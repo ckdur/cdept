@@ -1,0 +1,15 @@
+[package]
+name = "amt"
+version.workspace = true
+license.workspace = true
+categories.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+egui.workspace = true
+eframe.workspace = true
+eyre.workspace = true
+lazy_static.workspace = true
+libamt = { path = "../libamt" }
