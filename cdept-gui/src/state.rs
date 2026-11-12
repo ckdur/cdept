@@ -7,7 +7,7 @@ use std::thread;
 use libcdept::tools::{self, ToolInfo};
 use serde::{Deserialize, Serialize};
 
-use crate::dock::Tab;
+use crate::dock::{Tab, WindowId};
 use crate::log::LogBuffer;
 
 /// User settings persisted across sessions (the dock layout is stored separately).
@@ -82,9 +82,17 @@ impl ConsoleLevel {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     OpenTab(Tab),
+    /// Move a tab into a new native window.
+    DetachTab(Tab),
+    /// Move a tab into an existing window.
+    MoveTab(Tab, WindowId),
+    FocusWindow(WindowId),
+    /// Close a detached window; its tabs return to the main window.
+    CloseWindow(u64),
     ResetLayout,
     DetectTools,
-    ShowAbout,
+    /// Show the About dialog over the given window.
+    ShowAbout(WindowId),
     Quit,
 }
 

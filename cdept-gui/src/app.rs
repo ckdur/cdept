@@ -1,16 +1,24 @@
-//! The main window: menu bar, toolbar, dock area and status bar.
+//! The application shell: the main window and any detached native windows.
+//!
+//! Every native window has its own menu bar, toolbar and dock area. The menus are the
+//! same global ones everywhere, plus the contextual menus of the active document *of
+//! that window*. Only the main window has a status bar.
 
-use egui::{Button, Context, Id, KeyboardShortcut, Modifiers, Ui};
-use egui_dock::{DockArea, DockState, Style};
+use std::collections::HashMap;
 
-use crate::GuiOptions;
-use crate::dock::{self, Tab, Viewer};
+use egui::{
+    Button, Context, Id, KeyboardShortcut, Modifiers, Ui, ViewportBuilder, ViewportCommand,
+};
+use egui_dock::{DockArea, Style};
+
+use crate::dock::{Geometry, Layout, Tab, Viewer, WindowId};
 use crate::log::LogBuffer;
 use crate::state::{Action, AppCtx, Settings};
 use crate::views::{EditAction, Views};
+use crate::{APP_ID, GuiOptions};
 
-// Bump the suffix when `Tab` changes incompatibly, so stale layouts are dropped.
-const DOCK_KEY: &str = "cdept.dock.v1";
+// Bump the suffix when `Layout` or `Tab` change incompatibly, so stale layouts are dropped.
+const LAYOUT_KEY: &str = "cdept.layout.v2";
 const SETTINGS_KEY: &str = "cdept.settings";
 
 const QUIT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, egui::Key::Q);
@@ -19,25 +27,35 @@ const PHASE3: &str = "Launching tools arrives in Phase 3";
 /// Global toolbar launchers (tool names from `libcdept::tools::KNOWN_TOOLS`).
 const LAUNCHERS: [&str; 4] = ["xschem", "KLayout", "Magic", "ngspice"];
 
+const DETACHED_SIZE: [f32; 2] = [1000.0, 700.0];
+
 pub struct CdeptApp {
-    dock: DockState<Tab>,
+    layout: Layout,
     views: Views,
     ctx: AppCtx,
-    /// Last focused document tab; it owns the contextual menus and toolbar.
-    active_doc: Option<Tab>,
-    show_about: bool,
+    /// Last focused document tab of each window; it owns that window's contextual
+    /// menus and toolbar.
+    active_docs: HashMap<WindowId, Tab>,
+    /// Display name of every window, refreshed each frame.
+    window_names: Vec<(WindowId, String)>,
+    /// Geometry each detached window was spawned with. The viewport builder must stay
+    /// the same across frames, or egui would keep moving the window back.
+    spawn_geometry: HashMap<u64, Option<Geometry>>,
+    about: Option<WindowId>,
 }
 
 impl CdeptApp {
     pub fn new(cc: &eframe::CreationContext<'_>, options: GuiOptions, log: LogBuffer) -> Self {
         log.set_repaint_context(cc.egui_ctx.clone());
 
-        let (dock, settings) = match cc.storage {
+        let (layout, settings) = match cc.storage {
             Some(storage) => (
-                eframe::get_value(storage, DOCK_KEY).unwrap_or_else(dock::default_layout),
+                eframe::get_value::<Layout>(storage, LAYOUT_KEY)
+                    .map(Layout::restored)
+                    .unwrap_or_default(),
                 eframe::get_value::<Settings>(storage, SETTINGS_KEY).unwrap_or_default(),
             ),
-            None => (dock::default_layout(), Settings::default()),
+            None => (Layout::default(), Settings::default()),
         };
 
         let mut ctx = AppCtx::new(settings, log);
@@ -51,15 +69,161 @@ impl CdeptApp {
         tracing::info!(target: "cdept", "CDePT {} started", libcdept::version::long_version());
 
         Self {
-            dock,
+            layout,
             views: Views::default(),
             ctx,
-            active_doc: None,
-            show_about: false,
+            active_docs: HashMap::new(),
+            window_names: Vec::new(),
+            spawn_geometry: HashMap::new(),
+            about: None,
         }
     }
 
-    fn menu_bar(&mut self, ui: &mut Ui) {
+    fn active_doc(&self, win: WindowId) -> Option<Tab> {
+        self.active_docs.get(&win).copied()
+    }
+
+    /// Track the focused document of `win`, dropping it once it left the window.
+    fn update_active_doc(&mut self, win: WindowId) {
+        let Some(dock) = self.layout.dock_mut(win) else {
+            self.active_docs.remove(&win);
+            return;
+        };
+        if let Some((_, tab)) = dock.find_active_focused()
+            && tab.is_document()
+        {
+            self.active_docs.insert(win, *tab);
+        }
+        if let Some(tab) = self.active_docs.get(&win)
+            && dock.find_tab(tab).is_none()
+        {
+            self.active_docs.remove(&win);
+        }
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.active_docs.entry(win)
+            // Fall back to any open document so its menus are reachable.
+            && let Some(tab) = dock
+                .iter_all_tabs()
+                .map(|(_, t)| *t)
+                .find(|t| t.is_document())
+        {
+            entry.insert(tab);
+        }
+    }
+
+    fn refresh_window_names(&mut self) {
+        let mut names = Vec::new();
+        for (n, win) in self.layout.window_ids().into_iter().enumerate() {
+            let name = match win {
+                WindowId::Main => "Main Window".to_string(),
+                WindowId::Detached(_) => {
+                    let tab = self.active_doc(win).or_else(|| {
+                        self.layout
+                            .dock(win)?
+                            .iter_all_tabs()
+                            .map(|(_, t)| *t)
+                            .next()
+                    });
+                    match tab {
+                        Some(tab) => {
+                            format!("Window {n}: {}", self.views.get(tab).title(&self.ctx))
+                        }
+                        None => format!("Window {n}"),
+                    }
+                }
+            };
+            names.push((win, name));
+        }
+        self.window_names = names;
+    }
+
+    fn window_name(&self, win: WindowId) -> &str {
+        self.window_names
+            .iter()
+            .find(|(w, _)| *w == win)
+            .map_or("", |(_, name)| name.as_str())
+    }
+
+    /// Menu bar, toolbar and dock area of one native window.
+    fn window_ui(&mut self, ui: &mut Ui, win: WindowId) {
+        if ui.input_mut(|i| i.consume_shortcut(&QUIT)) {
+            self.ctx.request(Action::Quit);
+        }
+        self.update_active_doc(win);
+
+        egui::Panel::top(Id::new(("menu-bar", win))).show(ui, |ui| self.menu_bar(ui, win));
+        egui::Panel::top(Id::new(("toolbar", win))).show(ui, |ui| self.toolbar(ui, win));
+        if win == WindowId::Main {
+            egui::Panel::bottom("status-bar").show(ui, |ui| self.status_bar(ui));
+        }
+
+        let style = Style::from_egui(ui.style().as_ref());
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ui, |ui| {
+                let Some(dock) = self.layout.dock_mut(win) else {
+                    return;
+                };
+                DockArea::new(dock)
+                    .id(Id::new(("dock-area", win)))
+                    .style(style)
+                    .show_leaf_collapse_buttons(false)
+                    .show_inside(
+                        ui,
+                        &mut Viewer {
+                            views: &mut self.views,
+                            ctx: &mut self.ctx,
+                            here: win,
+                            windows: &self.window_names,
+                        },
+                    );
+            });
+
+        if self.about == Some(win) {
+            self.about(ui.ctx());
+        }
+    }
+
+    /// A detached window, as an immediate viewport (a real OS window where supported).
+    fn show_detached(&mut self, ctx: &Context, id: u64) {
+        let win = WindowId::Detached(id);
+        let Some(window) = self.layout.detached_mut(id) else {
+            return;
+        };
+        let geometry = *self.spawn_geometry.entry(id).or_insert(window.geometry);
+        let mut builder = ViewportBuilder::default()
+            .with_app_id(APP_ID)
+            .with_title(format!("CDePT: {}", self.window_name(win)))
+            .with_min_inner_size([400.0, 300.0]);
+        builder = match geometry {
+            Some(g) => builder.with_position(g.pos).with_inner_size(g.size),
+            None => builder.with_inner_size(DETACHED_SIZE),
+        };
+
+        ctx.show_viewport_immediate(win.viewport(), builder, |ui, _class| {
+            self.window_ui(ui, win);
+            let (close, geometry) = ui.input(|i| {
+                let vp = i.viewport();
+                let geometry = vp
+                    .outer_rect
+                    .zip(vp.inner_rect)
+                    .map(|(outer, inner)| Geometry {
+                        pos: outer.min.into(),
+                        size: inner.size().into(),
+                    });
+                (vp.close_requested(), geometry)
+            });
+            if let Some(g) = geometry
+                && let Some(window) = self.layout.detached_mut(id)
+            {
+                window.geometry = Some(g);
+            }
+            if close {
+                self.ctx.request(Action::CloseWindow(id));
+            }
+        });
+    }
+
+    fn menu_bar(&mut self, ui: &mut Ui, win: WindowId) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 ui.add_enabled(false, Button::new("New Project…"))
@@ -75,6 +239,11 @@ impl CdeptApp {
                     }
                 });
                 ui.separator();
+                if let WindowId::Detached(id) = win
+                    && ui.button("Close Window").clicked()
+                {
+                    self.ctx.request(Action::CloseWindow(id));
+                }
                 if ui
                     .add(Button::new("Quit").shortcut_text(ui.ctx().format_shortcut(&QUIT)))
                     .clicked()
@@ -83,7 +252,7 @@ impl CdeptApp {
                 }
             });
 
-            self.edit_menu(ui);
+            self.edit_menu(ui, win);
 
             ui.menu_button("View", |ui| {
                 ui.menu_button("Theme", |ui| {
@@ -92,8 +261,8 @@ impl CdeptApp {
                 ui.menu_button("Zoom", egui::gui_zoom::zoom_menu_buttons);
             });
 
-            // Contextual menus of the active document.
-            if let Some(tab) = self.active_doc {
+            // Contextual menus of this window's active document.
+            if let Some(tab) = self.active_doc(win) {
                 self.views.get(tab).menus(ui, &mut self.ctx);
             }
 
@@ -119,37 +288,69 @@ impl CdeptApp {
                 }
             });
 
-            ui.menu_button("Window", |ui| {
-                for tab in Tab::ALL {
-                    let mut open = self.dock.find_tab(&tab).is_some();
-                    let title = self.views.get(tab).title(&self.ctx);
-                    if ui.checkbox(&mut open, title).changed() {
-                        if open {
-                            dock::open_tab(&mut self.dock, tab);
-                        } else {
-                            dock::close_tab(&mut self.dock, tab);
-                        }
-                    }
-                }
-                ui.separator();
-                ui.weak("Right-click a tab to detach it.");
-                if ui.button("Reset Layout").clicked() {
-                    self.ctx.request(Action::ResetLayout);
-                }
-            });
+            ui.menu_button("Window", |ui| self.window_menu(ui, win));
 
             ui.menu_button("Help", |ui| {
                 if ui.button("About CDePT").clicked() {
-                    self.ctx.request(Action::ShowAbout);
+                    self.ctx.request(Action::ShowAbout(win));
                 }
             });
         });
     }
 
+    fn window_menu(&mut self, ui: &mut Ui, win: WindowId) {
+        for tab in Tab::ALL {
+            let mut open = self.layout.find(tab).is_some();
+            let title = self.views.get(tab).title(&self.ctx);
+            if ui.checkbox(&mut open, title).changed() {
+                if open {
+                    self.ctx.request(Action::OpenTab(tab));
+                } else {
+                    self.layout.close_tab(tab);
+                }
+            }
+        }
+        ui.separator();
+        let active = self.active_doc(win);
+        if ui
+            .add_enabled(active.is_some(), Button::new("Open Document in New Window"))
+            .on_hover_text("Right-click any tab to move it to another window.")
+            .clicked()
+            && let Some(tab) = active
+        {
+            self.ctx.request(Action::DetachTab(tab));
+        }
+        ui.separator();
+        for (other, name) in &self.window_names {
+            if ui
+                .add_enabled(*other != win, Button::new(name).selected(*other == win))
+                .clicked()
+            {
+                self.ctx.request(Action::FocusWindow(*other));
+            }
+        }
+        ui.separator();
+        if let WindowId::Detached(id) = win
+            && ui
+                .button("Close Window")
+                .on_hover_text("Its tabs return to the main window.")
+                .clicked()
+        {
+            self.ctx.request(Action::CloseWindow(id));
+        }
+        if ui
+            .button("Reset Layout")
+            .on_hover_text("Close all detached windows and restore the default layout.")
+            .clicked()
+        {
+            self.ctx.request(Action::ResetLayout);
+        }
+    }
+
     /// Edit actions are routed to the active document; unsupported ones are greyed out.
-    fn edit_menu(&mut self, ui: &mut Ui) {
-        let caps = self
-            .active_doc
+    fn edit_menu(&mut self, ui: &mut Ui, win: WindowId) {
+        let active = self.active_doc(win);
+        let caps = active
             .map(|t| self.views.get(t).edit_caps())
             .unwrap_or_default();
         let mut chosen = None;
@@ -177,12 +378,12 @@ impl CdeptApp {
                 EditAction::SelectAll,
             );
         });
-        if let (Some(action), Some(tab)) = (chosen, self.active_doc) {
+        if let (Some(action), Some(tab)) = (chosen, active) {
             self.views.get(tab).edit(action, &mut self.ctx);
         }
     }
 
-    fn toolbar(&mut self, ui: &mut Ui) {
+    fn toolbar(&mut self, ui: &mut Ui, win: WindowId) {
         ui.horizontal(|ui| {
             let project = self
                 .ctx
@@ -209,7 +410,7 @@ impl CdeptApp {
                 ui.add_enabled(false, Button::new(format!("▶ {name}")))
                     .on_disabled_hover_text(hover);
             }
-            if let Some(tab) = self.active_doc {
+            if let Some(tab) = self.active_doc(win) {
                 ui.separator();
                 self.views.get(tab).toolbar(ui, &mut self.ctx);
             }
@@ -237,6 +438,10 @@ impl CdeptApp {
                 }
                 None => ui.weak("Tools: …"),
             };
+            if !self.layout.windows.is_empty() {
+                ui.separator();
+                ui.label(format!("Windows: {}", self.layout.windows.len() + 1));
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.weak(format!("CDePT {}", libcdept::version::long_version()));
             });
@@ -258,20 +463,54 @@ impl CdeptApp {
             }
         });
         if response.should_close() {
-            self.show_about = false;
+            self.about = None;
         }
+    }
+
+    fn focus(ctx: &Context, win: WindowId) {
+        ctx.send_viewport_cmd_to(win.viewport(), ViewportCommand::Focus);
     }
 
     fn apply(&mut self, ctx: &Context, action: Action) {
         match action {
-            Action::OpenTab(tab) => dock::open_tab(&mut self.dock, tab),
+            Action::OpenTab(tab) => {
+                let win = self.layout.open_tab(tab);
+                Self::focus(ctx, win);
+            }
+            Action::DetachTab(tab) => {
+                if let Some(id) = self.layout.detach(tab) {
+                    Self::focus(ctx, WindowId::Detached(id));
+                }
+            }
+            Action::MoveTab(tab, to) => {
+                self.layout.move_tab(tab, to);
+                Self::focus(ctx, to);
+            }
+            Action::FocusWindow(win) => Self::focus(ctx, win),
+            Action::CloseWindow(id) => {
+                self.layout.close_window(id);
+                self.forget_window(id);
+            }
             Action::ResetLayout => {
-                self.dock = dock::default_layout();
-                self.active_doc = None;
+                self.layout.reset();
+                self.active_docs.clear();
+                self.spawn_geometry.clear();
+                self.about = self.about.map(|_| WindowId::Main);
             }
             Action::DetectTools => self.ctx.tools.start_detection(ctx),
-            Action::ShowAbout => self.show_about = true,
-            Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Action::ShowAbout(win) => self.about = Some(win),
+            Action::Quit => {
+                ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close)
+            }
+        }
+    }
+
+    fn forget_window(&mut self, id: u64) {
+        let win = WindowId::Detached(id);
+        self.active_docs.remove(&win);
+        self.spawn_geometry.remove(&id);
+        if self.about == Some(win) {
+            self.about = Some(WindowId::Main);
         }
     }
 }
@@ -279,60 +518,29 @@ impl CdeptApp {
 impl eframe::App for CdeptApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = &ui.ctx().clone();
-        if ctx.input_mut(|i| i.consume_shortcut(&QUIT)) {
-            self.ctx.request(Action::Quit);
-        }
-        // Drop the active document if its tab was closed.
-        if let Some(tab) = self.active_doc
-            && self.dock.find_tab(&tab).is_none()
-        {
-            self.active_doc = None;
+        self.refresh_window_names();
+
+        self.window_ui(ui, WindowId::Main);
+        let detached: Vec<u64> = self.layout.windows.iter().map(|w| w.id).collect();
+        for id in detached {
+            self.show_detached(ctx, id);
         }
 
-        egui::Panel::top("menu-bar").show(ui, |ui| self.menu_bar(ui));
-        egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
-        egui::Panel::bottom("status-bar").show(ui, |ui| self.status_bar(ui));
-
-        let style = Style::from_egui(ui.style().as_ref());
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ui, |ui| {
-                DockArea::new(&mut self.dock)
-                    .style(style)
-                    .show_leaf_collapse_buttons(false)
-                    .show_inside(
-                        ui,
-                        &mut Viewer {
-                            views: &mut self.views,
-                            ctx: &mut self.ctx,
-                        },
-                    );
-            });
-
-        if let Some((_, tab)) = self.dock.find_active_focused()
-            && tab.is_document()
-        {
-            self.active_doc = Some(*tab);
-        }
-        if self.active_doc.is_none() {
-            // Fall back to any open document so its menus are reachable.
-            self.active_doc = self
-                .dock
-                .iter_all_tabs()
-                .map(|(_, t)| *t)
-                .find(|t| t.is_document());
-        }
-
-        if self.show_about {
-            self.about(ctx);
-        }
         for action in self.ctx.take_actions() {
             self.apply(ctx, action);
+        }
+        // A detached window whose last tab was closed or dragged away disappears.
+        let before: Vec<u64> = self.layout.windows.iter().map(|w| w.id).collect();
+        self.layout.prune();
+        for id in before {
+            if self.layout.detached_mut(id).is_none() {
+                self.forget_window(id);
+            }
         }
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, DOCK_KEY, &self.dock);
+        eframe::set_value(storage, LAYOUT_KEY, &self.layout);
         eframe::set_value(storage, SETTINGS_KEY, &self.ctx.settings);
     }
 }
