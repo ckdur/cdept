@@ -80,18 +80,19 @@ pub fn default_layout() -> DockState<Tab> {
 /// Show `tab`: focus it if open, otherwise add it next to tabs of the same area
 /// (or as a floating window if that area was emptied).
 pub fn open_tab(state: &mut DockState<Tab>, tab: Tab) {
-    if let Some((surface, node, index)) = state.find_tab(&tab) {
-        state.set_active_tab((surface, node, index));
-        state.set_focused_node_and_surface((surface, node));
+    if let Some(path) = state.find_tab(&tab) {
+        // The path was just found, so this cannot fail.
+        let _ = state.set_active_tab(path);
+        state.set_focused_node_and_surface(path.node_path());
         return;
     }
     let sibling = state
         .iter_all_tabs()
         .find(|(_, t)| t.area() == tab.area())
-        .map(|(loc, _)| loc);
+        .map(|(path, _)| path.node_path());
     match sibling {
-        Some((surface, node)) => {
-            state.set_focused_node_and_surface((surface, node));
+        Some(node) => {
+            state.set_focused_node_and_surface(node);
             state.push_to_focused_leaf(tab);
         }
         None => {
@@ -101,8 +102,8 @@ pub fn open_tab(state: &mut DockState<Tab>, tab: Tab) {
 }
 
 pub fn close_tab(state: &mut DockState<Tab>, tab: Tab) {
-    if let Some(loc) = state.find_tab(&tab) {
-        state.remove_tab(loc);
+    if let Some(path) = state.find_tab(&tab) {
+        state.remove_tab(path);
     }
 }
 
@@ -165,9 +166,9 @@ mod tests {
         close_tab(&mut state, Tab::Jobs);
         assert!(state.find_tab(&Tab::Jobs).is_none());
         open_tab(&mut state, Tab::Jobs);
-        let (s, n, _) = state.find_tab(&Tab::Jobs).unwrap();
-        let (s2, n2, _) = state.find_tab(&Tab::Console).unwrap();
-        assert_eq!((s, n), (s2, n2));
+        let jobs = state.find_tab(&Tab::Jobs).unwrap();
+        let console = state.find_tab(&Tab::Console).unwrap();
+        assert_eq!(jobs.node_path(), console.node_path());
     }
 
     #[test]
@@ -176,6 +177,6 @@ mod tests {
         open_tab(&mut state, Tab::LibraryManager);
         let a = state.find_tab(&Tab::LibraryManager).unwrap();
         let b = state.find_tab(&Tab::Start).unwrap();
-        assert_eq!((a.0, a.1), (b.0, b.1));
+        assert_eq!(a.node_path(), b.node_path());
     }
 }

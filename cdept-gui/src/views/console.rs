@@ -37,9 +37,9 @@ impl View for ConsoleView {
             }
         });
 
-        egui::TopBottomPanel::bottom("console-command")
+        egui::Panel::bottom("console-command")
             .frame(egui::Frame::NONE)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.add_space(2.0);
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut self.command)
@@ -75,7 +75,7 @@ impl View for ConsoleView {
         let row_height = ui.text_style_height(&TextStyle::Monospace);
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ScrollArea::both()
                     .auto_shrink(false)
                     .stick_to_bottom(true)

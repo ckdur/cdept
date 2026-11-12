@@ -277,7 +277,8 @@ impl CdeptApp {
 }
 
 impl eframe::App for CdeptApp {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        let ctx = &ui.ctx().clone();
         if ctx.input_mut(|i| i.consume_shortcut(&QUIT)) {
             self.ctx.request(Action::Quit);
         }
@@ -288,20 +289,25 @@ impl eframe::App for CdeptApp {
             self.active_doc = None;
         }
 
-        egui::TopBottomPanel::top("menu-bar").show(ctx, |ui| self.menu_bar(ui));
-        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.toolbar(ui));
-        egui::TopBottomPanel::bottom("status-bar").show(ctx, |ui| self.status_bar(ui));
+        egui::Panel::top("menu-bar").show(ui, |ui| self.menu_bar(ui));
+        egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
+        egui::Panel::bottom("status-bar").show(ui, |ui| self.status_bar(ui));
 
-        DockArea::new(&mut self.dock)
-            .style(Style::from_egui(ctx.style().as_ref()))
-            .show_leaf_collapse_buttons(false)
-            .show(
-                ctx,
-                &mut Viewer {
-                    views: &mut self.views,
-                    ctx: &mut self.ctx,
-                },
-            );
+        let style = Style::from_egui(ui.style().as_ref());
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ui, |ui| {
+                DockArea::new(&mut self.dock)
+                    .style(style)
+                    .show_leaf_collapse_buttons(false)
+                    .show_inside(
+                        ui,
+                        &mut Viewer {
+                            views: &mut self.views,
+                            ctx: &mut self.ctx,
+                        },
+                    );
+            });
 
         if let Some((_, tab)) = self.dock.find_active_focused()
             && tab.is_document()

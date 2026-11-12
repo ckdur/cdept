@@ -7,22 +7,22 @@ version = "0.1.0"
 license = "MIT"
 categories = []
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.95"
 repository = "https://github.com/ckdur/cdept"
 
 [workspace.dependencies]
 libcdept = { path = "libcdept" }
 cdept-gui = { path = "cdept-gui" }
 
-eframe = { version = "0.33", default-features = false, features = [
+eframe = { version = "0.36", default-features = false, features = [
     "default_fonts",
     "glow",
     "persistence",
     "wayland",
     "x11",
 ] }
-egui = { version = "0.33", default-features = false, features = ["serde"] }
-egui_dock = { version = "0.18", features = ["serde"] }
+egui = { version = "0.36", default-features = false, features = ["serde"] }
+egui_dock = { version = "0.21", features = ["serde"] }
 
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
