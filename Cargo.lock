@@ -49,17 +49,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "amt"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "eyre",
- "lazy_static",
- "libamt",
-]
-
-[[package]]
 name = "android-activity"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -271,6 +260,17 @@ dependencies = [
  "jobserver",
  "libc",
  "shlex",
+]
+
+[[package]]
+name = "cdept"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "eyre",
+ "lazy_static",
+ "libcdept",
 ]
 
 [[package]]
@@ -1256,7 +1256,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
-name = "libamt"
+name = "libc"
+version = "0.2.183"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
+
+[[package]]
+name = "libcdept"
 version = "0.1.0"
 dependencies = [
  "eframe",
@@ -1265,12 +1271,6 @@ dependencies = [
  "lazy_static",
  "vergen-gitcl",
 ]
-
-[[package]]
-name = "libc"
-version = "0.2.183"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
 
 [[package]]
 name = "libloading"

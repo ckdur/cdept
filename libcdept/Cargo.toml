@@ -1,5 +1,5 @@
 [package]
-name = "libamt"
+name = "libcdept"
 version.workspace = true
 license.workspace = true
 categories.workspace = true

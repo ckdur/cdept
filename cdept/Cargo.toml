@@ -1,5 +1,5 @@
 [package]
-name = "amt"
+name = "cdept"
 version.workspace = true
 license.workspace = true
 categories.workspace = true
@@ -12,4 +12,4 @@ egui.workspace = true
 eframe.workspace = true
 eyre.workspace = true
 lazy_static.workspace = true
-libamt = { path = "../libamt" }
+libcdept = { path = "../libcdept" }

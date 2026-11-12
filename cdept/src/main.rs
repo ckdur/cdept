@@ -2,7 +2,7 @@
 mod main_impl {
     use egui::Vec2;
     use eyre::Result;
-    use libamt::{
+    use libcdept::{
         run_egui,
         LibraryHandlerGUI,
     };
@@ -12,8 +12,8 @@ mod main_impl {
 
         let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_app_id("org.ckdur.amt")
-                .with_title("Analog Management Tool")
+                .with_app_id("org.ckdur.cdept")
+                .with_title("Chip Design Project Tool (CDePT)")
                 .with_inner_size(Vec2::new(
                     1920 as f32, // TODO: Load this from configurations
                     1080 as f32,
@@ -22,7 +22,7 @@ mod main_impl {
         };
 
         eframe::run_native(
-            "Analog Management Tool",
+            "Chip Design Project Tool (CDePT)",
             options,
             Box::new(|_cc| Ok(run_egui(_cc, main_app)?)),
         ).unwrap();
