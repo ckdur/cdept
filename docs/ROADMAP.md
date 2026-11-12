@@ -82,7 +82,7 @@ milestone).
 - Fix the current skeleton: `entry.rs` is invalid Rust (default field values,
   `entry_type.Undefined`), modules are not declared in `lib.rs`, and
   `cdept/src/library_handler_gui.rs` is a duplicate. Use idiomatic names (`EntryType`, `Library`).
-- Name decided: CDePT. Pick the license (proposal → must be OSI; Cargo says MIT).
+- Name decided: CDePT. License: MIT (LICENSE file added).
 - Workspace split (core / gui / cli), `tracing` logging, `clap` CLI, CI (fmt, clippy, test).
 - Dockable multi-panel GUI shell (`egui_dock` or `egui_tiles`), settings persistence.
 - **Milestone:** empty app with docked panels, CLI stub, CI green.
