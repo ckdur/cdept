@@ -1,5 +1,6 @@
 [package]
 name = "cdept"
+description = "Chip Design Project Tool: GUI by default, headless subcommands"
 version.workspace = true
 license.workspace = true
 categories.workspace = true
@@ -8,8 +9,9 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
-egui.workspace = true
-eframe.workspace = true
+libcdept.workspace = true
+cdept-gui.workspace = true
+clap.workspace = true
 eyre.workspace = true
-lazy_static.workspace = true
-libcdept = { path = "../libcdept" }
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -1,31 +1,37 @@
-/*Entry definition file
-An "Entry" is any object inside of an element.
-The entry can be any folder having a file or group of files with a function.
-Such function can be:
-- Layout
-- Schematic
-- Netlist
-- Simulation
-*/
+//! An [`Entry`] is one view of a cell (Virtuoso: "cellview").
+//!
+//! An entry is a folder holding a file or a group of files with a single function, such as
+//! a layout, a schematic, a netlist or a simulation setup.
 
-enum entry_type {
-    // Undefined
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+/// The kind of view an [`Entry`] holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum EntryType {
+    #[default]
     Undefined,
-    // Layout types
-    Layout_Mag,
-    Layout_GDS,
-    // Schematics
-    Schematic_Qucs,
-    Schematic_Xschem,
-    Schematic_Xcircuit,
+    // Layout
+    LayoutMag,
+    LayoutGds,
+    // Schematic
+    SchematicQucs,
+    SchematicXschem,
+    SchematicXcircuit,
     // Netlist
-    Netlist_Spice,
-    Netlist_CDL,
+    NetlistSpice,
+    NetlistCdl,
     // Simulation
-    Simulation_Default
+    Simulation,
 }
 
-#[derive(Default)]
-struct entry {
-    typ: entry_type = entry_type.Undefined,
+/// One view of a cell.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Entry {
+    /// View name, e.g. `schematic`, `layout`, `tb_ac`.
+    pub name: String,
+    pub typ: EntryType,
+    /// Folder of the view, relative to the cell folder.
+    pub path: PathBuf,
 }

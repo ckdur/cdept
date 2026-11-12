@@ -1,5 +1,6 @@
 [package]
 name = "libcdept"
+description = "CDePT core: project/library model, technology, tool adapters (no GUI)"
 version.workspace = true
 license.workspace = true
 categories.workspace = true
@@ -8,10 +9,9 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
-egui.workspace = true
-eframe.workspace = true
 eyre.workspace = true
-lazy_static.workspace = true
+serde.workspace = true
+tracing.workspace = true
 
 [build-dependencies]
 vergen-gitcl = { version = "1.0.0", features = ["build"] }
