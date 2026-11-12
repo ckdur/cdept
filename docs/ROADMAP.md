@@ -16,14 +16,14 @@ Source of scope: NLnet proposal "Chip Design Project Tool (CDePT)". Budget: ~750
 | Virtuoso component              | CDePT equivalent                         | Backed by (external)                 |
 |---------------------------------|----------------------------------------|--------------------------------------|
 | cds.lib / Library Manager       | `cdept.lib` + Library Manager (lib/cell/view) | filesystem + git                 |
-| Technology file / PDK setup     | Technology Manager (open_pdks aware)   | sky130, gf180mcu, ihp-sg13g2         |
+| Technology file / PDK setup     | Technology Manager (open_pdks aware)   | sky130, gf180mcu, ihp-sg13g2/sg13cmos5l, ciel |
 | Virtuoso Schematic Editor       | Launch + control                       | xschem (primary), Qucs-S             |
 | Virtuoso Layout Suite L/XL      | Launch + control, cross-probe, SDL     | KLayout (primary), Magic             |
-| ADE L/XL/Assembler/Explorer     | Simulation Environment                 | ngspice (shared lib), Xyce           |
-| ViVA waveform + Calculator      | Waveform Viewer + Calculator           | own egui plot + Surfer/wellen        |
-| Assura/PVS/Calibre DRC/LVS/PEX  | Signoff dashboard                      | KLayout DRC/LVS, Magic, netgen       |
+| ADE L/XL/Assembler/Explorer     | Simulation Environment                 | ngspice (shared lib), Xyce, VACASK, OpenVAF |
+| ViVA waveform + Calculator      | Waveform Viewer + Calculator           | own egui plot, UberWave (large analog), Surfer/wellen |
+| Assura/PVS/Calibre DRC/LVS/PEX  | Signoff dashboard                      | KLayout DRC/LVS, Magic, netgen, CVC, KLayout-PEX |
 | Abstract Generator / Liberate   | Mixed-signal utilities                 | Magic LEF, lctime/CharLib, OpenSTA   |
-| AMS Designer                    | Co-simulation                          | ngspice XSPICE d_cosim + Verilator/Icarus |
+| AMS Designer                    | Co-simulation                          | ngspice XSPICE d_cosim + Verilator/Icarus, cocotb + spicebind |
 | Innovus handoff                 | Digital flow hook                      | OpenROAD / LibreLane, yosys          |
 
 ---
@@ -40,7 +40,8 @@ cdept (GUI binary, egui/eframe)
       │    ├── klayout  (Python plugin, JSON-RPC over TCP)
       │    ├── magic    (Tcl over stdin/pipe or Tcl socket script)
       │    ├── ngspice  (libngspice shared API, in-process)
-      │    └── xyce / qucs-s / netgen / yosys / openroad (batch)
+      │    ├── uberwave (launch with a file; IPC to agree with the uberWAVE team)
+      │    └── xyce / vacask / qucs-s / netgen / cvc / yosys / openroad / … (batch)
       ├── sim/         testbench, design variables, corners, sweeps, job queue, results DB
       ├── wave/        SPICE raw reader, VCD/FST via wellen, signal model
       ├── calc/        waveform calculator (expression language + DSP/measurement library)
@@ -85,6 +86,10 @@ milestone).
 - Name decided: CDePT. License: MIT (LICENSE file added).
 - Workspace split (core / gui / cli), `tracing` logging, `clap` CLI, CI (fmt, clippy, test).
 - Dockable multi-panel GUI shell (`egui_dock` or `egui_tiles`), settings persistence.
+- Tool detection (`libcdept::tools::KNOWN_TOOLS`): binaries on `PATH`, Python packages
+  (`importlib` lookup, version from package metadata, interpreter `$CDEPT_PYTHON` or
+  `python3`) and KLayout salt packages. Every entry records the phase that integrates it.
+  The list covers the asic-all image (see §3, "External tools").
 - **Milestone:** empty app with docked panels, CLI stub, CI green.
 
 ### Phase 1: Project & Library Manager (~80 h)
@@ -96,6 +101,10 @@ milestone).
 - Hierarchy browser: parse xschem instances and GDS references → tree, "used by" query.
 - File watching (`notify`) so external edits show up live. Git status per cell.
 - Import an existing xschem/KLayout project (scan → generate `cdept.lib`).
+- Study IHP's **LibMan** (`github.com/IHP-GmbH/LibMan`, in the asic-all image), a Qt library
+  manager over xschem and KLayout. Reuse its library conventions where they fit, read
+  its library definitions if a format is shared, and offer "open in LibMan" instead of
+  diverging silently.
 - **Milestone:** manage a real project (e.g. ASICONE SAR-ADC) entirely from CDePT.
 
 ### Phase 2: Technology / PDK Manager (~60 h)
@@ -107,6 +116,12 @@ milestone).
 - Generate per-tool config from that one source (xschemrc, .magicrc, KLayout tech), so the
   user configures once.
 - Support NDA PDKs through user-written `tech.toml` (no PDK content shipped).
+- `ciel` integration: list/enable PDK versions under `$PDK_ROOT` (LibreLane's
+  `pdk_hashes.yaml` pins them). PDKs to support: sky130A, gf180mcu, ihp-sg13g2 and
+  ihp-sg13cmos5l.
+- `$PDK` may list several PDKs separated by colons (the asic-all image sets
+  `PDK=sky130A:gf180mcu:ihp-sg13g2`). Treat it as "available PDKs", not "the PDK": the
+  project chooses one. The Phase 0 toolbar still shows the raw value.
 - **Milestone:** create a project for sg13g2 or sky130 in 3 clicks. All tools open with the
   correct tech.
 
@@ -124,7 +139,12 @@ milestone).
   GUI, source a Tcl socket-server script.
 - **ngspice:** in-process via `libngspice` (shared API: `ngSpice_Init`, `ngSpice_Command`,
   callbacks for live vectors). Bind through `bindgen` or an existing crate.
-- **Xyce, Qucs-S, netgen, yosys, OpenROAD:** batch adapters (command and parse output).
+- **KLayout extras:** `klive` (salt package, JSON on port 8082) already reloads a GDS in a
+  running KLayout. Use it as the first "open layout" path before our own bridge exists.
+  The productivity suite and xsection are detected as salt packages too.
+- **Xyce, VACASK, Qucs-S, netgen, yosys, OpenROAD:** batch adapters (command and parse output).
+- **Python tools** (KLayout pip module, gdsfactory, CACE, pygmid…) run with the detected
+  interpreter. Same supervisor, with the venv/interpreter recorded per project.
 - **Milestone:** double-click a view to open it in the correct tool. Netlist any cell from CDePT.
 
 ### Phase 4: Simulation Environment, "ADE-lite" (~120 h)
@@ -134,6 +154,13 @@ milestone).
   Post-layout option: swap the DUT for the extracted netlist (Phase 7).
 - Sweeps (parametric, corners × variables × temperature) and Monte Carlo when the PDK has
   statistical models.
+- Simulators: ngspice first, then Xyce and VACASK through the same netlist pipeline.
+  OpenVAF(-reloaded) compiles Verilog-A models into OSDI for ngspice/VACASK (needed for PSP
+  and other compact models in the IHP PDKs). CDePT compiles them on demand and caches them
+  per tech.
+- CACE (datasheet-driven characterisation) overlaps with the spec table: import and export
+  CACE datasheets rather than inventing a second spec format. pygmid can feed gm/Id sizing
+  helpers later.
 - Job queue: parallel local runs (tokio + process pool), progress, cancel. Optional SLURM/ssh
   later.
 - Results DB: per-run directory + SQLite index (`rusqlite`). Outputs/specs table with
@@ -148,7 +175,20 @@ milestone).
   multiple strips, cursors and deltas, log axes, Bode/magnitude-phase, eye diagram, overlay of
   sweep families, mixed analog and digital in one window.
 - Digital: embed or interoperate with Surfer (egui, Rust, `libsurfer`, Waveform Control
-  Protocol). Coordinate with the uberWAVE team mentioned in the proposal.
+  Protocol).
+- **UberWave** (the uberWAVE project from the proposal, `gitlab.symbioticeda.com/Juan_25/uberwave`):
+  C++20/ImGui/ImPlot analog and mixed-signal viewer built for multi-GB ngspice raw files
+  (memory-mapped parser, decimation, `.uwraw` cache), plus Spectre PSF. Binary
+  `UberWaveViewer`; CLI `UberWaveViewer <file.raw|psf-dir> [--analysis <name>]`; there is
+  also a WebAssembly build. Integration plan:
+  1. Phase 3/5: "Open in UberWave" for any result (launch with the file), detected like other tools.
+  2. Results DB: point UberWave at a run directory, with the analysis preselected.
+  3. With the uberWAVE team: an IPC channel (open file, add signal, set cursors, report
+     cursor values back), so CDePT's calculator and UberWave's plots stay in sync. Today the
+     viewer has no IPC, only the CLI.
+  4. Decide which side owns large-file viewing. Our own egui plot then covers small
+     results, calculator output and the spec table, and UberWave handles the large transients.
+- Other viewers detected for "open with": GTKWave and gaw (xschem's viewer).
 - Calculator, in two layers:
   1. Native Rust function library (`rustfft`, `ndarray`): FFT/windowing, SNR/SNDR/SFDR/THD/ENOB,
      INL/DNL (histogram and code-edge), noise integration and spot noise, PSD, jitter
@@ -177,7 +217,10 @@ milestone).
 - LVS: netgen or KLayout LVS. CDePT assembles the schematic netlist correctly (subckt
   includes, CDL conversion, global nets), which is the pain point the proposal names.
 - PEX: Magic `ext2spice` (C, RC) → extracted view → back-annotated simulation (Phase 4).
-- Antenna, density and fill hooks where the PDK provides them. Signoff checklist per cell
+- ERC: CVC (circuit validity check) on the schematic/extracted netlist.
+- PEX alternatives: KLayout-PEX (`kpex`), plus FastHenry2/FasterCap for inductance and
+  capacitance extraction of critical structures. GDS3D gives a 3D view of a cell.
+- Antenna, density and fill hooks where the PDK provides them (gdsfill for IHP). Signoff checklist per cell
   (status badges in the Library Manager).
 - **Milestone:** one-click DRC → LVS → PEX → post-layout sim on a cell.
 
@@ -188,13 +231,16 @@ milestone).
 - Netlist conversion: Verilog ↔ SPICE/CDL (yosys `write_spice`, OpenROAD `write_cdl`, custom
   converter). Black-box handling for analog macros.
 - Co-simulation: ngspice XSPICE `d_cosim` with Verilator/Icarus for digital blocks in analog
-  tests.
-- Digital flow hook: launch LibreLane/OpenROAD on an RTL view and import GDS/LEF/LIB as views.
+  tests. Alternative: cocotb + spicebind (ngspice inside the HDL simulator). NVC for VHDL.
+- Digital flow hook: launch LibreLane/OpenROAD (or SiliconCompiler) on an RTL view and import
+  GDS/LEF/LIB as views. OpenSTA for timing reports.
+- Generators that produce views: padring (pad ring GDS), OpenRAM (SRAM macros).
 - **Milestone:** SAR-ADC macro (analog) + SPI (digital) integrated with LEF/LIB generated
   from CDePT.
 
 ### Phase 9: Release, docs, community (~30 h, plus continuous)
-- Packaging: cargo install, AppImage/Flatpak, Nix, IIC-OSIC-TOOLS docker integration.
+- Packaging: cargo install, AppImage/Flatpak, Nix, IIC-OSIC-TOOLS docker integration, and the
+  Symbiotic EDA `asic-all` image (ship CDePT in it, with its desktop entry).
 - Tutorials: 5T-OTA (sky130 / sg13g2), SAR-ADC flow. User manual and developer guide (how to
   write a ToolAdapter).
 - Upstream patches where needed (xschem, KLayout macro, Surfer).
@@ -224,14 +270,33 @@ because the raw reader and calculator have no dependencies. 6 and 7 depend on 3.
 | Git integration        | `git2` or `gix`                                              |
 
 ### External tools orchestrated
-- Schematic: xschem (primary), Qucs-S
-- Layout: KLayout (primary, Python API), Magic (Tcl)
-- Simulation: ngspice (shared lib), Xyce
-- Verification: KLayout DRC/LVS, Magic DRC/ext, netgen LVS
-- Digital / mixed: yosys, OpenROAD/OpenSTA, LibreLane, Verilator, Icarus, lctime, CharLib
-- Waveforms: Surfer, GTKWave (fallback)
-- PDKs: open_pdks (sky130, gf180mcu), IHP-Open-PDK (sg13g2)
-- Distribution reference: IIC-OSIC-TOOLS container (all tools pinned, good for CI)
+Reference tool set: the `factory.symbioticeda.com/asic-all:dev` image
+(`centerstage/bouquet_factory/bouquet_assembler/asic-all/asic-all.yaml`). Every tool from it
+that matters to CDePT is in `KNOWN_TOOLS`, with the phase that integrates it; binary names
+and version flags were checked in that image. Add new tools there first.
+
+| Area | Tools (phase) |
+|------|---------------|
+| Schematic | xschem (3), Qucs-S (3), XCircuit (detect only) |
+| Layout | KLayout (3) + pip `klayout` (3), Magic (3), klive (3), KLayout productivity suite (6), xsection (7), gdsfactory (6), GDS3D (7) |
+| Simulation | ngspice (3/4), Xyce (4), VACASK (4), OpenVAF-reloaded (4), CACE (4), pygmid (4), spicelib (5), PySpice (detect only) |
+| Waveforms | UberWave (5), Surfer (5), GTKWave (5), gaw (5) |
+| Verification | netgen (7), CVC (7), KLayout-PEX (7), FastHenry2 (7), FasterCap (7), gdsfill (7) |
+| Digital / mixed | yosys, OpenROAD, OpenSTA, LibreLane, SiliconCompiler, Verilator, Icarus, NVC, cocotb, spicebind, CharLib, lctime, padring, OpenRAM (all 8) |
+| RF / EM | openEMS (+ IHP openEMS scripts), scikit-rf (detect only; RF flows are outside this grant) |
+| Project / PDK / scripting | LibMan (1), ciel (2), Python 3 (3) |
+
+Left out on purpose, because they don't touch the analog/mixed-signal design data CDePT
+manages or are reached through another tool: gvim; abc (via yosys); graywolf, qflow,
+IRSIM (superseded by LibreLane/ngspice); HDL front-ends and linters (amaranth, PyRTL,
+pyverilog, veryl, sv2v, surelog, verible, svck, rggen, kactus2); build/package managers
+(edalize, fusesoc, bender, pulp-tools); digital verification extras (cocotbext-*, pyuvm,
+verilog-covered, fault, kepler-formal); geometry/netlist libraries (gdspy, gdstk, gmsh,
+najaeda, vlsir/hdl21, schemdraw, ngspyce, spyci); RISC-V toolchain and spike.
+
+- PDKs: open_pdks via ciel (sky130, gf180mcu), IHP-Open-PDK (sg13g2, sg13cmos5l)
+- Distribution references: the asic-all image (primary) and the IIC-OSIC-TOOLS container
+  (both pin all tools, good for CI)
 
 ---
 

@@ -73,7 +73,11 @@ fn main() -> eyre::Result<()> {
                     (Some(p), None) => p.display().to_string(),
                     (None, _) => "not found".into(),
                 };
-                println!("{:<10} {:<12} {status}", t.spec.name, t.spec.role);
+                let phase = t.spec.phase.map_or("-".into(), |p| p.to_string());
+                println!(
+                    "{:<20} {:<16} {phase:<2} {status}",
+                    t.spec.name, t.spec.role
+                );
             }
             Ok(())
         }

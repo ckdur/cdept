@@ -3,7 +3,7 @@ use egui::{Grid, RichText, ScrollArea, Ui};
 use super::{View, empty_state};
 use crate::state::{Action, AppCtx};
 
-/// External tools found on PATH. Becomes the process supervisor view in Phase 3.
+/// External tools (binaries, Python packages, KLayout packages) and where they were found. Becomes the process supervisor view in Phase 3.
 #[derive(Default)]
 pub struct ToolsView;
 
@@ -33,10 +33,11 @@ impl View for ToolsView {
         ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             Grid::new("tools-grid")
                 .striped(true)
-                .num_columns(3)
+                .num_columns(4)
                 .show(ui, |ui| {
                     ui.strong("Tool");
                     ui.strong("Role");
+                    ui.strong("Phase");
                     ui.strong("Version");
                     ui.end_row();
                     for t in &tools {
@@ -50,7 +51,16 @@ impl View for ToolsView {
                         if let Some(path) = &t.path {
                             name.on_hover_text(path.display().to_string());
                         }
-                        ui.weak(t.spec.role);
+                        let role = ui.weak(t.spec.role);
+                        if let Some(note) = t.spec.note {
+                            role.on_hover_text(note);
+                        }
+                        match t.spec.phase {
+                            Some(p) => ui.weak(p.to_string()),
+                            None => ui
+                                .weak("–")
+                                .on_hover_text("Detected only; no integration planned yet"),
+                        };
                         match (&t.path, &t.version) {
                             (Some(_), Some(v)) => ui.label(v),
                             (Some(_), None) => ui.weak("found"),
