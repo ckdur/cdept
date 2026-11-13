@@ -5,6 +5,7 @@
 //! views bring their own menus without the shell changing.
 
 mod console;
+mod inspector;
 mod library;
 mod placeholder;
 mod start;
@@ -61,7 +62,7 @@ pub struct Views {
     library_manager: library::LibraryManagerView,
     libraries: library::LibrariesView,
     hierarchy: placeholder::Placeholder,
-    inspector: placeholder::Placeholder,
+    inspector: inspector::InspectorView,
     tools: tools::ToolsView,
     console: console::ConsoleView,
     jobs: placeholder::Placeholder,
@@ -78,9 +79,9 @@ impl Default for Views {
             hierarchy: Placeholder::new(
                 "Hierarchy",
                 "Open a cell to see its hierarchy.",
-                "Phase 1",
+                "a later Phase 1 step",
             ),
-            inspector: Placeholder::new("Inspector", "Nothing selected.", "Phase 1"),
+            inspector: Default::default(),
             tools: Default::default(),
             console: Default::default(),
             jobs: Placeholder::new("Jobs", "No simulation or verification jobs.", "Phase 4"),

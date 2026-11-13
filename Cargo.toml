@@ -28,6 +28,9 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
 eyre = "0.6.12"
 serde = { version = "1", features = ["derive"] }
+rfd = "0.18"
 ron = "0.11"
+tempfile = "3"
+toml_edit = "0.25"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

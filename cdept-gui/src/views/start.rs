@@ -2,7 +2,7 @@ use egui::{RichText, Ui};
 
 use super::View;
 use crate::dock::Tab;
-use crate::state::{Action, AppCtx};
+use crate::state::{Action, AppCtx, PickFor};
 
 #[derive(Default)]
 pub struct StartView;
@@ -20,23 +20,41 @@ impl View for StartView {
         ui.add_space(16.0);
 
         ui.horizontal(|ui| {
-            ui.add_enabled(false, egui::Button::new("New Project…"))
-                .on_disabled_hover_text("Project creation arrives in Phase 1");
-            ui.add_enabled(false, egui::Button::new("Open Project…"))
-                .on_disabled_hover_text("Project loading arrives in Phase 1");
+            if ui.button("New Project…").clicked() {
+                ctx.request(Action::PickFolder(PickFor::NewProject));
+            }
+            if ui.button("Open Project…").clicked() {
+                ctx.request(Action::PickFolder(PickFor::OpenProject));
+            }
             if ui.button("Library Manager").clicked() {
                 ctx.request(Action::OpenTab(Tab::LibraryManager));
             }
         });
         ui.add_space(16.0);
 
+        if let Some(project) = &ctx.project {
+            ui.strong(format!("Project {}", project.name));
+            let cells: usize = project.libraries.iter().map(|l| l.cells.len()).sum();
+            ui.label(format!(
+                "{} libraries, {cells} cells in {}",
+                project.libraries.len(),
+                project.root.display()
+            ));
+            ui.add_space(16.0);
+        }
+
         ui.strong("Recent projects");
         if ctx.settings.recent_projects.is_empty() {
-            ui.weak("No recent projects. Start one with `cdept --project <dir>`.");
-        } else {
-            for path in &ctx.settings.recent_projects {
-                ui.label(path.display().to_string());
+            ui.weak("None yet. A project is a folder with a cdept.toml file.");
+        }
+        let mut open = None;
+        for path in &ctx.settings.recent_projects {
+            if ui.link(path.display().to_string()).clicked() {
+                open = Some(path.clone());
             }
+        }
+        if let Some(path) = open {
+            ctx.request(Action::LoadProject(path));
         }
         ui.add_space(16.0);
 

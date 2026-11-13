@@ -11,9 +11,10 @@ use egui::{
 };
 use egui_dock::{DockArea, Style};
 
+use crate::dialogs::{self, Dialog};
 use crate::dock::{Geometry, Layout, Tab, Viewer, WindowId};
 use crate::log::LogBuffer;
-use crate::state::{Action, AppCtx, Settings};
+use crate::state::{Action, AppCtx, PickFor, Settings};
 use crate::views::{EditAction, Views};
 use crate::{APP_ID, GuiOptions};
 
@@ -59,14 +60,11 @@ impl CdeptApp {
         };
 
         let mut ctx = AppCtx::new(settings, log);
+        tracing::info!(target: "cdept", "CDePT {} started", libcdept::version::long_version());
         if let Some(path) = options.project {
-            let path = path.canonicalize().unwrap_or(path);
-            tracing::info!(target: "cdept", "project {}: loading arrives in Phase 1", path.display());
-            ctx.settings.add_recent(path.clone());
-            ctx.project = Some(path);
+            ctx.load_project(&path);
         }
         ctx.tools.start_detection(&cc.egui_ctx);
-        tracing::info!(target: "cdept", "CDePT {} started", libcdept::version::long_version());
 
         Self {
             layout,
@@ -149,6 +147,7 @@ impl CdeptApp {
             self.ctx.request(Action::Quit);
         }
         self.update_active_doc(win);
+        self.ctx.window = win;
 
         egui::Panel::top(Id::new(("menu-bar", win))).show(ui, |ui| self.menu_bar(ui, win));
         egui::Panel::top(Id::new(("toolbar", win))).show(ui, |ui| self.toolbar(ui, win));
@@ -181,6 +180,7 @@ impl CdeptApp {
         if self.about == Some(win) {
             self.about(ui.ctx());
         }
+        dialogs::show(ui.ctx(), &mut self.ctx);
     }
 
     /// A detached window, as an immediate viewport (a real OS window where supported).
@@ -226,18 +226,32 @@ impl CdeptApp {
     fn menu_bar(&mut self, ui: &mut Ui, win: WindowId) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                ui.add_enabled(false, Button::new("New Project…"))
-                    .on_disabled_hover_text("Arrives in Phase 1");
-                ui.add_enabled(false, Button::new("Open Project…"))
-                    .on_disabled_hover_text("Arrives in Phase 1");
+                if ui.button("New Project…").clicked() {
+                    self.ctx.request(Action::PickFolder(PickFor::NewProject));
+                }
+                if ui.button("Open Project…").clicked() {
+                    self.ctx.request(Action::PickFolder(PickFor::OpenProject));
+                }
                 ui.menu_button("Recent Projects", |ui| {
                     if self.ctx.settings.recent_projects.is_empty() {
                         ui.weak("None");
                     }
+                    let mut open = None;
                     for path in &self.ctx.settings.recent_projects {
-                        ui.add_enabled(false, Button::new(path.display().to_string()));
+                        if ui.button(path.display().to_string()).clicked() {
+                            open = Some(path.clone());
+                        }
+                    }
+                    if let Some(path) = open {
+                        self.ctx.request(Action::LoadProject(path));
                     }
                 });
+                if ui
+                    .add_enabled(self.ctx.project.is_some(), Button::new("Close Project"))
+                    .clicked()
+                {
+                    self.ctx.request(Action::CloseProject);
+                }
                 ui.separator();
                 if let WindowId::Detached(id) = win
                     && ui.button("Close Window").clicked()
@@ -267,9 +281,28 @@ impl CdeptApp {
             }
 
             ui.menu_button("Project", |ui| {
-                for item in ["Settings…", "Technology…", "Library Definitions…"] {
+                let open = self.ctx.project.is_some();
+                if ui
+                    .add_enabled(open, Button::new("Reload"))
+                    .on_hover_text("Read cdept.toml and the library folders again")
+                    .clicked()
+                {
+                    self.ctx.request(Action::ReloadProject);
+                }
+                if ui
+                    .add_enabled(open, Button::new("Copy Project File Path"))
+                    .on_hover_text(
+                        "Libraries are defined in cdept.toml, which can be edited by hand",
+                    )
+                    .clicked()
+                    && let Some(project) = &self.ctx.project
+                {
+                    ui.ctx().copy_text(project.file.display().to_string());
+                }
+                ui.separator();
+                for item in ["Settings…", "Technology…"] {
                     ui.add_enabled(false, Button::new(item))
-                        .on_disabled_hover_text("Arrives in Phase 1–2");
+                        .on_disabled_hover_text("Arrives in Phase 2");
                 }
             });
 
@@ -385,14 +418,12 @@ impl CdeptApp {
 
     fn toolbar(&mut self, ui: &mut Ui, win: WindowId) {
         ui.horizontal(|ui| {
-            let project = self
-                .ctx
-                .project
-                .as_ref()
-                .and_then(|p| p.file_name())
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "No project".into());
-            ui.label(format!("📁 {project}"));
+            match &self.ctx.project {
+                Some(project) => ui
+                    .label(format!("📁 {}", project.name))
+                    .on_hover_text(project.root.display().to_string()),
+                None => ui.weak("📁 No project"),
+            };
             ui.separator();
             match self.ctx.pdk() {
                 Some(pdk) => ui.label(format!("PDK: {pdk}")),
@@ -420,8 +451,18 @@ impl CdeptApp {
     fn status_bar(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             match &self.ctx.project {
-                Some(p) => ui.label(p.display().to_string()),
-                None => ui.weak("No project"),
+                Some(p) => {
+                    ui.label(p.root.display().to_string());
+                    let problems =
+                        p.warnings.len() + p.libraries.iter().filter(|l| l.error.is_some()).count();
+                    if problems > 0 {
+                        ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {problems}"))
+                            .on_hover_text("Problems in the library definitions; see the Console");
+                    }
+                }
+                None => {
+                    ui.weak("No project");
+                }
             };
             ui.separator();
             ui.label(format!(
@@ -496,7 +537,14 @@ impl CdeptApp {
                 self.active_docs.clear();
                 self.spawn_geometry.clear();
                 self.about = self.about.map(|_| WindowId::Main);
+                if let Some((owner, _)) = &mut self.ctx.dialog {
+                    *owner = WindowId::Main;
+                }
             }
+            Action::PickFolder(purpose) => self.ctx.pick_folder(ctx, purpose),
+            Action::LoadProject(path) => self.ctx.load_project(&path),
+            Action::ReloadProject => self.ctx.reload_project(),
+            Action::CloseProject => self.ctx.close_project(),
             Action::DetectTools => self.ctx.tools.start_detection(ctx),
             Action::ShowAbout(win) => self.about = Some(win),
             Action::Quit => {
@@ -512,6 +560,27 @@ impl CdeptApp {
         if self.about == Some(win) {
             self.about = Some(WindowId::Main);
         }
+        if let Some((owner, _)) = &mut self.ctx.dialog
+            && *owner == win
+        {
+            *owner = WindowId::Main;
+        }
+    }
+
+    /// Act on the folder chosen in the native folder dialog.
+    fn picked(&mut self, purpose: PickFor, path: std::path::PathBuf) {
+        // Dialogs opened from here belong to the main window.
+        self.ctx.window = WindowId::Main;
+        match purpose {
+            PickFor::NewProject => self.ctx.new_project(&path),
+            PickFor::OpenProject => self.ctx.load_project(&path),
+            PickFor::AddLibrary => {
+                if let Some(project) = &self.ctx.project {
+                    let dialog = Dialog::add_library(project, &path);
+                    self.ctx.open_dialog(dialog);
+                }
+            }
+        }
     }
 }
 
@@ -526,8 +595,12 @@ impl eframe::App for CdeptApp {
             self.show_detached(ctx, id);
         }
 
+        self.ctx.window = WindowId::Main;
         for action in self.ctx.take_actions() {
             self.apply(ctx, action);
+        }
+        if let Some((purpose, path)) = self.ctx.take_picked() {
+            self.picked(purpose, path);
         }
         // A detached window whose last tab was closed or dragged away disappears.
         let before: Vec<u64> = self.layout.windows.iter().map(|w| w.id).collect();

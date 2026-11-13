@@ -1,12 +1,15 @@
 //! State shared by all views of the main window.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use libcdept::tools::{self, ToolInfo};
+use libcdept::{Cell, Entry, Library, Project};
 use serde::{Deserialize, Serialize};
 
+use crate::dialogs::{Dialog, DialogState};
 use crate::dock::{Tab, WindowId};
 use crate::log::LogBuffer;
 
@@ -90,6 +93,13 @@ pub enum Action {
     /// Close a detached window; its tabs return to the main window.
     CloseWindow(u64),
     ResetLayout,
+    /// Ask for a folder, then do what the purpose says with it.
+    PickFolder(PickFor),
+    /// Open the project in this folder (or the one it belongs to).
+    LoadProject(PathBuf),
+    /// Re-read cdept.toml and the library folders.
+    ReloadProject,
+    CloseProject,
     DetectTools,
     /// Show the About dialog over the given window.
     ShowAbout(WindowId),
@@ -140,12 +150,63 @@ impl ToolsState {
     }
 }
 
+/// What a folder chosen in the native folder dialog is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickFor {
+    NewProject,
+    OpenProject,
+    /// An existing folder to define as a library.
+    AddLibrary,
+}
+
+struct Picker {
+    purpose: PickFor,
+    result: Receiver<Option<PathBuf>>,
+}
+
+/// The library, cell and view selected in the library views (shared by all of them).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Selection {
+    pub library: Option<String>,
+    pub cell: Option<String>,
+    pub view: Option<String>,
+}
+
+impl Selection {
+    pub fn library(library: &str) -> Self {
+        Self {
+            library: Some(library.into()),
+            ..Default::default()
+        }
+    }
+
+    pub fn cell(library: &str, cell: &str) -> Self {
+        Self {
+            cell: Some(cell.into()),
+            ..Self::library(library)
+        }
+    }
+
+    pub fn view(library: &str, cell: &str, view: &str) -> Self {
+        Self {
+            view: Some(view.into()),
+            ..Self::cell(library, cell)
+        }
+    }
+}
+
 /// Everything views can read or change, other than the dock layout itself.
 pub struct AppCtx {
     pub settings: Settings,
     pub log: LogBuffer,
     pub tools: ToolsState,
-    pub project: Option<PathBuf>,
+    pub project: Option<Project>,
+    pub selection: Selection,
+    /// The native window whose UI is being built.
+    pub window: WindowId,
+    /// The open modal dialog and the window it belongs to.
+    pub(crate) dialog: Option<(WindowId, DialogState)>,
+    picker: Option<Picker>,
     actions: Vec<Action>,
 }
 
@@ -156,6 +217,10 @@ impl AppCtx {
             log,
             tools: ToolsState::default(),
             project: None,
+            selection: Selection::default(),
+            window: WindowId::Main,
+            dialog: None,
+            picker: None,
             actions: Vec::new(),
         }
     }
@@ -173,5 +238,156 @@ impl AppCtx {
     /// The `$PDK` environment variable, as set by open_pdks / IIC-OSIC-TOOLS.
     pub fn pdk(&self) -> Option<String> {
         std::env::var("PDK").ok().filter(|s| !s.is_empty())
+    }
+
+    /// Show a modal dialog over the window being built.
+    pub fn open_dialog(&mut self, dialog: Dialog) {
+        self.dialog = Some((self.window, DialogState::new(dialog)));
+    }
+
+    /// Report a failure: in the console and as a dialog.
+    pub fn error(&mut self, message: String) {
+        tracing::error!(target: "cdept::project", "{message}");
+        self.open_dialog(Dialog::Error(message));
+    }
+
+    pub fn selected_library(&self) -> Option<&Library> {
+        self.project
+            .as_ref()?
+            .library(self.selection.library.as_deref()?)
+    }
+
+    pub fn selected_cell(&self) -> Option<&Cell> {
+        self.selected_library()?
+            .cell(self.selection.cell.as_deref()?)
+    }
+
+    pub fn selected_view(&self) -> Option<&Entry> {
+        self.selected_cell()?.entry(self.selection.view.as_deref()?)
+    }
+
+    /// Drop the parts of the selection that no longer exist.
+    pub fn validate_selection(&mut self) {
+        if self.selected_library().is_none() {
+            self.selection = Selection::default();
+        } else if self.selected_cell().is_none() {
+            self.selection.cell = None;
+            self.selection.view = None;
+        } else if self.selected_view().is_none() {
+            self.selection.view = None;
+        }
+    }
+
+    /// Open the project `path` is in (its folder, or any folder below it).
+    pub fn load_project(&mut self, path: &Path) {
+        let root = Project::find_root(path).unwrap_or_else(|| path.to_path_buf());
+        match Project::load(&root) {
+            Ok(project) => self.set_project(project),
+            Err(e) => self.error(format!("{e:#}")),
+        }
+    }
+
+    /// Create a project in `dir`, or open the one that is already there.
+    pub fn new_project(&mut self, dir: &Path) {
+        if dir.join(libcdept::PROJECT_FILE).is_file() {
+            tracing::info!(target: "cdept::project", "{} already holds a project; opening it", dir.display());
+            return self.load_project(dir);
+        }
+        match Project::create(dir, None) {
+            Ok(project) => self.set_project(project),
+            Err(e) => self.error(format!("{e:#}")),
+        }
+    }
+
+    fn set_project(&mut self, project: Project) {
+        let cells: usize = project.libraries.iter().map(|l| l.cells.len()).sum();
+        tracing::info!(
+            target: "cdept::project",
+            "project '{}' ({}): {} libraries, {cells} cells",
+            project.name,
+            project.root.display(),
+            project.libraries.len()
+        );
+        log_problems(&project);
+        self.settings.add_recent(project.root.clone());
+        self.project = Some(project);
+        self.validate_selection();
+    }
+
+    pub fn reload_project(&mut self) {
+        let Some(project) = &mut self.project else {
+            return;
+        };
+        match project.reload() {
+            Ok(()) => {
+                log_problems(project);
+                self.validate_selection();
+            }
+            Err(e) => self.error(format!("{e:#}")),
+        }
+    }
+
+    pub fn close_project(&mut self) {
+        if let Some(project) = self.project.take() {
+            tracing::info!(target: "cdept::project", "closed project '{}'", project.name);
+        }
+        self.selection = Selection::default();
+    }
+
+    /// Open the native folder dialog on a background thread; the choice is picked up
+    /// by [`take_picked`](Self::take_picked).
+    pub fn pick_folder(&mut self, ctx: &egui::Context, purpose: PickFor) {
+        if self.picker.is_some() {
+            return;
+        }
+        let title = match purpose {
+            PickFor::NewProject => "Folder for the new project",
+            PickFor::OpenProject => "Open project folder",
+            PickFor::AddLibrary => "Library folder",
+        };
+        let start = self
+            .project
+            .as_ref()
+            .map(|p| p.root.clone())
+            .or_else(|| std::env::current_dir().ok());
+        let (sender, result) = mpsc::channel();
+        let ctx = ctx.clone();
+        thread::spawn(move || {
+            let mut dialog = rfd::FileDialog::new().set_title(title);
+            if let Some(dir) = start {
+                dialog = dialog.set_directory(dir);
+            }
+            let _ = sender.send(dialog.pick_folder());
+            ctx.request_repaint();
+        });
+        self.picker = Some(Picker { purpose, result });
+    }
+
+    /// The folder chosen in the folder dialog, once the user has answered.
+    pub(crate) fn take_picked(&mut self) -> Option<(PickFor, PathBuf)> {
+        let picker = self.picker.as_ref()?;
+        match picker.result.try_recv() {
+            Ok(choice) => {
+                let purpose = picker.purpose;
+                self.picker = None;
+                choice.map(|path| (purpose, path))
+            }
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.picker = None;
+                None
+            }
+        }
+    }
+}
+
+fn log_problems(project: &Project) {
+    for warning in &project.warnings {
+        tracing::warn!(target: "cdept::project", "{warning}");
+    }
+    for lib in &project.libraries {
+        if let Some(error) = &lib.error {
+            tracing::warn!(target: "cdept::project", "library '{}': {error}", lib.name);
+        }
     }
 }

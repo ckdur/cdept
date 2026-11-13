@@ -6,6 +6,8 @@ them: one project and library model, one technology setup, one simulation enviro
 waveform viewer and calculator, one signoff dashboard, with schematic, layout and simulation
 kept in sync.
 
+Working notes (open to-do items and known trouble spots): [NOTES.md](NOTES.md).
+
 Source of scope: NLnet proposal "Chip Design Project Tool (CDePT)". Budget: ~750 h
 (15 h/week × 50 weeks).
 
@@ -15,7 +17,7 @@ Source of scope: NLnet proposal "Chip Design Project Tool (CDePT)". Budget: ~750
 
 | Virtuoso component              | CDePT equivalent                         | Backed by (external)                 |
 |---------------------------------|----------------------------------------|--------------------------------------|
-| cds.lib / Library Manager       | `cdept.lib` + Library Manager (lib/cell/view) | filesystem + git                 |
+| cds.lib / Library Manager       | `[libraries]` in `cdept.toml` + Library Manager (lib/cell/view) | filesystem + git |
 | Technology file / PDK setup     | Technology Manager (open_pdks aware)   | sky130, gf180mcu, ihp-sg13g2/sg13cmos5l, ciel |
 | Virtuoso Schematic Editor       | Launch + control                       | xschem (primary), Qucs-S             |
 | Virtuoso Layout Suite L/XL      | Launch + control, cross-probe, SDL     | KLayout (primary), Magic             |
@@ -33,7 +35,7 @@ Source of scope: NLnet proposal "Chip Design Project Tool (CDePT)". Budget: ~750
 ```
 cdept (GUI binary, egui/eframe)
  └── libcdept (core, no GUI deps where possible)
-      ├── project/     lib-cell-view model, cdept.lib, cell metadata (TOML, serde)
+      ├── project/     lib-cell-view model, cdept.toml (project + library definitions, TOML)
       ├── tech/        PDK discovery + technology description
       ├── tools/       ToolAdapter trait, process supervisor, IPC clients
       │    ├── xschem   (Tcl over TCP: xschem_listen_port)
@@ -54,22 +56,52 @@ Suggested split: `libcdept` = core with no GUI, `cdept-gui` = egui frontend, `cd
 `ToolAdapter` with methods like `capabilities()`, `open(view)`, `netlist(cell)`,
 `highlight(net)` and `on_event()`, so new tools plug in without touching the core.
 
-### On-disk model (the Virtuoso lib/cell/view idea, in plain files)
+### On-disk model (the lib/cell/view idea, in plain files)
+The model is library → cell → view, but the files are our own: there is no `cds.lib`
+clone. One hand-editable TOML file, `cdept.toml`, names the project and defines its
+libraries. CDePT edits it in place and keeps comments and formatting.
+
+```toml
+# myproject/cdept.toml
+name = "sar_adc"
+description = "10-bit SAR ADC"
+technology = "ihp-sg13g2"                      # used from Phase 2 on
+
+include = ["../shared/libraries.toml"]         # more definitions (same keys), optional
+
+[libraries]
+analog = "libs/analog"                         # short form: name = "folder"
+sg13g2_pr = { path = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_pr", read_only = true }
+```
+
+- Paths are relative to the file that contains them. `$VAR`, `${VAR}` and a leading `~`
+  are expanded when loading and kept as written when saving.
+- `read_only = true` marks reference libraries (PDK primitives): CDePT never modifies them.
+- `layout` says how a library folder maps to cells and views. It is detected from the
+  folder when left out.
+  - `"cells"` (default for new libraries): `<library>/<cell>/<view>/<files>`. A design
+    file directly in the cell folder is a view too.
+  - `"flat"`: `<library>/<cell>.<ext>`, files sharing a name form a cell and each file is
+    a view. xschem symbol libraries, GDS folders and PDK libraries work in place, with
+    no import step.
+- A library that cannot be resolved (unset variable, missing folder) stays listed with
+  its error instead of failing the whole project.
+
 ```
 myproject/
-  cdept.toml                 # project: tech ref, tool paths, default corners
-  cdept.lib                  # DEFINE mylib ./libs/mylib ; DEFINE sg13g2_pr $PDK/... (read-only)
-  libs/mylib/
-    lib.toml               # library metadata, tech binding
-    ota5t/                 # cell
-      cell.toml            # views, pins, symbol↔layout mapping, status
-      schematic/ota5t.sch  # view: xschem
+  cdept.toml                 # project + library definitions
+  libs/analog/
+    lib.toml                 # optional library metadata (description; tech binding later)
+    ota5t/                   # cell
+      schematic/ota5t.sch    # view: xschem
       symbol/ota5t.sym
-      layout/ota5t.gds     # or .mag
-      tb_ac/               # view: testbench (sim setup + results)
+      layout/ota5t.gds       # or .mag
+      tb_ac/                 # view: testbench (sim setup + results), Phase 4
         setup.toml
         results/<run-id>/
 ```
+The kind of a view (schematic, symbol, layout, netlist, testbench, config, hdl, abstract,
+liberty) comes from its main file's format, which also selects the tool that opens it.
 Plain text, diff-able, git-friendly. That is a real advantage over Virtuoso's binary OA.
 
 ---
@@ -93,18 +125,34 @@ milestone).
 - **Milestone:** empty app with docked panels, CLI stub, CI green.
 
 ### Phase 1: Project & Library Manager (~80 h)
-- Data model: Project → Library → Cell → View (entry), with typed views (schematic, symbol,
-  layout, netlist, testbench, config, verilog, abstract, liberty).
-- `cdept.lib` parser (DEFINE / INCLUDE / env vars), read-only reference libraries (PDK).
-- Library Manager GUI: 3-column lib/cell/view browser, create/copy/rename/delete cell
-  (rewriting references inside .sch/.gds), categories, search.
+Done:
+- Data model: Project → Library → Cell → View (`Entry`), with typed views (`ViewKind`) and
+  file formats (`Format`, which names the tool).
+- `cdept.toml`: project fields, `[libraries]` (short and long form), `include`, variable
+  expansion, read-only reference libraries, `cells` and `flat` layouts (see §1).
+- Operations: create project/library/cell/view (templates: xschem schematic and symbol,
+  empty GDS, SPICE, Verilog), copy (also between layouts), rename and delete cell, delete
+  view, remove a library definition. Read-only libraries refuse changes.
+- CLI: `cdept init`, `cdept ls`, `cdept lib add|remove`. The project is found from the
+  current folder upwards, like cargo.
+- GUI: New/Open/Recent/Close Project, library tree (side panel), 3-column Library Manager
+  with cell filter, context menus and dialogs for all operations, Inspector.
+
+To do:
+- Rewrite references when a cell is renamed or copied (instances in other `.sch` files,
+  the structure name inside GDS). Needs the parsers of the hierarchy browser.
 - Hierarchy browser: parse xschem instances and GDS references → tree, "used by" query.
-- File watching (`notify`) so external edits show up live. Git status per cell.
-- Import an existing xschem/KLayout project (scan → generate `cdept.lib`).
-- Study IHP's **LibMan** (`github.com/IHP-GmbH/LibMan`, in the asic-all image), a Qt library
-  manager over xschem and KLayout. Reuse its library conventions where they fit, read
-  its library definitions if a format is shared, and offer "open in LibMan" instead of
-  diverging silently.
+  A GDS file with many cells (e.g. a standard-cell library) is one cell today; the
+  hierarchy work should list the structures inside it.
+- Categories and search across libraries.
+- File watching (`notify`) so external edits show up live (today: Reload). Git status per cell.
+- Import an existing xschem/KLayout project (scan → generate the `[libraries]` table).
+- IHP **LibMan** (`github.com/IHP-GmbH/LibMan`, in the asic-all image). Findings so far:
+  its project file (`*.projects` / `*.lib`) is a list of `define(name, path)` calls, with
+  wildcard paths; a library folder is marked by a `.room` file; views are chosen by file
+  suffix (`.sch .sym .gds .oas .lstr`); categories live in `Category.group` files. Our
+  `flat` layout reads the same kind of folder. To do: import its `define()` list into
+  `[libraries]`, read its categories, and offer "open in LibMan".
 - **Milestone:** manage a real project (e.g. ASICONE SAR-ADC) entirely from CDePT.
 
 ### Phase 2: Technology / PDK Manager (~60 h)
@@ -256,13 +304,13 @@ because the raw reader and calculator have no dependencies. 6 and 7 depend on 3.
 | Purpose                | Crate(s)                                                     |
 |------------------------|--------------------------------------------------------------|
 | GUI                    | `egui`, `eframe` (already used), `egui_dock`/`egui_tiles`, `egui_extras` (tables), `egui_plot`, `rfd` (file dialogs) |
-| Config / serialisation | `serde`, `toml`, `serde_json`                                |
+| Config / serialisation | `serde`, `toml_edit` (keeps comments in hand-edited files), `serde_json` |
 | Errors / logs / CLI    | `eyre` (in use), `thiserror`, `tracing`, `clap`              |
 | Async / processes / IPC| `tokio` (process, net), JSON-RPC over TCP (`serde_json` line protocol or `jsonrpsee`) |
 | File watching          | `notify`                                                     |
 | Results DB             | `rusqlite`                                                   |
 | DSP / math             | `rustfft`, `realfft`, `ndarray`, `statrs`, `num-complex`     |
-| Parsers                | `winnow` or `nom` (SPICE raw, netlists, xschem .sch, cdept.lib), `chumsky` (calc language) |
+| Parsers                | `winnow` or `nom` (SPICE raw, netlists, xschem .sch), `chumsky` (calc language) |
 | Waveforms              | `wellen` (VCD/FST/GHW, used by Surfer), `libsurfer`          |
 | Layout                 | `gds21` (GDS read/write, thumbnails/hierarchy), `libreda-*` (Rust EDA DB from the LibreCell author) |
 | ngspice                | `bindgen` on `sharedspice.h` (or an existing `ngspice-sys`-style crate) |
@@ -314,7 +362,7 @@ najaeda, vlsir/hdl21, schemdraw, ngspyce, spyci); RISC-V toolchain and spike.
 | Day/session | Work |
 |-------------|------|
 | 1 | Phase 0: fix skeleton, workspace split, docked GUI shell, CI |
-| 2–3 | Phase 1: data model + `cdept.lib` + Library Manager browser |
+| 2–3 | Phase 1: data model + `cdept.toml` libraries + Library Manager browser (done), then hierarchy, reference rewriting, file watching |
 | 4 | Phase 2: PDK discovery for sg13g2 + sky130, `tech.toml` |
 | 5 | Phase 3 spike: xschem listen-port + KLayout bridge prototypes |
 | 6 | Phase 5 spike: SPICE raw reader + basic plot (parallel track) |

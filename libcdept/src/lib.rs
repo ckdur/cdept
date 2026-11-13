@@ -7,11 +7,15 @@
 pub mod cell;
 pub mod entry;
 pub mod library;
+pub mod project;
 pub mod technology;
+pub mod template;
 pub mod tools;
 pub mod version;
 
 pub use cell::Cell;
-pub use entry::{Entry, EntryType};
-pub use library::Library;
+pub use entry::{Entry, Format, ViewKind};
+pub use library::{Library, LibraryLayout};
+pub use project::{AddLibrary, PROJECT_FILE, Project};
 pub use technology::Technology;
+pub use template::Template;
