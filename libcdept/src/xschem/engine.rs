@@ -1,6 +1,7 @@
 //! Client side of the xschem helper: starts `cdept-xschem`, sends it requests and reads
 //! the replies. One [`Engine`] is one helper process, i.e. one xschem.
 
+use std::ffi::OsString;
 use std::io::BufReader;
 use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -28,6 +29,8 @@ pub struct EngineOptions {
     pub startup: Option<String>,
     /// Working folder of the helper. xschem resolves relative names against it.
     pub cwd: Option<PathBuf>,
+    /// Extra environment variables for the helper, e.g. `PDK_ROOT`.
+    pub env: Vec<(OsString, OsString)>,
     /// How long to wait for xschem to start.
     pub startup_timeout: Duration,
 }
@@ -38,6 +41,7 @@ impl Default for EngineOptions {
             helper: None,
             startup: None,
             cwd: None,
+            env: Vec::new(),
             startup_timeout: Duration::from_secs(30),
         }
     }
@@ -156,6 +160,7 @@ impl Engine {
         if let Some(cwd) = &options.cwd {
             command.current_dir(cwd);
         }
+        command.envs(options.env.iter().map(|(name, value)| (name, value)));
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

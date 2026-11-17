@@ -186,8 +186,16 @@ and previews.
   `cell/schematic/cell.sch`, xschem looks for `cell/symbol/cell.sch`, does not find it
   and writes an empty `.subckt` without an error. The `flat` layout works. Solved with
   a `schematic=` attribute in the symbol, see §7.
-- **The user's `~/.xschem` is still touched**: xschem creates it if missing and reads
-  `recent_files` from it (the user's `xschemrc` is not read). Harmless so far.
+- **The user's `~/.xschem` is still used**: xschem reads and writes `recent_files`
+  there (the user's `xschemrc` is not read), so files opened through CDePT show up in
+  the "recent" list of the user's own xschem. Copy and paste between xschem windows
+  also goes through this folder, which is a reason to share it. To decide in step 3:
+  share it, or give the helper a folder of its own (`USER_CONF_DIR` in
+  `xschem_config.h`).
+- **Start-up race in xschem.** When `~/.xschem` is missing, xschem checks, then creates
+  it, and exits if the folder appeared in between. Several helpers starting together
+  on a fresh machine hit this (it failed the first CI run). The helper now creates the
+  folder itself before starting xschem.
 - In headless mode xschem prints `tk scaling failed` during SVG export. Harmless; it
   goes to the log at debug level (`cdept -v`).
 

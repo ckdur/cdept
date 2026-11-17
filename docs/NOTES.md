@@ -44,8 +44,11 @@ Last updated: 2026-11-17 (embedded xschem: step 0 done).
       in ngspice and in stock xschem 3.4.8RC (asic-all image).
 - [ ] Show the result of the link check in the GUI (a mark on the symbol view in the
       Library Manager, with "fix"); today only the CLI reports it.
-- [ ] Let CI run once with the new job steps (submodule checkout, flex, bison, tcl-dev,
-      libcairo2-dev). Not yet run on the runner or with the MSRV toolchain.
+- [x] CI with the new job steps (submodule checkout, flex, bison, tcl-dev,
+      libcairo2-dev): builds. The first run failed in the tests: helpers starting
+      together fought over creating `~/.xschem` (XSCHEM.md §6); fixed in the helper.
+- [ ] Decide in step 3: does the helper share `~/.xschem` with the user's own xschem
+      (recent files, copy and paste between windows) or get its own folder?
 - [ ] Step 1: SVG preview in the Inspector, `Tab::Document`, double-click opens a view,
       engine on its own thread with restart, frame transport.
 - [ ] Step 2: Xlib/Tk replacements, read-only viewer. Gate before going on.

@@ -150,6 +150,7 @@ fn start_xschem(args: &Args) -> Result<Xschem, String> {
 
     // SAFETY: no other thread exists yet.
     unsafe { std::env::set_var("XSCHEM_SHAREDIR", &sharedir) };
+    create_user_conf_dir(&sharedir)?;
 
     // Runs before the rc file: start the symbol search path with xschem's own devices
     // library, reachable both as `res.sym` and as `devices/res.sym` (schematics in the
@@ -176,6 +177,30 @@ fn start_xschem(args: &Args) -> Result<Xschem, String> {
         None => argv.push("--no_rcload".into()),
     }
     Xschem::start(&argv)
+}
+
+/// Create xschem's folder in the user's home (`USER_CONF_DIR` in `xschem_config.h`) if
+/// it is missing, with the template `xschemrc`, as xschem itself does at start-up.
+///
+/// xschem checks for the folder and then creates it, and exits when the folder appeared
+/// in between. That happens when several helpers start at the same moment on a machine
+/// where xschem never ran. Creating it here first is safe against that.
+fn create_user_conf_dir(sharedir: &Path) -> Result<(), String> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    let Some(home) = std::env::var_os("HOME") else {
+        return Ok(()); // xschem asks the system for the home folder itself
+    };
+    let dir = Path::new(&home).join(".xschem");
+    match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
+        Ok(()) => {
+            // Only the process that created the folder fills it.
+            let _ = std::fs::copy(sharedir.join("xschemrc"), dir.join("xschemrc"));
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(format!("cannot create {}: {error}", dir.display())),
+    }
 }
 
 /// The folder holding `xschem.tcl` and `xschem_library/devices`.

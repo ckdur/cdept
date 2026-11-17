@@ -185,6 +185,29 @@ fn project_libraries_resolve_in_the_cells_layout() {
     );
 }
 
+/// On a machine where xschem never ran, its folder in the home does not exist. Engines
+/// started at the same moment must not trip over each other creating it.
+#[test]
+fn engines_start_together_in_a_fresh_home() {
+    let home = tempfile::tempdir().unwrap();
+    let threads: Vec<_> = (0..8)
+        .map(|_| {
+            let home = home.path().to_path_buf();
+            std::thread::spawn(move || {
+                let mut engine = Engine::start(EngineOptions {
+                    env: vec![("HOME".into(), home.into())],
+                    ..options()
+                })?;
+                engine.tcl("expr {6 * 7}")
+            })
+        })
+        .collect();
+    for thread in threads {
+        assert_eq!(thread.join().unwrap().unwrap(), "42");
+    }
+    assert!(home.path().join(".xschem/xschemrc").is_file());
+}
+
 /// The example project of the repository: three levels across two libraries.
 #[test]
 fn the_example_project_netlists() {
