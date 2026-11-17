@@ -1,0 +1,11 @@
+# CDePT project file. Edit it by hand or from the Library Manager.
+name = "buffer"
+
+# Libraries, as  name = "folder"  (relative to this file; $VAR and ~ are expanded).
+# Long form, for reference libraries such as PDK primitives:
+#   sg13g2_pr = { path = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_pr", read_only = true }
+# Optional  layout = "cells"  (<library>/<cell>/<view>/<files>)  or  "flat"
+# (<library>/<cell>.<ext>, one view per file); detected from the folder when left out.
+[libraries]
+logic = "libs/logic"
+bench = "libs/bench"

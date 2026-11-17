@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["cdept", "cdept-gui", "libcdept"]
+members = ["cdept", "cdept-gui", "cdept-xschem", "libcdept"]
+# cdept-xschem (GPL helper, needs Tcl, cairo, flex, bison) is built on request:
+#   cargo build -p cdept-xschem
+default-members = ["cdept", "cdept-gui", "libcdept"]
 
 [workspace.package]
 version = "0.1.0"
@@ -28,6 +31,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
 eyre = "0.6.12"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 rfd = "0.18"
 ron = "0.11"
 tempfile = "3"

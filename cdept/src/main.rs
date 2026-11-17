@@ -4,8 +4,10 @@ use std::path::PathBuf;
 
 use cdept_gui::{GuiOptions, LogBuffer};
 use clap::{Parser, Subcommand, ValueEnum};
-use eyre::{Result, eyre};
-use libcdept::{AddLibrary, LibraryLayout, Project};
+use eyre::{Result, bail, eyre};
+use libcdept::xschem::symbol::{self, Problem};
+use libcdept::xschem::{Engine, NetlistFormat};
+use libcdept::{AddLibrary, Format, LibraryLayout, Project};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
 
@@ -49,6 +51,22 @@ enum Command {
     /// Change the library definitions in cdept.toml.
     #[command(subcommand)]
     Lib(LibCommand),
+    /// Write the netlist of a cell's schematic, with its hierarchy (uses xschem).
+    Netlist {
+        library: String,
+        cell: String,
+        /// Output file. Defaults to <cell>.<suffix of the format> in the current folder.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        #[arg(short, long, value_enum, default_value = "spice")]
+        format: NetlistKind,
+        /// The view to netlist, when the cell has several schematics.
+        #[arg(long)]
+        view: Option<String>,
+    },
+    /// Use the embedded xschem engine directly.
+    #[command(subcommand)]
+    Xschem(XschemCommand),
     /// List the external tools found on PATH.
     Tools,
     /// Print version and build information.
@@ -73,6 +91,71 @@ enum LibCommand {
     Remove { name: String },
 }
 
+#[derive(Subcommand)]
+enum XschemCommand {
+    /// Draw a schematic or symbol view into an SVG file.
+    Svg {
+        library: String,
+        cell: String,
+        /// Output file. Defaults to <cell>.svg in the current folder.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// The view to draw. Defaults to the schematic, else the symbol.
+        #[arg(long)]
+        view: Option<String>,
+    },
+    /// List the instances placed in a schematic: name, symbol, type.
+    Instances {
+        library: String,
+        cell: String,
+        #[arg(long)]
+        view: Option<String>,
+    },
+    /// Check that xschem will find the schematic behind every symbol.
+    ///
+    /// In a `cells` library the schematic is not next to its symbol, so the symbol
+    /// names it with a `schematic=` attribute. CDePT writes the attribute and keeps
+    /// it right; this finds the symbols where it is missing or wrong, e.g. after files
+    /// were copied by hand. Without it xschem netlists the cell empty.
+    Link {
+        /// Only this library.
+        library: Option<String>,
+        /// Only this cell.
+        cell: Option<String>,
+        /// Write the attribute where it is missing or names a file that does not exist.
+        #[arg(long)]
+        fix: bool,
+        /// With --fix: also rewrite attributes that name another cell's schematic.
+        #[arg(long, requires = "fix")]
+        foreign: bool,
+    },
+    /// Evaluate a Tcl script in the engine and print the result (for debugging).
+    Tcl { script: String },
+    /// Print the version of the engine.
+    Version,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum NetlistKind {
+    Spice,
+    Spectre,
+    Verilog,
+    Vhdl,
+    Tedax,
+}
+
+impl From<NetlistKind> for NetlistFormat {
+    fn from(kind: NetlistKind) -> Self {
+        match kind {
+            NetlistKind::Spice => NetlistFormat::Spice,
+            NetlistKind::Spectre => NetlistFormat::Spectre,
+            NetlistKind::Verilog => NetlistFormat::Verilog,
+            NetlistKind::Vhdl => NetlistFormat::Vhdl,
+            NetlistKind::Tedax => NetlistFormat::Tedax,
+        }
+    }
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum Layout {
     /// <library>/<cell>/<view>/<files>
@@ -94,6 +177,99 @@ fn open_project(explicit: Option<PathBuf>) -> Result<Project> {
         tracing::warn!("{warning}");
     }
     Ok(project)
+}
+
+/// `cdept xschem link`: report the symbols whose schematic xschem would not find, and
+/// repair them with `fix`. Fails when problems are left.
+fn link_symbols(
+    project: &Project,
+    library: Option<&str>,
+    cell: Option<&str>,
+    fix: bool,
+    foreign: bool,
+) -> Result<()> {
+    if let Some(name) = library
+        && project.library(name).is_none()
+    {
+        bail!("no library '{name}'");
+    }
+    let mut left = 0;
+    for unlinked in symbol::check(project, library, cell) {
+        let symbol = project.portable_path(&unlinked.symbol);
+        let wanted = fix && (foreign || !matches!(unlinked.problem, Problem::Foreign { .. }));
+        let outcome = if !wanted {
+            Err(None)
+        } else {
+            symbol::repair(project, &unlinked).map_err(Some)
+        };
+        match outcome {
+            Ok(()) => println!("{symbol}: set schematic={}", unlinked.expected),
+            Err(error) => {
+                left += 1;
+                println!("{symbol}: {}", unlinked.problem);
+                println!("    expected schematic={}", unlinked.expected);
+                if let Some(error) = error {
+                    println!("    not fixed: {error:#}");
+                }
+            }
+        }
+    }
+    if left > 0 {
+        let hint = match (fix, foreign) {
+            (false, _) => " (--fix writes the expected value)",
+            (true, false) => " (--foreign also rewrites links to another cell)",
+            (true, true) => "",
+        };
+        bail!("{left} symbol(s) not linked to the schematic of their cell{hint}");
+    }
+    Ok(())
+}
+
+/// The xschem file of a cell's view: the named view, else the schematic, else (when
+/// `or_symbol`) the symbol.
+fn xschem_view(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+    or_symbol: bool,
+) -> Result<PathBuf> {
+    let lib = project
+        .library(library)
+        .ok_or_else(|| eyre!("no library '{library}'"))?;
+    if let Some(error) = &lib.error {
+        return Err(eyre!("library '{library}': {error}"));
+    }
+    let found = lib
+        .cell(cell)
+        .ok_or_else(|| eyre!("no cell '{cell}' in library '{library}'"))?;
+    let is_xschem = |format| matches!(format, Some(Format::XschemSchematic | Format::XschemSymbol));
+    let entry = match view {
+        Some(name) => found
+            .entry(name)
+            .ok_or_else(|| eyre!("cell '{cell}' has no view '{name}'"))?,
+        None => found
+            .entries
+            .iter()
+            .find(|e| e.format == Some(Format::XschemSchematic))
+            .or_else(|| {
+                found
+                    .entries
+                    .iter()
+                    .find(|e| or_symbol && e.format == Some(Format::XschemSymbol))
+            })
+            .ok_or_else(|| eyre!("cell '{cell}' has no xschem schematic view"))?,
+    };
+    if !is_xschem(entry.format) {
+        return Err(eyre!(
+            "view '{}' of '{cell}' is not an xschem file",
+            entry.name
+        ));
+    }
+    entry
+        .main_file
+        .clone()
+        .ok_or_else(|| eyre!("view '{}' of '{cell}' has no file", entry.name))
 }
 
 fn list(project: &Project, only: Option<&str>, libraries_only: bool) -> Result<()> {
@@ -200,6 +376,81 @@ fn main() -> Result<()> {
                     println!("removed {name} from {}", project.file.display());
                 }
             }
+            Ok(())
+        }
+        Command::Netlist {
+            library,
+            cell,
+            output,
+            format,
+            view,
+        } => {
+            init_tracing(cli.verbose, None);
+            let project = open_project(cli.project)?;
+            let format = NetlistFormat::from(format);
+            let file = xschem_view(&project, &library, &cell, view.as_deref(), false)?;
+            let output =
+                output.unwrap_or_else(|| PathBuf::from(format!("{cell}.{}", format.suffix())));
+            let unlinked = symbol::check(&project, None, None);
+            if !unlinked.is_empty() {
+                tracing::warn!(
+                    "xschem will not find the schematic of {} symbol(s), their cells may \
+                     come out empty: see `cdept xschem link`",
+                    unlinked.len()
+                );
+            }
+            let mut engine = Engine::for_project(&project)?;
+            engine.load(&file)?;
+            engine.netlist(format, &output)?;
+            engine.shutdown()?;
+            println!("{}", output.display());
+            Ok(())
+        }
+        Command::Xschem(command) => {
+            init_tracing(cli.verbose, None);
+            let project = open_project(cli.project)?;
+            if let XschemCommand::Link {
+                library,
+                cell,
+                fix,
+                foreign,
+            } = command
+            {
+                return link_symbols(&project, library.as_deref(), cell.as_deref(), fix, foreign);
+            }
+            let mut engine = Engine::for_project(&project)?;
+            match command {
+                XschemCommand::Link { .. } => unreachable!("handled above"),
+                XschemCommand::Svg {
+                    library,
+                    cell,
+                    output,
+                    view,
+                } => {
+                    let file = xschem_view(&project, &library, &cell, view.as_deref(), true)?;
+                    let output = output.unwrap_or_else(|| PathBuf::from(format!("{cell}.svg")));
+                    engine.load(&file)?;
+                    engine.export_svg(&output)?;
+                    println!("{}", output.display());
+                }
+                XschemCommand::Instances {
+                    library,
+                    cell,
+                    view,
+                } => {
+                    let file = xschem_view(&project, &library, &cell, view.as_deref(), false)?;
+                    engine.load(&file)?;
+                    for instance in engine.instances()? {
+                        println!(
+                            "{:<16} {:<40} {}",
+                            instance.name, instance.symbol, instance.kind
+                        );
+                    }
+                }
+                XschemCommand::Tcl { script } => println!("{}", engine.tcl(&script)?),
+                XschemCommand::Version => println!("xschem {}", engine.xschem_version()),
+            }
+            engine.shutdown()?;
             Ok(())
         }
         Command::Tools => {

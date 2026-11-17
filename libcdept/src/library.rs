@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use eyre::{Context, Result, bail, eyre};
 use toml_edit::DocumentMut;
 
+use crate::xschem::symbol;
 use crate::{Cell, Entry, Format, Template, ViewKind};
 
 /// Metadata file inside a library folder.
@@ -108,7 +109,7 @@ impl Library {
         }
     }
 
-    fn writable(&self) -> Result<()> {
+    pub(crate) fn writable(&self) -> Result<()> {
         if self.read_only {
             bail!("library '{}' is read-only", self.name);
         }
@@ -148,6 +149,9 @@ impl Library {
     }
 
     /// Create a view from a template, creating the cell if needed. Returns the new file.
+    ///
+    /// An xschem symbol in a `cells` library gets a `schematic=` attribute naming the
+    /// schematic view of its cell: see [`symbol`].
     pub fn create_view(&self, cell: &str, template: Template) -> Result<PathBuf> {
         self.writable()?;
         validate_name("cell", cell)?;
@@ -167,15 +171,24 @@ impl Library {
         }
         let dir = file.parent().expect("a view file has a parent folder");
         fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
-        fs::write(&file, template.contents(cell))
-            .wrap_err_with(|| format!("cannot write {}", file.display()))?;
+        let mut contents = template.contents(cell);
+        if template == Template::XschemSymbol
+            && let Some(schematic) = symbol::for_new_symbol(self, cell, self.cell(cell))
+            && let Ok(text) = std::str::from_utf8(&contents)
+        {
+            contents = symbol::set_schematic(text, Some(&schematic))
+                .map_err(|e| eyre!("cannot create the symbol of '{cell}': {e}"))?
+                .into_bytes();
+        }
+        fs::write(&file, contents).wrap_err_with(|| format!("cannot write {}", file.display()))?;
         Ok(file)
     }
 
     /// Rename a cell, together with the files named after it.
     ///
-    /// References to the cell from other cells (xschem instances, GDS cell references)
-    /// and the structure name inside layout files are not rewritten yet.
+    /// The `schematic=` attribute of the cell's xschem symbols follows. References to the
+    /// cell from other cells (xschem instances, GDS cell references) and the structure
+    /// name inside layout files are not rewritten yet.
     pub fn rename_cell(&self, old: &str, new: &str) -> Result<()> {
         self.writable()?;
         let cell = self.existing(old)?;
@@ -185,7 +198,7 @@ impl Library {
                 let target = self.path.join(new);
                 fs::rename(dir, &target)
                     .wrap_err_with(|| format!("cannot rename {}", dir.display()))?;
-                rename_cell_files(&target, old, new)
+                rename_cell_files(&target, old, new)?;
             }
             None => {
                 let moves = flat_targets(cell, old, new, &self.path)?;
@@ -193,12 +206,15 @@ impl Library {
                     fs::rename(&from, &to)
                         .wrap_err_with(|| format!("cannot rename {}", from.display()))?;
                 }
-                Ok(())
             }
         }
+        self.relink_symbols(new, self, old)
     }
 
     /// Copy a cell into `to` (which may be this library) under the name `new`.
+    ///
+    /// The `schematic=` attribute of the copied xschem symbols is rewritten to point at
+    /// the copy.
     pub fn copy_cell(&self, cell: &str, to: &Library, new: &str) -> Result<()> {
         to.writable()?;
         let source = self.existing(cell)?;
@@ -207,7 +223,7 @@ impl Library {
             (Some(dir), LibraryLayout::Cells) => {
                 let target = to.path.join(new);
                 copy_dir(dir, &target)?;
-                rename_cell_files(&target, cell, new)
+                rename_cell_files(&target, cell, new)?;
             }
             (None, LibraryLayout::Cells) => {
                 for entry in &source.entries {
@@ -220,15 +236,36 @@ impl Library {
                         copy_file(file, &dir.join(name))?;
                     }
                 }
-                Ok(())
             }
             (_, LibraryLayout::Flat) => {
                 for (from, to) in flat_targets(source, cell, new, &to.path)? {
                     copy_file(&from, &to)?;
                 }
-                Ok(())
             }
         }
+        to.relink_symbols(new, self, cell)
+    }
+
+    /// After cell `old` of `source` was copied or renamed to `new` in this library:
+    /// make the `schematic=` attribute of its xschem symbols follow.
+    fn relink_symbols(&self, new: &str, source: &Library, old: &str) -> Result<()> {
+        let cell = match self.layout {
+            LibraryLayout::Cells => {
+                let dir = self.path.join(new);
+                Cell {
+                    name: new.to_string(),
+                    entries: scan_cell(new, &dir)?,
+                    path: Some(dir),
+                }
+            }
+            LibraryLayout::Flat => {
+                let Some(cell) = scan_flat(&self.path)?.into_iter().find(|c| c.name == new) else {
+                    return Ok(());
+                };
+                cell
+            }
+        };
+        symbol::follow_cell(self, &cell, source, old)
     }
 
     /// Delete a cell and all its views from disk.

@@ -12,6 +12,7 @@ pub mod technology;
 pub mod template;
 pub mod tools;
 pub mod version;
+pub mod xschem;
 
 pub use cell::Cell;
 pub use entry::{Entry, Format, ViewKind};

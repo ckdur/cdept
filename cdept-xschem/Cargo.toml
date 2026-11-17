@@ -1,0 +1,23 @@
+[package]
+name = "cdept-xschem"
+description = "CDePT helper process: xschem's schematic engine behind a socket protocol"
+version.workspace = true
+# This crate compiles and links xschem (GPL-2.0-or-later), so the program built from it
+# is GPL. The rest of the workspace is MIT and only talks to it over a socket.
+license = "GPL-2.0-or-later"
+categories.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[dependencies]
+libcdept.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[build-dependencies]
+cc = "1"
+pkg-config = "0.3"

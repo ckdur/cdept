@@ -4,7 +4,7 @@ What is still to do and what may cause trouble. [ROADMAP.md](ROADMAP.md) is the 
 file is the running list behind it. Update it when an item is done or a new problem shows
 up. Items marked **(verify)** are suspicions, not confirmed facts.
 
-Last updated: 2026-11-13 (after the first step of Phase 1).
+Last updated: 2026-11-17 (embedded xschem: step 0 done).
 
 ---
 
@@ -31,6 +31,31 @@ Last updated: 2026-11-13 (after the first step of Phase 1).
 8. [ ] **LibMan**: import its `define(name, path)` list, read `Category.group`, "open in
        LibMan".
 
+### Embedded xschem ([XSCHEM.md](XSCHEM.md))
+- [x] Decisions: helper process (GPL helper, MIT rest), pinned to the asic-all commit,
+      no patches unless unavoidable.
+- [x] Step 0: submodule, headless engine (load, netlist, SVG, instances), CLI
+      `cdept netlist` and `cdept xschem …`. xschem's sources are unmodified.
+- [x] `cells` layout for xschem views (XSCHEM.md §7): decided B, the symbol names its
+      schematic with a `schematic=` attribute. Written on create, rewritten on copy and
+      rename, checked by `cdept xschem link [--fix]`.
+- [x] Example project `examples/buffer` (inverter, buffer, testbench in two `cells`
+      libraries; generic xschem devices, no PDK). A test netlists it; checked by hand
+      in ngspice and in stock xschem 3.4.8RC (asic-all image).
+- [ ] Show the result of the link check in the GUI (a mark on the symbol view in the
+      Library Manager, with "fix"); today only the CLI reports it.
+- [ ] Let CI run once with the new job steps (submodule checkout, flex, bison, tcl-dev,
+      libcairo2-dev). Not yet run on the runner or with the MSRV toolchain.
+- [ ] Step 1: SVG preview in the Inspector, `Tab::Document`, double-click opens a view,
+      engine on its own thread with restart, frame transport.
+- [ ] Step 2: Xlib/Tk replacements, read-only viewer. Gate before going on.
+- [ ] Steps 3–5: editing, library picker, remaining dialogs. In step 4: "make symbol
+      from schematic" and "open symbol" must use the view folders (xschem puts the
+      symbol next to the schematic).
+- [ ] Small: show the helper in the Tools panel; `save` in the client; JPEG images in
+      schematics (libjpeg is left out of the build); install layout
+      (`share/cdept-xschem`) for packaging.
+
 ### Smaller gaps left in what exists
 - [ ] Edit project fields (name, description, technology) from the GUI; today by hand.
 - [ ] Edit or remove libraries that come from an `include` file; today the GUI refuses.
@@ -55,17 +80,34 @@ Last updated: 2026-11-13 (after the first step of Phase 1).
 ## 2. Things that may cause trouble
 
 ### 2.1 Most likely to bite soon
-- **xschem expects a symbol and its schematic side by side (verify).** To descend into
-  an instance, xschem takes the symbol path and swaps `.sym` for `.sch`, unless the
-  symbol carries a `schematic=` attribute. Our `cells` layout puts them in
-  `cell/symbol/cell.sym` and `cell/schematic/cell.sch`, so descend may fail. Options:
-  keep both in one folder, write `schematic=` into the symbol template, or generate the
-  search path in the xschemrc (Phase 2). Decide before people create real designs in the
-  `cells` layout, because changing the layout later means moving files.
-- **How instances name symbols (verify).** xschem stores instance references as paths
-  resolved through `XSCHEM_LIBRARY_PATH` (e.g. `sg13g2_pr/nmos.sym`). In the `cells`
-  layout the reference becomes `lib/cell/symbol/cell.sym` or needs one search-path entry
-  per cell. This decides what "rewrite references" has to rewrite.
+- **xschem expects a symbol and its schematic side by side (confirmed 2026-11-17).** To
+  descend into an instance, xschem takes the symbol path and swaps `.sym` for `.sch`,
+  unless the symbol or the instance carries a `schematic=` attribute. Our `cells`
+  layout puts them in `cell/symbol/cell.sym` and `cell/schematic/cell.sch`, so every
+  symbol there needs the attribute (XSCHEM.md §7); without it xschem netlists an
+  **empty** `.subckt`, with no error. CDePT keeps the attribute right for what goes
+  through it. It breaks when files are moved behind its back:
+  - a **library folder renamed or moved** to a folder with another name: every symbol
+    of the library names the old folder;
+  - a cell folder copied with `cp` into another library: the copy still descends into
+    the **original** schematic, silently;
+  - symbols imported from another project have no attribute.
+
+  `cdept xschem link` finds all three and `--fix` repairs them. `cdept netlist` only
+  prints a one-line warning.
+- **Two libraries whose folders have the same name** (`a/analog`, `b/analog`) cannot be
+  told apart by xschem: references and `schematic=` values read `analog/...` and the
+  first folder on the path wins. Not detected yet.
+- **How instances name symbols (confirmed).** A reference is a path below one of the
+  folders on `XSCHEM_LIBRARY_PATH`. CDePT puts the parent of each library folder on
+  that path, so references read `<library folder>/<cell>.sym` (flat) or
+  `<library folder>/<cell>/<view>/<cell>.sym` (cells). The library *folder* name is
+  used, not the name in `cdept.toml`; they can differ. "Rewrite references" has to
+  rewrite exactly these strings. Two libraries whose folders have the same name under
+  different parents would shadow each other.
+- **Template header is behind the engine.** New files are written with
+  `xschem version=3.4.5 file_version=1.2`; the engine is 3.4.8RC with file version 1.3.
+  xschem reads the old header fine and rewrites it on save.
 - **Folder dialog inside containers.** `rfd` uses the XDG desktop portal. The asic-all
   image and bare X sessions usually have no portal, so the dialog may never appear and
   New/Open Project silently does nothing. The CLI (`cdept init`, `cdept -p`) still works.
@@ -75,6 +117,18 @@ Last updated: 2026-11-13 (after the first step of Phase 1).
 - **Variables missing in the GUI's environment.** `$PDK_ROOT` set in a shell rc is not
   set when the app starts from a desktop launcher; such libraries show an error. Phase 2
   should resolve PDK paths from the technology instead of the environment.
+
+- **Embedded xschem (see XSCHEM.md §5).** The helper is GPL-2.0-or-later; `libcdept`,
+  `cdept-gui` and `cdept` must never depend on the `cdept-xschem` crate, only start the
+  program. Steps 2–5 remain the risk: xschem's dialogs block the caller, its state is
+  global, and `xschem.tcl` expects Tk when drawing is on. Estimated 130–160 h in total,
+  more than the 110 h Phase 3 had for all tools.
+- **The helper needs its build tools everywhere it is built**: flex, bison, Tcl and
+  cairo development files, and `git submodule update --init` after cloning. A plain
+  `cargo build` skips it (not a default member), `cargo build --workspace` does not.
+- **xschem's messages are hidden by default.** They go to the log at debug level
+  (`cdept -v`). A netlist with unresolved symbols fails with "netlisting errors" and
+  the reason is only visible there.
 
 ### 2.2 Data model and format
 - **Layout detection can flip.** With no `layout` key and no `lib.toml`, a library is
@@ -128,7 +182,7 @@ Last updated: 2026-11-13 (after the first step of Phase 1).
 ### 2.5 Dependencies
 - `egui_dock` has no release for egui 0.37, so we stay on egui/eframe 0.36.
 - `rfd` pulls the portal stack (`ashpd`, `zbus`); watch build time and the MSRV.
-- xschem and KLayout are not installed on the development host. Templates were checked
+- xschem (as a program) and KLayout are not installed on the development host. Templates were checked
   in the asic-all image (`docker run --entrypoint bash asic-all:dev-amd64-new`); the
   host-built `cdept` binary cannot run in that image (glibc too old there).
 

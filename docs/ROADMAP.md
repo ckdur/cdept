@@ -38,7 +38,7 @@ cdept (GUI binary, egui/eframe)
       ├── project/     lib-cell-view model, cdept.toml (project + library definitions, TOML)
       ├── tech/        PDK discovery + technology description
       ├── tools/       ToolAdapter trait, process supervisor, IPC clients
-      │    ├── xschem   (Tcl over TCP: xschem_listen_port)
+      │    ├── xschem   (helper process cdept-xschem, see XSCHEM.md)
       │    ├── klayout  (Python plugin, JSON-RPC over TCP)
       │    ├── magic    (Tcl over stdin/pipe or Tcl socket script)
       │    ├── ngspice  (libngspice shared API, in-process)
@@ -81,6 +81,8 @@ sg13g2_pr = { path = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_pr", read_onl
   folder when left out.
   - `"cells"` (default for new libraries): `<library>/<cell>/<view>/<files>`. A design
     file directly in the cell folder is a view too.
+    An xschem symbol names the schematic view of its cell with a `schematic=`
+    attribute, which CDePT writes and keeps right (XSCHEM.md §7).
   - `"flat"`: `<library>/<cell>.<ext>`, files sharing a name form a cell and each file is
     a view. xschem symbol libraries, GDS folders and PDK libraries work in place, with
     no import step.
@@ -176,9 +178,11 @@ To do:
 ### Phase 3: Tool Hub & IPC (~110 h) ← highest technical risk
 - Process supervisor: launch, track, restart, collect logs per tool, one instance per tool
   reused across cells.
-- **xschem:** use the built-in TCP listener (`xschem_listen_port`) to send Tcl (open, netlist,
-  select instance, highlight net). Get callbacks by injecting a small Tcl script. *Verify
-  first*: this probably avoids the source modifications the proposal assumed.
+- **xschem:** embedded (decided 2026-11-17). xschem's C code is built from a submodule
+  into a GPL helper process, `cdept-xschem`, with replacements for Xlib and Tk, and its
+  editor is shown in a CDePT tab. The headless part (netlist, SVG, queries) works. Plan, steps and hours: [XSCHEM.md](XSCHEM.md). Fallback
+  if the step-2 gate fails: the built-in TCP listener (`xschem_listen_port`) to send Tcl
+  (open, netlist, select instance, highlight net) to a separate xschem window.
 - **KLayout:** ship an CDePT macro/plugin (`klayout -rm cdept_bridge.py`) that opens a TCP/JSON-RPC
   server via `pya.QTcpServer` or a polling `QTimer`. Commands: load cell, select/zoom, highlight
   net, run DRC, report selection back. Risk: some distro builds lack Qt bindings, so detect this
