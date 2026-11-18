@@ -36,6 +36,11 @@
 # 4. Symbols made from schematics go into the cell's `symbol` view and name their
 #    schematic, in libraries with view folders. See "Symbols made from schematics".
 #      cdept::symbol_file <schematic>   where the symbol of that schematic is written
+#    Schematics made from symbols go where the symbol's `schematic=` attribute says,
+#    in the same libraries. See "Schematics made from symbols".
+#      cdept::schematic_file <symbol>   where the schematic of that symbol is written
+#      cdept::make_schematic <symbol> ?yes?
+#                                       write it (yes: without asking first)
 #
 # Part of cdept-xschem, GPL-2.0-or-later.
 
@@ -335,6 +340,10 @@ proc cdept::key_filter {keysym state} {
       # Ctrl+t: a new, empty tab
       if {$mods & 4} {no_empty_window; return 1}
     }
+    108 {
+      # Ctrl+l: make schematic from symbol (see "Schematics made from symbols")
+      if {$mods == 4 && [xschem get semaphore] < 2} {return [make_schematic_here]}
+    }
   }
   return 0
 }
@@ -353,6 +362,9 @@ proc xschem {args} {
       }
     }
     load_new_window {return [::cdept::load_new_window [lrange $args 1 end]]}
+    make_sch {
+      if {[llength $args] == 1 && [::cdept::make_schematic_here]} {return {}}
+    }
     schematic_in_new_window {return [::cdept::schematic_in_new_window]}
     symbol_in_new_window {return [::cdept::symbol_in_new_window]}
     new_process {
@@ -624,4 +636,273 @@ proc make_symbol_lcc {name} {
   lassign $place symbol value
   ::cdept::generate_symbol make_sym_lcc.awk {} $name $symbol $value
   return {}
+}
+
+# ---------------------------------------------------------------------------------
+# Schematics made from symbols
+# ---------------------------------------------------------------------------------
+#
+# xschem's "Make schematic from symbol" (Symbol menu, Ctrl+L, `xschem make_sch`) writes
+# a schematic with a pin (ipin, opin, iopin) for each pin of the symbol of the selected
+# instance, into the file the symbol's `schematic=` attribute names. That is C code
+# (create_sch_from_sym in save.c), which does not replace @symname in the value, so
+# with the value CDePT writes (section 7 of docs/XSCHEM.md) it fails ("file opening
+# for write failed") and writes nothing.
+#
+# For symbols in a view folder of a library with view folders the command is done
+# here instead, the way the C code does it and with the same output, into the file
+# xschem looks for when it descends into the symbol: the attribute with @symname
+# replaced, or <cell>/schematic/<name>.sch when there is no attribute. The folder is
+# created when missing. With nothing selected and such a symbol open, the schematic
+# of that symbol is made (in stock xschem Ctrl+L does nothing then). Other symbols
+# are left to xschem's C code, as before.
+
+namespace eval cdept {
+  # the second part of xschem's file header comes from the C side (engine.c)
+  variable file_header
+  if {![info exists file_header]} {
+    set file_header "xschem version=[xschem get version] file_version=1.3"
+  }
+}
+
+# For a symbol in a view folder of one of the libraries: {library cell name}, the
+# name without extension. Else {}.
+proc cdept::symbol_cell {symbol} {
+  set symbol [file normalize $symbol]
+  if {[file extension $symbol] ne ".sym"} {return {}}
+  foreach library $::cdept_cells_libraries {
+    set library [file normalize $library]
+    set length [string length $library]
+    if {[string range $symbol 0 $length] ne "$library/"} continue
+    set parts [file split [string range $symbol [expr {$length + 1}] end]]
+    if {[llength $parts] != 3} continue
+    lassign $parts cell view name
+    return [list $library $cell [file rootname $name]]
+  }
+  return {}
+}
+
+# The records of a design file, each a list of words; a {...} string is one word,
+# read as xschem reads it (a backslash takes the next character as it is).
+proc cdept::records {text} {
+  set records {}
+  set record {}
+  set i 0
+  set length [string length $text]
+  while {$i < $length} {
+    set c [string index $text $i]
+    if {$c eq "\n"} {
+      if {[llength $record]} {lappend records $record}
+      set record {}
+      incr i
+    } elseif {[string is space $c]} {
+      incr i
+    } elseif {$c eq "\{"} {
+      set word {}
+      incr i
+      while {$i < $length && [regexp -indices -start $i {[\\\}]} $text at]} {
+        set at [lindex $at 0]
+        append word [string range $text $i [expr {$at - 1}]]
+        if {[string index $text $at] eq "\}"} break
+        append word [string index $text [expr {$at + 1}]]
+        set i [expr {$at + 2}]
+      }
+      if {![info exists at] || [string index $text $at] ne "\}"} {
+        error "missing close brace"
+      }
+      lappend record $word
+      set i [expr {$at + 1}]
+      unset at
+    } else {
+      regexp -indices -start $i {[^\s\{]+} $text at
+      lappend record [string range $text {*}$at]
+      set i [expr {[lindex $at 1] + 1}]
+      unset at
+    }
+  }
+  if {[llength $record]} {lappend records $record}
+  return $records
+}
+
+# What a schematic made from `symbol` (a file) needs of it, as a dict:
+#   attributes  the symbol's attribute string (K, or G in old files where K is empty)
+#   pins        the attribute strings of its pins (layer 5), in xschem's order
+#   generic     those of its generic pins (layer 3)
+proc cdept::symbol_pins {symbol} {
+  set fd [open $symbol r]
+  set text [read $fd]
+  ::close $fd
+  set k {}
+  set g {}
+  set pins {}
+  set numbers {}
+  set generic {}
+  set depth 0
+  foreach record [records $text] {
+    set tag [lindex $record 0]
+    # the symbols embedded in a schematic are not the symbol's own
+    if {$tag eq "\["} {incr depth; continue}
+    if {$tag eq "\]"} {incr depth -1; continue}
+    if {$depth} continue
+    switch -- $tag {
+      K {set k [lindex $record end]}
+      G {set g [lindex $record end]}
+      B {
+        set attributes [lindex $record end]
+        switch -- [lindex $record 1] {
+          5 {
+            lappend pins $attributes
+            lappend numbers [xschem get_tok $attributes sim_pinnumber 0]
+          }
+          3 {lappend generic $attributes}
+        }
+      }
+    }
+  }
+  set attributes [expr {[string trim $k] eq "" && [string trim $g] ne "" ? $g : $k}]
+  # xschem sorts the pins by sim_pinnumber when every pin has one (sort_symbol_pins)
+  if {[llength $pins] && [lsearch -exact $numbers {}] < 0} {
+    set order {}
+    foreach number $numbers {
+      lappend order [expr {[string is integer -strict $number] ? $number : 0}]
+    }
+    set sorted {}
+    foreach i [lsort -integer -indices $order] {lappend sorted [lindex $pins $i]}
+    set pins $sorted
+  }
+  dict create attributes $attributes pins $pins generic $generic
+}
+
+# Where the schematic of `symbol` is written. `attributes`: the symbol's attribute
+# string, read from the file when not given. {} when it cannot be told (a generator
+# script, or a value naming a library that is not on the library path).
+proc cdept::schematic_file {symbol {attributes -}} {
+  set symbol [abs_sym_path $symbol]
+  if {$attributes eq "-"} {set attributes [dict get [symbol_pins $symbol] attributes]}
+  set place [symbol_cell $symbol]
+  set value [xschem get_tok $attributes schematic 0]
+  if {$place eq {}} {
+    # as xschem's C code: the value as it is, or the .sch next to the symbol
+    if {$value eq ""} {return [file rootname $symbol].sch}
+    return [abs_sym_path $value]
+  }
+  lassign $place library cell name
+  if {$value eq ""} {return [file join $library $cell schematic $name.sch]}
+  # as xschem when it descends into the symbol (get_sch_from_sym)
+  set value [string map [list @symname $name] $value]
+  if {[string first ( $value] >= 0} {return {}}
+  if {[file pathtype $value] eq "absolute"} {return $value}
+  set found [abs_sym_path $value]
+  if {[file isfile $found]} {return $found}
+  # a new file: CDePT's value starts with the library folder
+  set first [lindex [file split $value] 0]
+  if {$first eq [file tail $library]} {
+    return [file join [file dirname $library] $value]
+  }
+  set paths [expr {[info exists ::pathlist] ? $::pathlist : {}}]
+  foreach dir $paths {
+    if {[file isdirectory [file join $dir $first]]} {return [file join $dir $value]}
+  }
+  return {}
+}
+
+# The text create_sch_from_sym writes for a symbol with these pins, or {} with an
+# alert when xschem's pin symbols are not on the library path.
+proc cdept::schematic_text {pins generic} {
+  variable file_header
+  foreach kind {ipin opin iopin generic_pin} {
+    set pin($kind) [rel_sym_path [find_file_first $kind.sym]]
+    if {$pin($kind) eq ""} {
+      alert_ {create_sch_from_sym(): location of schematic pins not found} {}
+      return {}
+    }
+  }
+  set text "v \{$file_header\}\nG {}\nV {}\nE {}\nS {}\n"
+  set escape [list \\ \\\\ \{ \\\{ \} \\\}]
+  set p 0
+  set ypos 0
+  foreach attributes $generic {
+    set at [string first name= $attributes]
+    if {$at < 0} continue
+    set label [string range $attributes [expr {$at + 5}] end]
+    append text [format "C {%s} %.16g %.16g 0 0 " $pin(generic_pin) -120.0 [expr {20.0 * $ypos}]]
+    append text "\{[string map $escape "name=g$p lab=$label"]\}\n"
+    incr p
+    incr ypos
+  }
+  foreach kind {ipin opin iopin} dir {in out inout} x {-120.0 120.0 120.0} {
+    if {$kind eq "opin"} {set ypos 0}
+    foreach attributes $pins {
+      set at [string first name= $attributes]
+      if {$at < 0} continue
+      set label [xschem subst_tok [string range $attributes [expr {$at + 5}] end] dir <NULL>]
+      if {$label eq "" || [xschem get_tok $attributes dir 0] ne $dir} continue
+      append text [format "C {%s} %.16g %.16g 0 0 " $pin($kind) $x [expr {20.0 * $ypos}]]
+      append text "\{[string map $escape "name=g$p lab=$label"]\}\n"
+      incr p
+      incr ypos
+    }
+  }
+  return $text
+}
+
+# Make the schematic of `symbol` (a file) and return the file written, or {} when
+# nothing was written. With `ask` at its default an existing schematic is only
+# replaced after xschem's question.
+proc cdept::make_schematic {symbol {ask no}} {
+  set symbol [abs_sym_path $symbol]
+  set contents [symbol_pins $symbol]
+  set schematic [schematic_file $symbol [dict get $contents attributes]]
+  if {$schematic eq ""} {
+    error "cannot tell where the schematic of $symbol goes\
+           (schematic=[xschem get_tok [dict get $contents attributes] schematic 0])"
+  }
+  if {$ask eq {no} && [file exists $schematic]} {
+    set answer [ask_save "Create schematic file: $schematic?\nWARNING: This schematic\
+                          file already exists, it will be overwritten"]
+    if {$answer ne {yes}} {return {}}
+  }
+  set text [schematic_text [dict get $contents pins] [dict get $contents generic]]
+  if {$text eq ""} {return {}}
+  file mkdir [file dirname $schematic]
+  set fd [open $schematic w]
+  fconfigure $fd -translation binary
+  puts -nonewline $fd $text
+  ::close $fd
+  if {[have_faketk]} {
+    cdept::ui [::faketk::jobj [list kind [::faketk::jstr written] path [::faketk::jstr $schematic]]]
+    say "Schematic written to $schematic"
+  }
+  return $schematic
+}
+
+# Ctrl+L and Symbol > Make schematic from symbol. Returns 1 when done here, 0 when
+# xschem's C code is to do it.
+proc cdept::make_schematic_here {} {
+  set selected [xschem get lastsel]
+  if {$selected > 1} {return 0}
+  if {$selected == 1} {
+    set inst [selected_instance]
+    if {$inst eq ""} {return 0}
+    set symbol [abs_sym_path [xschem getprop instance $inst cell::name]]
+  } else {
+    set symbol [xschem get schname]
+  }
+  if {[symbol_cell $symbol] eq {} || ![file isfile $symbol]} {return 0}
+  if {[catch {schematic_file $symbol} schematic] || $schematic eq ""} {return 0}
+  if {$selected == 0 && [cdept::modified]} {
+    # the pins are read from the file
+    switch -- [ask_save "Save changes to [file tail $symbol] first?"] {
+      yes {
+        xschem save
+        if {[cdept::modified]} {return 1}
+      }
+      no {}
+      default {return 1}
+    }
+  }
+  if {[catch {make_schematic $symbol} message]} {
+    alert_ "Cannot make the schematic of $symbol: $message" {}
+  }
+  return 1
 }

@@ -820,6 +820,10 @@ impl CdeptApp {
                     self.ctx.request(Action::CloseProject);
                 }
                 ui.separator();
+                // Entries of the active document (export, ...).
+                if let Some(tab) = self.active_doc(win) {
+                    self.views.get(tab).file_menu(ui, &mut self.ctx);
+                }
                 if let WindowId::Detached(id) = win
                     && ui.button("Close Window").clicked()
                 {

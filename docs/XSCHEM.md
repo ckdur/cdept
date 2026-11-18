@@ -259,10 +259,23 @@ Inside the editor (step 4) the same holds:
   one (after a question) and puts the pins where the generator wants them.
 - **Open the symbol of this schematic** and back look in the neighbouring view folder
   (`cdept::counterpart`).
-- Not covered: **make schematic from symbol** (Ctrl+L). xschem's C code writes the file
-  itself and takes the `schematic=` value without replacing `@symname`, so in a `cells`
-  library it fails with "file opening for write failed" and writes nothing. Create the
-  schematic view in the Library Manager instead.
+- **Make schematic from symbol** (Symbol menu, Ctrl+L; also `cdept xschem
+  make-schematic <library> <cell> [--force]`). xschem's C code (`create_sch_from_sym`)
+  writes the file itself, a pin (ipin, opin, iopin) for each pin of the selected
+  instance's symbol, into the file the symbol's `schematic=` attribute names; it does
+  not replace `@symname`, so in a `cells` library it would fail with "file opening for
+  write failed". The helper takes the key (`cdept::key_filter`) and the command
+  (`xschem make_sch`, which the menu entry runs) before xschem's C code: for a symbol
+  in a view folder of a `cells` library it writes the same text in Tcl
+  (`cdept::make_schematic`), into the file xschem looks for when descending (the
+  attribute with `@symname` replaced, or `<cell>/schematic/<name>.sch` without
+  attribute), creating the folder. As in xschem, an existing schematic is replaced only
+  after xschem's question, and the result is not opened; CDePT is told
+  (`UiUpdate::Written`) and shows the new view. With nothing selected and such a
+  symbol open, Ctrl+L makes the schematic of that symbol (stock xschem does nothing
+  then). Other symbols are left to xschem's C code. The pins are not connected yet, so
+  netlisting the schematic reports xschem's check errors (undriven output) until it is
+  drawn.
 
 ## 8. Interfaces between the parts (steps 1 to 5)
 
@@ -327,7 +340,11 @@ Conventions on top of `protocol.rs`:
 - A symbol made from a schematic goes into the cell's `symbol` view and names its
   schematic (section 7); the helper reports `UiUpdate::Written { path }` and CDePT
   looks at the libraries again. This part also applies without a display.
+- A schematic made from a symbol (Ctrl+L) of such a library goes where the symbol's
+  `schematic=` attribute says (section 7); reported the same way.
 - For CDePT to call: `cdept::symbol_file <schematic>` (where that symbol is written);
+  `cdept::schematic_file <symbol>` and `cdept::make_schematic <symbol> ?yes?` (the
+  other way round);
   `cdept::modified` (0 or 1); `cdept::close` (asks xschem's own
   "save changes?" question when modified, then exits with status 0, or returns 0 when
   cancelled); `cdept::selection` (`count N instances {{name symbol attributes}…} wires

@@ -4,7 +4,7 @@ What is still to do and what may cause trouble. [ROADMAP.md](ROADMAP.md) is the 
 file is the running list behind it. Update it when an item is done or a new problem shows
 up. Items marked **(verify)** are suspicions, not confirmed facts.
 
-Last updated: 2026-11-17 (embedded xschem: step 0 done).
+Last updated: 2026-11-18 (embedded xschem: steps 1–4 done, CI green).
 
 ---
 
@@ -14,8 +14,8 @@ Last updated: 2026-11-17 (embedded xschem: step 0 done).
 - [ ] Try the GUI by hand. Only headless drawing tests and a 6 s launch were done. Not
       exercised: the native folder dialog (New/Open Project, Add Existing Library),
       right-click menus, every dialog, detached windows with a dialog open.
-- [ ] Let CI run once: the new dependency `rfd` has not been built on the CI runner or
-      with the MSRV toolchain (its declared minimum, 1.92, is below ours).
+- [x] Let CI run once: `rfd` builds on the runner and with the MSRV toolchain (CI run
+      of fd11b7b, 2026-11-18).
 
 ### Phase 1, remaining (suggested order)
 1. [ ] **xschem and GDS readers** (instances in `.sch`, structures and references in GDS).
@@ -42,8 +42,12 @@ Last updated: 2026-11-17 (embedded xschem: step 0 done).
 - [x] Example project `examples/buffer` (inverter, buffer, testbench in two `cells`
       libraries; generic xschem devices, no PDK). A test netlists it; checked by hand
       in ngspice and in stock xschem 3.4.8RC (asic-all image).
-- [ ] Show the result of the link check in the GUI (a mark on the symbol view in the
-      Library Manager, with "fix"); today only the CLI reports it.
+- [x] Link check in the GUI (2026-11-18): warning marks on library, cell and symbol
+      view (tree and Library Manager), tooltip with the expected value, "Fix schematic
+      link" on right-click and in the Inspector, "Fix all schematic links…" in the
+      Library menu (links to another cell only when ticked, like `--foreign`).
+      Checked on load, Reload and after library operations; a symbol saved from an
+      xschem tab is not re-checked until then.
 - [x] CI with the new job steps (submodule checkout, flex, bison, tcl-dev,
       libcairo2-dev): builds. The first run failed in the tests: helpers starting
       together fought over creating `~/.xschem` (XSCHEM.md §6); fixed in the helper.
@@ -63,19 +67,35 @@ Last updated: 2026-11-17 (embedded xschem: step 0 done).
       Tcl procedure `make_symbol`, xschem itself is unchanged. Also `cdept xschem
       make-symbol <library> <cell> [--force]`. "Open symbol of this schematic" already
       looked in the view folders.
-- [ ] "Make schematic from symbol" (Ctrl+L) fails in a `cells` library: xschem's C
-      code uses the `schematic=` value with `@symname` in it as a file name. Nothing is
-      written. To fix it the command has to be redone in Tcl (pins from the symbol).
+- [x] "Make schematic from symbol" (Ctrl+L, Symbol menu) in `cells` libraries
+      (2026-11-18): redone in Tcl in `cdept.tcl`, byte-identical to xschem's
+      `create_sch_from_sym` (a test compares them; keep in step when the submodule
+      moves). Also works on an open symbol with nothing selected. CLI `cdept xschem
+      make-schematic <library> <cell> [--force]`. The new schematic has unwired pins,
+      so netlisting reports "undriven node" until it is drawn, as in stock xschem.
 - [ ] Preview panes inside xschem's own dialogs; clipboard from the system into
       xschem's dialogs; scripted input in detached windows; run the native file
       chooser once by hand.
-- [ ] Let CI run: the helper now also needs fonts for its drawing tests
-      (`fonts-dejavu-core` added to the workflow, not yet run).
+- [x] Let CI run: with `fonts-dejavu-core` the helper's drawing tests pass (CI run of
+      fd11b7b, 2026-11-18).
 - [ ] Step 5 leftovers: graph and simulation dialogs by hand, packaging in asic-all,
       install layout (`share/cdept-xschem`), JPEG needs `libjpeg-dev` at build time
       (optional).
-- [ ] Try it by hand: everything was tested through scripts and screenshots, not by a
-      person using the mouse for a while.
+- [ ] Try it by hand: first session by the user on 2026-11-18 found four problems, all
+      fixed the same day (below). Keep trying: graph/simulation dialogs, detached
+      windows, the native file chooser.
+- [x] Selection rectangle stuck after a double-click on an instance: the GUI dropped
+      the button release while xschem's property dialog was modal, so later motions
+      carried Button1 and xschem started a rubber band. Releases now go through while a
+      dialog is open (`schematic/mod.rs`); check in `scripts/buffer-smoke.script`.
+- [x] Console "vibrated" on multi-line messages (e.g. a failing simulation): rows of
+      unequal height in `ScrollArea::show_rows`. One fixed-height row per text line now.
+      Not seen yet: xschem's own job-error window, if a failure shows up there instead.
+- [x] Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y undo and redo in a schematic tab, and Edit → Undo
+      / Redo work (in xschem Ctrl+Z is "zoom out", undo is `u`; both kept for `u`).
+- [x] File → Export (PNG, SVG, PDF) for the active schematic. xschem's own "Image
+      export" was there all along, but under the "Schematic" menu where xschem's File
+      menu is merged, so nobody found it.
 
 ### Smaller gaps left in what exists
 - [ ] Edit project fields (name, description, technology) from the GUI; today by hand.

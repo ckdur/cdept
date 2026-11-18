@@ -74,6 +74,39 @@ expect_dialog Ask Save
 dialog_click Yes
 expect_documents 0
 
+# Make schematic from symbol (Ctrl+L on an instance): in the symbol's cell, where its
+# schematic= attribute says. The cell has a schematic: xschem asks first, No keeps it.
+open logic buf schematic
+wait_frame
+wait 0.7
+click_instance x1
+tcl_expect {{x1}} xschem selected_set
+key l ctrl
+expect_dialog Ask Save
+dialog_click No
+tcl_expect 1 expr {[file size $PROJECT/libs/logic/inv/schematic/inv.sch] > 300}
+tcl file delete -force $PROJECT/libs/logic/inv/schematic
+key l ctrl
+sync
+tcl_expect 1 file isfile $PROJECT/libs/logic/inv/schematic/inv.sch
+tcl_expect 0 file exists $PROJECT/libs/logic/inv/symbol/inv.sch
+expect_view logic inv schematic
+close
+open logic inv schematic
+wait_frame
+tcl_expect {g0 ipin.sym ipin g1 opin.sym opin g2 iopin.sym iopin g3 iopin.sym iopin} join [xschem instance_list]
+tcl file delete -force $PROJECT/libs/logic/inv/schematic
+close
+# With nothing selected, the symbol that is open (Symbol menu).
+open logic inv symbol
+wait_frame
+menu Symbol / Make schematic from symbol
+sync
+tcl_expect 1 file isfile $PROJECT/libs/logic/inv/schematic/inv.sch
+expect_view logic inv schematic
+close
+expect_documents 0
+
 # Closing the project with a changed document asks; Save All saves and closes.
 open bench tb_buf schematic
 wait_frame

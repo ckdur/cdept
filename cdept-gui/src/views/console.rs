@@ -1,9 +1,11 @@
 //! Console panel (Virtuoso: CIW). Shows the log and, later, a command line.
 
-use egui::{Color32, RichText, ScrollArea, TextStyle, Ui};
+use egui::text::{LayoutJob, TextFormat};
+use egui::{Color32, ScrollArea, TextStyle, Ui};
 use tracing::Level;
 
 use super::View;
+use crate::log::LogLine;
 use crate::state::{AppCtx, ConsoleLevel};
 
 #[derive(Default)]
@@ -60,43 +62,73 @@ impl View for ConsoleView {
         let level = ctx.settings.console_level;
         let filter = self.filter.to_lowercase();
         let lines = ctx.log.lines();
-        let shown: Vec<usize> = lines
-            .iter()
-            .enumerate()
-            .filter(|(_, l)| level.shows(l.level))
-            .filter(|(_, l)| {
-                filter.is_empty()
-                    || l.message.to_lowercase().contains(&filter)
-                    || l.target.to_lowercase().contains(&filter)
-            })
-            .map(|(i, _)| i)
-            .collect();
+        // One display row per text line of a message. `show_rows` needs every row to
+        // have the same height: a multi-line message (a simulator's output) drawn as one
+        // row made the content taller than computed and the scroll position oscillate.
+        let mut rows: Vec<(usize, usize)> = Vec::new();
+        for (i, l) in lines.iter().enumerate() {
+            if !level.shows(l.level) {
+                continue;
+            }
+            if !filter.is_empty()
+                && !l.message.to_lowercase().contains(&filter)
+                && !l.target.to_lowercase().contains(&filter)
+            {
+                continue;
+            }
+            rows.extend((0..message_rows(&l.message)).map(|k| (i, k)));
+        }
 
-        let row_height = ui.text_style_height(&TextStyle::Monospace);
+        let font = TextStyle::Monospace.resolve(ui.style());
+        let row_height = ui.fonts_mut(|f| f.row_height(&font));
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ui, |ui| {
                 ScrollArea::both()
                     .auto_shrink(false)
                     .stick_to_bottom(true)
-                    .show_rows(ui, row_height, shown.len(), |ui, range| {
-                        for &i in &shown[range] {
+                    .show_rows(ui, row_height, rows.len(), |ui, range| {
+                        for &(i, k) in &rows[range] {
                             let line = &lines[i];
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 8.0;
-                                ui.label(RichText::new(&line.time).monospace().weak());
-                                ui.label(
-                                    RichText::new(format!("{:5}", line.level))
-                                        .monospace()
-                                        .color(level_color(ui, line.level)),
-                                );
-                                ui.label(RichText::new(&line.target).monospace().weak());
-                                ui.label(RichText::new(&line.message).monospace());
-                            });
+                            let text = line.message.lines().nth(k).unwrap_or("");
+                            ui.add(egui::Label::new(row_job(ui, &font, line, k, text)).extend());
                         }
                     });
             });
     }
+}
+
+/// Number of display rows of a message: its text lines, at least one.
+fn message_rows(message: &str) -> usize {
+    message.lines().count().max(1)
+}
+
+/// One row of the console as a single text layout, so its height is exactly the font's
+/// row height. The first row of a message has time, level and target; the following
+/// ones are indented to the message column.
+fn row_job(ui: &Ui, font: &egui::FontId, line: &LogLine, k: usize, text: &str) -> LayoutJob {
+    let v = ui.visuals();
+    let fmt = |color: Color32| TextFormat {
+        font_id: font.clone(),
+        color,
+        ..Default::default()
+    };
+    let text = text.replace('\t', "    ");
+    let mut job = LayoutJob::default();
+    let head = format!("{} {:5} {} ", line.time, line.level, line.target);
+    if k == 0 {
+        job.append(&line.time, 0.0, fmt(v.weak_text_color()));
+        job.append(
+            &format!(" {:5} ", line.level),
+            0.0,
+            fmt(level_color(ui, line.level)),
+        );
+        job.append(&format!("{} ", line.target), 0.0, fmt(v.weak_text_color()));
+    } else {
+        job.append(&" ".repeat(head.chars().count()), 0.0, fmt(v.text_color()));
+    }
+    job.append(&text, 0.0, fmt(v.text_color()));
+    job
 }
 
 fn level_color(ui: &Ui, level: Level) -> Color32 {
@@ -106,5 +138,17 @@ fn level_color(ui: &Ui, level: Level) -> Color32 {
         Level::WARN => v.warn_fg_color,
         Level::INFO => v.text_color(),
         _ => v.weak_text_color(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::message_rows;
+
+    #[test]
+    fn a_message_takes_one_row_per_text_line() {
+        assert_eq!(message_rows(""), 1);
+        assert_eq!(message_rows("one"), 1);
+        assert_eq!(message_rows("a\nb\nc\n"), 3);
     }
 }

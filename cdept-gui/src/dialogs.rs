@@ -8,9 +8,10 @@ use std::path::Path;
 
 use egui::{Context, Id, Key, RichText, Ui};
 use eyre::{Result, eyre};
+use libcdept::xschem::symbol::Unlinked;
 use libcdept::{AddLibrary, Library, LibraryLayout, Project, Template};
 
-use crate::state::{AppCtx, Selection};
+use crate::state::{AppCtx, Selection, is_foreign};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Dialog {
@@ -61,6 +62,12 @@ pub enum Dialog {
         library: String,
         cell: String,
         view: String,
+    },
+    /// Write the expected `schematic=` into the broken symbols of a library.
+    FixLinks {
+        library: String,
+        /// Also rewrite links that point to another cell's schematic.
+        foreign: bool,
     },
 }
 
@@ -129,6 +136,7 @@ impl Dialog {
             Self::CopyCell { .. } => "Copy Cell",
             Self::DeleteCell { .. } => "Delete Cell",
             Self::DeleteView { .. } => "Delete View",
+            Self::FixLinks { .. } => "Fix Schematic Links",
         }
     }
 
@@ -141,6 +149,7 @@ impl Dialog {
             Self::RenameCell { .. } => "Rename",
             Self::CopyCell { .. } => "Copy",
             Self::DeleteCell { .. } | Self::DeleteView { .. } => "Delete",
+            Self::FixLinks { .. } => "Fix",
         }
     }
 }
@@ -243,6 +252,45 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
         .spacing([8.0, 6.0]);
 
     match &mut state.dialog {
+        Dialog::FixLinks { library, foreign } => {
+            let items = fixable_links(&app.links, library, *foreign);
+            let others = app
+                .links
+                .iter()
+                .filter(|u| u.library == *library && !items.contains(u))
+                .count();
+            ui.label(format!(
+                "Write the expected schematic= into {} symbol(s) of '{library}':",
+                items.len()
+            ));
+            egui::ScrollArea::vertical()
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    for u in &items {
+                        ui.label(RichText::new(format!("{} / {}", u.cell, u.problem)).small());
+                        ui.label(
+                            RichText::new(format!("    -> schematic={}", u.expected))
+                                .monospace()
+                                .small(),
+                        );
+                    }
+                });
+            if app
+                .links
+                .iter()
+                .any(|u| u.library == *library && is_foreign(u))
+            {
+                ui.checkbox(
+                    foreign,
+                    "Also links to another cell's schematic (changes where descending goes)",
+                );
+            }
+            if others > 0 {
+                ui.small(format!(
+                    "{others} link(s) to another cell are left as they are."
+                ));
+            }
+        }
         Dialog::Error(message) => {
             ui.label(message.as_str());
         }
@@ -393,8 +441,32 @@ fn layout_label(layout: Option<LibraryLayout>) -> &'static str {
     }
 }
 
+/// The broken links of `library` a "fix all" repairs: those that point to another
+/// cell's schematic only when `foreign` is set.
+fn fixable_links<'a>(links: &'a [Unlinked], library: &str, foreign: bool) -> Vec<&'a Unlinked> {
+    links
+        .iter()
+        .filter(|u| u.library == library && (foreign || !is_foreign(u)))
+        .collect()
+}
+
 fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
     if matches!(dialog, Dialog::Error(_)) {
+        return Ok(());
+    }
+    if let Dialog::FixLinks { library, foreign } = dialog {
+        let items: Vec<Unlinked> = fixable_links(&app.links, library, *foreign)
+            .into_iter()
+            .cloned()
+            .collect();
+        let fixed = app.fix_links(&items);
+        tracing::info!(target: "cdept::library", "fixed {fixed} schematic link(s) in '{library}'");
+        if fixed < items.len() {
+            return Err(eyre!(
+                "{} link(s) could not be fixed; see the Console",
+                items.len() - fixed
+            ));
+        }
         return Ok(());
     }
     let project = app
@@ -409,7 +481,7 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
     };
     const TARGET: &str = "cdept::library";
     let selection = match dialog {
-        Dialog::Error(_) => return Ok(()),
+        Dialog::Error(_) | Dialog::FixLinks { .. } => return Ok(()),
         Dialog::NewLibrary { name, path, .. } => {
             let options = AddLibrary {
                 create: true,
@@ -506,6 +578,7 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
         }
     };
     project.rescan();
+    app.refresh_links();
     app.selection = selection;
     app.validate_selection();
     Ok(())
@@ -543,6 +616,36 @@ mod tests {
 
     fn confirm(app: &mut AppCtx, dialog: Dialog) -> Result<()> {
         apply(&dialog, app)
+    }
+
+    #[test]
+    fn fix_all_links_leaves_links_to_another_cell_unless_asked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = app(tmp.path());
+        let root = tmp.path();
+        let cell = |name: &str, symbol: &str| {
+            let dir = root.join("libs/analog").join(name);
+            fs::create_dir_all(dir.join("symbol")).unwrap();
+            fs::create_dir_all(dir.join("schematic")).unwrap();
+            fs::write(dir.join(format!("schematic/{name}.sch")), "v {}\n").unwrap();
+            fs::write(dir.join(format!("symbol/{name}.sym")), symbol).unwrap();
+        };
+        cell("a", "G {}\nK {type=subcircuit\n}\n");
+        cell(
+            "b",
+            "G {}\nK {type=subcircuit\nschematic=analog/ota/schematic/ota.sch\n}\n",
+        );
+        app.reload_project();
+        assert_eq!(app.links.len(), 2);
+        let fix = |foreign| Dialog::FixLinks {
+            library: "analog".into(),
+            foreign,
+        };
+        confirm(&mut app, fix(false)).unwrap();
+        assert_eq!(app.links.len(), 1);
+        assert!(is_foreign(&app.links[0]));
+        confirm(&mut app, fix(true)).unwrap();
+        assert!(app.links.is_empty());
     }
 
     #[test]
@@ -648,6 +751,15 @@ mod tests {
     fn views_and_dialogs_draw() {
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path());
+        // A symbol without its schematic link: the views draw the warning.
+        fs::create_dir_all(tmp.path().join("libs/analog/ota/symbol")).unwrap();
+        fs::write(
+            tmp.path().join("libs/analog/ota/symbol/ota.sym"),
+            "G {}\nK {type=subcircuit\n}\n",
+        )
+        .unwrap();
+        app.reload_project();
+        assert_eq!(app.links.len(), 1);
         let mut views = Views::default();
         let project = app.project.clone().unwrap();
         let analog = project.library("analog").unwrap();
@@ -660,8 +772,13 @@ mod tests {
             Selection::library("prims"),
             Selection::cell("prims", "nmos"),
             Selection::view("analog", "ota", "schematic"),
+            Selection::view("analog", "ota", "symbol"),
         ];
         let dialogs = [
+            Dialog::FixLinks {
+                library: text("analog"),
+                foreign: false,
+            },
             Dialog::Error(text("boom")),
             Dialog::new_library(),
             Dialog::add_library(&project, &project.root.join("prims")),

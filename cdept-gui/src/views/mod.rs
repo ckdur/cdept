@@ -55,6 +55,9 @@ pub trait View {
     /// Contextual toolbar buttons, shown after the global ones.
     fn toolbar(&mut self, _ui: &mut Ui, _ctx: &mut AppCtx) {}
 
+    /// Entries added to the global File menu, after the project entries.
+    fn file_menu(&mut self, _ui: &mut Ui, _ctx: &mut AppCtx) {}
+
     fn edit_caps(&self) -> EditCaps {
         EditCaps::default()
     }

@@ -24,7 +24,7 @@ use libcdept::xschem::{frame, tcl};
 
 use self::mirror::Mirror;
 pub use self::picture::Picture;
-use super::View;
+use super::{EditAction, EditCaps, View};
 use crate::dock::{DocId, DocRef, Tab};
 use crate::state::{Action, AppCtx, Selection};
 
@@ -676,6 +676,13 @@ impl SchematicView {
                     modifiers,
                     ..
                 } if keys => {
+                    // Ctrl+Z and the like are CDePT's: xschem would zoom out.
+                    if let Some(action) = keys::edit_shortcut(*key, *modifiers) {
+                        if *pressed {
+                            self.undo_redo(action);
+                        }
+                        continue;
+                    }
                     // Keys that type a character arrive as text, with the right case.
                     if keys::types_text(*key, *modifiers) {
                         continue;
@@ -851,6 +858,17 @@ impl View for SchematicView {
         if running && !modal {
             let (events, modifiers) = ui.input(|i| (i.events.clone(), i.modifiers));
             self.input(&events, modifiers, over, keys);
+        } else if running && self.buttons != 0 {
+            // A press can open a dialog (a double click opens the attribute dialog)
+            // while the button is still down. Its release must still reach xschem, as
+            // it would with X: otherwise the button stays down for xschem and the
+            // first movement after the dialog starts selecting by area.
+            let (events, modifiers) = ui.input(|i| (i.events.clone(), i.modifiers));
+            let releases: Vec<Event> = events
+                .into_iter()
+                .filter(|e| matches!(e, Event::PointerButton { pressed: false, .. }))
+                .collect();
+            self.input(&releases, modifiers, false, false);
         }
 
         if modal {
@@ -899,9 +917,64 @@ impl View for SchematicView {
             self.send(event);
         }
     }
+
+    fn edit_caps(&self) -> EditCaps {
+        let ready = self.session.status() == Status::Running && !self.mirror.has_modal();
+        EditCaps {
+            undo: ready,
+            redo: ready,
+            ..EditCaps::default()
+        }
+    }
+
+    fn edit(&mut self, action: EditAction, _ctx: &mut AppCtx) {
+        self.undo_redo(action);
+    }
+
+    fn file_menu(&mut self, ui: &mut Ui, _ctx: &mut AppCtx) {
+        let ready = self.session.status() == Status::Running && !self.mirror.has_modal();
+        ui.add_enabled_ui(ready, |ui| {
+            ui.menu_button("Export", |ui| {
+                // xschem's own commands; it asks for the destination file.
+                for (label, command) in EXPORTS {
+                    if ui.button(label).clicked() {
+                        self.session.tcl(command);
+                        self.selection_stale = true;
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text(
+                "Write the drawing as an image (same as Schematic > File > Image export)",
+            );
+        });
+        ui.separator();
+    }
 }
 
+/// File > Export: xschem's "Image export" commands.
+const EXPORTS: [(&str, &str); 4] = [
+    ("PNG Image…", "xschem print png"),
+    ("SVG Image…", "xschem print svg"),
+    ("PDF/PS Document…", "xschem print pdf"),
+    ("PDF/PS Document, full drawing…", "xschem print pdf_full"),
+];
+
 impl SchematicView {
+    /// Undo or redo with xschem's own commands, as its Edit menu does.
+    fn undo_redo(&mut self, action: EditAction) {
+        let command = match action {
+            EditAction::Undo => "xschem undo; xschem redraw",
+            EditAction::Redo => "xschem redo; xschem redraw",
+            _ => return,
+        };
+        if self.session.status() == Status::Running && !self.mirror.has_modal() {
+            self.session.tcl(command);
+            self.selection_stale = true;
+        }
+    }
+
     /// CDePT's own menu for the cell of the document, next to xschem's.
     fn cell_menu(&self, ui: &mut Ui, ctx: &mut AppCtx) {
         if self.doc.file.is_some() {

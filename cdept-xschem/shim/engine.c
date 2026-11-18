@@ -63,6 +63,10 @@ int cdx_init(int argc, char **argv, int display)
   /* Before Tcl_AppInit, so that everything xschem's start-up runs can use it. */
   Tcl_Eval(interp, "namespace eval cdept {}");
   Tcl_CreateObjCommand(interp, "cdept::ui", ui_command, NULL, NULL);
+  /* The header xschem writes into the files it saves, for files cdept.tcl writes in
+   * xschem's place (`xschem get version` gives the first part, nothing the second). */
+  Tcl_SetVar(interp, "::cdept::file_header",
+    "xschem version=" XSCHEM_VERSION " file_version=" XSCHEM_FILE_VERSION, TCL_GLOBAL_ONLY);
   /* While xschem starts, nobody is connected who could answer a dialog. The Tcl side
    * (faketk.tcl) does not wait for an answer as long as this is set. */
   Tcl_SetVar(interp, "::cdept::starting", "1", TCL_GLOBAL_ONLY);

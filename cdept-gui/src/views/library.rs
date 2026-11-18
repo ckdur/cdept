@@ -3,12 +3,13 @@
 //! the open project and share one selection.
 
 use egui::{Button, CollapsingHeader, RichText, ScrollArea, Sense, Ui};
+use libcdept::xschem::symbol::Unlinked;
 use libcdept::{Cell, Entry, Library, Project};
 
 use super::{View, empty_state};
 use crate::dialogs::Dialog;
 use crate::dock::Tab;
-use crate::state::{Action, AppCtx, PickFor, Selection};
+use crate::state::{Action, AppCtx, PickFor, Selection, cell_link, is_foreign, view_link};
 
 const READ_ONLY: &str = "The library is read-only";
 
@@ -18,6 +19,8 @@ enum Cmd {
     Dialog(Dialog),
     Action(Action),
     CopyText(String),
+    /// Write the expected `schematic=` into a symbol.
+    FixLink(Unlinked),
     /// Double-click on a view.
     Open(Selection),
 }
@@ -29,6 +32,9 @@ fn run(cmds: Vec<Cmd>, ui: &Ui, ctx: &mut AppCtx) {
             Cmd::Dialog(dialog) => ctx.open_dialog(dialog),
             Cmd::Action(action) => ctx.request(action),
             Cmd::CopyText(text) => ui.ctx().copy_text(text),
+            Cmd::FixLink(unlinked) => {
+                ctx.fix_links(&[unlinked]);
+            }
             Cmd::Open(selection) => {
                 ctx.selection = selection.clone();
                 ctx.request(Action::OpenView(selection));
@@ -63,6 +69,36 @@ fn library_hover(lib: &Library) -> String {
         text.push_str(&format!("\n⚠ {error}"));
     }
     text
+}
+
+/// The mark in front of a symbol view whose `schematic=` link is broken.
+pub(super) const LINK_MARK: &str = "⚠";
+
+/// What is wrong with the link, and what it should be.
+pub(super) fn link_hover(u: &Unlinked) -> String {
+    let mut text = format!("Broken schematic link: {}", u.problem);
+    text.push_str(&format!("\nExpected schematic={}", u.expected));
+    if is_foreign(u) {
+        text.push_str("\nDescending from this symbol opens another cell's schematic.");
+    }
+    text
+}
+
+/// The menu entry (and button) that repairs the link.
+pub(super) fn fix_label(u: &Unlinked) -> &'static str {
+    if is_foreign(u) {
+        "Point to this cell's schematic"
+    } else {
+        "Fix schematic link"
+    }
+}
+
+/// A view name, with the warning mark when its symbol link is broken.
+fn view_text(ui: &Ui, text: String, link: Option<&Unlinked>) -> RichText {
+    match link {
+        Some(_) => RichText::new(format!("{LINK_MARK} {text}")).color(ui.visuals().warn_fg_color),
+        None => RichText::new(text),
+    }
 }
 
 fn view_label(entry: &Entry) -> String {
@@ -105,13 +141,28 @@ fn project_items(ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     }
 }
 
-fn library_items(ui: &mut Ui, lib: &Library, cmds: &mut Vec<Cmd>) {
+fn library_items(ui: &mut Ui, lib: &Library, links: &[Unlinked], cmds: &mut Vec<Cmd>) {
     if ui
         .add_enabled(writable(lib), Button::new("New Cell…"))
         .on_disabled_hover_text(READ_ONLY)
         .clicked()
     {
         cmds.push(Cmd::Dialog(Dialog::new_cell(lib)));
+    }
+    let broken = links.iter().filter(|u| u.library == lib.name).count();
+    if broken > 0 {
+        let fix = ui
+            .add_enabled(writable(lib), Button::new("Fix all schematic links…"))
+            .on_hover_text(format!(
+                "{broken} symbol(s) not linked to their own schematic"
+            ))
+            .on_disabled_hover_text(READ_ONLY);
+        if fix.clicked() {
+            cmds.push(Cmd::Dialog(Dialog::FixLinks {
+                library: lib.name.clone(),
+                foreign: false,
+            }));
+        }
     }
     if ui.button("Remove Library…").clicked() {
         cmds.push(Cmd::Dialog(Dialog::RemoveLibrary {
@@ -176,7 +227,14 @@ fn cell_items(ui: &mut Ui, project: &Project, lib: &Library, cell: &Cell, cmds: 
     }
 }
 
-fn view_items(ui: &mut Ui, lib: &Library, cell: &Cell, entry: &Entry, cmds: &mut Vec<Cmd>) {
+fn view_items(
+    ui: &mut Ui,
+    lib: &Library,
+    cell: &Cell,
+    entry: &Entry,
+    link: Option<&Unlinked>,
+    cmds: &mut Vec<Cmd>,
+) {
     if ui
         .add_enabled(crate::app::has_viewer(entry), Button::new("Open"))
         .on_disabled_hover_text("No embedded viewer for this kind of view yet")
@@ -187,6 +245,18 @@ fn view_items(ui: &mut Ui, lib: &Library, cell: &Cell, entry: &Entry, cmds: &mut
             &cell.name,
             &entry.name,
         )));
+    }
+    if let Some(u) = link
+        && ui
+            .add_enabled(
+                writable(lib),
+                Button::new(format!("{LINK_MARK} {}", fix_label(u))),
+            )
+            .on_hover_text(link_hover(u))
+            .on_disabled_hover_text(READ_ONLY)
+            .clicked()
+    {
+        cmds.push(Cmd::FixLink(u.clone()));
     }
     ui.separator();
     if ui
@@ -264,6 +334,7 @@ impl View for LibrariesView {
 
         let filter = self.filter.trim().to_lowercase();
         let selection = &ctx.selection;
+        let links = &ctx.links;
         let mut cmds = Vec::new();
         if project.libraries.is_empty() {
             empty_state(ui, "No libraries.", Some("Right-click to add one."));
@@ -278,7 +349,11 @@ impl View for LibrariesView {
                 continue;
             }
             let selected = selection.library.as_deref() == Some(&lib.name);
+            let broken = links.iter().filter(|u| u.library == lib.name).count();
             let mut label = RichText::new(library_label(lib));
+            if broken > 0 {
+                label = RichText::new(format!("{} {LINK_MARK}", library_label(lib)));
+            }
             if selected && selection.cell.is_none() {
                 label = label.strong();
             }
@@ -292,16 +367,25 @@ impl View for LibrariesView {
                         ui.weak("No cells");
                     }
                     for cell in cells {
-                        cell_node(ui, project, lib, cell, selected, selection, &mut cmds);
+                        cell_node(
+                            ui, project, lib, cell, selected, selection, links, &mut cmds,
+                        );
                     }
                 })
                 .header_response
-                .on_hover_text(library_hover(lib));
+                .on_hover_text(if broken > 0 {
+                    format!(
+                        "{}\n{LINK_MARK} {broken} symbol(s) with a broken schematic link",
+                        library_hover(lib)
+                    )
+                } else {
+                    library_hover(lib)
+                });
             if header.clicked() {
                 cmds.push(Cmd::Select(Selection::library(&lib.name)));
             }
             header.context_menu(|ui| {
-                library_items(ui, lib, &mut cmds);
+                library_items(ui, lib, links, &mut cmds);
                 ui.separator();
                 project_items(ui, &mut cmds);
             });
@@ -313,6 +397,7 @@ impl View for LibrariesView {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cell_node(
     ui: &mut Ui,
     project: &Project,
@@ -320,14 +405,20 @@ fn cell_node(
     cell: &Cell,
     lib_selected: bool,
     selection: &Selection,
+    links: &[Unlinked],
     cmds: &mut Vec<Cmd>,
 ) {
     let selected = lib_selected && selection.cell.as_deref() == Some(&cell.name);
+    let broken = cell_link(links, &lib.name, &cell.name);
     let mut label = RichText::new(&cell.name);
+    if broken.is_some() {
+        label = RichText::new(format!("{LINK_MARK} {}", cell.name))
+            .color(ui.visuals().warn_fg_color.gamma_multiply(0.6));
+    }
     if selected && selection.view.is_none() {
         label = label.strong();
     }
-    let header = CollapsingHeader::new(label)
+    let mut header = CollapsingHeader::new(label)
         .id_salt(("cell", &lib.name, &cell.name))
         .show(ui, |ui| {
             if cell.entries.is_empty() {
@@ -336,18 +427,32 @@ fn cell_node(
             for entry in &cell.entries {
                 let active = selected && selection.view.as_deref() == Some(&entry.name);
                 let target = Selection::view(&lib.name, &cell.name, &entry.name);
-                let response = ui
-                    .selectable_label(active, &entry.name)
-                    .on_hover_text(view_label(entry));
+                let link = view_link(links, entry);
+                let mut response =
+                    ui.selectable_label(active, view_text(ui, entry.name.clone(), link));
+                response = match link {
+                    Some(u) => response.on_hover_text(format!(
+                        "{}\n\n{}",
+                        view_label(entry),
+                        link_hover(u)
+                    )),
+                    None => response.on_hover_text(view_label(entry)),
+                };
                 if response.double_clicked() {
                     cmds.push(Cmd::Open(target));
                 } else if response.clicked() {
                     cmds.push(Cmd::Select(target));
                 }
-                response.context_menu(|ui| view_items(ui, lib, cell, entry, cmds));
+                response.context_menu(|ui| view_items(ui, lib, cell, entry, link, cmds));
             }
         })
         .header_response;
+    if let Some(u) = broken {
+        header = header.on_hover_text(format!(
+            "A symbol of this cell has a broken schematic link:\n{}",
+            link_hover(u)
+        ));
+    }
     if header.clicked() {
         cmds.push(Cmd::Select(Selection::cell(&lib.name, &cell.name)));
     }
@@ -361,7 +466,14 @@ pub struct LibraryManagerView {
 }
 
 impl LibraryManagerView {
-    fn columns(&self, ui: &mut Ui, project: &Project, selection: &Selection, cmds: &mut Vec<Cmd>) {
+    fn columns(
+        &self,
+        ui: &mut Ui,
+        project: &Project,
+        selection: &Selection,
+        links: &[Unlinked],
+        cmds: &mut Vec<Cmd>,
+    ) {
         let filter = self.filter.trim().to_lowercase();
         let library = selection
             .library
@@ -382,7 +494,7 @@ impl LibraryManagerView {
                     if response.clicked() {
                         cmds.push(Cmd::Select(Selection::library(&lib.name)));
                     }
-                    response.context_menu(|ui| library_items(ui, lib, cmds));
+                    response.context_menu(|ui| library_items(ui, lib, links, cmds));
                 }
                 let rest = ui.allocate_response(ui.available_size(), Sense::click());
                 rest.context_menu(|ui| project_items(ui, cmds));
@@ -421,7 +533,19 @@ impl LibraryManagerView {
                     |ui, range| {
                         for c in &cells[range] {
                             let selected = cell.is_some_and(|s| s.name == c.name);
-                            let response = ui.selectable_label(selected, &c.name);
+                            let broken = cell_link(links, &lib.name, &c.name);
+                            let text = match broken {
+                                Some(_) => RichText::new(format!("{LINK_MARK} {}", c.name))
+                                    .color(ui.visuals().warn_fg_color.gamma_multiply(0.6)),
+                                None => RichText::new(&c.name),
+                            };
+                            let mut response = ui.selectable_label(selected, text);
+                            if let Some(u) = broken {
+                                response = response.on_hover_text(format!(
+                                    "A symbol of this cell has a broken schematic link:\n{}",
+                                    link_hover(u)
+                                ));
+                            }
                             if response.clicked() {
                                 cmds.push(Cmd::Select(Selection::cell(&lib.name, &c.name)));
                             }
@@ -441,13 +565,18 @@ impl LibraryManagerView {
                 for entry in &cell.entries {
                     let selected = selection.view.as_deref() == Some(&entry.name);
                     let target = Selection::view(&lib.name, &cell.name, &entry.name);
-                    let response = ui.selectable_label(selected, view_label(entry));
+                    let link = view_link(links, entry);
+                    let mut response =
+                        ui.selectable_label(selected, view_text(ui, view_label(entry), link));
+                    if let Some(u) = link {
+                        response = response.on_hover_text(link_hover(u));
+                    }
                     if response.double_clicked() {
                         cmds.push(Cmd::Open(target));
                     } else if response.clicked() {
                         cmds.push(Cmd::Select(target));
                     }
-                    response.context_menu(|ui| view_items(ui, lib, cell, entry, cmds));
+                    response.context_menu(|ui| view_items(ui, lib, cell, entry, link, cmds));
                 }
             });
         });
@@ -484,7 +613,7 @@ impl View for LibraryManagerView {
             return no_project(ui, ctx);
         };
         let mut cmds = Vec::new();
-        self.columns(ui, project, &ctx.selection, &mut cmds);
+        self.columns(ui, project, &ctx.selection, &ctx.links, &mut cmds);
         run(cmds, ui, ctx);
     }
 
@@ -500,7 +629,7 @@ impl View for LibraryManagerView {
             let cell = ctx.selected_cell();
             ui.separator();
             match library {
-                Some(lib) => library_items(ui, lib, &mut cmds),
+                Some(lib) => library_items(ui, lib, &ctx.links, &mut cmds),
                 None => {
                     ui.weak("No library selected");
                 }
@@ -514,7 +643,10 @@ impl View for LibraryManagerView {
             }
             ui.separator();
             match (library, cell, ctx.selected_view()) {
-                (Some(lib), Some(cell), Some(entry)) => view_items(ui, lib, cell, entry, &mut cmds),
+                (Some(lib), Some(cell), Some(entry)) => {
+                    let link = view_link(&ctx.links, entry);
+                    view_items(ui, lib, cell, entry, link, &mut cmds)
+                }
                 _ => {
                     ui.weak("No view selected");
                 }

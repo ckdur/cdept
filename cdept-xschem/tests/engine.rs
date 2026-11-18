@@ -402,6 +402,97 @@ fn a_symbol_made_from_a_schematic_goes_into_the_symbol_view() {
 }
 
 #[test]
+fn a_schematic_made_from_a_symbol_goes_where_the_symbol_says() {
+    let (dir, mut project) = example_copy();
+    let schematic = dir.path().join("libs/logic/inv/schematic/inv.sch");
+    let mut engine = engine_for(&project);
+    let library = project.library("logic").unwrap().clone();
+
+    // The cell has a schematic: it is kept unless asked otherwise.
+    let before = std::fs::read_to_string(&schematic).unwrap();
+    let error = engine.make_schematic(&library, "inv", false).unwrap_err();
+    assert!(error.to_string().contains("exists already"), "{error}");
+    assert_eq!(std::fs::read_to_string(&schematic).unwrap(), before);
+
+    // Without a schematic view: one pin for each pin of the symbol, in the file the
+    // symbol's schematic= attribute names (with @symname replaced), the folder
+    // created.
+    std::fs::remove_dir_all(schematic.parent().unwrap()).unwrap();
+    project.rescan();
+    let library = project.library("logic").unwrap().clone();
+    assert_eq!(
+        engine.make_schematic(&library, "inv", false).unwrap(),
+        schematic
+    );
+    assert!(!dir.path().join("libs/logic/inv/symbol/inv.sch").exists());
+    let text = std::fs::read_to_string(&schematic).unwrap();
+    let version = engine.xschem_version().to_string();
+    assert!(
+        text.starts_with(&format!("v {{xschem version={version} file_version=")),
+        "{text}"
+    );
+    assert!(
+        text.contains("C {ipin.sym} -120 0 0 0 {name=g0 lab=A }\n")
+            && text.contains("C {opin.sym} 120 0 0 0 {name=g1 lab=Y }\n")
+            && text.contains("C {iopin.sym} 120 20 0 0 {name=g2 lab=VDD }\n")
+            && text.contains("C {iopin.sym} 120 40 0 0 {name=g3 lab=VSS }\n"),
+        "{text}"
+    );
+    project.rescan();
+    assert_eq!(symbol::check(&project, None, None), []);
+    assert_eq!(
+        engine.make_schematic(&library, "inv", true).unwrap(),
+        schematic
+    );
+
+    // xschem descends into the new schematic and netlists the buffer with its ports.
+    let buf = dir.path().join("libs/logic/buf/schematic/buf.sch");
+    let hierarchy = engine.hierarchy(&buf).unwrap();
+    let x1 = hierarchy.cells[0]
+        .instances
+        .iter()
+        .find(|i| i.instance.name == "x1")
+        .unwrap();
+    assert_eq!(
+        hierarchy.cells[x1.child.expect("x1 has no schematic")].schematic,
+        schematic
+    );
+    let netlist = dir.path().join("buf.spice");
+    engine.load(&buf).unwrap();
+    // The pins are not connected yet: the output is undriven, which xschem's check
+    // counts as an error. The netlist is written all the same.
+    let error = engine.netlist(NetlistFormat::Spice, &netlist).unwrap_err();
+    assert!(error.to_string().contains("netlisting errors"), "{error}");
+    let text = std::fs::read_to_string(&netlist).unwrap();
+    assert!(text.contains(".subckt inv A Y VDD VSS"), "{text}");
+    assert!(text.contains("x1 A net1 VDD VSS inv"), "{text}");
+
+    // In a flat library the schematic is next to the symbol, as xschem has it.
+    project
+        .add_library(
+            "flat",
+            "libs/flat",
+            AddLibrary {
+                create: true,
+                layout: Some(LibraryLayout::Flat),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let flat_symbol = dir.path().join("libs/flat/inv.sym");
+    let text = std::fs::read_to_string(dir.path().join("libs/logic/inv/symbol/inv.sym")).unwrap();
+    std::fs::write(&flat_symbol, symbol::set_schematic(&text, None).unwrap()).unwrap();
+    project.rescan();
+    let flat = project.library("flat").unwrap().clone();
+    let mut engine = engine_for(&project);
+    assert_eq!(
+        engine.make_schematic(&flat, "inv", false).unwrap(),
+        dir.path().join("libs/flat/inv.sch")
+    );
+    assert!(engine.make_schematic(&flat, "nothing", false).is_err());
+}
+
+#[test]
 fn the_service_runs_jobs_in_the_background_and_recovers() {
     use libcdept::xschem::Service;
     use std::sync::Arc;

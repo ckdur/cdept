@@ -557,6 +557,44 @@ impl Engine {
         Ok(symbol)
     }
 
+    /// Make the schematic of `cell` from the pins of its symbol, as xschem's "Make
+    /// schematic from symbol" does (an input, output or inout pin for each pin), and
+    /// return the file written: the one the symbol's `schematic=` attribute names
+    /// (normally `<cell>/schematic/<cell>.sch`) in a library with view folders,
+    /// `<cell>.sch` next to the symbol in a flat one.
+    ///
+    /// An existing schematic is replaced only with `overwrite`: its contents are lost.
+    pub fn make_schematic(
+        &mut self,
+        library: &Library,
+        cell: &str,
+        overwrite: bool,
+    ) -> Result<PathBuf> {
+        library.writable()?;
+        let symbol = cell_symbol(library, cell)?;
+        let symbol = tcl::quote(&symbol.to_string_lossy());
+        let schematic = self.tcl(&format!("cdept::schematic_file {symbol}"))?;
+        if schematic.is_empty() {
+            return Err(eyre!(
+                "cannot tell where the schematic of cell '{cell}' goes: see the \
+                 schematic= attribute of its symbol"
+            ));
+        }
+        let schematic = PathBuf::from(schematic);
+        if schematic.exists() && !overwrite {
+            return Err(eyre!(
+                "{} exists already; it is only replaced on request (--force)",
+                schematic.display()
+            ));
+        }
+        // `yes`: do not ask before replacing a schematic.
+        self.tcl(&format!("cdept::make_schematic {symbol} yes"))?;
+        if !schematic.is_file() {
+            return Err(eyre!("xschem did not write {}", schematic.display()));
+        }
+        Ok(schematic)
+    }
+
     /// Ask the helper to exit and wait for it.
     pub fn shutdown(mut self) -> Result<()> {
         let id = self.next_id;
@@ -662,22 +700,28 @@ fn forward_output(child: &mut Child) {
 
 /// The xschem schematic of `cell`: the view named `schematic`, else the first one.
 fn cell_schematic(library: &Library, cell: &str) -> Result<PathBuf> {
+    cell_view(library, cell, Format::XschemSchematic, "schematic")
+}
+
+/// The xschem symbol of `cell`: the view named `symbol`, else the first one.
+fn cell_symbol(library: &Library, cell: &str) -> Result<PathBuf> {
+    cell_view(library, cell, Format::XschemSymbol, "symbol")
+}
+
+fn cell_view(library: &Library, cell: &str, format: Format, name: &str) -> Result<PathBuf> {
     library
         .cell(cell)
         .and_then(|c| {
-            let mut views = c
-                .entries
-                .iter()
-                .filter(|e| e.format == Some(Format::XschemSchematic));
+            let mut views = c.entries.iter().filter(|e| e.format == Some(format));
             views
                 .clone()
-                .find(|e| e.name == "schematic")
+                .find(|e| e.name == name)
                 .or_else(|| views.next())
         })
         .and_then(|entry| entry.main_file.clone())
         .ok_or_else(|| {
             eyre!(
-                "cell '{cell}' of library '{}' has no xschem schematic",
+                "cell '{cell}' of library '{}' has no xschem {name}",
                 library.name
             )
         })

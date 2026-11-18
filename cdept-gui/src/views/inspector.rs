@@ -5,8 +5,9 @@
 use egui::{Grid, RichText, Ui};
 use libcdept::Format;
 
+use super::library::{LINK_MARK, fix_label, link_hover};
 use super::{Selected, View, empty_state};
-use crate::state::AppCtx;
+use crate::state::{AppCtx, view_link};
 
 #[derive(Default)]
 pub struct InspectorView;
@@ -181,6 +182,33 @@ impl View for InspectorView {
                 row(ui, "File", file.display().to_string());
             }
         });
+        let mut fix = None;
+        if let Some(u) = view_link(&ctx.links, entry) {
+            ui.add_space(4.0);
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                format!("{LINK_MARK} Schematic link: {}", u.problem),
+            );
+            ui.add(
+                egui::Label::new(RichText::new(format!("schematic={}", u.expected)).monospace())
+                    .wrap(),
+            );
+            let writable = ctx
+                .selected_library()
+                .is_some_and(|l| !l.read_only && l.error.is_none());
+            if ui
+                .add_enabled(writable, egui::Button::new(fix_label(u)))
+                .on_hover_text(link_hover(u))
+                .on_disabled_hover_text("The library is read-only")
+                .clicked()
+            {
+                fix = Some(u.clone());
+            }
+        }
+        if let Some(u) = fix {
+            ctx.fix_links(&[u]);
+            return;
+        }
         if entry.files.len() > 1 {
             ui.add_space(4.0);
             ui.weak("Files");

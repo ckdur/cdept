@@ -140,6 +140,18 @@ enum XschemCommand {
         #[arg(short, long)]
         force: bool,
     },
+    /// Make the schematic of a cell from the pins of its symbol.
+    ///
+    /// The same as xschem's "Make schematic from symbol": a pin of the schematic for
+    /// each pin of the symbol, nothing else. In a `cells` library the schematic goes
+    /// where the symbol's schematic= attribute says, normally the `schematic` view.
+    MakeSchematic {
+        library: String,
+        cell: String,
+        /// Replace the schematic if the cell has one. Its contents are lost.
+        #[arg(short, long)]
+        force: bool,
+    },
     /// Check that xschem will find the schematic behind every symbol.
     ///
     /// In a `cells` library the schematic is not next to its symbol, so the symbol
@@ -541,6 +553,17 @@ fn main() -> Result<()> {
                         .ok_or_else(|| eyre!("no library '{library}'"))?;
                     let symbol = engine.make_symbol(library, &cell, force)?;
                     println!("{}", symbol.display());
+                }
+                XschemCommand::MakeSchematic {
+                    library,
+                    cell,
+                    force,
+                } => {
+                    let library = project
+                        .library(&library)
+                        .ok_or_else(|| eyre!("no library '{library}'"))?;
+                    let schematic = engine.make_schematic(library, &cell, force)?;
+                    println!("{}", schematic.display());
                 }
                 XschemCommand::Tcl { script } => println!("{}", engine.tcl(&script)?),
                 XschemCommand::Version => println!("xschem {}", engine.xschem_version()),

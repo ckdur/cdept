@@ -315,6 +315,94 @@ file copy $inv [pwd]/flat/inv4.sch
 make_symbol [pwd]/flat/inv4.sch yes
 check flat-symbol-beside-schematic {[file isfile [pwd]/flat/inv4.sym]}
 check flat-symbol-no-attribute {[string first schematic= [slurp [pwd]/flat/inv4.sym]] < 0}
+
+# --- schematics made from symbols ------------------------------------------------------
+proc spit {file text} {
+  file mkdir [file dirname $file]
+  set fd [open $file w]; puts -nonewline $fd $text; close $fd
+}
+# A schematic with one instance of `symbol`, loaded, the instance selected.
+proc place_one {schematic symbol} {
+  spit $schematic "v {xschem version=3.4.5 file_version=1.2}\nC {$symbol} 0 0 0 0 {name=x1}\n"
+  xschem load $schematic
+  update
+  xschem select instance x1
+}
+set make_sch [.menubar.sym index {Make schematic from symbol}]
+# Outside the libraries with view folders xschem's C code writes the file, next to
+# the symbol; what the Tcl side writes is the same text, also for sorted pins
+# (sim_pinnumber), generic pins and braces.
+set flat_sym [pwd]/flat/odd.sym
+spit $flat_sym [string cat "v {xschem version=3.4.5 file_version=1.2}\nK {type=subcircuit\n}\n" \
+  "B 3 0 0 1 1 {name=P value=1}\n" \
+  "B 5 -42.5 -2.5 -37.5 2.5 {name=A dir=in sim_pinnumber=3}\n" \
+  "B 5 37.5 -2.5 42.5 2.5 {name=Y dir=out sim_pinnumber=1 goto=\\{x\\}}\n" \
+  "B 5 -2.5 -42.5 2.5 -37.5 {name=B dir=in sim_pinnumber=2}\n" \
+  "B 5 -2.5 37.5 2.5 42.5 {name=VSS dir=inout sim_pinnumber=4}\n"]
+place_one [pwd]/flat/top.sch $flat_sym
+clear_updates
+faketk::event menu .menubar.sym $make_sch
+set flat_sch [pwd]/flat/odd.sch
+check flat-schematic-beside-symbol {[file isfile $flat_sch]}
+check_eq flat-schematic-not-reported [updates written] {}
+set c_text [slurp $flat_sch]
+set pins [cdept::symbol_pins $flat_sym]
+check_eq same-text-as-xschem \
+  [cdept::schematic_text [dict get $pins pins] [dict get $pins generic]] $c_text
+check same-text-has-all \
+  {[regexp {lab=P value=1\}\n.*-120 20 .*lab=B sim.*-120 40 .*lab=A sim.*lab=Y [^\n]*goto=\\\{x\\\}\}} $c_text]}
+check_eq schematic-file-flat [cdept::schematic_file $flat_sym] $flat_sch
+
+# In a library with view folders: the file the attribute names, @symname replaced.
+set inv5_sym $example/libs/logic/inv5/symbol/inv5.sym
+set inv5_sch $example/libs/logic/inv5/schematic/inv5.sch
+file mkdir [file dirname $inv5_sym]
+file copy $inv_sym $inv5_sym
+check_eq schematic-file [cdept::schematic_file $inv5_sym] $inv5_sch
+check_eq schematic-file-no-attribute [cdept::schematic_file $inv5_sym {type=subcircuit}] $inv5_sch
+check_eq schematic-file-other-cell \
+  [cdept::schematic_file $inv5_sym {schematic=logic/inv/schematic/inv.sch}] $inv
+check_eq schematic-file-generator [cdept::schematic_file $inv5_sym {schematic=gen.tcl(1)}] {}
+set expected [string cat "v {$::cdept::file_header}\nG {}\nV {}\nE {}\nS {}\n" \
+  "C {ipin.sym} -120 0 0 0 {name=g0 lab=A }\n" \
+  "C {opin.sym} 120 0 0 0 {name=g1 lab=Y }\n" \
+  "C {iopin.sym} 120 20 0 0 {name=g2 lab=VDD }\n" \
+  "C {iopin.sym} 120 40 0 0 {name=g3 lab=VSS }\n"]
+set top5 $example/libs/bench/top5/schematic/top5.sch
+place_one $top5 logic/inv5/symbol/inv5.sym
+clear_updates
+faketk::event menu .menubar.sym $make_sch
+check_eq make-sch-menu [slurp $inv5_sch] $expected
+check make-sch-not-beside-symbol {![file exists [file rootname $inv5_sym].sch]}
+check_eq make-sch-reported [updates written] \
+  [list "{\"kind\":\"written\",\"path\":\"$inv5_sch\"}"]
+check_eq make-sch-found [xschem get_sch_from_sym x1] $inv5_sch
+check_eq make-sch-design-unchanged [list [xschem get schname] [cdept::modified]] [list $top5 0]
+# Ctrl+L, the file exists: xschem's question; No keeps it, Yes replaces it
+spit $inv5_sch "mine"
+check_eq ctrl-l-taken [with_answers {{press .dialog No}} {cdept::key_filter 108 4}] 1
+check_eq ctrl-l-kept [slurp $inv5_sch] mine
+with_answers {{press .dialog Yes}} {cdept::key_filter 108 4}
+check_eq ctrl-l-replaced [slurp $inv5_sch] $expected
+check_eq ctrl-l-alt-not-taken [cdept::key_filter 108 12] 0
+# with nothing selected, the symbol that is open
+file delete -force [file dirname $inv5_sch]
+xschem load $inv5_sym
+update
+check_eq ctrl-l-open-symbol [cdept::key_filter 108 4] 1
+check_eq ctrl-l-open-symbol-written [slurp $inv5_sch] $expected
+# ... but not a schematic, nor a symbol of a flat library: xschem's C code
+xschem load $top5
+update
+check_eq ctrl-l-schematic-not-taken [cdept::key_filter 108 4] 0
+xschem load $flat_sym
+update
+check_eq ctrl-l-flat-not-taken [cdept::key_filter 108 4] 0
+# a symbol without the attribute: into the schematic view of the cell
+set inv6_sym $example/libs/logic/inv6/symbol/inv6.sym
+spit $inv6_sym [regsub {schematic=[^\n]*\n} [slurp $inv_sym] {}]
+check_eq make-schematic-no-attribute [cdept::make_schematic $inv6_sym yes] \
+  $example/libs/logic/inv6/schematic/inv6.sch
 xschem load $tb
 update
 

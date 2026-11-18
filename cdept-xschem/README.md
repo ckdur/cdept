@@ -108,6 +108,10 @@ Then run the three test commands above.
   `make_symbol_lcc`): check that their arguments did not change, and that
   `make_sym.awk` and `make_sym_lcc.awk` still write `x.sym` for the file `x.sch` they
   are given.
+- It also redoes in Tcl what xschem's C function `create_sch_from_sym` (save.c; "Make
+  schematic from symbol", Ctrl+L, `xschem make_sch`) writes, for symbols in `cells`
+  libraries (`cdept::schematic_text`). If that function changed, change the Tcl copy
+  to match: `t_cdept.tcl` compares the two outputs (`same-text-as-xschem`).
 
 ## Comparing with stock xschem
 

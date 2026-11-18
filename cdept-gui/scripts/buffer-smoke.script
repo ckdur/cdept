@@ -46,6 +46,17 @@ dialog_type .dialog.symprop name=Vdd value=3.3 savecurrent=false
 dialog_click OK
 tcl_expect 3.3 xschem getprop instance Vdd value
 
+# A double click opens the attribute dialog while the button is still down. Its
+# release still reaches xschem: moving afterwards draws no selection rectangle.
+wait 0.7
+click_instance Vdd
+click_instance Vdd
+expect_dialog Edit Properties
+dialog_click Cancel
+move_by 60 40
+move_by 30 20
+tcl_expect 0 expr {[xschem get ui_state] & 16}
+
 # A message box of xschem's Tk code, answered with its button.
 tcl_send set ::answer [tk_messageBox -message {Keep going?} -type yesno]
 wait 0.3

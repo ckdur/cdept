@@ -3,6 +3,8 @@
 use egui::{Key, Modifiers, MouseWheelUnit, PointerButton, Vec2};
 use libcdept::xschem::input::{button, keysym, state};
 
+use crate::views::EditAction;
+
 /// The `state` mask: modifier keys, and the mouse buttons in `buttons` (a mask of
 /// `state::BUTTON*`) that were down before the event.
 pub fn state_mask(modifiers: Modifiers, buttons: u32) -> u32 {
@@ -62,6 +64,20 @@ pub fn take_wheel_buttons(pending: &mut Vec2) -> Vec<u32> {
     take(&mut pending.y, button::WHEEL_UP, button::WHEEL_DOWN);
     take(&mut pending.x, button::WHEEL_LEFT, button::WHEEL_RIGHT);
     buttons
+}
+
+/// The standard editing shortcut of a key press, which CDePT handles itself instead of
+/// passing the key on to xschem: Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo. (xschem
+/// reads Ctrl+Z as "zoom out"; its own undo and redo are `u` and `Shift+U`.)
+pub fn edit_shortcut(key: Key, modifiers: Modifiers) -> Option<EditAction> {
+    if !(modifiers.ctrl || modifiers.command) || modifiers.alt {
+        return None;
+    }
+    match (key, modifiers.shift) {
+        (Key::Z, false) | (Key::Y, true) => Some(EditAction::Undo),
+        (Key::Z, true) | (Key::Y, false) => Some(EditAction::Redo),
+        _ => None,
+    }
 }
 
 /// The character a key types without modifiers, for the keys that type one.
@@ -270,6 +286,25 @@ mod tests {
         assert_eq!(key_symbol(Key::ControlRight, CTRL), Some(keysym::CONTROL_R));
         assert_eq!(key_symbol(Key::Copy, NONE), None);
         assert_eq!(key_symbol(Key::BrowserBack, NONE), None);
+    }
+
+    #[test]
+    fn undo_and_redo_shortcuts() {
+        assert_eq!(edit_shortcut(Key::Z, CTRL), Some(EditAction::Undo));
+        assert_eq!(
+            edit_shortcut(Key::Z, Modifiers::COMMAND),
+            Some(EditAction::Undo)
+        );
+        assert_eq!(edit_shortcut(Key::Z, CTRL | SHIFT), Some(EditAction::Redo));
+        assert_eq!(edit_shortcut(Key::Y, CTRL), Some(EditAction::Redo));
+        // Plain keys stay xschem's: `u` undoes, `Shift+U` redoes, `z` is the zoom box.
+        assert_eq!(edit_shortcut(Key::Z, NONE), None);
+        assert_eq!(edit_shortcut(Key::U, NONE), None);
+        assert_eq!(edit_shortcut(Key::U, SHIFT), None);
+        assert_eq!(edit_shortcut(Key::Y, NONE), None);
+        assert_eq!(edit_shortcut(Key::Z, Modifiers::ALT), None);
+        assert_eq!(edit_shortcut(Key::Z, CTRL | Modifiers::ALT), None);
+        assert_eq!(edit_shortcut(Key::S, CTRL), None);
     }
 
     #[test]

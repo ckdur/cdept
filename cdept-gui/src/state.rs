@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use libcdept::tools::{self, ToolInfo};
+use libcdept::xschem::symbol::{self, Problem, Unlinked};
 use libcdept::xschem::{Engine, NetlistFormat};
 use libcdept::{Cell, Entry, Library, Project};
 use serde::{Deserialize, Serialize};
@@ -284,6 +285,9 @@ pub struct AppCtx {
     pub log: LogBuffer,
     pub tools: ToolsState,
     pub project: Option<Project>,
+    /// Symbols of the project whose `schematic=` link is broken, checked when the
+    /// libraries are scanned (see [`refresh_links`](Self::refresh_links)).
+    pub links: Vec<Unlinked>,
     pub selection: Selection,
     /// xschem engines of the project that are not documents (jobs, the preview).
     pub engines: Engines,
@@ -304,6 +308,7 @@ impl AppCtx {
             log,
             tools: ToolsState::default(),
             project: None,
+            links: Vec::new(),
             selection: Selection::default(),
             engines: Engines::default(),
             schematic: None,
@@ -400,6 +405,7 @@ impl AppCtx {
         log_problems(&project);
         self.settings.add_recent(project.root.clone());
         self.project = Some(project);
+        self.refresh_links();
         self.validate_selection();
     }
 
@@ -410,10 +416,53 @@ impl AppCtx {
         match project.reload() {
             Ok(()) => {
                 log_problems(project);
+                self.refresh_links();
                 self.validate_selection();
             }
             Err(e) => self.error(format!("{e:#}")),
         }
+    }
+
+    /// Check the `schematic=` links of the symbols again. It reads the attribute block
+    /// of every symbol file of the `cells` libraries, so it runs when the libraries
+    /// are scanned, not every frame.
+    pub fn refresh_links(&mut self) {
+        self.links = match &self.project {
+            Some(project) => symbol::check(project, None, None),
+            None => Vec::new(),
+        };
+        if !self.links.is_empty() {
+            tracing::warn!(
+                target: "cdept::project",
+                "{} symbol(s) not linked to the schematic of their cell",
+                self.links.len()
+            );
+        }
+    }
+
+    /// Write the expected `schematic=` into these symbols, and check again. Each fix
+    /// and each failure is logged; returns how many symbols were fixed.
+    pub fn fix_links(&mut self, items: &[Unlinked]) -> usize {
+        let Some(project) = &self.project else {
+            return 0;
+        };
+        let mut fixed = 0;
+        for item in items {
+            let name = project.portable_path(&item.symbol);
+            match symbol::repair(project, item) {
+                Ok(()) => {
+                    fixed += 1;
+                    tracing::info!(
+                        target: "cdept::library",
+                        "{name}: set schematic={}",
+                        item.expected
+                    );
+                }
+                Err(e) => tracing::error!(target: "cdept::library", "{name}: not fixed: {e:#}"),
+            }
+        }
+        self.refresh_links();
+        fixed
     }
 
     pub fn close_project(&mut self) {
@@ -470,6 +519,29 @@ impl AppCtx {
     }
 }
 
+/// The broken link of the symbol file `file`, if it has one.
+pub fn link_of<'a>(links: &'a [Unlinked], file: &Path) -> Option<&'a Unlinked> {
+    links.iter().find(|u| u.symbol == file)
+}
+
+/// The broken link of a symbol view of `cell`.
+pub fn view_link<'a>(links: &'a [Unlinked], entry: &Entry) -> Option<&'a Unlinked> {
+    entry.files.iter().find_map(|f| link_of(links, f))
+}
+
+/// The broken link of any symbol of a cell.
+pub fn cell_link<'a>(links: &'a [Unlinked], library: &str, cell: &str) -> Option<&'a Unlinked> {
+    links
+        .iter()
+        .find(|u| u.library == library && u.cell == cell)
+}
+
+/// Whether repairing writes where descending goes, rather than filling a gap: the link
+/// points to another cell's schematic, so it is only rewritten on request.
+pub fn is_foreign(unlinked: &Unlinked) -> bool {
+    matches!(unlinked.problem, Problem::Foreign { .. })
+}
+
 fn log_problems(project: &Project) {
     for warning in &project.warnings {
         tracing::warn!(target: "cdept::project", "{warning}");
@@ -483,7 +555,10 @@ fn log_problems(project: &Project) {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
+    use crate::log::LogBuffer;
 
     #[test]
     fn the_helper_says_which_xschem_it_holds() {
@@ -492,5 +567,69 @@ mod tests {
             "xschem 3.4.8RC, protocol 2"
         );
         assert_eq!(helper_version("something else"), "something else");
+    }
+
+    fn broken_project(root: &Path) -> AppCtx {
+        let cell = root.join("libs/l/inv");
+        fs::create_dir_all(cell.join("symbol")).unwrap();
+        fs::create_dir_all(cell.join("schematic")).unwrap();
+        fs::write(cell.join("schematic/inv.sch"), "v {}\n").unwrap();
+        fs::write(
+            cell.join("symbol/inv.sym"),
+            "v {}\nG {}\nK {type=subcircuit\n}\nV {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join(libcdept::PROJECT_FILE),
+            "name = \"t\"\n[libraries]\nl = \"libs/l\"\n",
+        )
+        .unwrap();
+        let mut app = AppCtx::new(Settings::default(), LogBuffer::new());
+        app.load_project(root);
+        app
+    }
+
+    #[test]
+    fn broken_links_are_found_when_the_project_loads_and_fixed_on_request() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = broken_project(tmp.path());
+        assert_eq!(app.links.len(), 1);
+        let item = app.links[0].clone();
+        assert_eq!(item.problem, Problem::Missing);
+        assert!(!is_foreign(&item));
+        let project = app.project.as_ref().unwrap();
+        let entry = project
+            .library("l")
+            .unwrap()
+            .cell("inv")
+            .unwrap()
+            .entry("symbol");
+        assert!(view_link(&app.links, entry.unwrap()).is_some());
+        assert!(cell_link(&app.links, "l", "inv").is_some());
+        assert!(cell_link(&app.links, "l", "other").is_none());
+
+        assert_eq!(app.fix_links(std::slice::from_ref(&item)), 1);
+        assert!(app.links.is_empty());
+        let text = fs::read_to_string(&item.symbol).unwrap();
+        assert!(
+            text.contains("schematic=l/@symname/schematic/@symname.sch"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_read_only_library_is_not_fixed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = broken_project(tmp.path());
+        fs::write(
+            tmp.path().join(libcdept::PROJECT_FILE),
+            "name = \"t\"\n[libraries]\nl = { path = \"libs/l\", read_only = true }\n",
+        )
+        .unwrap();
+        app.reload_project();
+        assert_eq!(app.links.len(), 1);
+        let item = app.links[0].clone();
+        assert_eq!(app.fix_links(&[item]), 0);
+        assert_eq!(app.links.len(), 1);
     }
 }
