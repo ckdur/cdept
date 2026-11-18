@@ -18,7 +18,9 @@ use std::collections::HashMap;
 use egui::Ui;
 
 pub use self::hierarchy::HierarchyView;
-pub use self::schematic::{CloseChoice, NETLIST_FORMATS, Picture, SchematicView, Selected};
+pub use self::schematic::{
+    CloseChoice, NETLIST_FORMATS, Picture, SchematicView, Selected, pretend_clipboard,
+};
 use crate::dock::{DocId, Tab};
 use crate::state::AppCtx;
 

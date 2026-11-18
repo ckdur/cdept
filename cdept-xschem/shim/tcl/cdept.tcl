@@ -42,6 +42,11 @@
 #      cdept::make_schematic <symbol> ?yes?
 #                                       write it (yes: without asking first)
 #
+# 5. Jobs. Programs xschem starts in the background (simulators, viewers, terminals:
+#    `execute`) report their end in CDePT's console. One that fails without being
+#    asked to report (status 0, such as `$terminal -e ngspice` when the terminal cannot
+#    open a window) shows its error output instead of failing silently. See "Jobs".
+#
 # Part of cdept-xschem, GPL-2.0-or-later.
 
 namespace eval cdept {
@@ -905,4 +910,61 @@ proc cdept::make_schematic_here {} {
     alert_ "Cannot make the schematic of $symbol: $message" {}
   }
   return 1
+}
+
+# ---------------------------------------------------------------------------------
+# Jobs
+# ---------------------------------------------------------------------------------
+
+# xschem reads the output of a job in `execute_fileevent` and, at its end, keeps the
+# exit status in execute(exitcode,<id>) and the error output in execute(error,last). A
+# job started with a status argument without `1` reports nothing: xschem's default
+# simulator (`$terminal -e {ngspice ...}`) is one, so a terminal that cannot start
+# went unnoticed.
+if {[llength [info commands ::execute_fileevent]]
+    && ![llength [info commands ::cdept::orig::execute_fileevent]]} {
+  rename ::execute_fileevent ::cdept::orig::execute_fileevent
+  proc ::execute_fileevent {id} {
+    global execute
+    set job {}
+    if {[info exists execute(pipe,$id)]} {
+      set job [list $execute(status,$id) $execute(cmd,$id)]
+    }
+    set code [catch {::cdept::orig::execute_fileevent $id} result options]
+    if {$job ne "" && ![info exists execute(pipe,$id)]} {
+      catch {cdept::job_ended $id {*}$job}
+    }
+    return -options $options $result
+  }
+}
+
+# Job `id` ended. `status` and `cmd` as given to `execute`.
+proc cdept::job_ended {id status cmd} {
+  global execute
+  set code [expr {[info exists execute(exitcode,$id)] ? $execute(exitcode,$id) : 0}]
+  set errors [expr {[info exists execute(error,last)] ? $execute(error,last) : ""}]
+  # what Tcl adds to the error output of a job that ended badly is no news
+  regsub -all -line {^(child process exited abnormally|child killed: .*)$} $errors {} errors
+  set errors [string trim $errors]
+  set line "Job $id ended"
+  if {$code != 0} {append line " with exit status $code"}
+  append line ": [join $cmd]"
+  if {$code != 0 && $errors ne ""} {
+    append line "\n" [join [lrange [split $errors \n] 0 9] \n]
+  }
+  if {[have_faketk]} {cdept::say $line} else {puts stderr $line}
+  # A failure nobody would see: xschem only reports when asked to (status 1). Only
+  # with error output: a job that was stopped (Stop, "Terminate selected") has none.
+  if {$code != 0 && ![string match *1* $status] && $errors ne ""
+      && [info exists ::has_x]} {
+    after idle [list cdept::job_failed $cmd $code $errors]
+  }
+}
+
+proc cdept::job_failed {cmd code errors} {
+  if {[string length $errors] > 2000} {
+    set errors "[string range $errors 0 2000]..."
+  }
+  tk_messageBox -icon error -type ok -title {Job failed} \
+    -message "This command ended with exit status $code:\n[join $cmd]" -detail $errors
 }

@@ -3,12 +3,14 @@
 //! A [`Session`] never blocks its caller. Input, sizes, widget events and Tcl commands
 //! are queued and written to the helper by a supervisor thread; frames, widget updates
 //! and replies are read by a second thread and kept until the GUI asks for them
-//! ([`Session::frame`], [`Session::take_updates`], [`Session::take_replies`]). The
+//! ([`Session::frame`], [`Session::take_updates`], [`Session::take_panes`],
+//! [`Session::take_replies`]). The
 //! `wake` callback of the options is called whenever there is something new to show.
 //!
 //! The supervisor starts the helper, loads the file, and starts the helper again when
 //! it stops unexpectedly (see [`Status`]).
 
+use std::collections::HashMap;
 use std::io::BufReader;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -97,6 +99,30 @@ impl FrameView<'_> {
     }
 }
 
+/// A picture pane of a dialog changed (see the protocol documentation): xschem draws a
+/// schematic or symbol into a frame of the dialog `widget` names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaneUpdate {
+    /// New pixels, all of them: `width * 4` bytes per row, R G B A premultiplied.
+    Changed {
+        widget: String,
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    },
+    Gone {
+        widget: String,
+    },
+}
+
+impl PaneUpdate {
+    pub fn widget(&self) -> &str {
+        match self {
+            PaneUpdate::Changed { widget, .. } | PaneUpdate::Gone { widget } => widget,
+        }
+    }
+}
+
 enum Command {
     Resize(u32, u32),
     Input(Input),
@@ -125,6 +151,9 @@ struct State {
     generation: u64,
     damage: Rect,
     updates: Vec<UiUpdate>,
+    /// Files of the picture panes, by widget, with their serial numbers.
+    panes: HashMap<String, (u64, FrameReader)>,
+    pane_updates: Vec<PaneUpdate>,
     replies: Vec<Reply>,
     /// Last size asked for, sent again to a restarted helper.
     size: Option<(u32, u32)>,
@@ -268,6 +297,12 @@ impl Session {
         std::mem::take(&mut self.shared.lock().updates)
     }
 
+    /// Changes of the picture panes since the last call, oldest first; only the last
+    /// one of each pane.
+    pub fn take_panes(&self) -> Vec<PaneUpdate> {
+        std::mem::take(&mut self.shared.lock().pane_updates)
+    }
+
     /// Answers to [`tcl`](Self::tcl) calls received since the last call.
     pub fn take_replies(&self) -> Vec<Reply> {
         std::mem::take(&mut self.shared.lock().replies)
@@ -367,6 +402,17 @@ impl Supervisor {
             // Widgets and answers of the previous helper mean nothing to this one.
             state.updates.clear();
             state.replies.clear();
+            state.panes.clear();
+            // The panes of the old helper are gone with its windows.
+            let old: Vec<String> = state
+                .pane_updates
+                .drain(..)
+                .map(|u| u.widget().into())
+                .collect();
+            state.pane_updates = old
+                .into_iter()
+                .map(|widget| PaneUpdate::Gone { widget })
+                .collect();
             state.xschem_version = Some(xschem_version);
             (state.epoch, state.size)
         };
@@ -457,6 +503,12 @@ fn load_script(file: &Path) -> String {
     format!("xschem load {}", word(&file))
 }
 
+/// Queue a pane update; an older one of the same pane is replaced.
+fn push_pane(queue: &mut Vec<PaneUpdate>, update: PaneUpdate) {
+    queue.retain(|u| u.widget() != update.widget());
+    queue.push(update);
+}
+
 /// Take in one message from the helper (reader thread).
 fn receive(shared: &Shared, epoch: u64, message: Message) {
     let mut state = shared.lock();
@@ -494,6 +546,41 @@ fn receive(shared: &Shared, epoch: u64, message: Message) {
             state.damage = state.damage.union(Rect::new(x, y, width, height));
         }
         Message::Ui { update } => state.updates.push(update),
+        Message::Preview {
+            widget,
+            serial,
+            path,
+            width,
+            height,
+            stride,
+        } => {
+            let known = state.panes.get(&widget).is_some_and(|(s, _)| *s == serial);
+            if !known {
+                match FrameReader::open(Path::new(&path), width, height, stride) {
+                    Ok(reader) => {
+                        state.panes.insert(widget.clone(), (serial, reader));
+                    }
+                    Err(error) => {
+                        tracing::debug!(target: "xschem", "pane {widget}: {error}");
+                        return;
+                    }
+                }
+            }
+            let (_, reader) = &state.panes[&widget];
+            let mut pixels = Vec::new();
+            reader.copy_rect(Rect::new(0, 0, width, height), &mut pixels);
+            let update = PaneUpdate::Changed {
+                widget,
+                width: reader.width(),
+                height: reader.height(),
+                pixels,
+            };
+            push_pane(&mut state.pane_updates, update);
+        }
+        Message::PreviewGone { widget } => {
+            state.panes.remove(&widget);
+            push_pane(&mut state.pane_updates, PaneUpdate::Gone { widget });
+        }
         Message::Reply { id, ok, value } => {
             if id >= INTERNAL_ID {
                 if !ok {
@@ -515,4 +602,81 @@ fn receive(shared: &Shared, epoch: u64, message: Message) {
     }
     drop(state);
     (shared.wake)();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_last_change_of_a_pane_is_kept() {
+        let changed = |widget: &str, width| PaneUpdate::Changed {
+            widget: widget.into(),
+            width,
+            height: 1,
+            pixels: vec![0; width as usize * 4],
+        };
+        let mut queue = Vec::new();
+        push_pane(&mut queue, changed(".a", 1));
+        push_pane(&mut queue, changed(".b", 1));
+        push_pane(&mut queue, changed(".a", 2));
+        assert_eq!(queue, vec![changed(".b", 1), changed(".a", 2)]);
+        push_pane(
+            &mut queue,
+            PaneUpdate::Gone {
+                widget: ".b".into(),
+            },
+        );
+        assert_eq!(queue[0].widget(), ".a");
+        assert_eq!(
+            queue[1],
+            PaneUpdate::Gone {
+                widget: ".b".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_pane_arrives_with_its_pixels() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut file =
+            super::super::frame::FrameWriter::create_named(dir.path(), "preview-1", 2, 2).unwrap();
+        file.pixels_mut()[..4].copy_from_slice(&[1, 2, 3, 255]);
+        let shared = Shared {
+            state: Mutex::new(State::default()),
+            wake: Arc::new(|| {}),
+        };
+        let path = file.path().to_string_lossy().into_owned();
+        let preview = |serial| Message::Preview {
+            widget: ".bk".into(),
+            serial,
+            path: path.clone(),
+            width: 2,
+            height: 2,
+            stride: 8,
+        };
+        receive(&shared, 0, preview(1));
+        let updates = std::mem::take(&mut shared.lock().pane_updates);
+        let [PaneUpdate::Changed { widget, pixels, .. }] = &updates[..] else {
+            panic!("{updates:?}");
+        };
+        assert_eq!(widget, ".bk");
+        assert_eq!(&pixels[..4], &[1, 2, 3, 255]);
+        // Same file, new pixels.
+        file.pixels_mut()[..4].copy_from_slice(&[9, 9, 9, 255]);
+        receive(&shared, 0, preview(1));
+        let updates = std::mem::take(&mut shared.lock().pane_updates);
+        let [PaneUpdate::Changed { pixels, .. }] = &updates[..] else {
+            panic!("{updates:?}");
+        };
+        assert_eq!(&pixels[..4], &[9, 9, 9, 255]);
+        receive(
+            &shared,
+            0,
+            Message::PreviewGone {
+                widget: ".bk".into(),
+            },
+        );
+        assert!(shared.lock().panes.is_empty());
+    }
 }

@@ -329,9 +329,42 @@ impl AppCtx {
         std::mem::take(&mut self.actions)
     }
 
-    /// The `$PDK` environment variable, as set by open_pdks / IIC-OSIC-TOOLS.
+    /// The PDK of the project (`$PDK`): its `technology`, else the environment's.
     pub fn pdk(&self) -> Option<String> {
-        std::env::var("PDK").ok().filter(|s| !s.is_empty())
+        Some(self.project.as_ref()?.pdk.name.as_ref()?.value.clone())
+    }
+
+    /// Where PDKs are installed (`$PDK_ROOT`), resolved the same way.
+    pub fn pdk_root(&self) -> Option<String> {
+        Some(self.project.as_ref()?.pdk.root.as_ref()?.value.clone())
+    }
+
+    /// Save the project's name, description, technology and PDK folder, resolve the PDK
+    /// again and rescan the libraries.
+    pub fn change_settings(&mut self, settings: &libcdept::Settings) -> eyre::Result<()> {
+        let project = self
+            .project
+            .as_mut()
+            .ok_or_else(|| eyre::eyre!("no project is open"))?;
+        let before = project.pdk.clone();
+        project.set_settings(settings)?;
+        log_problems(project);
+        let changed = project.pdk != before;
+        tracing::info!(
+            target: "cdept::project",
+            "project settings saved: PDK {}, PDK_ROOT {}",
+            crate::dialogs::pdk_text(&project.pdk.name),
+            crate::dialogs::pdk_text(&project.pdk.root)
+        );
+        if changed {
+            tracing::warn!(
+                target: "cdept::project",
+                "the PDK changed: reopen the xschem tabs that are open, they still run with the old one"
+            );
+        }
+        self.refresh_links();
+        self.validate_selection();
+        Ok(())
     }
 
     /// Show a modal dialog over the window being built.

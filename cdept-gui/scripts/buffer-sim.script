@@ -1,0 +1,95 @@
+# Simulation and waveform graphs of the embedded xschem, on a COPY of examples/buffer
+# (it writes a netlist, a raw file and a changed schematic into the project).
+#
+#   cdept-gui/scripts/run.sh          runs it (and the other scripts) the right way
+#
+# Needs no simulator: the "simulator" set up here copies a raw file written by the
+# script itself. Exit status 0: every check passed. `$PROJECT` is the project folder.
+
+open bench tb_buf schematic
+wait_frame
+key f
+tcl set netlist_dir $PROJECT/sim; file mkdir $netlist_dir
+
+# A raw file as ngspice writes it in ascii: a pulse on `in`, its inverse on `out`.
+tcl set f [open $PROJECT/source.raw w]; puts $f "Title: t\nDate: d\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 3\nNo. Points: 101\nVariables:\n\t0\ttime\ttime\n\t1\tv(in)\tvoltage\n\t2\tv(out)\tvoltage\nValues:"; for {set i 0} {$i <= 100} {incr i} {set v [expr {($i / 20) % 2 ? 1.8 : 0.0}]; puts $f " $i\t[expr {$i * 1e-10}]\n\t$v\n\t[expr {1.8 - $v}]\n"}; close $f
+
+# Simulation > Configure simulators and tools: the first spice row becomes the copy.
+menu Simulation / Configure simulators and tools
+expect_dialog Simulation Configuration
+dialog_type .sim.topf.f.scrl.center.spice.r.0.cmd cp $PROJECT/source.raw "$n.raw"
+dialog_click Accept, no Save and Close
+tcl_expect 0 set sim(spice,default)
+tcl_expect {cp $PROJECT/source.raw "$n.raw"} set sim(spice,0,cmd)
+
+# Netlist, then Simulate: a background job, read through Tcl file events.
+menu Netlist
+menu Simulate
+wait 1.5
+tcl_expect 1 file exists $netlist_dir/tb_buf.raw
+tcl_expect 0 set execute(exitcode,last)
+menu Simulation / View last job data
+expect_dialog View data
+dialog_click Dismiss
+
+# A job that fails says so (with xschem's defaults it would not).
+tcl set ::saved_cmd $sim(spice,0,cmd); set sim(spice,0,cmd) {sh -c "echo no simulator here >&2; exit 2"}
+menu Simulate
+expect_dialog Job failed
+dialog_click OK
+tcl set sim(spice,0,cmd) $::saved_cmd
+
+# A program that is not there: xschem's own message.
+tcl set sim(spice,0,cmd) {/nonexistent/simulator "$N"}
+menu Simulate
+dialog_click OK
+tcl set sim(spice,0,cmd) $::saved_cmd
+
+# Simulation > Graphs > Add waveform graph: the graph follows the pointer until a
+# click puts it down.
+move 470 520
+menu Simulation / Graphs / Add waveform graph
+click_here
+tcl xschem unselect_all
+tcl_expect graph xschem getprop rect 2 [expr {[xschem get rects 2] - 1}] flags
+tcl set ::g [expr {[xschem get rects 2] - 1}]; list
+
+# The graph dialog (double click in the graph): the raw file, the simulation type and
+# a signal, typed into its fields.
+wait 0.7
+double_click 470 520
+expect_dialog graphdialog
+dialog_type .graphdialog.center.right.rawentry $PROJECT/sim/tb_buf.raw
+dialog_type .graphdialog.center.right.list tran
+dialog_type .graphdialog.center.right.text1 out
+dialog_type .graphdialog.top3.xmax 1e-8
+dialog_click OK
+tcl_expect out xschem getprop rect 2 $::g node
+tcl_expect tran xschem getprop rect 2 $::g sim_type
+tcl_expect 1e-8 xschem getprop rect 2 $::g x2
+tcl_expect 0 winfo exists .graphdialog
+
+# Waves: read the file for the whole schematic, as Waves > Tran does after its file
+# dialog (which a script cannot answer).
+tcl_expect 1 xschem raw_read $netlist_dir/tb_buf.raw tran
+check_picture
+
+# Cursors (keys a and b with the pointer in the graph), zoom (wheel), full zoom (f).
+move 430 520
+key a
+move 510 520
+key b
+tcl_expect 1 expr {[xschem get cursor1_x] < [xschem get cursor2_x]}
+wheel 470 520 down 2
+tcl_expect 1 expr {[xschem getprop rect 2 $::g x2] != 1e-8}
+move 470 520
+key f
+tcl_expect 1 expr {abs([xschem getprop rect 2 $::g x2] - 1e-8) < 1e-12}
+
+# The job list.
+menu Simulation / List running sub-processes
+expect_dialog List of running commands
+dialog_click Dismiss
+
+close
+quit

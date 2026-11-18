@@ -50,6 +50,10 @@ if {[info exists ::cdept::drw(width)]} {
   append XSCHEM_LIBRARY_PATH :$example/libs
   xschem load $example/libs/bench/tb_buf/schematic/tb_buf.sch
   update
+  # a waveform graph, for the graph dialogs
+  xschem set rectcolor 2
+  xschem rect -400 200 400 600 -1 "flags=graph\nnode=\"in\nout\"\ncolor=\"4 5\""
+  set ::sweep_graph [expr {[xschem get rects 2] - 1}]
 }
 
 # --- procedures that build windows ---------------------------------------------
@@ -84,6 +88,11 @@ sweep enter_text {set props {}; set tctx::hsize 0.4; set tctx::vsize 0.4; set tc
 sweep tk_messageBox {tk_messageBox -message hello}
 sweep tk_getOpenFile {tk_getOpenFile}
 sweep tk_chooseColor {tk_chooseColor}
+sweep select_raw select_raw
+if {[info exists ::sweep_graph]} {
+  sweep graph_edit_properties {graph_edit_properties $::sweep_graph}
+  sweep graph_edit_wave {graph_edit_wave $::sweep_graph 1}
+}
 
 # --- every command of the menu bar that neither quits, nor starts programs, nor
 # --- writes files ----------------------------------------------------------------------

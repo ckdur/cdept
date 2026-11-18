@@ -60,8 +60,14 @@ Last updated: 2026-11-18 (embedded xschem: steps 1–4 done, CI green).
       "Netlist to View". Compared with stock xschem: pixel-identical (XSCHEM.md §4, §9).
       Test driver for the real GUI: `cdept gui --script` (GUI-TESTING.md).
 - [x] `[xschem] rc` in `cdept.toml`: the PDK's `xschemrc`. Checked with IHP SG13G2.
-- [ ] `PDK_ROOT` and `PDK` still come from the environment CDePT was started in; they
-      belong in the project's technology setting (Phase 2).
+- [x] `PDK_ROOT` and `PDK` from the project (2026-11-18): `technology` → `PDK`, new
+      optional `pdk_root` → `PDK_ROOT`, environment as fallback; used for `$VAR`
+      expansion and passed to every tool (`Project::tool_env`). `cdept info`, `cdept
+      init --technology --pdk-root`, Project → Project Settings…, PDK in the status bar.
+- [ ] `pdk_root` is machine-specific: a project shared through git needs a per-user
+      override (e.g. a local, uncommitted file) or must leave it to the environment.
+- [ ] Changing the PDK in Project Settings does not restart open xschem tabs (a Console
+      warning says to reopen them). No folder-browse button for the PDK folder.
 - [x] "Make symbol from schematic" writes `<cell>/symbol/<cell>.sym` with its
       `schematic=` link in `cells` libraries (2026-11-18): the helper replaces xschem's
       Tcl procedure `make_symbol`, xschem itself is unchanged. Also `cdept xschem
@@ -73,14 +79,34 @@ Last updated: 2026-11-18 (embedded xschem: steps 1–4 done, CI green).
       moves). Also works on an open symbol with nothing selected. CLI `cdept xschem
       make-schematic <library> <cell> [--force]`. The new schematic has unwired pins,
       so netlisting reports "undriven node" until it is drawn, as in stock xschem.
-- [ ] Preview panes inside xschem's own dialogs; clipboard from the system into
-      xschem's dialogs; scripted input in detached windows; run the native file
-      chooser once by hand.
+- [x] Preview panes inside xschem's own dialogs (file browser, symbol chooser, key
+      cheat sheet), and a Picture column in CDePT's library picker (2026-11-18).
+- [x] Clipboard from the system into xschem: Ctrl+V and middle-click (primary) in
+      dialog fields, Tcl `clipboard get` / `selection get` see the system clipboard.
+      Not tested on Wayland without Xwayland.
+- [ ] Scripted input in detached windows; run the native file chooser once by hand
+      (also Waves → Tran/Op and the graph's "Raw file:" button use it).
 - [x] Let CI run: with `fonts-dejavu-core` the helper's drawing tests pass (CI run of
       fd11b7b, 2026-11-18).
-- [ ] Step 5 leftovers: graph and simulation dialogs by hand, packaging in asic-all,
-      install layout (`share/cdept-xschem`), JPEG needs `libjpeg-dev` at build time
-      (optional).
+- [x] Simulation and graphs checked with ngspice 47 and the IHP PDK (2026-11-18):
+      simulator setup, netlist, simulate (background and foreground), jobs, waveforms,
+      graph dialog, cursors, zoom. Fixed four bugs; a failed job now shows "Job failed"
+      and a Console line. Tests without ngspice (`t_sim.tcl`, `buffer-sim.script`).
+- [x] Dialogs size to their content, button rows stay visible; the helper no longer
+      passes its made-up `DISPLAY=:0` to programs it starts.
+- [ ] Graph dialog "Del" removes the signal under the text cursor, which CDePT does not
+      report to xschem; edit the list text instead.
+- [ ] With the IHP benches use "Ngspice Control mode": batch mode (`-r $n.raw`) deletes
+      the raw file their `.control` block writes (xschem/ngspice, not CDePT). The IHP
+      `xschemrc` sets `netlist_dir` to `$PWD/simulations`, so it depends on where CDePT
+      was started.
+- [x] Install layout (2026-11-18): `scripts/install.sh --prefix P [--destdir D]` →
+      `bin/cdept`, `bin/cdept-xschem`, `share/cdept-xschem/`; CI runs it as a smoke
+      test. `libjpeg-dev` installed in CI (JPEG stays optional).
+- [ ] asic-all: entry drafted in `bouquet_assembler/tool_library.yaml` and
+      `asic-all.yaml` (centerstage repo, uncommitted), not built: the image has no Rust
+      toolchain and the cdept repo is private (needs credentials; the gitlab mirror
+      path in the entry is a guess).
 - [ ] Try it by hand: first session by the user on 2026-11-18 found four problems, all
       fixed the same day (below). Keep trying: graph/simulation dialogs, detached
       windows, the native file chooser.
@@ -98,7 +124,7 @@ Last updated: 2026-11-18 (embedded xschem: steps 1–4 done, CI green).
       menu is merged, so nobody found it.
 
 ### Smaller gaps left in what exists
-- [ ] Edit project fields (name, description, technology) from the GUI; today by hand.
+- [x] Edit project fields (name, description, technology, PDK folder) from the GUI.
 - [ ] Edit or remove libraries that come from an `include` file; today the GUI refuses.
 - [ ] Change a library definition (path, read-only, layout) from the GUI; today remove
       and add again, or edit `cdept.toml`.
@@ -155,9 +181,9 @@ Last updated: 2026-11-18 (embedded xschem: steps 1–4 done, CI green).
 - **Rename and copy leave stale references.** Until item 3 above, renaming a cell that
   others instantiate breaks those schematics, and a renamed layout keeps its old
   structure name inside the GDS.
-- **Variables missing in the GUI's environment.** `$PDK_ROOT` set in a shell rc is not
-  set when the app starts from a desktop launcher; such libraries show an error. Phase 2
-  should resolve PDK paths from the technology instead of the environment.
+- **Variables missing in the GUI's environment.** Solved for `PDK_ROOT`/`PDK` when the
+  project sets `technology` and `pdk_root`; any other `$VAR` in `cdept.toml` still comes
+  from the environment the app was started in.
 
 - **Embedded xschem (see XSCHEM.md §5).** The helper is GPL-2.0-or-later; `libcdept`,
   `cdept-gui` and `cdept` must never depend on the `cdept-xschem` crate, only start the

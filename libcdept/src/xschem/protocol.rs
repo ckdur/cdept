@@ -16,6 +16,13 @@
 //! new file (after a resize); a file is never resized. [`Message::Damage`] says which
 //! rectangle of it changed. See [`super::frame`].
 //!
+//! **Picture panes.** Some of xschem's dialogs show a schematic or symbol that the C
+//! code draws into a frame of the dialog (xschem's `preview_window`). Each such pane
+//! is a file of its own, laid out like the drawing window: [`Message::Preview`] names
+//! it and is sent again whenever its pixels changed (panes are small: the receiver
+//! copies all of it); [`Message::PreviewGone`] when the pane is gone. CDePT reports the
+//! size it shows a pane at with [`UiEvent::Configure`].
+//!
 //! **Widgets.** xschem's menus, tool bar, status bar and dialogs are written in Tcl/Tk.
 //! The helper has no Tk: a stand-in written in Tcl (`shim/tcl/faketk.tcl`) records
 //! what xschem's code creates and reports it as [`UiUpdate`]s; CDePT draws them with
@@ -30,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use super::input::Input;
 
 /// Bumped on incompatible changes. Both sides must agree.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// CDePT → helper.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +86,19 @@ pub enum Message {
     },
     /// A menu, the tool bar, the status bar or a dialog changed.
     Ui { update: UiUpdate },
+    /// The picture pane of the widget `widget` (Tk path) is the file `path`, laid out
+    /// like a frame, and its pixels changed. `serial` changes when the file does (a
+    /// new size); the same `serial` again means: same file, new pixels.
+    Preview {
+        widget: String,
+        serial: u64,
+        path: String,
+        width: u32,
+        height: u32,
+        stride: u32,
+    },
+    /// The picture pane of the widget `widget` is gone.
+    PreviewGone { widget: String },
 }
 
 fn yes() -> bool {
@@ -292,6 +312,18 @@ pub enum UiEvent {
     Focus { path: String },
     /// The close button of a top-level window.
     Close { path: String },
+    /// A picture pane (see [`Message::Preview`]) is shown at this size, in pixels: the
+    /// widget's window gets it and xschem draws again (Tk's `<Configure>`).
+    Configure {
+        path: String,
+        width: u32,
+        height: u32,
+    },
+    /// The text of the desktop's clipboard (`selection` `CLIPBOARD`) or of its primary
+    /// selection (`PRIMARY`, the text last selected, pasted with the middle button),
+    /// for Tcl's `clipboard get` and `selection get`. CDePT sends it when it may have
+    /// changed (the window got the focus back, a dialog opened, a paste).
+    Clipboard { selection: String, text: String },
 }
 
 /// Write one message as a line and flush.
@@ -366,11 +398,46 @@ mod tests {
                     index: 3,
                 },
             },
+            Request::Ui {
+                event: UiEvent::Configure {
+                    path: ".load.l.paneright.draw".into(),
+                    width: 330,
+                    height: 210,
+                },
+            },
+            Request::Ui {
+                event: UiEvent::Clipboard {
+                    selection: "PRIMARY".into(),
+                    text: "two\nlines".into(),
+                },
+            },
         ] {
             let mut wire = Vec::new();
             write_message(&mut wire, &request).unwrap();
             let back: Option<Request> = read_message(&mut wire.as_slice()).unwrap();
             assert_eq!(back, Some(request));
+        }
+    }
+
+    #[test]
+    fn picture_panes_read_back() {
+        for message in [
+            Message::Preview {
+                widget: ".bk".into(),
+                serial: 2,
+                path: "/run/x/preview-2".into(),
+                width: 400,
+                height: 300,
+                stride: 1600,
+            },
+            Message::PreviewGone {
+                widget: ".bk".into(),
+            },
+        ] {
+            let mut wire = Vec::new();
+            write_message(&mut wire, &message).unwrap();
+            let back: Option<Message> = read_message(&mut wire.as_slice()).unwrap();
+            assert_eq!(back, Some(message));
         }
     }
 

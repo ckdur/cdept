@@ -6,6 +6,7 @@
  */
 #include "xschem.h"
 #include "cdx.h"
+#include "xs_internal.h"
 
 /* xschem's srand() calls arrive here (see xschem_config.h): the seed it asks for,
  * made different for every process and moment. */
@@ -72,6 +73,7 @@ int cdx_init(int argc, char **argv, int display)
   Tcl_SetVar(interp, "::cdept::starting", "1", TCL_GLOBAL_ONLY);
   status = Tcl_AppInit(interp);
   Tcl_SetVar(interp, "::cdept::starting", "0", TCL_GLOBAL_ONLY);
+  if(display) xs_after_start();
   return status;
 }
 

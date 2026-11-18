@@ -45,6 +45,7 @@ impl EngineOptions {
         EngineOptions {
             startup: Some(setup::startup_script(project)),
             cwd: Some(project.root.clone()),
+            env: project.tool_env(),
             ..Default::default()
         }
     }

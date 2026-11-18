@@ -871,9 +871,14 @@ impl CdeptApp {
                     ui.ctx().copy_text(project.file.display().to_string());
                 }
                 ui.separator();
-                for item in ["Settings…", "Technology…"] {
-                    ui.add_enabled(false, Button::new(item))
-                        .on_disabled_hover_text("Arrives in Phase 2");
+                if ui
+                    .add_enabled(open, Button::new("Project Settings…"))
+                    .on_hover_text("Name, description, technology (PDK) and PDK folder")
+                    .clicked()
+                    && let Some(project) = &self.ctx.project
+                {
+                    let dialog = Dialog::project_settings(project);
+                    self.ctx.open_dialog(dialog);
                 }
             });
 
@@ -1007,12 +1012,7 @@ impl CdeptApp {
                 None => ui.weak("📁 No project"),
             };
             ui.separator();
-            match self.ctx.pdk() {
-                Some(pdk) => ui.label(format!("PDK: {pdk}")),
-                None => ui
-                    .weak("PDK: none")
-                    .on_hover_text("Set $PDK, or choose a technology in Phase 2"),
-            };
+            pdk_label(ui, &self.ctx);
             ui.separator();
             for name in LAUNCHERS {
                 let hover = match self.ctx.tools.find(name) {
@@ -1047,10 +1047,10 @@ impl CdeptApp {
                 }
             };
             ui.separator();
-            ui.label(format!(
-                "PDK: {}",
-                self.ctx.pdk().unwrap_or_else(|| "none".into())
-            ));
+            pdk_label(ui, &self.ctx);
+            if let Some(root) = self.ctx.pdk_root() {
+                ui.weak(format!("in {root}"));
+            }
             ui.separator();
             ui.label("Jobs: 0");
             ui.separator();
@@ -1234,6 +1234,23 @@ impl eframe::App for CdeptApp {
         eframe::set_value(storage, LAYOUT_KEY, &self.layout);
         eframe::set_value(storage, SETTINGS_KEY, &self.ctx.settings);
     }
+}
+
+/// "PDK: name" with the folder and where both come from as the tooltip.
+fn pdk_label(ui: &mut Ui, ctx: &AppCtx) {
+    let Some(project) = &ctx.project else {
+        ui.weak("PDK: none");
+        return;
+    };
+    let tip = format!(
+        "PDK: {}\nPDK_ROOT: {}\nChange them in Project > Project Settings…",
+        crate::dialogs::pdk_text(&project.pdk.name),
+        crate::dialogs::pdk_text(&project.pdk.root)
+    );
+    match ctx.pdk() {
+        Some(pdk) => ui.label(format!("PDK: {pdk}")).on_hover_text(tip),
+        None => ui.weak("PDK: none").on_hover_text(tip),
+    };
 }
 
 #[cfg(test)]

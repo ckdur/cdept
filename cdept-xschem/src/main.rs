@@ -10,7 +10,7 @@
 //! of the drawing window that changed is copied to the shared frame.
 
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
@@ -19,7 +19,7 @@ use std::process::ExitCode;
 use std::rc::Rc;
 
 use cdept_xschem::start::{self, StartOptions};
-use cdept_xschem::xschem::{self, Xschem};
+use cdept_xschem::xschem::{self, Pane, Xschem};
 use libcdept::xschem::frame::{FrameWriter, Rect};
 use libcdept::xschem::protocol::{self, Message, PROTOCOL_VERSION, Request, UiEvent, UiUpdate};
 use libcdept::xschem::tcl;
@@ -29,6 +29,7 @@ cdept-xschem: xschem engine for CDePT (started by cdept, not by hand)
 
 Usage: cdept-xschem --connect <socket> [options]
        cdept-xschem --version
+       cdept-xschem --print-sharedir [--sharedir <folder>]
 
   --connect <socket>   Unix socket CDePT listens on
   --rcfile <file>      start-up file (Tcl) to read instead of the user's xschemrc
@@ -87,6 +88,16 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Option<Args>, St
                 );
                 return Ok(None);
             }
+            "--print-sharedir" => {
+                // Where the runtime files are found (used by the install script).
+                return match start::find_sharedir(sharedir.as_deref()) {
+                    Ok(dir) => {
+                        println!("{}", dir.display());
+                        Ok(None)
+                    }
+                    Err(error) => Err(error),
+                };
+            }
             "-h" | "--help" => {
                 print!("{USAGE}");
                 return Ok(None);
@@ -123,6 +134,9 @@ struct Helper {
     frame_dir: Option<PathBuf>,
     frame: RefCell<Option<FrameWriter>>,
     serial: Cell<u64>,
+    /// Files of the picture panes of dialogs, by Tk path, with their serial numbers.
+    previews: RefCell<HashMap<String, (u64, FrameWriter)>>,
+    preview_serial: Cell<u64>,
 }
 
 impl Helper {
@@ -136,6 +150,9 @@ impl Helper {
     fn exit(&self) -> ! {
         if let Some(frame) = self.frame.borrow().as_ref() {
             frame.unlink();
+        }
+        for (_, file) in self.previews.borrow().values() {
+            file.unlink();
         }
         let _ = self.xschem.eval("exit 0");
         std::process::exit(0)
@@ -267,11 +284,81 @@ impl Helper {
         }
     }
 
-    /// Copy what changed in the drawing window to the frame and tell CDePT.
+    /// Copy what changed in the drawing window and in the picture panes to their
+    /// files and tell CDePT.
     fn present(&self) {
         if self.frame_dir.is_none() {
             return;
         }
+        self.present_drawing();
+        self.present_previews();
+    }
+
+    /// The picture panes of dialogs: a file for each new one (or new size), the pixels
+    /// copied whenever they changed (all of them: panes are small).
+    fn present_previews(&self) {
+        let Some(dir) = &self.frame_dir else {
+            return;
+        };
+        let panes = self.xschem.previews();
+        let mut files = self.previews.borrow_mut();
+        let gone: Vec<String> = files
+            .keys()
+            .filter(|path| !panes.iter().any(|pane| &pane.path == *path))
+            .cloned()
+            .collect();
+        for widget in gone {
+            if let Some((_, file)) = files.remove(&widget) {
+                file.unlink();
+            }
+            self.send(&Message::PreviewGone { widget });
+        }
+        for pane in &panes {
+            let fits = files
+                .get(&pane.path)
+                .is_some_and(|(_, f)| f.width() == pane.width && f.height() == pane.height);
+            if fits && !pane.changed {
+                continue;
+            }
+            if !fits {
+                let serial = self.preview_serial.get() + 1;
+                self.preview_serial.set(serial);
+                let name = format!("preview-{serial}");
+                match FrameWriter::create_named(dir, &name, pane.width, pane.height) {
+                    Ok(file) => {
+                        if let Some((_, old)) = files.insert(pane.path.clone(), (serial, file)) {
+                            old.unlink();
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "cdept-xschem: cannot create a file for {}: {error}",
+                            pane.path
+                        );
+                        continue;
+                    }
+                }
+            }
+            let (serial, file) = files.get_mut(&pane.path).expect("just made");
+            self.copy_pane(pane, file);
+            self.send(&Message::Preview {
+                widget: pane.path.clone(),
+                serial: *serial,
+                path: file.path().to_string_lossy().into_owned(),
+                width: pane.width,
+                height: pane.height,
+                stride: file.stride(),
+            });
+        }
+    }
+
+    fn copy_pane(&self, pane: &Pane, file: &mut FrameWriter) {
+        let stride = file.stride();
+        self.xschem.read_preview(pane, file.pixels_mut(), stride);
+    }
+
+    /// Copy what changed in the drawing window to the frame and tell CDePT.
+    fn present_drawing(&self) {
         let Some((width, height)) = self.xschem.display_size() else {
             return;
         };
@@ -341,6 +428,14 @@ fn ui_event_script(event: &UiEvent) -> String {
         UiEvent::Key { path, key } => format!("faketk::event key {} {}", q(path), q(key)),
         UiEvent::Focus { path } => format!("faketk::event focus {}", q(path)),
         UiEvent::Close { path } => format!("faketk::event close {}", q(path)),
+        UiEvent::Configure {
+            path,
+            width,
+            height,
+        } => format!("faketk::event configure {} {width} {height}", q(path)),
+        UiEvent::Clipboard { selection, text } => {
+            format!("faketk::event clipboard {} {}", q(selection), q(text))
+        }
     }
 }
 
@@ -389,6 +484,8 @@ fn run(args: Args) -> Result<(), String> {
         frame_dir: args.display.then_some(args.frame_dir).flatten(),
         frame: RefCell::new(None),
         serial: Cell::new(0),
+        previews: RefCell::new(HashMap::new()),
+        preview_serial: Cell::new(0),
     });
     {
         let helper = helper.clone();

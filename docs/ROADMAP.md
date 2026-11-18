@@ -65,7 +65,7 @@ libraries. CDePT edits it in place and keeps comments and formatting.
 # myproject/cdept.toml
 name = "sar_adc"
 description = "10-bit SAR ADC"
-technology = "ihp-sg13g2"                      # used from Phase 2 on
+technology = "ihp-sg13g2"                      # the PDK name ($PDK); optional pdk_root = "…" is $PDK_ROOT
 
 include = ["../shared/libraries.toml"]         # more definitions (same keys), optional
 

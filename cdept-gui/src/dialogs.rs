@@ -9,7 +9,7 @@ use std::path::Path;
 use egui::{Context, Id, Key, RichText, Ui};
 use eyre::{Result, eyre};
 use libcdept::xschem::symbol::Unlinked;
-use libcdept::{AddLibrary, Library, LibraryLayout, Project, Template};
+use libcdept::{AddLibrary, Library, LibraryLayout, Project, Settings, Template};
 
 use crate::state::{AppCtx, Selection, is_foreign};
 
@@ -63,6 +63,8 @@ pub enum Dialog {
         cell: String,
         view: String,
     },
+    /// Name, description, technology and PDK folder of the project.
+    ProjectSettings(Settings),
     /// Write the expected `schematic=` into the broken symbols of a library.
     FixLinks {
         library: String,
@@ -72,6 +74,15 @@ pub enum Dialog {
 }
 
 impl Dialog {
+    pub fn project_settings(project: &Project) -> Self {
+        Self::ProjectSettings(Settings {
+            name: project.name.clone(),
+            description: project.description.clone().unwrap_or_default(),
+            technology: project.technology.clone().unwrap_or_default(),
+            pdk_root: project.pdk_root.clone().unwrap_or_default(),
+        })
+    }
+
     pub fn new_library() -> Self {
         Self::NewLibrary {
             name: String::new(),
@@ -136,6 +147,7 @@ impl Dialog {
             Self::CopyCell { .. } => "Copy Cell",
             Self::DeleteCell { .. } => "Delete Cell",
             Self::DeleteView { .. } => "Delete View",
+            Self::ProjectSettings(_) => "Project Settings",
             Self::FixLinks { .. } => "Fix Schematic Links",
         }
     }
@@ -150,6 +162,7 @@ impl Dialog {
             Self::CopyCell { .. } => "Copy",
             Self::DeleteCell { .. } | Self::DeleteView { .. } => "Delete",
             Self::FixLinks { .. } => "Fix",
+            Self::ProjectSettings(_) => "Save",
         }
     }
 }
@@ -293,6 +306,26 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
         }
         Dialog::Error(message) => {
             ui.label(message.as_str());
+        }
+        Dialog::ProjectSettings(settings) => {
+            grid.show(ui, |ui| {
+                field(ui, "Name", &mut settings.name);
+                field(ui, "Description", &mut settings.description);
+                field(ui, "Technology", &mut settings.technology);
+                field(ui, "PDK folder", &mut settings.pdk_root);
+            });
+            ui.small(
+                "Technology is the PDK name ($PDK), e.g. ihp-sg13g2. PDK folder is where PDKs \
+                 are installed ($PDK_ROOT), relative to the project file; $VAR and ~ are \
+                 expanded. Left empty, they come from the environment CDePT was started in.",
+            );
+            if let Some(project) = project {
+                ui.small(format!(
+                    "In use now: PDK {}, PDK_ROOT {}",
+                    pdk_text(&project.pdk.name),
+                    pdk_text(&project.pdk.root)
+                ));
+            }
         }
         Dialog::NewLibrary {
             name,
@@ -450,9 +483,20 @@ fn fixable_links<'a>(links: &'a [Unlinked], library: &str, foreign: bool) -> Vec
         .collect()
 }
 
+/// A resolved PDK value with its source, for display.
+pub(crate) fn pdk_text(value: &Option<libcdept::Resolved>) -> String {
+    match value {
+        Some(r) => format!("{} ({})", r.value, r.source.name()),
+        None => "not set".into(),
+    }
+}
+
 fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
     if matches!(dialog, Dialog::Error(_)) {
         return Ok(());
+    }
+    if let Dialog::ProjectSettings(settings) = dialog {
+        return app.change_settings(settings);
     }
     if let Dialog::FixLinks { library, foreign } = dialog {
         let items: Vec<Unlinked> = fixable_links(&app.links, library, *foreign)
@@ -481,7 +525,7 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
     };
     const TARGET: &str = "cdept::library";
     let selection = match dialog {
-        Dialog::Error(_) | Dialog::FixLinks { .. } => return Ok(()),
+        Dialog::Error(_) | Dialog::FixLinks { .. } | Dialog::ProjectSettings(_) => return Ok(()),
         Dialog::NewLibrary { name, path, .. } => {
             let options = AddLibrary {
                 create: true,
@@ -646,6 +690,31 @@ mod tests {
         assert!(is_foreign(&app.links[0]));
         confirm(&mut app, fix(true)).unwrap();
         assert!(app.links.is_empty());
+    }
+
+    #[test]
+    fn project_settings_set_the_pdk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = app(tmp.path());
+        let Dialog::ProjectSettings(mut settings) =
+            Dialog::project_settings(app.project.as_ref().unwrap())
+        else {
+            unreachable!()
+        };
+        assert_eq!(settings.name, "demo");
+        settings.technology = "ihp-sg13g2".into();
+        settings.pdk_root = "/opt/ext/OpenPDKs".into();
+        confirm(&mut app, Dialog::ProjectSettings(settings)).unwrap();
+        let project = app.project.as_ref().unwrap();
+        assert_eq!(app.pdk().as_deref(), Some("ihp-sg13g2"));
+        assert_eq!(app.pdk_root().as_deref(), Some("/opt/ext/OpenPDKs"));
+        // The libraries survive the edit.
+        assert_eq!(project.libraries.len(), 3);
+        assert!(
+            fs::read_to_string(&project.file)
+                .unwrap()
+                .contains("analog = \"libs/analog\"")
+        );
     }
 
     #[test]

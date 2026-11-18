@@ -1,5 +1,8 @@
 //! The pixels of xschem's drawing window, shared between the helper and CDePT.
 //!
+//! The picture panes of dialogs (xschem's previews) travel the same way, one file
+//! each (see `protocol`).
+//!
 //! A frame is a file both programs map into memory: `height` rows of `stride` bytes,
 //! four bytes per pixel in the order R G B A, alpha premultiplied. The helper writes
 //! it ([`FrameWriter`]) and says which rectangle changed; CDePT copies that rectangle
@@ -93,9 +96,20 @@ pub struct FrameWriter {
 impl FrameWriter {
     /// Create the frame file `frame-<serial>` in `dir`, all transparent black.
     pub fn create(dir: &Path, serial: u64, width: u32, height: u32) -> io::Result<FrameWriter> {
+        Self::create_named(dir, &format!("frame-{serial}"), width, height)
+    }
+
+    /// Create the frame file `name` in `dir` (a file that must not exist yet), all
+    /// transparent black. Picture panes use this with names of their own.
+    pub fn create_named(
+        dir: &Path,
+        name: &str,
+        width: u32,
+        height: u32,
+    ) -> io::Result<FrameWriter> {
         check_size(width, height)?;
         let stride = width * BYTES_PER_PIXEL;
-        let path = dir.join(format!("frame-{serial}"));
+        let path = dir.join(name);
         let file = OpenOptions::new()
             .read(true)
             .write(true)

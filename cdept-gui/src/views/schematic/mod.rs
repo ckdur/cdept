@@ -5,6 +5,7 @@
 //! mouse and the keyboard the way X11 would, and draws xschem's own menus, tool bar,
 //! status bar and dialogs with egui widgets ([`mirror`]).
 
+mod clipboard;
 mod keys;
 mod mirror;
 mod picker;
@@ -22,6 +23,7 @@ use libcdept::xschem::session::Reply;
 use libcdept::xschem::{EngineOptions, NetlistFormat, Session, SessionOptions, Status};
 use libcdept::xschem::{frame, tcl};
 
+pub use self::clipboard::pretend as pretend_clipboard;
 use self::mirror::Mirror;
 pub use self::picture::Picture;
 use super::{EditAction, EditCaps, View};
@@ -192,6 +194,8 @@ pub struct SchematicView {
     selection_asked: Option<u64>,
     /// A "save as" is under way: the request whose answer says xschem is done with it.
     saving_as: Option<u64>,
+    /// What xschem knows of the desktop's clipboard.
+    clipboard: clipboard::ClipboardSync,
 }
 
 impl SchematicView {
@@ -230,6 +234,7 @@ impl SchematicView {
             selection_stale: false,
             selection_asked: None,
             saving_as: None,
+            clipboard: clipboard::ClipboardSync::default(),
         }
     }
 
@@ -503,6 +508,12 @@ impl SchematicView {
         found
     }
 
+    /// The picture pane of the widget at `path` in a dialog: its size in pixels, the
+    /// size asked for, and how many colours it has (counted up to 16).
+    pub fn dialog_pane(&self, path: &str) -> Option<([u32; 2], Option<[u32; 2]>, usize)> {
+        self.mirror.pane_info(path)
+    }
+
     /// Titles of the open dialogs.
     pub fn dialog_titles(&self) -> Vec<String> {
         self.mirror
@@ -524,6 +535,7 @@ impl SchematicView {
             self.selection = None;
             self.selection_asked = None;
             self.closing = None;
+            self.clipboard.forget();
             // Which of CDePT's procedures this helper has.
             let ask = "list [llength [info commands ::cdept::close]] \
                        [llength [info commands ::cdept::selection]]";
@@ -534,6 +546,37 @@ impl SchematicView {
         }
         for update in self.session.take_updates() {
             self.mirror.apply(update, ctx);
+        }
+        for update in self.session.take_panes() {
+            self.mirror.apply_pane(update, ctx);
+        }
+        // xschem's Tcl may ask for the desktop's clipboard (`clipboard get`) and its
+        // dialogs paste it: tell it what the clipboard holds whenever that may have
+        // changed: a dialog opened, the window got the keyboard back.
+        let focus_back = ctx.input(|i| {
+            i.events
+                .iter()
+                .any(|e| matches!(e, Event::WindowFocused(true)))
+        });
+        if self.mirror.take_opened_window() || focus_back {
+            self.clipboard.refresh(ctx);
+        }
+        let pasted: Vec<String> = ctx.input(|i| {
+            i.events
+                .iter()
+                .filter_map(|e| match e {
+                    Event::Paste(text) if !text.is_empty() => Some(text.clone()),
+                    _ => None,
+                })
+                .collect()
+        });
+        let mut news: Vec<UiEvent> = pasted
+            .iter()
+            .filter_map(|text| self.clipboard.pasted(text))
+            .collect();
+        news.extend(self.clipboard.poll(ctx));
+        for event in news {
+            self.send(event);
         }
         self.replies.extend(self.session.take_replies());
 
@@ -878,9 +921,16 @@ impl View for SchematicView {
 
         let salt = egui::Id::new(("xschem", self.id));
         let mut events = self.mirror.popup(ui, salt, self.pointer);
+        // The library picker shows the view chosen, as the Inspector does.
+        let (project, engines) = (ctx.project.as_ref(), &mut ctx.engines);
+        let mut picture = |ui: &mut Ui, file: &Path| {
+            if let Some(project) = project {
+                engines.picker_preview(ui, project, file);
+            }
+        };
         events.extend(
             self.mirror
-                .windows(ui.ctx(), salt, area, ctx.project.as_ref()),
+                .windows(ui.ctx(), salt, area, project, &mut picture),
         );
         for event in events {
             self.send(event);

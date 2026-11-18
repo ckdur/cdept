@@ -73,4 +73,19 @@ int cdx_display_take_damage_list(int *rects, int max);
  * inside the window. */
 void cdx_display_read(unsigned char *dst, int dst_stride, int x, int y, int width, int height);
 
+/* ---- picture panes in dialogs (display.c) ---- */
+
+/* Some of xschem's dialogs show a schematic or symbol in a pane of their own: C draws
+ * into the window of a Tk frame (xschem's preview_window()). The windows that exist
+ * now are listed by cdx_preview_list(), which returns how many; the others take an
+ * index below that, valid until the next call of cdx_preview_list() or into Tcl. */
+int cdx_preview_list(void);
+
+/* Tk path of the pane, its size, and whether its pixels changed since the last call
+ * (calling this clears that). NULL for a bad index. */
+const char *cdx_preview_info(int index, int *width, int *height, int *changed);
+
+/* Copy all of the pane's pixels, as cdx_display_read() does. */
+void cdx_preview_read(int index, unsigned char *dst, int dst_stride);
+
 #endif /* CDX_H */

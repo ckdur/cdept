@@ -266,9 +266,10 @@ int cdx_display_take_damage_list(int *rects, int max)
   return xs_take_damage_list(win, rects, max);
 }
 
-void cdx_display_read(unsigned char *dst, int dst_stride, int x, int y, int width, int height)
+/* Copy a rectangle of a window as R G B A bytes (see cdx_display_read()). */
+static void read_window(xs_drawable *win, unsigned char *dst, int dst_stride, int x, int y,
+    int width, int height)
 {
-  xs_drawable *win = drawing_window();
   const unsigned char *data;
   int row, col, stride;
 
@@ -293,6 +294,45 @@ void cdx_display_read(unsigned char *dst, int dst_stride, int x, int y, int widt
   }
 }
 
+void cdx_display_read(unsigned char *dst, int dst_stride, int x, int y, int width, int height)
+{
+  read_window(drawing_window(), dst, dst_stride, x, y, width, height);
+}
+
+/* ---- picture panes in dialogs -------------------------------------------------------------- */
+
+#define MAX_PREVIEWS 16
+
+static const char *preview_paths[MAX_PREVIEWS];
+static xs_drawable *preview_wins[MAX_PREVIEWS];
+static int npreviews = 0;
+
+int cdx_preview_list(void)
+{
+  npreviews = has_x ? xs_preview_windows(preview_paths, preview_wins, MAX_PREVIEWS) : 0;
+  return npreviews;
+}
+
+const char *cdx_preview_info(int index, int *width, int *height, int *changed)
+{
+  xs_drawable *win;
+  int x, y, w, h;
+  if(index < 0 || index >= npreviews) return NULL;
+  win = preview_wins[index];
+  *width = win->width;
+  *height = win->height;
+  *changed = xs_take_damage(win, &x, &y, &w, &h);
+  return preview_paths[index];
+}
+
+void cdx_preview_read(int index, unsigned char *dst, int dst_stride)
+{
+  xs_drawable *win;
+  if(index < 0 || index >= npreviews) return;
+  win = preview_wins[index];
+  read_window(win, dst, dst_stride, 0, 0, win->width, win->height);
+}
+
 /* ---- Tcl commands for tests ---------------------------------------------------------------- */
 
 static int ints_from(Tcl_Interp *ip, int objc, Tcl_Obj *const objv[], long *values, int n,
@@ -309,18 +349,20 @@ static int ints_from(Tcl_Interp *ip, int objc, Tcl_Obj *const objv[], long *valu
   return TCL_OK;
 }
 
-/* cdept::png file: write the drawing window as a PNG image. */
+/* cdept::png file ?path?: write the drawing window, or the window of the Tk widget
+ * `path` (a picture pane), as a PNG image. */
 static int png_command(ClientData data, Tcl_Interp *ip, int objc, Tcl_Obj *const objv[])
 {
-  xs_drawable *win = drawing_window();
+  xs_drawable *win;
   cairo_status_t status;
   (void)data;
-  if(objc != 2) {
-    Tcl_WrongNumArgs(ip, 1, objv, "file");
+  if(objc != 2 && objc != 3) {
+    Tcl_WrongNumArgs(ip, 1, objv, "file ?path?");
     return TCL_ERROR;
   }
+  win = objc == 3 ? xs_window_of_path(Tcl_GetString(objv[2])) : drawing_window();
   if(!win || !win->surface) {
-    Tcl_SetResult(ip, "there is no drawing window", TCL_STATIC);
+    Tcl_SetResult(ip, "there is no such window", TCL_STATIC);
     return TCL_ERROR;
   }
   cairo_surface_flush(win->surface);
@@ -329,6 +371,89 @@ static int png_command(ClientData data, Tcl_Interp *ip, int objc, Tcl_Obj *const
     Tcl_SetResult(ip, (char *)cairo_status_to_string(status), TCL_VOLATILE);
     return TCL_ERROR;
   }
+  return TCL_OK;
+}
+
+/* cdept::colours ?path?: how many different colours the drawing window (or the
+ * window of the Tk widget `path`) shows, counted up to 64. Lets tests tell a picture
+ * from an empty window. */
+static int colours_command(ClientData data, Tcl_Interp *ip, int objc, Tcl_Obj *const objv[])
+{
+  unsigned int seen[64];
+  int nseen = 0, x, y, i, stride;
+  const unsigned char *pixels;
+  xs_drawable *win;
+  (void)data;
+  if(objc != 1 && objc != 2) {
+    Tcl_WrongNumArgs(ip, 1, objv, "?path?");
+    return TCL_ERROR;
+  }
+  win = objc == 2 ? xs_window_of_path(Tcl_GetString(objv[1])) : drawing_window();
+  if(!win || !win->surface) {
+    Tcl_SetResult(ip, "there is no such window", TCL_STATIC);
+    return TCL_ERROR;
+  }
+  cairo_surface_flush(win->surface);
+  pixels = cairo_image_surface_get_data(win->surface);
+  stride = cairo_image_surface_get_stride(win->surface);
+  for(y = 0; y < win->height && nseen < 64; ++y) {
+    const unsigned int *row = (const unsigned int *)(const void *)(pixels + (size_t)y * (size_t)stride);
+    for(x = 0; x < win->width && nseen < 64; ++x) {
+      for(i = 0; i < nseen; ++i) if(seen[i] == row[x]) break;
+      if(i == nseen) seen[nseen++] = row[x];
+    }
+  }
+  Tcl_SetObjResult(ip, Tcl_NewIntObj(nseen));
+  return TCL_OK;
+}
+
+/* cdept::window_resize path width height: the window of the Tk widget `path` (a
+ * picture pane) has this size now. Its pixels start black; the Tcl side then runs the
+ * widget's <Configure> bindings, through which xschem redraws. Returns 1 if there is
+ * such a window, 0 if C has not made one (yet). */
+static int window_resize_command(ClientData data, Tcl_Interp *ip, int objc,
+    Tcl_Obj *const objv[])
+{
+  int width, height;
+  xs_drawable *win;
+  (void)data;
+  if(objc != 4) {
+    Tcl_WrongNumArgs(ip, 1, objv, "path width height");
+    return TCL_ERROR;
+  }
+  if(Tcl_GetIntFromObj(ip, objv[2], &width) != TCL_OK ||
+     Tcl_GetIntFromObj(ip, objv[3], &height) != TCL_OK) return TCL_ERROR;
+  if(width < 1 || height < 1 || width > 16384 || height > 16384) {
+    Tcl_SetResult(ip, "bad window size", TCL_STATIC);
+    return TCL_ERROR;
+  }
+  win = xs_window_of_path(Tcl_GetString(objv[1]));
+  if(win && win != drawing_window()) xs_window_resize(win, width, height);
+  Tcl_SetObjResult(ip, Tcl_NewIntObj(win != NULL));
+  return TCL_OK;
+}
+
+/* cdept::previews: the picture panes as a list of {path width height}. */
+static int previews_command(ClientData data, Tcl_Interp *ip, int objc, Tcl_Obj *const objv[])
+{
+  const char *paths[MAX_PREVIEWS];
+  xs_drawable *wins[MAX_PREVIEWS];
+  Tcl_Obj *result = Tcl_NewListObj(0, NULL);
+  int i, n;
+  (void)data;
+  if(objc != 1) {
+    Tcl_WrongNumArgs(ip, 1, objv, "");
+    return TCL_ERROR;
+  }
+  n = has_x ? xs_preview_windows(paths, wins, MAX_PREVIEWS) : 0;
+  for(i = 0; i < n; ++i) {
+    Tcl_Obj *item = Tcl_NewListObj(0, NULL);
+    Tcl_ListObjAppendElement(ip, item, Tcl_NewStringObj(paths[i], -1));
+    Tcl_ListObjAppendElement(ip, item, Tcl_NewIntObj(wins[i]->width));
+    Tcl_ListObjAppendElement(ip, item, Tcl_NewIntObj(wins[i]->height));
+    Tcl_ListObjAppendElement(ip, result, item);
+  }
+  Tcl_SetObjResult(ip, result);
   return TCL_OK;
 }
 
@@ -405,4 +530,7 @@ void xs_register_display_commands(Tcl_Interp *ip)
   Tcl_CreateObjCommand(ip, "cdept::resize", resize_command, NULL, NULL);
   Tcl_CreateObjCommand(ip, "cdept::damage", damage_command, NULL, NULL);
   Tcl_CreateObjCommand(ip, "cdept::colour", colour_command, NULL, NULL);
+  Tcl_CreateObjCommand(ip, "cdept::window_resize", window_resize_command, NULL, NULL);
+  Tcl_CreateObjCommand(ip, "cdept::previews", previews_command, NULL, NULL);
+  Tcl_CreateObjCommand(ip, "cdept::colours", colours_command, NULL, NULL);
 }

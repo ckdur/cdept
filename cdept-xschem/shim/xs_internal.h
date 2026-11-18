@@ -47,10 +47,20 @@ int xs_take_damage_list(xs_drawable *win, int *rects, int max);
  * Created on first use. */
 xs_drawable *xs_window_of_path(const char *path);
 
+/* The windows xschem draws into besides the drawing window: the picture panes of its
+ * dialogs (xschem's preview_window(): a Tk frame whose X window the C code draws in).
+ * Fills up to `max` Tk paths and windows and returns how many. Windows whose widget is
+ * gone are left out. The paths stay valid until the next call into Tcl. */
+int xs_preview_windows(const char **paths, xs_drawable **wins, int max);
+
+/* Call once xschem has started: see xshim.c. */
+void xs_after_start(void);
+
 /* The interpreter the stand-in Tk was initialised with (NULL without a display). */
 Tcl_Interp *xs_interp(void);
 
-/* display.c: the Tcl commands cdept::png, cdept::event, cdept::resize, cdept::damage. */
+/* display.c: the Tcl commands cdept::png, cdept::event, cdept::resize, cdept::damage,
+ * cdept::colour, cdept::colours, cdept::window_resize, cdept::previews. */
 void xs_register_display_commands(Tcl_Interp *interp);
 
 #endif /* CDEPT_XS_INTERNAL_H */

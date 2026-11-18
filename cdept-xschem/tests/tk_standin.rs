@@ -119,6 +119,10 @@ tcl_tests! {
     sweep: "t_sweep.tcl", false, at least 30;
     sweep_with_display: "t_sweep.tcl", true, at least 150;
     cdept_adjustments_with_display: "t_cdept.tcl", true, at least 140;
+    simulation: "t_sim.tcl", false, at least 34;
+    simulation_with_display: "t_sim.tcl", true, at least 65;
+    panes_and_clipboard: "t_preview.tcl", false, at least 9;
+    panes_and_clipboard_with_display: "t_preview.tcl", true, at least 22;
 }
 
 /// Every test script is listed above.

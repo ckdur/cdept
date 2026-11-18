@@ -10,6 +10,9 @@ repository.workspace = true
 
 [dependencies]
 libcdept.workspace = true
+# the desktop's clipboard and primary selection for xschem (egui reads only what is
+# pasted); the same crate egui-winit uses, so nothing new is built
+arboard = { version = "3.6", default-features = false }
 chrono.workspace = true
 eframe.workspace = true
 egui.workspace = true

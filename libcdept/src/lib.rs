@@ -17,6 +17,6 @@ pub mod xschem;
 pub use cell::Cell;
 pub use entry::{Entry, Format, ViewKind};
 pub use library::{Library, LibraryLayout};
-pub use project::{AddLibrary, PROJECT_FILE, Project};
-pub use technology::Technology;
+pub use project::{AddLibrary, PROJECT_FILE, Project, Settings};
+pub use technology::{Pdk, Resolved, Source, Technology};
 pub use template::Template;

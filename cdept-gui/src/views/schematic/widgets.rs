@@ -11,8 +11,9 @@ use egui::load::SizedTexture;
 use egui::{Key, RichText, ScrollArea, TextEdit, TextStyle, TextWrapMode, Ui};
 use libcdept::xschem::protocol::{UiEvent, Widget};
 
+use super::clipboard::{self, Selection};
 use super::keys::tk_key_name;
-use super::mirror::Images;
+use super::mirror::{Images, Panes};
 
 /// Widest a text field grows to when Tk asks it to fill its parent, in points.
 const MAX_FILL_WIDTH: f32 = 520.0;
@@ -125,6 +126,8 @@ pub struct Draw<'a> {
     pub edits: &'a mut Edits,
     pub events: &'a mut Vec<UiEvent>,
     pub images: &'a mut Images,
+    /// Frames xschem draws pictures into (its file browser's preview).
+    pub panes: &'a mut Panes,
     /// The widget to give the keyboard focus to in this frame.
     pub focus: Option<&'a str>,
 }
@@ -174,6 +177,13 @@ fn field_width(ui: &Ui, widget: &Widget, default_chars: f32) -> f32 {
 
 /// Draw `widget` and everything inside it.
 pub fn draw(ui: &mut Ui, widget: &Widget, cx: &mut Draw<'_>) {
+    if cx.panes.has(&widget.path) {
+        let size = pane_size(ui, widget);
+        ui.push_id(&widget.path, |ui| {
+            cx.panes.show(ui, &widget.path, size, cx.events)
+        });
+        return;
+    }
     let drawn = ui.push_id(&widget.path, |ui| match widget.class.as_str() {
         "Label" | "TLabel" => label(ui, widget, cx, TextWrapMode::Extend),
         "Message" => label(ui, widget, cx, TextWrapMode::Wrap),
@@ -187,7 +197,24 @@ pub fn draw(ui: &mut Ui, widget: &Widget, cx: &mut Draw<'_>) {
         }
         "Radiobutton" | "TRadiobutton" => {
             let radio = egui::RadioButton::new(widget.checked, widget.text.as_str());
-            if ui.add_enabled(widget.enabled, radio).clicked() {
+            let mut clicked = ui.add_enabled(widget.enabled, radio).clicked();
+            // A radio button without text whose background is what it chooses: the
+            // colour choosers of xschem's graph dialogs.
+            if widget.text.is_empty()
+                && let Some(colour) =
+                    option(widget, "background").and_then(|c| egui::Color32::from_hex(c).ok())
+            {
+                let size = egui::vec2(14.0, 14.0);
+                let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+                ui.painter().rect_filled(rect, 2.0, colour);
+                if widget.checked {
+                    let stroke = ui.visuals().selection.stroke;
+                    ui.painter()
+                        .rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Outside);
+                }
+                clicked |= widget.enabled && response.clicked();
+            }
+            if clicked {
                 invoke(widget, cx);
             }
         }
@@ -244,22 +271,45 @@ fn grid(ui: &mut Ui, parent: &Widget, cells: &[&Widget], cx: &mut Draw<'_>) {
             .or_default()
             .push((position(cell, "column"), cell));
     }
-    egui::Grid::new(("grid", &parent.path)).show(ui, |ui| {
-        for cells in rows.values_mut() {
-            cells.sort_by_key(|(column, _)| *column);
-            let mut at = 0;
-            for (column, cell) in cells.iter() {
-                // A widget spanning columns sits in its first one.
-                while at < *column {
-                    ui.label("");
-                    at += 1;
+    // A row holding one widget that spans columns (a list or text with its scroll
+    // bars) is drawn on its own: in the grid it would widen its first column and push
+    // the other rows apart. The rows between such rows make one grid each.
+    let wide = |cells: &Vec<(u32, &Widget)>| {
+        let mut shown = cells
+            .iter()
+            .filter(|(_, c)| !matches!(c.class.as_str(), "Scrollbar" | "TScrollbar"));
+        matches!((shown.next(), shown.next()), (Some((_, c)), None)
+            if placement(c, "columnspan").parse().unwrap_or(1) > 1)
+    };
+    let mut rows: Vec<Vec<(u32, &Widget)>> = rows.into_values().collect();
+    for cells in &mut rows {
+        cells.sort_by_key(|(column, _)| *column);
+    }
+    for (segment, run) in rows.chunk_by(|a, b| wide(a) == wide(b)).enumerate() {
+        if wide(&run[0]) {
+            for cells in run {
+                for (_, cell) in cells {
+                    draw(ui, cell, cx);
                 }
-                draw(ui, cell, cx);
-                at += 1;
             }
-            ui.end_row();
+        } else {
+            egui::Grid::new(("grid", &parent.path, segment)).show(ui, |ui| {
+                for cells in run {
+                    let mut at = 0;
+                    for (column, cell) in cells {
+                        // A widget spanning columns sits in its first one.
+                        while at < *column {
+                            ui.label("");
+                            at += 1;
+                        }
+                        draw(ui, cell, cx);
+                        at += 1;
+                    }
+                    ui.end_row();
+                }
+            });
         }
-    });
+    }
 }
 
 /// Tk's packer: each widget takes one side of what the ones before it left over.
@@ -393,6 +443,56 @@ fn field_keys(
     }
 }
 
+/// Size to show a picture pane at, in points: as wide as there is room for (it grows
+/// and shrinks with the dialog), as high as Tk's `-height` asks (else in proportion).
+fn pane_size(ui: &Ui, widget: &Widget) -> egui::Vec2 {
+    let width = ui.available_width().clamp(200.0, 900.0);
+    let asked = option(widget, "height").map_or(0.0, |h| {
+        let (number, unit) = h.split_at(h.trim_end_matches(['c', 'm', 'i', 'p']).len());
+        let n: f32 = number.parse().unwrap_or(0.0);
+        match unit {
+            "c" => n * 37.8,
+            "m" => n * 3.78,
+            "i" => n * 96.0,
+            "p" => n * 96.0 / 72.0,
+            _ => n,
+        }
+    });
+    let height = if asked > 0.0 { asked } else { width * 0.6 };
+    egui::Vec2::new(width, height.clamp(100.0, 600.0))
+}
+
+/// Tk pastes the primary selection (the text last selected anywhere) into a text field
+/// with the middle button; egui does not know that selection. Inserted at the cursor.
+fn paste_primary(ui: &Ui, response: &mut egui::Response, text: &mut String, multiline: bool) {
+    if !response.middle_clicked() || !response.sense.senses_click() {
+        return;
+    }
+    let Some(mut pasted) = clipboard::read(Selection::Primary) else {
+        return;
+    };
+    if !multiline {
+        pasted = pasted.replace(['\r', '\n'], " ");
+    }
+    let mut state = TextEdit::load_state(ui.ctx(), response.id).unwrap_or_default();
+    let chars = text.chars().count();
+    let at = state
+        .cursor
+        .char_range()
+        .map_or(chars, |range| range.primary.index.0.min(chars));
+    let byte = text.char_indices().nth(at).map_or(text.len(), |(i, _)| i);
+    text.insert_str(byte, &pasted);
+    let after = egui::text::CCursor::new(at + pasted.chars().count());
+    state
+        .cursor
+        .set_char_range(Some(egui::text::CCursorRange::one(after)));
+    state.store(ui.ctx(), response.id);
+    response.request_focus();
+    response.mark_changed();
+    // the field was drawn before the text changed
+    ui.ctx().request_repaint();
+}
+
 /// A text field bound to the local edit state. Sends the text when it changed.
 fn edit_field(
     ui: &mut Ui,
@@ -401,7 +501,8 @@ fn edit_field(
     field: impl FnOnce(&mut Ui, &mut String) -> egui::Response,
 ) -> egui::Response {
     let edit = cx.edits.texts.entry(widget.path.clone()).or_default();
-    let response = field(ui, &mut edit.text);
+    let mut response = field(ui, &mut edit.text);
+    paste_primary(ui, &mut response, &mut edit.text, widget.class == "Text");
     if response.changed() {
         let event = Edits::sent(edit, &widget.path);
         cx.events.push(event);
@@ -419,6 +520,9 @@ fn entry(ui: &mut Ui, widget: &Widget, cx: &mut Draw<'_>) {
     // Read-only text can still be selected and copied.
     let editable = option(widget, "state") != Some("readonly");
     let response = edit_field(ui, widget, cx, |ui, text| {
+        // egui keeps a field within the space it is given, which in a grid cell is
+        // the column as wide as it was: let the column grow to the width asked for.
+        ui.set_min_width(width);
         let field = TextEdit::singleline(text)
             .desired_width(width)
             .password(password)
@@ -460,6 +564,8 @@ fn text(ui: &mut Ui, widget: &Widget, cx: &mut Draw<'_>) {
     let width = field_width(ui, widget, 60.0).max(chars_width(ui, 40.0));
     let row_height = ui.text_style_height(&TextStyle::Monospace);
     let enabled = widget.enabled;
+    // as in `entry`: in a grid cell, room for the width asked for
+    ui.set_min_width(width);
     ScrollArea::vertical()
         .id_salt("text")
         .max_height(rows * row_height + 8.0)
@@ -488,43 +594,47 @@ fn listbox(ui: &mut Ui, widget: &Widget, cx: &mut Draw<'_>) {
             .max_width(width)
             .show(ui, |ui| {
                 ui.set_min_width(width);
-                for (index, item) in widget.items.iter().enumerate() {
-                    let index = index as u32;
-                    let selected = widget.selection.contains(&index);
-                    let response = ui.add_enabled(
-                        widget.enabled,
-                        egui::Button::selectable(selected, item.as_str()),
-                    );
-                    if response.double_clicked() {
-                        // The second click of a double click is a click too.
-                        cx.events.push(UiEvent::Select {
-                            path: widget.path.clone(),
-                            selection: vec![index],
-                        });
-                        cx.events.push(UiEvent::Activate {
-                            path: widget.path.clone(),
-                            index,
-                        });
-                    } else if response.clicked() {
-                        let extend = many && ui.input(|i| i.modifiers.command || i.modifiers.shift);
-                        let mut selection = if extend {
-                            widget.selection.clone()
-                        } else {
-                            Vec::new()
-                        };
-                        match selection.iter().position(|i| *i == index) {
-                            Some(at) if extend => {
-                                selection.remove(at);
+                // one item under the other, also inside a grid row
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    for (index, item) in widget.items.iter().enumerate() {
+                        let index = index as u32;
+                        let selected = widget.selection.contains(&index);
+                        let response = ui.add_enabled(
+                            widget.enabled,
+                            egui::Button::selectable(selected, item.as_str()),
+                        );
+                        if response.double_clicked() {
+                            // The second click of a double click is a click too.
+                            cx.events.push(UiEvent::Select {
+                                path: widget.path.clone(),
+                                selection: vec![index],
+                            });
+                            cx.events.push(UiEvent::Activate {
+                                path: widget.path.clone(),
+                                index,
+                            });
+                        } else if response.clicked() {
+                            let extend =
+                                many && ui.input(|i| i.modifiers.command || i.modifiers.shift);
+                            let mut selection = if extend {
+                                widget.selection.clone()
+                            } else {
+                                Vec::new()
+                            };
+                            match selection.iter().position(|i| *i == index) {
+                                Some(at) if extend => {
+                                    selection.remove(at);
+                                }
+                                _ => selection.push(index),
                             }
-                            _ => selection.push(index),
+                            selection.sort_unstable();
+                            cx.events.push(UiEvent::Select {
+                                path: widget.path.clone(),
+                                selection,
+                            });
                         }
-                        selection.sort_unstable();
-                        cx.events.push(UiEvent::Select {
-                            path: widget.path.clone(),
-                            selection,
-                        });
                     }
-                }
+                });
             });
     });
 }

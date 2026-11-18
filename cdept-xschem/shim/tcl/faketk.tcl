@@ -38,6 +38,8 @@
 #              only buttons (xschem's context menu); the entries are reported with
 #              `menu` = the menu or toplevel path and `index` = position
 #   clipboard  clipboard append
+# Picture panes (frames whose window xschem's C code draws into, its preview_window)
+# are not reported here: the helper sends their pixels itself (protocol.rs, Preview).
 #   log        text added to xschem's info window (.infotext), and errors raised by
 #              callbacks (what Tk would show in its error dialog)
 # What the user changes in a window (event text, select, focus) is not sent back; only
@@ -50,6 +52,8 @@
 #   menu <menu path> <index>      popup_closed            invoke <path>
 #   text <path> <text>            select <path> <indices> activate <path> <index>
 #   key <path> <keysym>           focus <path>            close <toplevel>
+#   configure <path> <width> <height>   a picture pane is shown at this size
+#   clipboard <CLIPBOARD|PRIMARY> <text>  what the desktop's clipboard holds
 #   (keysym may carry modifiers: Control-Return, Shift-Tab, ...)
 # Notes for the sender:
 #   - key: runs the KeyPress and then the KeyRelease bindings of the widget, its
@@ -737,6 +741,13 @@ proc faketk::pack_do {arglist} {
 
 proc ::grid {args} {
   set sub [lindex $args 0]
+  # Tk takes unique abbreviations: `grid column .w 0 -weight 1` (xschem's wave colour
+  # dialog) is `grid columnconfigure`
+  if {![string match {[.x^-]*} $sub]} {
+    set full [lsearch -all -inline -glob {anchor bbox columnconfigure configure content
+      forget info location propagate rowconfigure remove size slaves} $sub*]
+    if {[llength $full] == 1} {set sub [lindex $full 0]}
+  }
   switch -- $sub {
     configure {return [::faketk::grid_do [lrange $args 1 end]]}
     forget - remove {
@@ -2165,9 +2176,10 @@ proc faketk::mapped {w} {
   mapped $m
 }
 
-# Sizes are not computed: the drawing window is exact, the rest is an estimate.
+# Sizes are not computed: the drawing window is exact, and so is a picture pane once
+# CDePT said how large it shows it (event configure); the rest is an estimate.
 proc faketk::size {w} {
-  variable drawing; variable class
+  variable drawing; variable class; variable wmi
   if {$w eq ".drw" || $w eq "."} {
     # the C side knows the real size of the drawing window
     if {[info exists ::cdept::drw(width)]} {
@@ -2175,8 +2187,16 @@ proc faketk::size {w} {
     }
     return $drawing
   }
+  if {[info exists wmi($w,size)]} {return $wmi($w,size)}
+  if {$class($w) eq "Toplevel" && [info exists wmi($w,geometry)]
+      && [regexp {^=?(\d+)x(\d+)} $wmi($w,geometry) -> width height]} {
+    return [list $width $height]
+  }
   set width [cget $w -width]
   set height [cget $w -height]
+  # distances with a unit: 3.8c, 2i, ...
+  if {[regexp {^[0-9.]+[cmip]$} $width]} {set width [pixels $width]}
+  if {[regexp {^[0-9.]+[cmip]$} $height]} {set height [pixels $height]}
   switch -- $class($w) {
     Entry - Text - Listbox - Label - Button - Spinbox - TCombobox - Checkbutton -
     Radiobutton - Message {
@@ -3268,6 +3288,31 @@ proc faketk::event_do {kind arglist} {
       if {[exists $w]} {
         set script [binding $w <FocusIn>]
         if {$script ne ""} {run [subst_event $script [dict create W $w T 9]]}
+      }
+    }
+    configure {
+      # A picture pane is shown at this size: its window gets it, then what Tk does
+      # on a resize (both bindings; xschem draws the picture again in either).
+      lassign $arglist w width height
+      if {![exists $w]} return
+      if {[info exists wmi($w,size)] && $wmi($w,size) eq [list $width $height]} return
+      set wmi($w,size) [list $width $height]
+      if {[llength [info commands ::cdept::window_resize]]} {
+        ::cdept::window_resize $w $width $height
+      }
+      dispatch $w <Configure> [dict create w $width h $height]
+      if {[exists $w]} {dispatch $w <Expose> [dict create w $width h $height]}
+    }
+    clipboard {
+      # The desktop's clipboard or primary selection, for `clipboard get` and
+      # `selection get`. Not reported back: it came from there.
+      variable clip; variable primary
+      lassign $arglist which text
+      if {$which eq "PRIMARY"} {
+        set primary $text
+        unset -nocomplain wmi(selection,owner)
+      } else {
+        set clip $text
       }
     }
     close {

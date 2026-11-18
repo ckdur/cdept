@@ -117,7 +117,11 @@ fn preselect(picker: &mut Picker, project: &Project, dir: &str, file: &str) {
     picker.name = stem.map(|s| s.into_owned()).unwrap_or_default();
 }
 
-/// Show the picker for `window` and return what was decided in this frame.
+/// Draws the picture of a schematic or symbol file into the space given.
+pub type ShowPicture<'a> = dyn FnMut(&mut Ui, &Path) + 'a;
+
+/// Show the picker for `window` and return what was decided in this frame. `picture`
+/// draws the view chosen.
 pub fn show(
     ctx: &Context,
     id: Id,
@@ -125,6 +129,7 @@ pub fn show(
     window: &Window,
     project: Option<&Project>,
     picker: &mut Picker,
+    picture: &mut ShowPicture<'_>,
 ) -> Picked {
     let option = |name: &str| window.root.options.get(name).map_or("", String::as_str);
     let mut extensions: Vec<&str> = option("extensions").split_whitespace().collect();
@@ -205,6 +210,12 @@ pub fn show(
                             } else if response.clicked() {
                                 picker.file = Some(file.clone());
                             }
+                        }
+                    });
+                    column(ui, "Picture", |ui| match &picker.file {
+                        Some(file) => picture(ui, file),
+                        None => {
+                            ui.weak("Select a view");
                         }
                     });
                 }

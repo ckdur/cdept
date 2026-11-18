@@ -48,7 +48,7 @@ enum Command {
     Sync,
     Move(f32, f32),
     MoveBy(f32, f32),
-    Click(f32, f32, PointerButton),
+    Click(f32, f32, PointerButton, Modifiers),
     DoubleClick(f32, f32),
     ClickHere(PointerButton),
     ClickInstance(String, PointerButton),
@@ -66,6 +66,9 @@ enum Command {
     DialogClick(String),
     DialogType(String, String),
     ExpectDialog(String),
+    ExpectPane(String),
+    Clipboard(String),
+    Primary(String),
     Frame,
     Pixel(u32, u32),
     ExpectPixel(u32, u32, [u8; 3]),
@@ -104,6 +107,7 @@ impl Command {
                 | Command::DialogType(..)
                 | Command::CloseAnswer(_)
                 | Command::ExpectDialog(_)
+                | Command::ExpectPane(_)
                 | Command::ExpectPixel(..)
                 | Command::ExpectDocuments(_)
                 | Command::ExpectTitle(_)
@@ -167,6 +171,9 @@ pub struct Script {
     nudge: Instant,
     failed: Arc<AtomicBool>,
     finished: bool,
+    /// What the desktop's clipboard and primary selection hold, as far as the script
+    /// says (`clipboard`, `primary`): Ctrl+V pastes the first.
+    clipboard: (String, String),
 }
 
 /// The first word of `text` (or a `{braced}` group) and the rest.
@@ -276,7 +283,20 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
                 .ok_or("usage: click_instance <name> [button]")?;
             Command::ClickInstance(name.to_string(), button(args.get(1).copied())?)
         }
-        "click" => Command::Click(number(0)?, number(1)?, button(args.get(2).copied())?),
+        "click" => {
+            // click <x> <y> [button] [ctrl] [shift] [alt]
+            let mut pressed = PointerButton::Primary;
+            let mut modifiers = Modifiers::NONE;
+            for flag in args.iter().skip(2) {
+                match *flag {
+                    "ctrl" => modifiers |= Modifiers::CTRL | Modifiers::COMMAND,
+                    "shift" => modifiers |= Modifiers::SHIFT,
+                    "alt" => modifiers |= Modifiers::ALT,
+                    other => pressed = button(Some(other))?,
+                }
+            }
+            Command::Click(number(0)?, number(1)?, pressed, modifiers)
+        }
         "double_click" => Command::DoubleClick(number(0)?, number(1)?),
         "press" => Command::Press(number(0)?, number(1)?, button(args.get(2).copied())?),
         "release" => Command::Release(number(0)?, number(1)?, button(args.get(2).copied())?),
@@ -329,6 +349,16 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
             Command::DialogType(target.to_string(), typed.to_string())
         }
         "expect_dialog" => Command::ExpectDialog(text()?),
+        "expect_pane" => Command::ExpectPane(text()?),
+        // {text} keeps spaces at the ends
+        "clipboard" | "primary" => {
+            let inner = rest.strip_prefix('{').and_then(|r| r.strip_suffix('}'));
+            let text = inner.unwrap_or(rest).to_string();
+            match name {
+                "clipboard" => Command::Clipboard(text),
+                _ => Command::Primary(text),
+            }
+        }
         "frame" => Command::Frame,
         "pixel" => Command::Pixel(whole(0)?, whole(1)?),
         "expect_pixel" => {
@@ -431,6 +461,7 @@ impl Script {
             nudge: Instant::now(),
             failed,
             finished: false,
+            clipboard: Default::default(),
         })
     }
 
@@ -670,15 +701,23 @@ impl Script {
 
     /// Move to a frame position, press and release there.
     fn click(&mut self, x: f32, y: f32, button: PointerButton) {
+        self.click_with(x, y, button, Modifiers::NONE);
+    }
+
+    /// A click with modifier keys held down meanwhile.
+    fn click_with(&mut self, x: f32, y: f32, button: PointerButton, modifiers: Modifiers) {
         let press = |pressed| Event::PointerButton {
             pos: Pos2::new(x, y),
             button,
             pressed,
-            modifiers: Modifiers::NONE,
+            modifiers,
         };
-        self.events(vec![Event::PointerMoved(Pos2::new(x, y))], Modifiers::NONE);
-        self.events(vec![press(true)], Modifiers::NONE);
-        self.events(vec![press(false)], Modifiers::NONE);
+        self.events(vec![Event::PointerMoved(Pos2::new(x, y))], modifiers);
+        self.events(vec![press(true)], modifiers);
+        self.events(vec![press(false)], modifiers);
+        if modifiers != Modifiers::NONE {
+            self.events(Vec::new(), Modifiers::NONE);
+        }
     }
 
     fn start(&mut self, app: &mut CdeptApp, ctx: &Context, command: Command) -> Result<(), String> {
@@ -736,7 +775,7 @@ impl Script {
                 let at = Pos2::new(self.pointer.0 + dx, self.pointer.1 + dy);
                 self.events(vec![Event::PointerMoved(at)], none);
             }
-            Command::Click(x, y, button) => self.click(x, y, button),
+            Command::Click(x, y, button, modifiers) => self.click_with(x, y, button, modifiers),
             Command::DoubleClick(x, y) => {
                 self.click(x, y, PointerButton::Primary);
                 self.click(x, y, PointerButton::Primary);
@@ -797,7 +836,7 @@ impl Script {
                 let mut down = match (command, key) {
                     (true, Key::C) => vec![Event::Copy],
                     (true, Key::X) => vec![Event::Cut],
-                    (true, Key::V) => vec![Event::Paste(String::new())],
+                    (true, Key::V) => vec![Event::Paste(self.clipboard.0.clone())],
                     _ => vec![event(true)],
                 };
                 let typed = key.name().chars().next().filter(|_| key.name().len() == 1);
@@ -856,6 +895,35 @@ impl Script {
                 let view = app.script_schematic().ok_or("no schematic is open")?;
                 view.type_in_dialog(&target, &text)?;
                 self.settle = true;
+            }
+            Command::Clipboard(text) => {
+                self.clipboard.0 = text;
+                crate::views::pretend_clipboard(
+                    Some(self.clipboard.0.clone()),
+                    Some(self.clipboard.1.clone()),
+                );
+            }
+            Command::Primary(text) => {
+                self.clipboard.1 = text;
+                crate::views::pretend_clipboard(
+                    Some(self.clipboard.0.clone()),
+                    Some(self.clipboard.1.clone()),
+                );
+            }
+            Command::ExpectPane(path) => {
+                let view = app.script_schematic().ok_or("no schematic is open")?;
+                let (size, asked, colours) = view
+                    .dialog_pane(&path)
+                    .ok_or(format!("no dialog shows a picture in '{path}'"))?;
+                if asked.is_some_and(|asked| asked != size) {
+                    return Err(format!(
+                        "the picture in '{path}' is {size:?}, not {asked:?}"
+                    ));
+                }
+                if colours <= 3 {
+                    return Err(format!("the picture in '{path}' is empty"));
+                }
+                tracing::info!(target: "cdept::script", "pane {path}: {} x {}", size[0], size[1]);
             }
             Command::ExpectDialog(title) => {
                 let view = app.script_schematic().ok_or("no schematic is open")?;
@@ -1059,7 +1127,21 @@ mod tests {
         );
         assert_eq!(
             parse("click 10 20.5 right"),
-            Ok(Some(Command::Click(10.0, 20.5, PointerButton::Secondary)))
+            Ok(Some(Command::Click(
+                10.0,
+                20.5,
+                PointerButton::Secondary,
+                Modifiers::NONE
+            )))
+        );
+        assert_eq!(
+            parse("click 1 2 ctrl"),
+            Ok(Some(Command::Click(
+                1.0,
+                2.0,
+                PointerButton::Primary,
+                Modifiers::CTRL | Modifiers::COMMAND
+            )))
         );
         assert_eq!(
             parse("drag 1 2 3 4"),

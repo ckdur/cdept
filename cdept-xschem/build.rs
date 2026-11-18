@@ -89,6 +89,12 @@ fn main() {
     // them out, as its own build does.
     let jpeg = pkg_config::Config::new().probe("libjpeg").ok();
     println!("cargo:rustc-link-lib=m");
+    if jpeg.is_none() {
+        println!(
+            "cargo:warning=libjpeg not found: JPEG pictures in schematics will not be drawn \
+             (install libjpeg-dev and rebuild to enable them)"
+        );
+    }
 
     let configure = |build: &mut cc::Build| {
         build

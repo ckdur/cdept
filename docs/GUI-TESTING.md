@@ -24,7 +24,7 @@ XDG_DATA_HOME=$(mktemp -d) target/debug/cdept -p examples/buffer gui --script my
   target `cdept::script`. `-v` also shows each command as it starts, and what the
   xschem helper prints.
 
-Two scripts check the embedded xschem on `examples/buffer`, and
+Three scripts check the embedded xschem on `examples/buffer`, and
 `cdept-gui/scripts/run.sh` runs them with scratch settings, a scratch home folder and
 a scratch copy of the project:
 
@@ -32,6 +32,8 @@ a scratch copy of the project:
 |---|---|---|
 | `cdept-gui/scripts/buffer-smoke.script` | the picture, input, dialogs, the Inspector, the Hierarchy panel, closing a changed document | nothing |
 | `cdept-gui/scripts/buffer-edit.script` | the library picker (open, insert a symbol, save as), "open in new window", netlist to a view, saving on close and on closing the project | into the project: run it on a copy |
+| `cdept-gui/scripts/buffer-sim.script` | the simulator configuration, Netlist and Simulate as a background job (a copy command stands in for the simulator, so no ngspice is needed), failed jobs, a waveform graph with its dialog, cursors and zoom | a netlist, a raw file and a graph into the project |
+| `cdept-gui/scripts/buffer-preview.script` | pictures xschem draws inside its own dialogs (key cheat sheet, its file browser), pasting the desktop's clipboard into a dialog, Tcl's `clipboard get` / `selection get` (run it by name: `run.sh cdept-gui/scripts/buffer-preview.script`) | nothing |
 
 `$PROJECT` in a script stands for the folder of the project being opened.
 
@@ -82,7 +84,7 @@ with spaces that is not the last one is written in braces: `{Instance name}`.
 |---|---|
 | `move <x> <y>` | Move the pointer |
 | `move_by <dx> <dy>` | Move it relative to where the script left it |
-| `click <x> <y> [left\|middle\|right]` | Move, press and release |
+| `click <x> <y> [left\|middle\|right] [ctrl] [shift] [alt]` | Move, press and release (with the keys held: `click 10 20 left ctrl` is a Ctrl+click) |
 | `click_here [button]` | Click where the pointer is |
 | `click_instance <name> [button]` | Click the middle of an instance of the schematic |
 | `double_click <x> <y>` | Two clicks |
@@ -104,6 +106,8 @@ with spaces that is not the last one is written in braces: `{Instance name}`.
 | `dialog_click <button text>` | Press a button of the topmost dialog |
 | `dialog_type <path or {label}> <text>` | Replace the text of a field, named by its Tk path or by the label in front of it |
 | `expect_dialog <title>` | Fail unless a dialog whose title contains `<title>` is open |
+| `expect_pane <path>` | Fail unless a dialog shows a picture xschem drew (a preview) in the widget at this Tk path, at the size CDePT asked for |
+| `clipboard <text>`, `primary <text>` | What the desktop's clipboard and primary selection hold from now on, for CDePT and xschem (`{text}` keeps spaces at the ends); `key v ctrl` pastes the clipboard |
 
 **Library picker** (where xschem asks for a schematic or symbol)
 

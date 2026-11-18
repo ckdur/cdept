@@ -4,6 +4,7 @@
 //! Both belong to the open project. They start on first use and go away with the
 //! project.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -56,11 +57,16 @@ impl<T: PartialEq> Debounce<T> {
     }
 }
 
-/// What tells two set-ups of xschem apart: the project folder and its library paths.
-type Setup = (Option<PathBuf>, Option<String>);
+/// What tells two set-ups of xschem apart: the project folder, its library paths and
+/// the environment (`PDK_ROOT`, `PDK`).
+type Setup = (Option<PathBuf>, Option<String>, Vec<(OsString, OsString)>);
 
 fn setup(options: &EngineOptions) -> Setup {
-    (options.cwd.clone(), options.startup.clone())
+    (
+        options.cwd.clone(),
+        options.startup.clone(),
+        options.env.clone(),
+    )
 }
 
 /// A netlist being written.
@@ -116,6 +122,9 @@ pub struct Engines {
     service: Option<(Setup, Service)>,
     netlists: Vec<NetlistJob>,
     preview: Option<Preview>,
+    /// The picture in the library picker: an xschem of its own, because the Inspector
+    /// may show another file at the same time.
+    picker_preview: Option<Preview>,
 }
 
 impl Engines {
@@ -202,102 +211,118 @@ impl Engines {
     /// The xschem behind it gets no input and no command but "load this file and zoom
     /// to fit", so it cannot change a file.
     pub fn preview(&mut self, ui: &mut Ui, project: &Project, file: &Path) {
-        let options = EngineOptions::for_project(project);
-        if self
-            .preview
-            .as_ref()
-            .is_none_or(|p| p.setup != setup(&options))
+        show_preview(&mut self.preview, "xschem-preview", ui, project, file);
+    }
+
+    /// The same as [`preview`](Self::preview), for the library picker.
+    pub fn picker_preview(&mut self, ui: &mut Ui, project: &Project, file: &Path) {
+        show_preview(
+            &mut self.picker_preview,
+            "xschem-picker-preview",
+            ui,
+            project,
+            file,
+        );
+    }
+}
+
+/// Draw the picture of `file` with the xschem in `slot` (started on first use).
+fn show_preview(
+    slot: &mut Option<Preview>,
+    name: &str,
+    ui: &mut Ui,
+    project: &Project,
+    file: &Path,
+) {
+    let options = EngineOptions::for_project(project);
+    if slot.as_ref().is_none_or(|p| p.setup != setup(&options)) {
+        *slot = Some(Preview::new(options, ui.ctx()));
+    }
+    let preview = slot.as_mut().expect("just set");
+    let now = Instant::now();
+
+    // Whole pixels: the frame is drawn one pixel per screen pixel.
+    let scale = ui.ctx().pixels_per_point();
+    let width = ((ui.available_width() * scale).floor()).max(64.0);
+    let height = (width * PREVIEW_ASPECT).round();
+    let size = (width as u32, height as u32);
+    if preview.requested != Some(size) {
+        preview.requested = Some(size);
+        preview.session.resize(size.0, size.1);
+    }
+
+    // Nobody draws this xschem's menus and dialogs.
+    preview.session.take_updates();
+    for reply in preview.session.take_replies() {
+        if let Some((file, _, id)) = &preview.loading
+            && reply.id == *id
         {
-            self.preview = Some(Preview::new(options, ui.ctx()));
-        }
-        let preview = self.preview.as_mut().expect("just set");
-        let now = Instant::now();
-
-        // Whole pixels: the frame is drawn one pixel per screen pixel.
-        let scale = ui.ctx().pixels_per_point();
-        let width = ((ui.available_width() * scale).floor()).max(64.0);
-        let height = (width * PREVIEW_ASPECT).round();
-        let size = (width as u32, height as u32);
-        if preview.requested != Some(size) {
-            preview.requested = Some(size);
-            preview.session.resize(size.0, size.1);
-        }
-
-        // Nobody draws this xschem's menus and dialogs.
-        preview.session.take_updates();
-        for reply in preview.session.take_replies() {
-            if let Some((file, _, id)) = &preview.loading
-                && reply.id == *id
-            {
-                match reply.result {
-                    Ok(_) => {
-                        preview.shown = Some(file.clone());
-                        preview.error = None;
-                    }
-                    Err(error) => preview.error = Some(error),
+            match reply.result {
+                Ok(_) => {
+                    preview.shown = Some(file.clone());
+                    preview.error = None;
                 }
+                Err(error) => preview.error = Some(error),
             }
         }
+    }
 
-        let status = preview.session.status();
-        preview.wanted.set(file.to_path_buf(), now);
-        let epoch = preview.session.epoch();
-        let sent = preview
-            .loading
-            .as_ref()
-            .is_some_and(|(f, e, _)| f == file && *e == epoch);
-        if !sent && status == Status::Running {
-            if let Some(file) = preview.wanted.settled(now) {
-                // Looking at a file is not opening it: keep it out of xschem's list
-                // of recent files.
-                let script = format!(
-                    "proc update_recent_file {{args}} {{}}; xschem load {}; xschem zoom_full",
-                    tcl::quote(&file.to_string_lossy())
-                );
-                let id = preview.session.tcl(&script);
-                preview.loading = Some((file.clone(), epoch, id));
-            } else if let Some(wait) = preview.wanted.remaining(now) {
-                ui.ctx().request_repaint_after(wait);
-            }
-        }
-
-        preview
-            .picture
-            .update(&preview.session, ui.ctx(), "xschem-preview");
-        let area = Vec2::new(width, height) / scale;
-        let (rect, _) = ui.allocate_exact_size(area, Sense::hover());
-        let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 2.0, Color32::BLACK);
-        let note = |text: &str| {
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                text,
-                egui::TextStyle::Small.resolve(ui.style()),
-                Color32::from_gray(150),
+    let status = preview.session.status();
+    preview.wanted.set(file.to_path_buf(), now);
+    let epoch = preview.session.epoch();
+    let sent = preview
+        .loading
+        .as_ref()
+        .is_some_and(|(f, e, _)| f == file && *e == epoch);
+    if !sent && status == Status::Running {
+        if let Some(file) = preview.wanted.settled(now) {
+            // Looking at a file is not opening it: keep it out of xschem's list
+            // of recent files.
+            let script = format!(
+                "proc update_recent_file {{args}} {{}}; xschem load {}; xschem zoom_full",
+                tcl::quote(&file.to_string_lossy())
             );
-        };
-        match (&status, preview.picture.texture()) {
-            (Status::Failed(reason), _) => note(&format!("No picture: {reason}")),
-            (_, Some((texture, pixels))) if preview.shown.as_deref() == Some(file) => {
-                // Pixel for pixel, from a corner on a whole pixel.
-                let origin = Pos2::new(
-                    (rect.left() * scale).ceil() / scale,
-                    (rect.top() * scale).ceil() / scale,
-                );
-                let size = Vec2::new(pixels[0] as f32, pixels[1] as f32) / scale;
-                painter.image(
-                    texture.id(),
-                    Rect::from_min_size(origin, size),
-                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-            }
-            _ => match &preview.error {
-                Some(error) => note(error),
-                None => note("…"),
-            },
+            let id = preview.session.tcl(&script);
+            preview.loading = Some((file.clone(), epoch, id));
+        } else if let Some(wait) = preview.wanted.remaining(now) {
+            ui.ctx().request_repaint_after(wait);
         }
+    }
+
+    preview.picture.update(&preview.session, ui.ctx(), name);
+    let area = Vec2::new(width, height) / scale;
+    let (rect, _) = ui.allocate_exact_size(area, Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 2.0, Color32::BLACK);
+    let note = |text: &str| {
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            text,
+            egui::TextStyle::Small.resolve(ui.style()),
+            Color32::from_gray(150),
+        );
+    };
+    match (&status, preview.picture.texture()) {
+        (Status::Failed(reason), _) => note(&format!("No picture: {reason}")),
+        (_, Some((texture, pixels))) if preview.shown.as_deref() == Some(file) => {
+            // Pixel for pixel, from a corner on a whole pixel.
+            let origin = Pos2::new(
+                (rect.left() * scale).ceil() / scale,
+                (rect.top() * scale).ceil() / scale,
+            );
+            let size = Vec2::new(pixels[0] as f32, pixels[1] as f32) / scale;
+            painter.image(
+                texture.id(),
+                Rect::from_min_size(origin, size),
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+        _ => match &preview.error {
+            Some(error) => note(error),
+            None => note("…"),
+        },
     }
 }
 

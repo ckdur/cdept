@@ -4,7 +4,8 @@
 //! ```toml
 //! name = "sar_adc"
 //! description = "10-bit SAR ADC"
-//! technology = "ihp-sg13g2"
+//! technology = "ihp-sg13g2"        # the PDK name: $PDK
+//! pdk_root = "/opt/ext/OpenPDKs"    # where PDKs are installed: $PDK_ROOT
 //!
 //! # More definition files (same `include` and `[libraries]` keys), e.g. one shared by
 //! # a team or kept next to a PDK.
@@ -16,7 +17,8 @@
 //! ```
 //!
 //! Paths are relative to the file that contains them; `$VAR`, `${VAR}` and a leading
-//! `~` are expanded. `layout = "cells" | "flat"` (see [`LibraryLayout`]) is detected
+//! `~` are expanded. `$PDK_ROOT` and `$PDK` mean the project's `pdk_root` and `technology`
+//! when set, the environment's variables otherwise (see [`Pdk`]). `layout = "cells" | "flat"` (see [`LibraryLayout`]) is detected
 //! from the folder when left out. The file is meant to be edited by hand as well as by
 //! CDePT, so edits made here keep its comments and formatting.
 
@@ -28,6 +30,7 @@ use eyre::{Context, Result, bail, eyre};
 use toml_edit::{DocumentMut, InlineTable, Item, TableLike, Value, value};
 
 use crate::library::{self, validate_name};
+use crate::technology::Pdk;
 use crate::{Library, LibraryLayout};
 
 /// The project file, in the project's root folder.
@@ -35,6 +38,12 @@ pub const PROJECT_FILE: &str = "cdept.toml";
 
 const NEW_PROJECT: &str = r#"# CDePT project file. Edit it by hand or from the Library Manager.
 name = ""
+
+# The PDK: its name ($PDK) and the folder PDKs are installed in ($PDK_ROOT). What is
+# left out is taken from the environment CDePT is started in. Both are also used in
+# the paths below and in the environment of every tool CDePT starts.
+# technology = "ihp-sg13g2"
+# pdk_root = "/opt/ext/OpenPDKs"
 
 # Libraries, as  name = "folder"  (relative to this file; $VAR and ~ are expanded).
 # Long form, for reference libraries such as PDK primitives:
@@ -67,8 +76,13 @@ pub struct Project {
     pub file: PathBuf,
     pub name: String,
     pub description: Option<String>,
-    /// Technology (PDK) name. Used from Phase 2 on.
+    /// `technology` as written in the project file: the PDK name. [`Project::pdk`] has
+    /// the value in use, which may come from the environment.
     pub technology: Option<String>,
+    /// `pdk_root` as written in the project file (`$VAR` and `~` not expanded).
+    pub pdk_root: Option<String>,
+    /// `$PDK_ROOT` and `$PDK` as resolved: the project file first, then the environment.
+    pub pdk: Pdk,
     /// Start-up files (`xschemrc`, Tcl) the embedded xschem reads before the project's
     /// libraries are added, typically the PDK's. From `[xschem] rc = …`.
     pub xschem_rc: Vec<PathBuf>,
@@ -76,6 +90,38 @@ pub struct Project {
     pub libraries: Vec<Library>,
     /// Problems found while loading that did not prevent it.
     pub warnings: Vec<String>,
+    /// Reads the environment. A function pointer so tests can replace it.
+    env: EnvFn,
+}
+
+/// The environment lookup of a project (not part of what makes two projects equal).
+#[derive(Clone, Copy)]
+struct EnvFn(fn(&str) -> Option<String>);
+
+impl PartialEq for EnvFn {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl Eq for EnvFn {}
+impl std::fmt::Debug for EnvFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("EnvFn")
+    }
+}
+
+/// The fields of the project file that are not libraries, for [`Project::set_settings`].
+/// An empty text removes the key.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Settings {
+    pub name: String,
+    pub description: String,
+    pub technology: String,
+    pub pdk_root: String,
+}
+
+fn process_env(name: &str) -> Option<String> {
+    std::env::var(name).ok()
 }
 
 impl Project {
@@ -89,6 +135,16 @@ impl Project {
 
     /// Create a project in `dir` (created if missing). `name` defaults to the folder name.
     pub fn create(dir: &Path, name: Option<&str>) -> Result<Project> {
+        Self::create_with(dir, name, None, None)
+    }
+
+    /// Like [`Project::create`], also setting `technology` and `pdk_root`.
+    pub fn create_with(
+        dir: &Path,
+        name: Option<&str>,
+        technology: Option<&str>,
+        pdk_root: Option<&str>,
+    ) -> Result<Project> {
         let file = dir.join(PROJECT_FILE);
         if file.exists() {
             bail!("{} already exists", file.display());
@@ -104,12 +160,22 @@ impl Project {
         };
         let mut doc: DocumentMut = NEW_PROJECT.parse().expect("the template is valid TOML");
         doc["name"] = value(name);
+        for (key, setting) in [("technology", technology), ("pdk_root", pdk_root)] {
+            if let Some(setting) = setting.filter(|s| !s.trim().is_empty()) {
+                doc[key] = value(setting.trim());
+            }
+        }
         write(&file, &doc.to_string())?;
         Self::load(dir)
     }
 
     /// Load a project from its folder or its `cdept.toml`.
     pub fn load(path: &Path) -> Result<Project> {
+        Self::load_with(path, process_env)
+    }
+
+    /// [`Project::load`] with another source of environment variables.
+    pub fn load_with(path: &Path, env: fn(&str) -> Option<String>) -> Result<Project> {
         let file = if path.is_dir() {
             path.join(PROJECT_FILE)
         } else {
@@ -137,6 +203,21 @@ impl Project {
                 },
             }
         };
+        let technology = text("technology")?;
+        let pdk_root = text("pdk_root")?;
+        let mut warnings = Vec::new();
+        // `pdk_root` may use `$VAR` and `~`, but not `$PDK_ROOT` itself.
+        let expanded_root =
+            pdk_root
+                .as_deref()
+                .and_then(|raw| match expand(raw, env).map(|e| root.join(e)) {
+                    Ok(path) => Some(path.to_string_lossy().into_owned()),
+                    Err(e) => {
+                        warnings.push(format!("pdk_root '{raw}': {e}; using the environment"));
+                        None
+                    }
+                });
+        let pdk = Pdk::resolve(expanded_root, technology.as_deref(), env, &mut warnings);
         let mut project = Project {
             name: text("name")?.unwrap_or_else(|| {
                 root.file_name()
@@ -144,12 +225,15 @@ impl Project {
                     .unwrap_or_default()
             }),
             description: text("description")?,
-            technology: text("technology")?,
+            technology,
+            pdk_root,
+            pdk,
             xschem_rc: Vec::new(),
             root,
             file: file.clone(),
             libraries: Vec::new(),
-            warnings: Vec::new(),
+            warnings,
+            env: EnvFn(env),
         };
         project.load_xschem_rc(&doc);
         let mut seen = HashSet::from([file.clone()]);
@@ -173,7 +257,7 @@ impl Project {
             }
         };
         for name in names {
-            match resolve(name, &self.root) {
+            match self.resolve(name, &self.root) {
                 Ok(file) if file.is_file() => self.xschem_rc.push(file),
                 Ok(file) => self
                     .warnings
@@ -183,9 +267,70 @@ impl Project {
         }
     }
 
+    /// The value of environment variable `name` as seen in the project's paths:
+    /// `$PDK_ROOT` and `$PDK` from [`Project::pdk`], the rest from the environment.
+    pub fn var(&self, name: &str) -> Option<String> {
+        match self.pdk.var(name) {
+            Some(value) => Some(value.to_string()),
+            None => (self.env.0)(name),
+        }
+    }
+
+    /// Expand `$VAR` and `~` in `path` and make it absolute relative to `base`.
+    pub fn resolve(&self, path: &str, base: &Path) -> Result<PathBuf, String> {
+        let expanded = expand(path, |name| self.var(name))?;
+        Ok(base.join(expanded))
+    }
+
+    /// Environment variables for every tool CDePT starts for this project: `PDK_ROOT`
+    /// and `PDK` as resolved, set on top of whatever the tool would inherit.
+    pub fn tool_env(&self) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+        self.pdk.env()
+    }
+
+    /// Change `name`, `description`, `technology` and `pdk_root` in the project file,
+    /// keeping its comments and everything else, then load it again (the PDK is
+    /// resolved anew, libraries are scanned again).
+    pub fn set_settings(&mut self, settings: &Settings) -> Result<()> {
+        let mut doc = read(&self.file)?;
+        for (key, text) in [
+            ("name", &settings.name),
+            ("description", &settings.description),
+            ("technology", &settings.technology),
+            ("pdk_root", &settings.pdk_root),
+        ] {
+            let text = text.trim();
+            if text.is_empty() {
+                // A project always has a `name` line, as the template does.
+                if key == "name" {
+                    doc[key] = value("");
+                } else {
+                    doc.remove(key);
+                }
+            } else {
+                match doc.get_mut(key) {
+                    Some(item) if item.is_value() => {
+                        // Keep the comment after the old value.
+                        let suffix = item.as_value().and_then(|v| v.decor().suffix().cloned());
+                        let mut new = Value::from(text);
+                        if let Some(suffix) = suffix {
+                            new.decor_mut().set_suffix(suffix);
+                        }
+                        *item = Item::Value(new);
+                    }
+                    _ => doc[key] = value(text),
+                }
+            }
+        }
+        write(&self.file, &doc.to_string())?;
+        let env = self.env.0;
+        *self = Self::load_with(&self.file, env)?;
+        Ok(())
+    }
+
     /// Read the project file and all libraries from disk again.
     pub fn reload(&mut self) -> Result<()> {
-        *self = Self::load(&self.file)?;
+        *self = Self::load_with(&self.file, self.env.0)?;
         Ok(())
     }
 
@@ -223,7 +368,7 @@ impl Project {
         if path.trim().is_empty() {
             bail!("the library needs a folder");
         }
-        let folder = resolve(path, &self.root).map_err(|e| eyre!(e))?;
+        let folder = self.resolve(path, &self.root).map_err(|e| eyre!(e))?;
         if options.create {
             library::create_library_folder(&folder, name)?;
         } else if !folder.is_dir() {
@@ -308,7 +453,7 @@ impl Project {
                 .ok_or_else(|| eyre!("{}: `include` must be a list of files", file.display()))?,
         };
         for include in includes {
-            let path = match resolve(include, dir) {
+            let path = match self.resolve(include, dir) {
                 Ok(path) => path,
                 Err(e) => {
                     self.warnings
@@ -359,7 +504,7 @@ impl Project {
             cells: Vec::new(),
         };
         // A library that cannot be resolved stays listed, with its error.
-        match resolve(path, dir) {
+        match self.resolve(path, dir) {
             Ok(folder) => {
                 library.layout = layout.unwrap_or_else(|| LibraryLayout::detect(&folder));
                 library.path = folder;
@@ -417,12 +562,6 @@ fn write(file: &Path, text: &str) -> Result<()> {
     fs::rename(&tmp, file).wrap_err_with(|| format!("cannot write {}", file.display()))
 }
 
-/// Expand variables in `path` and make it absolute relative to `base`.
-fn resolve(path: &str, base: &Path) -> Result<PathBuf, String> {
-    let expanded = expand(path, |name| std::env::var(name).ok())?;
-    Ok(base.join(expanded))
-}
-
 /// Expand `$VAR`, `${VAR}` and a leading `~`.
 pub fn expand(text: &str, var: impl Fn(&str) -> Option<String>) -> Result<String, String> {
     let lookup = |name: &str| var(name).ok_or_else(|| format!("${name} is not set"));
@@ -461,6 +600,7 @@ pub fn expand(text: &str, var: impl Fn(&str) -> Option<String>) -> Result<String
 mod tests {
     use super::*;
     use crate::Template;
+    use crate::technology::Source;
 
     fn env(name: &str) -> Option<String> {
         match name {
@@ -577,7 +717,7 @@ layout = "flat"
         )
         .unwrap();
 
-        let project = Project::load(&root).unwrap();
+        let project = Project::load_with(&root, |_| None).unwrap();
         assert_eq!(project.name, "demo");
         assert_eq!(project.technology.as_deref(), Some("ihp-sg13g2"));
         let names: Vec<_> = project.libraries.iter().map(|l| l.name.as_str()).collect();
@@ -618,6 +758,129 @@ layout = "flat"
             "libs/a"
         );
         assert_eq!(project.portable_path(Path::new("/elsewhere")), "/elsewhere");
+    }
+
+    fn pdk_env(name: &str) -> Option<String> {
+        match name {
+            "HOME" => Some("/home/me".into()),
+            "PDK_ROOT" => Some("/env/pdks".into()),
+            "PDK" => Some("sky130A".into()),
+            "PDKS" => Some("/opt/pdks".into()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn pdk_comes_from_the_project_then_the_environment() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        for dir in ["pdks/ihp/libs", "envpdks/sky130A/libs"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        fs::write(root.join("pdks/ihp/libs/inv.sym"), "").unwrap();
+        fs::write(root.join("pdks/ihp/xschemrc"), "").unwrap();
+        fs::write(
+            root.join(PROJECT_FILE),
+            r#"
+name = "p"
+technology = "ihp"
+pdk_root = "pdks"
+
+[libraries]
+prims = { path = "$PDK_ROOT/$PDK/libs", read_only = true }
+
+[xschem]
+rc = "$PDK_ROOT/$PDK/xschemrc"
+"#,
+        )
+        .unwrap();
+        let project = Project::load_with(root, pdk_env).unwrap();
+        let pdk_root = root.canonicalize().unwrap().join("pdks");
+        assert_eq!(project.pdk.var("PDK"), Some("ihp"));
+        assert_eq!(
+            project.pdk.var("PDK_ROOT"),
+            Some(pdk_root.to_str().unwrap())
+        );
+        assert_eq!(project.pdk.root.as_ref().unwrap().source, Source::Project);
+        assert_eq!(project.library("prims").unwrap().error, None);
+        assert_eq!(project.library("prims").unwrap().cells.len(), 1);
+        assert_eq!(project.xschem_rc, [pdk_root.join("ihp/xschemrc")]);
+        // $PDK of the environment differs: one warning, the project wins.
+        assert_eq!(project.warnings.len(), 1, "{:?}", project.warnings);
+        assert!(project.warnings[0].contains("sky130A"));
+        let tool_env = project.tool_env();
+        assert!(tool_env.contains(&("PDK".into(), "ihp".into())));
+
+        // Nothing in the project file: the environment fills in.
+        fs::write(
+            root.join(PROJECT_FILE),
+            "name = \"p\"\n[libraries]\nl = \"$PDK_ROOT/$PDK/libs\"\n",
+        )
+        .unwrap();
+        let project = Project::load_with(root, pdk_env).unwrap();
+        assert_eq!(
+            project.pdk.name.as_ref().unwrap().source,
+            Source::Environment
+        );
+        assert_eq!(
+            project.library("l").unwrap().path,
+            Path::new("/env/pdks/sky130A/libs")
+        );
+        assert!(project.warnings.is_empty());
+
+        // Nothing anywhere: the library keeps its error, nothing is set.
+        let project = Project::load_with(root, |_| None).unwrap();
+        assert!(project.pdk.root.is_none() && project.tool_env().is_empty());
+        assert!(project.library("l").unwrap().error.is_some());
+
+        // `pdk_root` expands other variables and `~`, and a bad one falls back.
+        fs::write(root.join(PROJECT_FILE), "pdk_root = \"$PDKS/x\"\n").unwrap();
+        let project = Project::load_with(root, pdk_env).unwrap();
+        assert_eq!(project.pdk.var("PDK_ROOT"), Some("/opt/pdks/x"));
+        fs::write(root.join(PROJECT_FILE), "pdk_root = \"$NOPE/x\"\n").unwrap();
+        let project = Project::load_with(root, pdk_env).unwrap();
+        assert_eq!(project.pdk.var("PDK_ROOT"), Some("/env/pdks"));
+        assert_eq!(project.warnings.len(), 1);
+    }
+
+    #[test]
+    fn settings_keep_comments_and_other_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("p");
+        let mut project = Project::create_with(&root, Some("p"), Some("ihp"), None).unwrap();
+        let text = fs::read_to_string(&project.file).unwrap();
+        assert!(text.contains("# pdk_root = "), "{text}");
+        assert!(text.contains("technology = \"ihp\""));
+        let mut with_comment = text.replace("technology = \"ihp\"", "technology = \"ihp\" # mine");
+        with_comment.push_str("# note\n[extra]\nkey = 1\n");
+        fs::write(&project.file, with_comment).unwrap();
+        project.reload().unwrap();
+
+        project
+            .set_settings(&Settings {
+                name: "q".into(),
+                description: "desc".into(),
+                technology: "sky130A".into(),
+                pdk_root: "/opt/x".into(),
+            })
+            .unwrap();
+        let text = fs::read_to_string(&project.file).unwrap();
+        assert!(text.contains("# mine") && text.contains("# note") && text.contains("[extra]"));
+        assert!(text.contains("# CDePT project file"));
+        assert_eq!(project.name, "q");
+        assert_eq!(project.technology.as_deref(), Some("sky130A"));
+        assert_eq!(project.pdk.var("PDK_ROOT"), Some("/opt/x"));
+        // The keys come before the tables, so they stay top-level keys.
+        assert!(text.find("pdk_root = ").unwrap() < text.find("[libraries]").unwrap());
+
+        project
+            .set_settings(&Settings {
+                name: "q".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(project.technology.is_none() && project.pdk_root.is_none());
+        assert!(project.description.is_none());
     }
 
     #[test]

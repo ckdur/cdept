@@ -309,6 +309,8 @@ on top of this.
 
 Conventions on top of `protocol.rs`:
 - `faketk::event` kinds and arguments: `menu <menu path> <index>`, `popup_closed`,
+  `configure <path> <width> <height>` (a picture pane's size),
+  `clipboard <CLIPBOARD|PRIMARY> <text>`,
   `invoke <path>`, `text <path> <text>`, `select <path> <list of indices>`,
   `activate <path> <index>`, `key <path> <Tk keysym name>`, `focus <path>`,
   `close <toplevel path>`.
@@ -380,17 +382,62 @@ widget updates, and can dump the drawing window.
 - **Requests behind a waiting one.** When xschem opens a dialog inside a request, the
   requests already read from the socket must still be served; an idle callback of the
   Tcl event loop does that.
+- **Simulation and graphs, checked by hand** (buffer example and IHP's
+  `tran_logic_not` with the PDK's `xschemrc`, ngspice 47; then `t_sim.tcl` and
+  `cdept-gui/scripts/buffer-sim.script`, which need no simulator). Configure
+  simulators, Netlist, Simulate (background and Fg), the job list, "View last job
+  data/errors", reading raw files, adding a graph, its dialog (signals, raw file, sim
+  type, ranges, colours), the wave colour dialog, cursors a/b, wheel zoom, drag, `f`
+  and "Send highlighted nets to viewer" (no gaw: a message, no hang) all work: jobs are
+  `open |cmd` pipes read by Tcl file events, and the helper's event loop serves them,
+  also while a dialog or an Fg job waits. Fixed: `grid column` (an abbreviation Tk
+  accepts) broke the wave colour dialog; lists in grid rows were laid out sideways,
+  fields in grid cells stayed narrow, and the colour radio buttons showed no colour.
+  xschem says nothing when a job it was not asked to report on fails, so a
+  `$terminal -e ngspice` whose terminal cannot open a window failed silently;
+  `cdept.tcl` now logs the end of every job in the console and shows a "Job failed"
+  box when such a job ends with error output (a missing terminal program already gave
+  xschem's own message). Still open (the `DISPLAY` and dialog height points were fixed
+  afterwards, see below): the graph dialog's Del button deletes the signal under the
+  text cursor, which CDePT does not report (edit the list instead); Waves > Tran and the
+  graph's "Raw file" button use the desktop's file chooser. Not CDePT's: ngspice's batch
+  mode (`-b -r file`) deletes a raw file of that name written by a `.control` block, as
+  the IHP test benches do; use "Ngspice Control mode" for those.
+
+- **Pictures in dialogs and the desktop's clipboard.** xschem draws a schematic or
+  symbol into a Tk frame of some dialogs (`xschem preview_window`: its own file
+  browser, the `file_chooser` symbol browser, and Help > Show Keybindings, whose whole
+  window is the picture). The stand-in X already gave such a frame a window of its own;
+  now the helper sends it like the drawing window, a frame file per picture
+  (`Message::Preview`, sent again when its pixels change; `PreviewGone`), and CDePT
+  draws it where the frame is, pixel for pixel. CDePT sizes it (as wide as the dialog,
+  as high as Tk's `-height`) and says so with `UiEvent::Configure`: the window gets
+  that size and the frame's `<Configure>`/`<Expose>` bindings make xschem draw again.
+  `Tk_DestroyWindow` now destroys the widget too, as in Tk. With the library picker
+  (the default) these browsers are not reached; the picker got a "Picture" column
+  instead, drawn by a second preview engine like the Inspector's. Clipboard: Ctrl+V in
+  a mirrored text field always worked on X11 (egui pastes itself; checked under Xvnc
+  with `xclip`). What was missing was the rest of what Tk does: the middle button now
+  pastes the desktop's primary selection into a field (read with arboard, the crate
+  egui already uses), and xschem's Tcl gets the desktop's clipboard and primary
+  selection (`clipboard get`, `selection get`): CDePT sends them
+  (`UiEvent::Clipboard`) when a dialog opens, when the window gets the focus back and
+  on every paste. Not checked on a Wayland desktop (no nested compositor here):
+  there egui pastes through smithay-clipboard and arboard reads through Xwayland.
+  Also: dialogs size to their content up to the tab's height, and in a taller one the
+  part packed to expand scrolls while the rows before and after it (buttons) stay;
+  a `DISPLAY` the helper made up for xschem.tcl is unset after start-up, so programs
+  xschem starts see the real one.
+  Tests: `t_preview.tcl` (panes need `CDX_DISPLAY`), `buffer-preview.script`, and the
+  IHP `xschemrc` by hand (IHP symbols in xschem's browser).
 
 Known gaps:
-- Preview panes inside xschem's own dialogs (symbol previews drawn by C into a Tk
-  frame) are empty; CDePT's library picker and Inspector preview replace them.
-- Clipboard goes out only (xschem → system); text from the system clipboard does not
-  reach xschem's dialogs. Copy and paste of schematic objects between tabs works
-  through xschem's own clipboard file.
 - xschem's "make schematic from symbol" does not work in a `cells` library
   (section 7).
 - The GUI test driver cannot inject mouse and keys into detached windows.
 - The native file chooser (export destinations, "Other File…") is written but was not
   run, because it opens a dialog on the desktop.
-- Not done from step 5: simulation setup and graph dialogs checked by hand, packaging
-  in asic-all, an install layout (`share/cdept-xschem`).
+- Step 5 packaging: `scripts/install.sh` (layout `bin/cdept`, `bin/cdept-xschem`,
+  `share/cdept-xschem/`, see `cdept-xschem/README.md`), CI installs libjpeg-dev and runs an
+  install smoke test, and a draft `cdept` entry exists in asic-all's `tool_library.yaml`
+  (not built in the image: private repository, needs a toolchain and network).

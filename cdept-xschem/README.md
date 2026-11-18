@@ -22,10 +22,44 @@ cargo build -p cdept-xschem
 
 Needs a C compiler, flex, bison and the development files of Tcl and cairo
 (Debian/Ubuntu: `sudo apt install build-essential flex bison tcl-dev libcairo2-dev`).
+**Optional:** `libjpeg-dev` (found with pkg-config `libjpeg`; libjpeg-turbo's works).
+With it, JPEG pictures embedded in schematics are drawn; without it they are left out
+and the build prints a warning. Release, CI and package builds should install it.
 The crate is not a default workspace member, so a plain `cargo build` does not need
 them.
 
 At run time xschem needs `awk` for netlisting.
+
+## Install
+
+```
+scripts/install.sh [--prefix /usr/local] [--destdir D] [--no-build] [--no-helper]
+```
+
+builds `cdept` and the helper in release mode and installs, under `D/prefix`:
+
+| Path | What |
+|------|------|
+| `bin/cdept` | the program (MIT) |
+| `bin/cdept-xschem` | the helper (GPL-2.0-or-later). In `bin/`, not `libexec/`: `cdept` already looks next to its own executable, and it can also be started by `--version` and found on `PATH` for diagnosis |
+| `share/cdept-xschem/` | what the helper reads at run time: xschem's Tcl and awk files, `systemlib`, `xschem_library/devices`, and `cdept/` (the Tk stand-in and CDePT's Tcl) |
+| `share/doc/cdept/` | the licences |
+
+The files do not depend on the prefix: the helper finds `../share/cdept-xschem` relative
+to its executable, so an installed tree can be moved. `--destdir` stages for packagers
+(nothing is recorded with it). `--no-helper` installs `cdept` alone. At run time the
+helper needs `libtcl8.6`, `libcairo2` (and `libjpeg`), and `awk` (netlisting).
+`cdept-xschem --print-sharedir` shows which share folder it uses.
+
+Lookup order. `cdept` finds the helper through `$CDEPT_XSCHEM`, then next to its own
+executable, then `PATH`. The helper finds the share folder through `--sharedir`
+(an explicit one that is wrong is an error), `$CDEPT_XSCHEM_SHAREDIR`,
+`<exe>/../share/cdept-xschem`, then the build tree (a symlink farm in cargo's `OUT_DIR`,
+for development). The install script copies from that farm with the links resolved.
+
+For the asic-all image the entry is `cdept` in `bouquet_assembler/tool_library.yaml`
+(private repository; it has to be built inside the image, because a host build needs a
+newer glibc).
 
 ## How it works
 
@@ -63,10 +97,7 @@ xschem's sources are not modified.
 | `src/bin/cdx-tcl.rs` | Test tool: run Tcl in the engine without CDePT |
 | `tests/` | End-to-end tests through `libcdept::xschem` (`Engine`, `Session`) |
 
-`cdept` finds the helper through `$CDEPT_XSCHEM`, next to its own executable, or on
-`PATH`. The helper finds xschem's runtime files (`xschem.tcl`, awk scripts,
-`xschem_library/devices`) through `--sharedir`, `$CDEPT_XSCHEM_SHAREDIR`,
-`../share/cdept-xschem` next to its executable, or the build tree.
+How `cdept` finds the helper and the helper its runtime files: see Install above.
 
 ## Testing
 

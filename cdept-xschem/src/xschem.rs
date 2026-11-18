@@ -45,6 +45,27 @@ unsafe extern "C" {
         width: c_int,
         height: c_int,
     );
+    fn cdx_preview_list() -> c_int;
+    fn cdx_preview_info(
+        index: c_int,
+        width: *mut c_int,
+        height: *mut c_int,
+        changed: *mut c_int,
+    ) -> *const c_char;
+    fn cdx_preview_read(index: c_int, dst: *mut c_uchar, dst_stride: c_int);
+}
+
+/// A picture pane of a dialog: a Tk frame whose window xschem's C code draws a
+/// schematic or symbol into (its `preview_window`). See [`Xschem::previews`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pane {
+    index: c_int,
+    /// Tk path of the frame (or top-level window) the picture belongs to.
+    pub path: String,
+    pub width: u32,
+    pub height: u32,
+    /// The pixels changed since the previous [`Xschem::previews`] call.
+    pub changed: bool,
 }
 
 /// xschem keeps its state in C globals: there can be one per process.
@@ -264,6 +285,50 @@ impl Xschem {
                 rect.height as c_int,
             )
         }
+    }
+}
+
+impl Xschem {
+    /// The picture panes that exist now. Valid until the next call into xschem.
+    pub fn previews(&self) -> Vec<Pane> {
+        // SAFETY: no arguments; refreshes the list the other calls index.
+        let count = unsafe { cdx_preview_list() };
+        (0..count)
+            .filter_map(|index| {
+                let (mut width, mut height, mut changed) = (0, 0, 0);
+                // SAFETY: the index is below the count just returned, pointers valid.
+                let path =
+                    unsafe { cdx_preview_info(index, &mut width, &mut height, &mut changed) };
+                if path.is_null() || width <= 0 || height <= 0 {
+                    return None;
+                }
+                // SAFETY: a NUL-terminated string owned by the C side, valid for now.
+                let path = unsafe { CStr::from_ptr(path) }
+                    .to_string_lossy()
+                    .into_owned();
+                Some(Pane {
+                    index,
+                    path,
+                    width: width as u32,
+                    height: height as u32,
+                    changed: changed != 0,
+                })
+            })
+            .collect()
+    }
+
+    /// Copy all pixels of `pane` into `frame`: rows of `stride` bytes, R G B A
+    /// premultiplied. Nothing happens when `frame` is too small. Call it right after
+    /// [`Xschem::previews`], before anything else calls into xschem.
+    pub fn read_preview(&self, pane: &Pane, frame: &mut [u8], stride: u32) {
+        if stride < pane.width * 4
+            || frame.len() < (pane.height as usize - 1) * stride as usize + pane.width as usize * 4
+        {
+            return;
+        }
+        // SAFETY: the buffer holds `height` rows of `stride` bytes (checked above), and
+        // the index came from the latest list, whose window has this size.
+        unsafe { cdx_preview_read(pane.index, frame.as_mut_ptr(), stride as c_int) }
     }
 }
 

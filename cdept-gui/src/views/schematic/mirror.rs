@@ -10,6 +10,7 @@ use egui::{Button, Color32, Context, Id, Pos2, Rect, TextureHandle, TextureOptio
 use libcdept::xschem::protocol::{
     Image, MenuItem, MenuKind, StatusField, ToolItem, UiEvent, UiUpdate, Widget, Window,
 };
+use libcdept::xschem::session::PaneUpdate;
 
 use libcdept::Project;
 
@@ -96,6 +97,158 @@ fn decode(image: &Image) -> Option<egui::ColorImage> {
     ))
 }
 
+/// A picture pane of a dialog: what xschem's C code drew into a frame of the dialog.
+struct Pane {
+    texture: TextureHandle,
+    /// Size of the picture in pixels.
+    size: [u32; 2],
+    /// Size last asked for (`UiEvent::Configure`), in pixels.
+    asked: Option<[u32; 2]>,
+    /// How many different colours the picture has, counted up to 16 (for tests).
+    colours: usize,
+}
+
+/// Changes of the size of a pane up to this many pixels are not passed on.
+const PANE_SLACK: u32 = 40;
+
+/// The picture panes of the dialogs, by Tk path of their widget.
+#[derive(Default)]
+pub struct Panes {
+    panes: HashMap<String, Pane>,
+}
+
+fn count_colours(pixels: &[u8]) -> usize {
+    let mut seen: Vec<&[u8; 4]> = Vec::new();
+    for pixel in pixels.as_chunks::<4>().0 {
+        if !seen.contains(&pixel) {
+            seen.push(pixel);
+            if seen.len() == 16 {
+                break;
+            }
+        }
+    }
+    seen.len()
+}
+
+impl Panes {
+    fn apply(&mut self, update: PaneUpdate, ctx: &Context) {
+        match update {
+            PaneUpdate::Changed {
+                widget,
+                width,
+                height,
+                pixels,
+            } => {
+                let size = [width, height];
+                let colours = count_colours(&pixels);
+                let image = egui::ColorImage::from_rgba_premultiplied(
+                    [width as usize, height as usize],
+                    &pixels,
+                );
+                match self.panes.get_mut(&widget) {
+                    Some(pane) => {
+                        pane.texture.set(image, TextureOptions::NEAREST);
+                        pane.size = size;
+                        pane.colours = colours;
+                    }
+                    None => {
+                        let texture = ctx.load_texture(
+                            format!("xschem-pane-{widget}"),
+                            image,
+                            TextureOptions::NEAREST,
+                        );
+                        let pane = Pane {
+                            texture,
+                            size,
+                            asked: None,
+                            colours,
+                        };
+                        self.panes.insert(widget, pane);
+                    }
+                }
+            }
+            PaneUpdate::Gone { widget } => {
+                self.panes.remove(&widget);
+            }
+        }
+    }
+
+    /// Forget the panes of the window at `path`.
+    fn forget(&mut self, path: &str) {
+        let inside = format!("{path}.");
+        self.panes
+            .retain(|key, _| key != path && !key.starts_with(&inside));
+    }
+
+    /// Whether the widget at `path` is a picture pane.
+    pub fn has(&self, path: &str) -> bool {
+        self.panes.contains_key(path)
+    }
+
+    /// Draw the pane of the widget at `path`, `size` points large (whole pixels are
+    /// asked for: the picture is drawn one pixel per screen pixel). A size the picture
+    /// does not have yet is asked for with `UiEvent::Configure`; a click on it is
+    /// reported as `UiEvent::Invoke` (Tk runs the frame's button bindings).
+    pub fn show(&mut self, ui: &mut Ui, path: &str, size: egui::Vec2, events: &mut Vec<UiEvent>) {
+        let Some(pane) = self.panes.get_mut(path) else {
+            return;
+        };
+        let scale = ui.ctx().pixels_per_point();
+        let mut pixels = [
+            (size.x * scale).floor().max(16.0) as u32,
+            (size.y * scale).floor().max(16.0) as u32,
+        ];
+        // A window that fits its content grows a little with a pane that takes all the
+        // width there is, frame after frame: small changes are ignored, so the window
+        // settles; a resize by the user is larger than that.
+        if let Some(asked) = pane.asked
+            && pixels[0].abs_diff(asked[0]) <= PANE_SLACK
+            && pixels[1].abs_diff(asked[1]) <= PANE_SLACK
+        {
+            pixels = asked;
+        }
+        if pane.asked != Some(pixels) {
+            pane.asked = Some(pixels);
+            if pane.size != pixels {
+                events.push(UiEvent::Configure {
+                    path: path.to_string(),
+                    width: pixels[0],
+                    height: pixels[1],
+                });
+            }
+        }
+        let area = egui::Vec2::new(pixels[0] as f32, pixels[1] as f32) / scale;
+        let (rect, response) = ui.allocate_exact_size(area, egui::Sense::click());
+        // Pixel for pixel, from a corner on a whole pixel; a picture of the old size
+        // (a new one is on its way) is cut to the space.
+        let origin = Pos2::new(
+            (rect.left() * scale).ceil() / scale,
+            (rect.top() * scale).ceil() / scale,
+        );
+        let shown = egui::Vec2::new(pane.size[0] as f32, pane.size[1] as f32) / scale;
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, Color32::BLACK);
+        painter.image(
+            pane.texture.id(),
+            Rect::from_min_size(origin, shown),
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
+        );
+        if response.clicked() {
+            events.push(UiEvent::Invoke {
+                path: path.to_string(),
+            });
+        }
+    }
+
+    /// Size of the picture of the pane at `path`, the size last asked for, and how
+    /// many colours it has (up to 16).
+    pub fn info(&self, path: &str) -> Option<([u32; 2], Option<[u32; 2]>, usize)> {
+        let pane = self.panes.get(path)?;
+        Some((pane.size, pane.asked, pane.colours))
+    }
+}
+
 /// A native file chooser running on its own thread, for a `FileDialog` window.
 struct Chooser {
     /// Tk path of the window that asked.
@@ -162,6 +315,9 @@ pub struct Mirror {
     /// The widget each window last gave the focus to, so that it is done once.
     focused: HashMap<String, String>,
     edits: Edits,
+    panes: Panes,
+    /// A dialog opened since the last call of `take_opened_window`.
+    window_opened: bool,
     choosers: Vec<Chooser>,
     /// Library pickers, by the Tk path of the window that asked.
     pickers: HashMap<String, Picker>,
@@ -205,7 +361,10 @@ impl Mirror {
                 }
                 match self.windows.iter_mut().find(|w| w.path == window.path) {
                     Some(open) => *open = window,
-                    None => self.windows.push(window),
+                    None => {
+                        self.window_opened = true;
+                        self.windows.push(window);
+                    }
                 }
             }
             UiUpdate::WindowClosed { path } => {
@@ -213,8 +372,24 @@ impl Mirror {
                 self.focused.remove(&path);
                 self.pickers.remove(&path);
                 self.edits.forget(&path);
+                self.panes.forget(&path);
             }
         }
+    }
+
+    /// Take in a change of a picture pane.
+    pub fn apply_pane(&mut self, update: PaneUpdate, ctx: &Context) {
+        self.panes.apply(update, ctx);
+    }
+
+    /// Whether a dialog opened since the last call.
+    pub fn take_opened_window(&mut self) -> bool {
+        std::mem::take(&mut self.window_opened)
+    }
+
+    /// The picture pane of the widget at `path`: see [`Panes::info`].
+    pub fn pane_info(&self, path: &str) -> Option<([u32; 2], Option<[u32; 2]>, usize)> {
+        self.panes.info(path)
     }
 
     /// Whether a "save as" got a file name since the last call.
@@ -394,6 +569,7 @@ impl Mirror {
         salt: Id,
         area: Rect,
         project: Option<&Project>,
+        picture: &mut picker::ShowPicture<'_>,
     ) -> Vec<UiEvent> {
         let mut events = Vec::new();
         self.choosers
@@ -427,7 +603,7 @@ impl Mirror {
                 if waiting || picker.answered {
                     continue;
                 }
-                let answer = match picker::show(ctx, id, area, window, project, picker) {
+                let answer = match picker::show(ctx, id, area, window, project, picker, picture) {
                     Picked::Nothing => continue,
                     Picked::Elsewhere => {
                         elsewhere.push(start_chooser(window, ctx));
@@ -449,6 +625,7 @@ impl Mirror {
                 edits: &mut self.edits,
                 events: &mut events,
                 images: &mut self.images,
+                panes: &mut self.panes,
                 focus: None,
             };
             // Give the focus where xschem put it, once per change.
@@ -694,13 +871,25 @@ fn dialog(ctx: &Context, id: Id, area: Rect, window: &Window, top: bool, cx: &mu
         .id(id)
         .open(&mut open)
         .collapsible(false)
+        // The height follows the content, up to what the tab has room for (the scroll
+        // area below): egui's default of 420 points hid the buttons at the bottom of
+        // tall dialogs (simulator configuration, graph dialog). The width stays the
+        // user's to change.
+        .resizable([true, false])
+        .default_height(area.height().max(200.0) - 40.0)
         .pivot(egui::Align2::CENTER_CENTER)
         .default_pos(area.center())
         .show(ctx, |ui| {
             let before = cx.events.len();
-            egui::ScrollArea::vertical()
-                .max_height(area.height().max(200.0) - 60.0)
-                .show(ui, |ui| widgets::children(ui, &window.root, cx));
+            if cx.panes.has(&window.root.path) {
+                // The window is a picture (xschem's key cheat sheet): as large as the
+                // tab allows.
+                let size =
+                    (area.size() - egui::Vec2::new(40.0, 90.0)).max(egui::Vec2::splat(200.0));
+                cx.panes.show(ui, &window.root.path, size, cx.events);
+            } else {
+                dialog_body(ui, id, area, &window.root, cx);
+            }
             cx.events.len() > before
         });
     // Return and Escape with no widget focused go to the window, where Tk dialogs
@@ -720,6 +909,64 @@ fn dialog(ctx: &Context, id: Id, area: Rect, window: &Window, top: bool, cx: &mu
         cx.events.push(UiEvent::Close {
             path: window.path.clone(),
         });
+    }
+}
+
+/// The widgets of a dialog, scrolled when the tab is too low for them. As with Tk, the
+/// part that is packed to expand is what gives way: what is packed before and after it
+/// (a title, the row of buttons at the bottom) stays in view.
+fn dialog_body(ui: &mut Ui, id: Id, area: Rect, root: &Widget, cx: &mut Draw<'_>) {
+    let room = area.height().max(200.0) - 60.0;
+    let placed: Vec<&Widget> = root
+        .children
+        .iter()
+        .filter(|c| !c.layout.is_empty())
+        .collect();
+    let packed = placed
+        .iter()
+        .all(|c| c.layout.get("manager").map(String::as_str) == Some("pack"));
+    let expands = |c: &Widget| {
+        matches!(
+            c.layout.get("expand").map(String::as_str),
+            Some("1" | "yes" | "true")
+        ) && matches!(
+            c.layout.get("side").map(String::as_str),
+            None | Some("top" | "bottom")
+        )
+    };
+    let at = placed.iter().position(|c| expands(c));
+    let (Some(at), true) = (at, packed) else {
+        egui::ScrollArea::vertical()
+            .max_height(room)
+            .show(ui, |ui| widgets::children(ui, root, cx));
+        return;
+    };
+    let part = |widgets: &[&Widget]| Widget {
+        children: widgets.iter().map(|w| (*w).clone()).collect(),
+        ..root.clone()
+    };
+    let (before, rest) = placed.split_at(at);
+    let (middle, after) = rest.split_at(1);
+    // The height of the parts around the scrolled one, from the previous frame.
+    let fixed_id = id.with("fixed height");
+    let fixed: f32 = ui.data(|d| d.get_temp(fixed_id)).unwrap_or(0.0);
+    let top = ui.cursor().top();
+    let mut fixed_now = 0.0;
+    if !before.is_empty() {
+        widgets::children(ui, &part(before), cx);
+    }
+    fixed_now += ui.cursor().top() - top;
+    egui::ScrollArea::vertical()
+        .max_height((room - fixed).max(100.0))
+        .show(ui, |ui| widgets::children(ui, &part(middle), cx));
+    if !after.is_empty() {
+        let start = ui.cursor().top();
+        widgets::children(ui, &part(after), cx);
+        fixed_now += ui.cursor().top() - start;
+    }
+    if (fixed_now - fixed).abs() > 0.5 {
+        ui.data_mut(|d| d.insert_temp(fixed_id, fixed_now));
+        ui.ctx().request_repaint();
     }
 }
 
@@ -920,6 +1167,64 @@ mod tests {
         }
     }
 
+    /// A picture pane: shown where its widget is, asked for at the size it is shown
+    /// at (once), gone with its window.
+    #[test]
+    fn picture_panes() {
+        let ctx = Context::default();
+        let mut mirror = Mirror::default();
+        let mut window = sample_dialog();
+        window.root.children.push(widget(
+            ".d.pane",
+            "Frame",
+            "",
+            &[("manager", "pack"), ("fill", "both")],
+        ));
+        let path = window.path.clone();
+        mirror.apply(UiUpdate::Window { window }, &ctx);
+        mirror.apply_pane(
+            PaneUpdate::Changed {
+                widget: ".d.pane".into(),
+                width: 2,
+                height: 2,
+                pixels: vec![255, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255],
+            },
+            &ctx,
+        );
+        assert_eq!(mirror.pane_info(".d.pane"), Some(([2, 2], None, 2)));
+        let mut configures = Vec::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let area = ui.max_rect();
+                let events = mirror.windows(ui.ctx(), Id::new("t"), area, None, &mut |_, _| {});
+                configures.extend(
+                    events
+                        .into_iter()
+                        .filter(|e| matches!(e, UiEvent::Configure { .. })),
+                );
+            });
+            output.drop_without_applying_deltas();
+        }
+        let [
+            UiEvent::Configure {
+                path: pane,
+                width,
+                height,
+            },
+        ] = &configures[..]
+        else {
+            panic!("one size asked for: {configures:?}");
+        };
+        assert_eq!(pane, ".d.pane");
+        assert!(*width >= 200 && *height >= 100, "{width} x {height}");
+        assert_eq!(
+            mirror.pane_info(".d.pane").unwrap().1,
+            Some([*width, *height])
+        );
+        mirror.apply(UiUpdate::WindowClosed { path }, &ctx);
+        assert_eq!(mirror.pane_info(".d.pane"), None);
+    }
+
     /// Draw everything a mirror can hold, headless, a few frames.
     #[test]
     fn everything_draws() {
@@ -1032,7 +1337,7 @@ mod tests {
                 let events = mirror.popup(ui, salt, None);
                 assert!(events.is_empty(), "{events:?}");
                 // The text field xschem focused reports the focus once.
-                let events = mirror.windows(ui.ctx(), salt, area, None);
+                let events = mirror.windows(ui.ctx(), salt, area, None, &mut |_, _| {});
                 for event in &events {
                     assert!(matches!(event, UiEvent::Focus { .. }), "{event:?}");
                 }

@@ -25,11 +25,19 @@ jobs:
           sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libwayland-dev
       - name: Build tools and libraries for the xschem helper
-        run: sudo apt-get install -y flex bison tcl-dev libcairo2-dev fonts-dejavu-core
+        run: sudo apt-get install -y flex bison tcl-dev libcairo2-dev libjpeg-dev fonts-dejavu-core
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
+      - name: Install (scripts/install.sh) and run from the installed layout
+        run: |
+          scripts/install.sh --prefix "$RUNNER_TEMP/prefix"
+          cp -r examples/buffer "$RUNNER_TEMP/buffer"
+          cd "$RUNNER_TEMP/buffer"
+          env -u CDEPT_XSCHEM -u CDEPT_XSCHEM_SHAREDIR "$RUNNER_TEMP/prefix/bin/cdept" xschem version
+          env -u CDEPT_XSCHEM -u CDEPT_XSCHEM_SHAREDIR "$RUNNER_TEMP/prefix/bin/cdept" netlist logic buf -o buf.spice
+          grep -q '^x1 ' buf.spice
 
   msrv:
     runs-on: ubuntu-24.04
@@ -44,6 +52,6 @@ jobs:
           sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libwayland-dev
       - name: Build tools and libraries for the xschem helper
-        run: sudo apt-get install -y flex bison tcl-dev libcairo2-dev
+        run: sudo apt-get install -y flex bison tcl-dev libcairo2-dev libjpeg-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --all-targets

@@ -1511,7 +1511,7 @@ int Tk_Init(Tcl_Interp *interp)
   /* xschem.tcl builds its widgets only if DISPLAY names something. The value is not
    * used by us; a real one is left alone for the programs xschem starts. */
   Tcl_Eval(interp, "if {![info exists ::env(DISPLAY)] || $::env(DISPLAY) eq {}} "
-                   "{set ::env(DISPLAY) :0}");
+                   "{set ::env(DISPLAY) :0; set ::cdept::fake_display 1}");
   /* What the Tcl side may ask about the drawing window (kept up to date by
    * display.c). */
   Tcl_Eval(interp, "namespace eval ::cdept { variable drw; "
@@ -1531,6 +1531,31 @@ int Tk_Init(Tcl_Interp *interp)
     }
   }
   return source_file(interp, share, use_faketk ? "faketk.tcl" : "tkmin.tcl");
+}
+
+/* After xschem's start-up: a DISPLAY made up by Tk_Init() goes again, so that the
+ * programs xschem starts (simulators, terminals, viewers) see the real environment.
+ * The two procedures of xschem.tcl that look at it later (for a new window or tab)
+ * get it back while they run. */
+void xs_after_start(void)
+{
+  if(!the_interp) return;
+  Tcl_Eval(the_interp,
+    "if {[info exists ::cdept::fake_display]} {\n"
+    "  unset -nocomplain ::cdept::fake_display ::env(DISPLAY)\n"
+    "  namespace eval ::cdept::with_display {}\n"
+    "  apply {{} {foreach p {set_bindings pack_widgets} {\n"
+    "    if {[llength [info procs ::$p]] && ![llength [info procs ::cdept::with_display::$p]]} {\n"
+    "      rename ::$p ::cdept::with_display::$p\n"
+    "      proc ::$p {args} [string map [list @P@ $p] {\n"
+    "        set ::env(DISPLAY) :0\n"
+    "        try {uplevel 1 [list ::cdept::with_display::@P@ {*}$args]} finally {\n"
+    "          unset -nocomplain ::env(DISPLAY)\n"
+    "        }\n"
+    "      }]\n"
+    "    }\n"
+    "  }}}\n"
+    "}");
 }
 
 void Tk_MainLoop(void) { UNSUPPORTED(); }
@@ -1587,9 +1612,27 @@ void Tk_MakeWindowExist(Tk_Window win)
   if(d) win->window = d->id;
 }
 
+/* As with Tk, the widget goes too (xschem's key cheat sheet closes this way). */
 void Tk_DestroyWindow(Tk_Window win)
 {
-  if(win) forget_tkwin(win);
+  Tcl_DString script;
+  if(!win) return;
+  if(the_interp && strcmp(win->path, ".")) {
+    Tcl_InterpState saved = Tcl_SaveInterpState(the_interp, TCL_OK);
+    Tcl_DStringInit(&script);
+    Tcl_DStringAppendElement(&script, "destroy");
+    Tcl_DStringAppendElement(&script, win->path);
+    Tcl_Eval(the_interp, Tcl_DStringValue(&script));
+    Tcl_DStringFree(&script);
+    Tcl_RestoreInterpState(the_interp, saved);
+  }
+  /* the Tcl side may have looked the window up meanwhile: find it again */
+  for(struct xs_tkwin *w = tkwins; w; w = w->next) {
+    if(w == win) {
+      forget_tkwin(win);
+      break;
+    }
+  }
 }
 
 Window Tk_WindowId(Tk_Window win)
@@ -1604,6 +1647,33 @@ xs_drawable *xs_window_of_path(const char *path)
   struct xs_tkwin *w = find_tkwin(path);
   if(!w || w->window == None) return NULL;
   return xs_lookup(w->window);
+}
+
+/* A drawing window of xschem's (".drw", or ".x1.drw" and the like for its own extra
+ * windows), not a picture pane. */
+static int is_drawing_window(const char *path)
+{
+  size_t n = strlen(path);
+  return !strcmp(path, ".") || (n >= 4 && !strcmp(path + n - 4, ".drw"));
+}
+
+int xs_preview_windows(const char **paths, xs_drawable **wins, int max)
+{
+  struct xs_tkwin *w;
+  int n = 0;
+  for(w = tkwins; w && n < max; w = w->next) {
+    xs_drawable *d;
+    if(w->window == None || is_drawing_window(w->path)) continue;
+    /* Gone from the Tcl side: Tk_NameToWindow() forgets it when xschem asks next;
+     * forgetting it here would leave xschem a dangling Tk_Window. */
+    if(!tcl_window_query("exists", w->path, 0)) continue;
+    d = xs_lookup(w->window);
+    if(!d) continue;
+    paths[n] = w->path;
+    wins[n] = d;
+    ++n;
+  }
+  return n;
 }
 
 Display *Tk_Display(Tk_Window win) { (void)win; return &the_display; }

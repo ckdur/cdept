@@ -1,0 +1,45 @@
+# Pictures inside xschem's own dialogs (its preview panes) and the desktop's clipboard
+# reaching xschem, on examples/buffer. Changes nothing on disk.
+#
+#   cdept-gui/scripts/run.sh cdept-gui/scripts/buffer-preview.script
+
+open bench tb_buf schematic
+wait_frame
+
+# The key cheat sheet (Help > Show Keybindings): a window that is a picture, shown at
+# the size CDePT gives it.
+tcl_send show_bindkeys
+expect_pane .bk
+tcl_send xschem preview_window destroy .bk
+tcl_expect 0 winfo exists .bk
+
+# xschem's own file browser, which CDePT's library picker replaces unless told
+# otherwise: the symbol chosen is drawn in the dialog.
+tcl set cdept::native_file_dialogs 0
+tcl_send load_file_dialog {Choose symbol} {*.sym} INITIALINSTDIR 1
+expect_dialog Choose symbol
+tcl_send file_dialog_display_preview [abs_sym_path logic/buf/symbol/buf.sym]
+expect_pane .load.l.paneright.draw
+dialog_click Cancel
+tcl set cdept::native_file_dialogs 1
+
+# Text from the desktop's clipboard: pasted into a dialog field (Ctrl+V), and what
+# xschem's Tcl gets from `clipboard get`.
+wait 0.7
+click_instance x1
+key q
+expect_dialog Edit Properties
+clipboard { extra=1}
+key v ctrl
+dialog_click OK
+tcl_expect 1 xschem getprop instance x1 extra
+tcl_expect { extra=1} clipboard get
+primary selected text
+click_instance x1
+key q
+expect_dialog Edit Properties
+tcl_expect {selected text} selection get
+dialog_click Cancel
+
+close
+quit

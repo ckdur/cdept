@@ -43,7 +43,16 @@ enum Command {
         /// Project name. Defaults to the folder name.
         #[arg(long)]
         name: Option<String>,
+        /// PDK name (`technology` in cdept.toml, `$PDK` for tools), e.g. ihp-sg13g2.
+        #[arg(long)]
+        technology: Option<String>,
+        /// Folder PDKs are installed in (`pdk_root`, `$PDK_ROOT` for tools).
+        #[arg(long)]
+        pdk_root: Option<String>,
     },
+    /// Show the project: its file, the PDK in use ($PDK, $PDK_ROOT) and where each
+    /// value comes from, the libraries.
+    Info,
     /// List the libraries, cells and views of the project.
     Ls {
         /// Only this library.
@@ -349,6 +358,30 @@ fn xschem_view(
         .ok_or_else(|| eyre!("view '{}' of '{cell}' has no file", entry.name))
 }
 
+/// What `cdept info` prints: the project and the PDK in use.
+fn info(project: &Project) {
+    println!("project      {}", project.name);
+    println!("file         {}", project.file.display());
+    let shown = |value: &Option<libcdept::Resolved>| match value {
+        Some(r) => format!("{}  ({})", r.value, r.source.name()),
+        None => "not set".to_string(),
+    };
+    println!("PDK          {}", shown(&project.pdk.name));
+    println!("PDK_ROOT     {}", shown(&project.pdk.root));
+    for rc in &project.xschem_rc {
+        println!("xschem rc    {}", rc.display());
+    }
+    let errors = project
+        .libraries
+        .iter()
+        .filter(|l| l.error.is_some())
+        .count();
+    println!(
+        "libraries    {} ({errors} with errors)",
+        project.libraries.len()
+    );
+}
+
 fn list(project: &Project, only: Option<&str>, libraries_only: bool) -> Result<()> {
     if let Some(name) = only
         && project.library(name).is_none()
@@ -417,10 +450,25 @@ fn main() -> Result<()> {
                 log,
             )
         }
-        Command::Init { dir, name } => {
+        Command::Init {
+            dir,
+            name,
+            technology,
+            pdk_root,
+        } => {
             init_tracing(cli.verbose, None);
-            let project = Project::create(&dir, name.as_deref())?;
+            let project = Project::create_with(
+                &dir,
+                name.as_deref(),
+                technology.as_deref(),
+                pdk_root.as_deref(),
+            )?;
             println!("created {}", project.file.display());
+            Ok(())
+        }
+        Command::Info => {
+            init_tracing(cli.verbose, None);
+            info(&open_project(cli.project)?);
             Ok(())
         }
         Command::Ls { library, libraries } => {
