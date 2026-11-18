@@ -6,12 +6,15 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use libcdept::tools::{self, ToolInfo};
+use libcdept::xschem::{Engine, NetlistFormat};
 use libcdept::{Cell, Entry, Library, Project};
 use serde::{Deserialize, Serialize};
 
 use crate::dialogs::{Dialog, DialogState};
-use crate::dock::{Tab, WindowId};
+use crate::dock::{DocId, DocRef, Tab, WindowId};
+use crate::engines::Engines;
 use crate::log::LogBuffer;
+use crate::views::Selected;
 
 /// User settings persisted across sessions (the dock layout is stored separately).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +88,11 @@ impl ConsoleLevel {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     OpenTab(Tab),
+    CloseTab(Tab),
+    /// Open a view of a cell in its embedded tool, as a document tab.
+    OpenView(Selection),
+    /// Open a file in its embedded tool: as the library view it is, if it is one.
+    OpenFile(PathBuf),
     /// Move a tab into a new native window.
     DetachTab(Tab),
     /// Move a tab into an existing window.
@@ -100,16 +108,58 @@ pub enum Action {
     /// Re-read cdept.toml and the library folders.
     ReloadProject,
     CloseProject,
+    /// Write the netlist of a cell's schematic into its `netlist` view.
+    NetlistToView {
+        library: String,
+        cell: String,
+        format: NetlistFormat,
+    },
     DetectTools,
     /// Show the About dialog over the given window.
     ShowAbout(WindowId),
     Quit,
 }
 
+/// The embedded xschem engine: the helper program `cdept-xschem`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HelperInfo {
+    /// Where the program is, if it was found.
+    pub path: Option<PathBuf>,
+    /// What it says about itself (`--version`), e.g. `xschem 3.4.8RC, protocol 2`.
+    pub version: Option<String>,
+}
+
+impl HelperInfo {
+    /// Look for the helper and ask it for its version.
+    fn detect() -> HelperInfo {
+        let Some(path) = Engine::find_helper() else {
+            return HelperInfo::default();
+        };
+        let output = std::process::Command::new(&path).arg("--version").output();
+        let version = output.ok().filter(|o| o.status.success()).map(|o| {
+            let text = String::from_utf8_lossy(&o.stdout);
+            helper_version(text.trim())
+        });
+        HelperInfo {
+            path: Some(path),
+            version,
+        }
+    }
+}
+
+/// `xschem 3.4.8RC, protocol 2` out of `cdept-xschem 0.1.0 (xschem 3.4.8RC, protocol 2)`.
+fn helper_version(line: &str) -> String {
+    match (line.find('('), line.rfind(')')) {
+        (Some(open), Some(close)) if open < close => line[open + 1..close].to_string(),
+        _ => line.to_string(),
+    }
+}
+
 /// External tool detection, run on a background thread.
 #[derive(Default)]
 pub struct ToolsState {
     result: Arc<Mutex<Option<Vec<ToolInfo>>>>,
+    helper: Arc<Mutex<Option<HelperInfo>>>,
     running: Arc<Mutex<bool>>,
 }
 
@@ -123,7 +173,20 @@ impl ToolsState {
             *running = true;
         }
         let (result, running, ctx) = (self.result.clone(), self.running.clone(), ctx.clone());
+        let helper = self.helper.clone();
         thread::spawn(move || {
+            let found = HelperInfo::detect();
+            match &found.path {
+                Some(path) => {
+                    tracing::debug!(target: "cdept::tools", "xschem engine: {}", path.display())
+                }
+                None => tracing::warn!(
+                    target: "cdept::tools",
+                    "the embedded xschem engine (cdept-xschem) was not found: schematics \
+                     cannot be opened"
+                ),
+            }
+            *helper.lock().unwrap() = Some(found);
             let tools = tools::detect_all();
             let found = tools.iter().filter(|t| t.found()).count();
             tracing::info!(target: "cdept::tools", "found {found} of {} external tools", tools.len());
@@ -148,6 +211,26 @@ impl ToolsState {
     pub fn find(&self, name: &str) -> Option<ToolInfo> {
         self.tools()?.into_iter().find(|t| t.spec.name == name)
     }
+
+    /// The embedded xschem engine, once looked for.
+    pub fn helper(&self) -> Option<HelperInfo> {
+        self.helper.lock().unwrap().clone()
+    }
+}
+
+/// The schematic document that is in front, for the panels that follow it (Hierarchy,
+/// Inspector).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveSchematic {
+    pub id: DocId,
+    pub doc: DocRef,
+    /// The file the document was opened for.
+    pub file: PathBuf,
+    pub title: String,
+    /// xschem has changes that are not saved.
+    pub modified: bool,
+    /// What is selected in xschem, if anything.
+    pub selection: Option<Selected>,
 }
 
 /// What a folder chosen in the native folder dialog is for.
@@ -202,6 +285,10 @@ pub struct AppCtx {
     pub tools: ToolsState,
     pub project: Option<Project>,
     pub selection: Selection,
+    /// xschem engines of the project that are not documents (jobs, the preview).
+    pub engines: Engines,
+    /// The schematic document in front, refreshed every frame.
+    pub schematic: Option<ActiveSchematic>,
     /// The native window whose UI is being built.
     pub window: WindowId,
     /// The open modal dialog and the window it belongs to.
@@ -218,6 +305,8 @@ impl AppCtx {
             tools: ToolsState::default(),
             project: None,
             selection: Selection::default(),
+            engines: Engines::default(),
+            schematic: None,
             window: WindowId::Main,
             dialog: None,
             picker: None,
@@ -389,5 +478,19 @@ fn log_problems(project: &Project) {
         if let Some(error) = &lib.error {
             tracing::warn!(target: "cdept::project", "library '{}': {error}", lib.name);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_helper_says_which_xschem_it_holds() {
+        assert_eq!(
+            helper_version("cdept-xschem 0.1.0 (xschem 3.4.8RC, protocol 2)"),
+            "xschem 3.4.8RC, protocol 2"
+        );
+        assert_eq!(helper_version("something else"), "something else");
     }
 }

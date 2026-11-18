@@ -178,11 +178,12 @@ To do:
 ### Phase 3: Tool Hub & IPC (~110 h) ← highest technical risk
 - Process supervisor: launch, track, restart, collect logs per tool, one instance per tool
   reused across cells.
-- **xschem:** embedded (decided 2026-11-17). xschem's C code is built from a submodule
-  into a GPL helper process, `cdept-xschem`, with replacements for Xlib and Tk, and its
-  editor is shown in a CDePT tab. The headless part (netlist, SVG, queries) works. Plan, steps and hours: [XSCHEM.md](XSCHEM.md). Fallback
-  if the step-2 gate fails: the built-in TCP listener (`xschem_listen_port`) to send Tcl
-  (open, netlist, select instance, highlight net) to a separate xschem window.
+- **xschem:** embedded (decided 2026-11-17, working since 2026-11-18). xschem's C code
+  is built from a submodule into a GPL helper process, `cdept-xschem`, with stand-ins
+  for Xlib and Tk; its editor, menus and dialogs show in a CDePT tab, and the same
+  engine does netlists, hierarchy and previews in the background. It draws the same as
+  stock xschem, so the fallback (a separate xschem window driven over its TCP
+  listener) is not needed. Plan, results and known gaps: [XSCHEM.md](XSCHEM.md).
 - **KLayout:** ship an CDePT macro/plugin (`klayout -rm cdept_bridge.py`) that opens a TCP/JSON-RPC
   server via `pya.QTcpServer` or a polling `QTimer`. Commands: load cell, select/zoom, highlight
   net, run DRC, report selection back. Risk: some distro builds lack Qt bindings, so detect this

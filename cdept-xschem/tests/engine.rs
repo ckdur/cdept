@@ -236,3 +236,209 @@ fn the_example_project_netlists() {
         assert!(text.contains(line), "missing `{line}` in:\n{text}");
     }
 }
+
+/// A copy of the example project that tests may write into.
+fn example_copy() -> (tempfile::TempDir, Project) {
+    fn copy(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.path().is_dir() {
+                copy(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/buffer");
+    copy(&source, dir.path());
+    let project = Project::load(dir.path()).unwrap();
+    (dir, project)
+}
+
+fn engine_for(project: &Project) -> Engine {
+    Engine::start(EngineOptions {
+        helper: options().helper,
+        ..EngineOptions::for_project(project)
+    })
+    .unwrap()
+}
+
+#[test]
+fn the_hierarchy_lists_every_schematic_once() {
+    let (dir, project) = example_copy();
+    let mut engine = engine_for(&project);
+    let top = dir.path().join("libs/bench/tb_buf/schematic/tb_buf.sch");
+    let hierarchy = engine.hierarchy(&top).unwrap();
+
+    let names: Vec<&str> = hierarchy.cells.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["tb_buf", "buf", "inv"]);
+    let child = |cell: usize, instance: &str| {
+        hierarchy.cells[cell]
+            .instances
+            .iter()
+            .find(|i| i.instance.name == instance)
+            .unwrap()
+            .child
+    };
+    assert_eq!(child(0, "x1"), Some(1));
+    assert_eq!(child(0, "C1"), None, "a capacitor is a primitive");
+    // Both inverters of the buffer are the same schematic.
+    assert_eq!(child(1, "x1"), Some(2));
+    assert_eq!(child(1, "x2"), Some(2));
+    assert!(
+        hierarchy.cells[2]
+            .instances
+            .iter()
+            .all(|i| i.child.is_none())
+    );
+}
+
+#[test]
+fn a_netlist_becomes_a_view_of_the_cell() {
+    let (dir, mut project) = example_copy();
+    let mut engine = engine_for(&project);
+    let library = project.library("logic").unwrap().clone();
+    let file = engine
+        .netlist_view(&library, "buf", NetlistFormat::Spice)
+        .unwrap();
+    assert_eq!(file, dir.path().join("libs/logic/buf/netlist/buf.spice"));
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("M1 Y A VSS VSS nmos"), "{text}");
+
+    project.rescan();
+    let cell = project.library("logic").unwrap().cell("buf").unwrap();
+    assert!(cell.entry("netlist").is_some(), "{:?}", cell.entries);
+
+    assert!(
+        engine
+            .netlist_view(&library, "nothing", NetlistFormat::Spice)
+            .is_err()
+    );
+}
+
+#[test]
+fn a_symbol_made_from_a_schematic_goes_into_the_symbol_view() {
+    let (dir, mut project) = example_copy();
+    let symbol = dir.path().join("libs/logic/buf/symbol/buf.sym");
+    let beside = dir.path().join("libs/logic/buf/schematic/buf.sym");
+    let mut engine = engine_for(&project);
+    let library = project.library("logic").unwrap().clone();
+
+    // The cell has a symbol: it is kept unless asked otherwise.
+    let before = std::fs::read_to_string(&symbol).unwrap();
+    let error = engine.make_symbol(&library, "buf", false).unwrap_err();
+    assert!(error.to_string().contains("exists already"), "{error}");
+    assert_eq!(std::fs::read_to_string(&symbol).unwrap(), before);
+
+    // Without a symbol view: xschem's generator makes one, in the view folder, and it
+    // names its schematic the way CDePT writes it.
+    std::fs::remove_dir_all(symbol.parent().unwrap()).unwrap();
+    project.rescan();
+    let library = project.library("logic").unwrap().clone();
+    assert_eq!(engine.make_symbol(&library, "buf", false).unwrap(), symbol);
+    assert!(
+        !beside.exists(),
+        "a symbol was written next to the schematic"
+    );
+    let text = std::fs::read_to_string(&symbol).unwrap();
+    assert_eq!(
+        symbol::schematic(&text).as_deref(),
+        Some("logic/@symname/schematic/@symname.sch")
+    );
+    assert_ne!(
+        text, before,
+        "this is the generated symbol, not the drawn one"
+    );
+    project.rescan();
+    assert_eq!(symbol::check(&project, None, None), []);
+    assert_eq!(engine.make_symbol(&library, "buf", true).unwrap(), symbol);
+
+    // xschem finds the schematic behind the new symbol. (The testbench of the example
+    // cannot be used: its wires end where the pins of the drawn symbol were.)
+    let top = dir.path().join("libs/bench/top/schematic/top.sch");
+    std::fs::create_dir_all(top.parent().unwrap()).unwrap();
+    std::fs::write(&top, top_schematic("logic/buf/symbol/buf.sym")).unwrap();
+    let hierarchy = engine.hierarchy(&top).unwrap();
+    let x1 = hierarchy.cells[0]
+        .instances
+        .iter()
+        .find(|i| i.instance.name == "x1")
+        .unwrap();
+    let child = &hierarchy.cells[x1.child.expect("x1 has no schematic")];
+    assert_eq!(
+        child.schematic,
+        dir.path().join("libs/logic/buf/schematic/buf.sch")
+    );
+
+    // In a flat library the symbol stays next to the schematic, as xschem has it.
+    project
+        .add_library(
+            "flat",
+            "libs/flat",
+            AddLibrary {
+                create: true,
+                layout: Some(LibraryLayout::Flat),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    std::fs::copy(
+        dir.path().join("libs/logic/inv/schematic/inv.sch"),
+        dir.path().join("libs/flat/inv.sch"),
+    )
+    .unwrap();
+    project.rescan();
+    let flat = project.library("flat").unwrap().clone();
+    let mut engine = engine_for(&project);
+    let symbol = engine.make_symbol(&flat, "inv", false).unwrap();
+    assert_eq!(symbol, dir.path().join("libs/flat/inv.sym"));
+    assert_eq!(
+        symbol::schematic(&std::fs::read_to_string(&symbol).unwrap()),
+        None
+    );
+}
+
+#[test]
+fn the_service_runs_jobs_in_the_background_and_recovers() {
+    use libcdept::xschem::Service;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let woken = Arc::new(AtomicUsize::new(0));
+    let service = {
+        let woken = woken.clone();
+        Service::new(
+            options(),
+            Arc::new(move || {
+                woken.fetch_add(1, Ordering::SeqCst);
+            }),
+        )
+    };
+    fn wait<T>(pending: &libcdept::xschem::Pending<T>) -> Result<T, String> {
+        for _ in 0..4000 {
+            if let Some(result) = pending.poll() {
+                return result;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the job did not finish");
+    }
+
+    let first = service.run(|engine| engine.tcl("expr {6 * 7}"));
+    let second = service.run(|engine| engine.tcl("set cdept_marker 1"));
+    assert_eq!(wait(&first).unwrap(), "42");
+    assert_eq!(wait(&second).unwrap(), "1");
+    // The same xschem served both.
+    let marker = service.run(|engine| engine.tcl("set cdept_marker"));
+    assert_eq!(wait(&marker).unwrap(), "1");
+
+    // A job that kills the helper fails; the next one gets a new xschem.
+    let killed = service.run(|engine| engine.tcl("exit 3"));
+    assert!(wait(&killed).unwrap_err().contains("stopped"));
+    let after = service.run(|engine| engine.tcl("info exists cdept_marker"));
+    assert_eq!(wait(&after).unwrap(), "0");
+    assert_eq!(woken.load(Ordering::SeqCst), 5);
+}

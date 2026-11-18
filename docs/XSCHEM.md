@@ -136,11 +136,11 @@ Each step ends with something visible. Hours are estimates.
 | Step | Work | Shows | Hours |
 |------|------|-------|-------|
 | 0 ✔ | Submodule, helper builds headless (`has_x=0`, Tcl only), protocol, client, generated start-up file. CLI: `cdept netlist <lib> <cell>`, `cdept xschem svg|instances|tcl|version` | Done: an IHP PDK testbench netlists and draws to SVG | 15–20 |
-| 1 | SVG preview in the Inspector (moved here from step 0: it needs the engine off the UI thread). GUI plumbing: `Tab::Document(DocId)` (dynamic tabs, layout persistence), double-click opens a view, supervisor starts/restarts the engine, shared-memory frame → texture (first with a test pattern) | Double-click opens a tab fed by the helper | 12–15 |
-| 2 | xshim + tkstub, `has_x=1`. Draw, resize, pan, zoom, descend/ascend, select, highlight | **Read-only schematic viewer in a tab.** Gate, see below | 30–40 |
-| 3 | Editing: full input mapping, menus, toolbar, message/prompt/property dialogs, save, undo, modified flag, close-with-unsaved | Draw and save a small schematic without leaving CDePT | 25–30 |
-| 4 | CDePT integration: insert instance through the library picker, new cell/symbol flows, netlist to a view, hierarchy data for the Hierarchy panel, selection → Inspector | Create an OTA from PDK devices and netlist it | 20–25 |
-| 5 | Remaining dialogs (search, layers, simulation setup, graphs), several schematics at once, packaging in asic-all, upstream patches | Parity list checked against stock xschem | 30+ |
+| 1 ✔ | GUI plumbing: `Tab::Document(DocId)` (dynamic tabs, layout persistence), double-click opens a view, a session per tab that starts and restarts the engine (`libcdept::xschem::Session`), frames through a memory-mapped file → texture (first with a test pattern). The Inspector preview moved to step 2: it shows pixels from the engine, not an SVG | Double-click opens a tab fed by the helper | 12–15 |
+| 2 ✔ | xshim (Xlib on cairo) + Tk stand-in (`faketk.tcl`, §8), `has_x=1`. Draw, resize, pan, zoom, descend/ascend, select, highlight | **Read-only schematic viewer in a tab.** Gate, see below | 30–40 |
+| 3 ✔ | Editing: full input mapping, menus, toolbar, message/prompt/property dialogs, save, undo, modified flag, close-with-unsaved | Draw and save a small schematic without leaving CDePT | 25–30 |
+| 4 ✔ (mostly) | CDePT integration: insert instance through the library picker, new cell/symbol flows, netlist to a view, hierarchy data for the Hierarchy panel, selection → Inspector | Create an OTA from PDK devices and netlist it | 20–25 |
+| 5 (partly) | Remaining dialogs (search, layers, simulation setup, graphs), several schematics at once, packaging in asic-all, upstream patches | Parity list checked against stock xschem | 30+ |
 
 Total ≈ 130–160 h, more than ROADMAP gave all of Phase 3 (110 h). Steps 0–1 are useful
 whatever happens: the headless engine replaces the planned TCP adapter for netlisting
@@ -150,6 +150,19 @@ and hierarchy.
 stock xschem, (b) pan/zoom is smooth on a 4K tab, (c) the patch series on xschem is
 short. Otherwise fall back to B for editing and keep the engine for netlist, hierarchy
 and previews.
+
+**Gate result (2026-11-18): passed.** (a) Compared with stock xschem of the same
+commit on a headless X server (Xvnc): 39 of 44 pictures are identical pixel for pixel
+(the example project, nine of xschem's examples, four IHP SG13G2 testbenches, and
+states such as selection, highlight, rubber band, light colours); the other five
+differ by one step of one colour value inside embedded bitmaps. (b) A full redraw at
+3840x2160 takes 9 to 15 ms, a pointer move 20 to 65 µs. (c) No patch on xschem.
+
+**State after steps 1 to 4** (details in §9): a schematic or symbol opens in a tab by
+double-click; drawing, editing, xschem's own menus, tool bar, status bar, context
+menu and dialogs work inside CDePT; files are chosen with CDePT's library picker;
+closing asks through xschem's own question; the Hierarchy panel, the Inspector
+(preview and selection) and "Netlist to View" use the engine in the background.
 
 ## 5. Risks
 
@@ -233,6 +246,134 @@ unless the symbol (or the instance) has a `schematic=` attribute.
 What CDePT cannot see, and `cdept xschem link` is for: a library folder renamed or
 moved by hand, cell folders copied with `cp`, symbols brought in from another project.
 
-Left for step 4 (inside the editor): xschem's own "make symbol from schematic" writes
-the symbol next to the schematic, and "open the symbol of this schematic" looks there
-too. Both need to go through CDePT's view folders.
+Inside the editor (step 4) the same holds:
+- **Make symbol from schematic** (Symbol menu, key A; also `cdept xschem make-symbol
+  <library> <cell> [--force]`). xschem's C code leaves the writing to a Tcl procedure,
+  `make_symbol`, which runs xschem's `make_sym.awk`; that script writes `x.sym` next to
+  `x.sch`. The helper replaces the procedure (`cdept.tcl`, no change to xschem): for a
+  schematic in a view folder of a `cells` library it runs the same script on a copy in
+  a scratch folder, puts the result at `<cell>/symbol/<name>.sym` and adds the
+  `schematic=` attribute. Anywhere else xschem's own procedure runs, as before. The
+  start-up file tells the helper which libraries have view folders
+  (`cdept_cells_libraries`). As in stock xschem, the generated symbol replaces a drawn
+  one (after a question) and puts the pins where the generator wants them.
+- **Open the symbol of this schematic** and back look in the neighbouring view folder
+  (`cdept::counterpart`).
+- Not covered: **make schematic from symbol** (Ctrl+L). xschem's C code writes the file
+  itself and takes the `schematic=` value without replacing `@symname`, so in a `cells`
+  library it fails with "file opening for write failed" and writes nothing. Create the
+  schematic view in the Library Manager instead.
+
+## 8. Interfaces between the parts (steps 1 to 5)
+
+One helper process per open schematic tab: each tab is its own xschem, as separate
+xschem windows are. Copy and paste between tabs then works the way it does between
+xschem instances (through the clipboard file in `~/.xschem`).
+
+```
+cdept-gui  views/schematic.rs      draws the frame, sends input, draws mirrored widgets
+   │  libcdept::xschem::Session    thread per tab: starts and restarts the engine
+   │  libcdept::xschem::Engine     one helper process; requests, replies, events
+   ▼  socket (protocol.rs, JSON lines) + frame file (frame.rs, mapped by both)
+cdept-xschem  src/main.rs          Tcl event loop; socket watched as a Tcl file event
+   │  shim/cdx.h                   C functions the Rust side calls
+   ├─ shim/engine.c                start-up, Tcl, event loop, `cdept::ui` command
+   ├─ shim/display.c, xshim.c      stand-in Xlib on cairo image surfaces; Tk C stubs
+   ├─ shim/tcl/faketk.tcl          stand-in Tk in Tcl: records widgets, reports them
+   └─ xschem/src/*.c, xschem.tcl   unmodified
+```
+
+**Widgets: a stand-in Tk instead of per-dialog replacements.** xschem's menus, tool
+bar, status bar and dialogs are Tcl/Tk code. `faketk.tcl` implements the Tk commands
+in plain Tcl: it records the widgets xschem's code creates and their state, and
+reports them (`cdept::ui <json>`, one `UiUpdate` of `protocol.rs`). CDePT draws them
+with egui widgets and reports what the user does (`UiEvent`), which the helper turns
+into `faketk::event <kind> <args>` calls. xschem's own Tcl code then runs unchanged,
+including after an update of the submodule. Waiting for a dialog (`tkwait`, `vwait`)
+works because the socket is served by the Tcl event loop, also when nested. Dialogs
+that deserve a native version (file chooser → library picker) are replaced one by one
+on top of this.
+
+Conventions on top of `protocol.rs`:
+- `faketk::event` kinds and arguments: `menu <menu path> <index>`, `popup_closed`,
+  `invoke <path>`, `text <path> <text>`, `select <path> <list of indices>`,
+  `activate <path> <index>`, `key <path> <Tk keysym name>`, `focus <path>`,
+  `close <toplevel path>`.
+- A window whose root widget has class `FileDialog` asks for a file name
+  (`tk_getOpenFile`, `tk_getSaveFile`, `tk_chooseDirectory`): options `mode`
+  (`open`, `save`, `directory`), `initialdir`, `initialfile`, `filetypes`. CDePT shows
+  its own chooser and answers with `UiEvent::Text { path: <window path>, text: <chosen
+  path, empty for cancel> }`.
+- A window whose root widget has class `LibraryPicker` asks for a schematic or symbol
+  the CDePT way (it replaces xschem's own file browser, `load_file_dialog` and
+  `file_chooser`): options `mode` (`open`, `save`, `symbol`, `merge`), `title`,
+  `extensions` (space separated, e.g. `sym tcl`), `initialdir`, `initialfile`. CDePT
+  shows its library / cell / view picker and answers with `UiEvent::Text { path:
+  <window path>, text: <absolute file, empty for cancel> }`.
+- A window whose root widget has class `MessageBox` is `tk_messageBox`: options
+  `icon`, `type`, `message`, `detail`; its children are the buttons to show.
+
+**CDePT's adjustments to xschem's Tcl side** (`shim/tcl/cdept.tcl`, read after
+`xschem.tcl` and the start-up file):
+- xschem's file browsers (`load_file_dialog`, `file_chooser`) open a `LibraryPicker`
+  window instead; the originals stay reachable (`set cdept::native_file_dialogs 0`).
+  Destinations of exports (PNG, SVG, PDF) use the ordinary `FileDialog`.
+- One drawing area per helper. Everything that would open another window or tab
+  inside the same xschem ("open in new window", "create new tab", descending in a new
+  window, the keys Alt+E, Alt+I, Ctrl+T, …) reports `UiUpdate::Open { path }` and leaves
+  the current design alone; CDePT opens that file as another document. Not redirected:
+  `xschem load a b c` with several files (the extra ones become xschem tabs on the same
+  drawing area).
+- A symbol made from a schematic goes into the cell's `symbol` view and names its
+  schematic (section 7); the helper reports `UiUpdate::Written { path }` and CDePT
+  looks at the libraries again. This part also applies without a display.
+- For CDePT to call: `cdept::symbol_file <schematic>` (where that symbol is written);
+  `cdept::modified` (0 or 1); `cdept::close` (asks xschem's own
+  "save changes?" question when modified, then exits with status 0, or returns 0 when
+  cancelled); `cdept::selection` (`count N instances {{name symbol attributes}…} wires
+  N texts N`).
+
+**Test tool.** `target/debug/cdx-tcl [--display WxH] [--rcfile F] [--ppm out.ppm]
+[-e script | file]...` runs Tcl in the engine without CDePT, prints results and
+widget updates, and can dump the drawing window.
+
+## 9. What steps 1 to 4 showed
+
+- **Zero patches still holds.** xschem's C and Tcl sources are unmodified. Two things
+  are done by the preprocessor in `xschem_config.h` instead: the Xlib names get an
+  `xs_` prefix, and `srand` is replaced (xschem seeds its temporary folder names with
+  the time in seconds, so engines started in the same second collided).
+- **Pixel-exact drawing needed the X server's own algorithms.** Lines, arcs, dashes
+  and polygons go through code taken unmodified from xorg-server (`shim/mi/`, MIT-style
+  licences, notices kept); cairo draws text, images and fills. cairo alone was close
+  but differed by single pixels at line ends and merged lines two pixels apart.
+- **The Tk stand-in covers all of xschem.tcl.** A sweep test calls every procedure of
+  xschem.tcl that builds a window (31) and 124 menu commands. Not exercised: the graph
+  dialogs (they need a graph object) and two minor ones.
+- **xschem measures text once, at the zoom in use when a file is loaded**, so "zoom
+  full" can cut long text; stock xschem does the same. The helper measures again when
+  a window first gets its size. A later "zoom full" (key `f`) is still xschem's own.
+- **A question during start cannot be answered** (nobody is connected yet). Tk's own
+  dialogs then return their default and any other window xschem waits for is logged
+  and closed. Seen with the IHP `xschemrc`, which loads a start page that asks
+  "execute scripts embedded in schematics?".
+- **PDK start-up files.** `[xschem] rc = "…/xschemrc"` in `cdept.toml` names the
+  PDK's file; it is read before the project's libraries are added. With the IHP file
+  the PDK's own menu ("IHP") shows up in CDePT's menu bar, because menus are mirrored.
+- **Requests behind a waiting one.** When xschem opens a dialog inside a request, the
+  requests already read from the socket must still be served; an idle callback of the
+  Tcl event loop does that.
+
+Known gaps:
+- Preview panes inside xschem's own dialogs (symbol previews drawn by C into a Tk
+  frame) are empty; CDePT's library picker and Inspector preview replace them.
+- Clipboard goes out only (xschem → system); text from the system clipboard does not
+  reach xschem's dialogs. Copy and paste of schematic objects between tabs works
+  through xschem's own clipboard file.
+- xschem's "make schematic from symbol" does not work in a `cells` library
+  (section 7).
+- The GUI test driver cannot inject mouse and keys into detached windows.
+- The native file chooser (export destinations, "Other File…") is written but was not
+  run, because it opens a dialog on the desktop.
+- Not done from step 5: simulation setup and graph dialogs checked by hand, packaging
+  in asic-all, an install layout (`share/cdept-xschem`).

@@ -47,17 +47,35 @@ Last updated: 2026-11-17 (embedded xschem: step 0 done).
 - [x] CI with the new job steps (submodule checkout, flex, bison, tcl-dev,
       libcairo2-dev): builds. The first run failed in the tests: helpers starting
       together fought over creating `~/.xschem` (XSCHEM.md §6); fixed in the helper.
-- [ ] Decide in step 3: does the helper share `~/.xschem` with the user's own xschem
-      (recent files, copy and paste between windows) or get its own folder?
-- [ ] Step 1: SVG preview in the Inspector, `Tab::Document`, double-click opens a view,
-      engine on its own thread with restart, frame transport.
-- [ ] Step 2: Xlib/Tk replacements, read-only viewer. Gate before going on.
-- [ ] Steps 3–5: editing, library picker, remaining dialogs. In step 4: "make symbol
-      from schematic" and "open symbol" must use the view folders (xschem puts the
-      symbol next to the schematic).
-- [ ] Small: show the helper in the Tools panel; `save` in the client; JPEG images in
-      schematics (libjpeg is left out of the build); install layout
-      (`share/cdept-xschem`) for packaging.
+- [x] The helper shares `~/.xschem` with the user's own xschem (decided 2026-11-18):
+      that is what makes copy and paste work between CDePT tabs and stock xschem
+      windows. The price: "Open recent" lists files of both.
+- [x] Steps 1 to 4 (2026-11-18): xschem draws and edits inside a CDePT tab. Stand-in
+      Xlib on cairo, stand-in Tk in Tcl (xschem's own menus and dialogs, mirrored),
+      library picker, close flow, Hierarchy panel, Inspector preview and selection,
+      "Netlist to View". Compared with stock xschem: pixel-identical (XSCHEM.md §4, §9).
+      Test driver for the real GUI: `cdept gui --script` (GUI-TESTING.md).
+- [x] `[xschem] rc` in `cdept.toml`: the PDK's `xschemrc`. Checked with IHP SG13G2.
+- [ ] `PDK_ROOT` and `PDK` still come from the environment CDePT was started in; they
+      belong in the project's technology setting (Phase 2).
+- [x] "Make symbol from schematic" writes `<cell>/symbol/<cell>.sym` with its
+      `schematic=` link in `cells` libraries (2026-11-18): the helper replaces xschem's
+      Tcl procedure `make_symbol`, xschem itself is unchanged. Also `cdept xschem
+      make-symbol <library> <cell> [--force]`. "Open symbol of this schematic" already
+      looked in the view folders.
+- [ ] "Make schematic from symbol" (Ctrl+L) fails in a `cells` library: xschem's C
+      code uses the `schematic=` value with `@symname` in it as a file name. Nothing is
+      written. To fix it the command has to be redone in Tcl (pins from the symbol).
+- [ ] Preview panes inside xschem's own dialogs; clipboard from the system into
+      xschem's dialogs; scripted input in detached windows; run the native file
+      chooser once by hand.
+- [ ] Let CI run: the helper now also needs fonts for its drawing tests
+      (`fonts-dejavu-core` added to the workflow, not yet run).
+- [ ] Step 5 leftovers: graph and simulation dialogs by hand, packaging in asic-all,
+      install layout (`share/cdept-xschem`), JPEG needs `libjpeg-dev` at build time
+      (optional).
+- [ ] Try it by hand: everything was tested through scripts and screenshots, not by a
+      person using the mouse for a while.
 
 ### Smaller gaps left in what exists
 - [ ] Edit project fields (name, description, technology) from the GUI; today by hand.

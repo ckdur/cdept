@@ -11,6 +11,14 @@ rust-version.workspace = true
 repository.workspace = true
 build = "build.rs"
 
+[lib]
+name = "cdept_xschem"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cdept-xschem"
+path = "src/main.rs"
+
 [dependencies]
 libcdept.workspace = true
 serde_json.workspace = true

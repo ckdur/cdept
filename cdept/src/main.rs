@@ -6,7 +6,7 @@ use cdept_gui::{GuiOptions, LogBuffer};
 use clap::{Parser, Subcommand, ValueEnum};
 use eyre::{Result, bail, eyre};
 use libcdept::xschem::symbol::{self, Problem};
-use libcdept::xschem::{Engine, NetlistFormat};
+use libcdept::xschem::{Engine, Hierarchy, NetlistFormat};
 use libcdept::{AddLibrary, Format, LibraryLayout, Project};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
@@ -30,7 +30,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Open the main window (default).
-    Gui,
+    Gui {
+        /// Run a script of GUI commands, for testing (see docs/GUI-TESTING.md).
+        #[arg(long)]
+        script: Option<PathBuf>,
+    },
     /// Create a project (a cdept.toml file) in a folder.
     Init {
         /// Folder of the new project.
@@ -58,6 +62,9 @@ enum Command {
         /// Output file. Defaults to <cell>.<suffix of the format> in the current folder.
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Write the netlist into the cell itself, as its `netlist` view.
+        #[arg(long, conflicts_with_all = ["output", "view"])]
+        into_view: bool,
         #[arg(short, long, value_enum, default_value = "spice")]
         format: NetlistKind,
         /// The view to netlist, when the cell has several schematics.
@@ -110,6 +117,28 @@ enum XschemCommand {
         cell: String,
         #[arg(long)]
         view: Option<String>,
+    },
+    /// Show the hierarchy below a schematic: which cells it uses, through which
+    /// instances.
+    Hierarchy {
+        library: String,
+        cell: String,
+        #[arg(long)]
+        view: Option<String>,
+        /// Also list the instances that are not subcircuits (transistors, pins, …).
+        #[arg(short, long)]
+        all: bool,
+    },
+    /// Make the symbol of a cell from the pins of its schematic.
+    ///
+    /// The same as xschem's "Make symbol from schematic". In a `cells` library the
+    /// symbol goes into the cell's `symbol` view and names its schematic.
+    MakeSymbol {
+        library: String,
+        cell: String,
+        /// Replace the symbol if the cell has one. Its drawing is lost.
+        #[arg(short, long)]
+        force: bool,
     },
     /// Check that xschem will find the schematic behind every symbol.
     ///
@@ -177,6 +206,42 @@ fn open_project(explicit: Option<PathBuf>) -> Result<Project> {
         tracing::warn!("{warning}");
     }
     Ok(project)
+}
+
+/// Print the instances of cell `index`, indented, descending into subcircuits.
+/// `path` holds the cells being printed, to stop at a schematic that contains itself.
+fn print_hierarchy(
+    hierarchy: &Hierarchy,
+    index: usize,
+    depth: usize,
+    all: bool,
+    path: &mut Vec<usize>,
+) {
+    let indent = "  ".repeat(depth);
+    for item in &hierarchy.cells[index].instances {
+        let instance = &item.instance;
+        match item.child {
+            Some(child) => {
+                let name = &hierarchy.cells[child].name;
+                if path.contains(&child) {
+                    println!("{indent}{} ({name}, recursive)", instance.name);
+                    continue;
+                }
+                println!("{indent}{} ({name})", instance.name);
+                path.push(child);
+                print_hierarchy(hierarchy, child, depth + 1, all, path);
+                path.pop();
+            }
+            None if instance.kind == "subcircuit" => {
+                println!(
+                    "{indent}{} ({}, no schematic)",
+                    instance.name, instance.symbol
+                );
+            }
+            None if all => println!("{indent}{} [{}]", instance.name, instance.kind),
+            None => {}
+        }
+    }
 }
 
 /// `cdept xschem link`: report the symbols whose schematic xschem would not find, and
@@ -328,13 +393,14 @@ fn init_tracing(verbose: u8, console: Option<&LogBuffer>) {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    match cli.command.unwrap_or(Command::Gui) {
-        Command::Gui => {
+    match cli.command.unwrap_or(Command::Gui { script: None }) {
+        Command::Gui { script } => {
             let log = LogBuffer::new();
             init_tracing(cli.verbose, Some(&log));
             cdept_gui::run(
                 GuiOptions {
                     project: project_root(cli.project),
+                    script,
                 },
                 log,
             )
@@ -382,6 +448,7 @@ fn main() -> Result<()> {
             library,
             cell,
             output,
+            into_view,
             format,
             view,
         } => {
@@ -389,8 +456,6 @@ fn main() -> Result<()> {
             let project = open_project(cli.project)?;
             let format = NetlistFormat::from(format);
             let file = xschem_view(&project, &library, &cell, view.as_deref(), false)?;
-            let output =
-                output.unwrap_or_else(|| PathBuf::from(format!("{cell}.{}", format.suffix())));
             let unlinked = symbol::check(&project, None, None);
             if !unlinked.is_empty() {
                 tracing::warn!(
@@ -400,8 +465,16 @@ fn main() -> Result<()> {
                 );
             }
             let mut engine = Engine::for_project(&project)?;
-            engine.load(&file)?;
-            engine.netlist(format, &output)?;
+            let output = if into_view {
+                let library = project.library(&library).expect("checked by xschem_view");
+                engine.netlist_view(library, &cell, format)?
+            } else {
+                let output =
+                    output.unwrap_or_else(|| PathBuf::from(format!("{cell}.{}", format.suffix())));
+                engine.load(&file)?;
+                engine.netlist(format, &output)?;
+                output
+            };
             engine.shutdown()?;
             println!("{}", output.display());
             Ok(())
@@ -433,6 +506,17 @@ fn main() -> Result<()> {
                     engine.export_svg(&output)?;
                     println!("{}", output.display());
                 }
+                XschemCommand::Hierarchy {
+                    library,
+                    cell,
+                    view,
+                    all,
+                } => {
+                    let file = xschem_view(&project, &library, &cell, view.as_deref(), false)?;
+                    let hierarchy = engine.hierarchy(&file)?;
+                    println!("{}", hierarchy.cells[0].name);
+                    print_hierarchy(&hierarchy, 0, 1, all, &mut vec![0]);
+                }
                 XschemCommand::Instances {
                     library,
                     cell,
@@ -446,6 +530,17 @@ fn main() -> Result<()> {
                             instance.name, instance.symbol, instance.kind
                         );
                     }
+                }
+                XschemCommand::MakeSymbol {
+                    library,
+                    cell,
+                    force,
+                } => {
+                    let library = project
+                        .library(&library)
+                        .ok_or_else(|| eyre!("no library '{library}'"))?;
+                    let symbol = engine.make_symbol(library, &cell, force)?;
+                    println!("{}", symbol.display());
                 }
                 XschemCommand::Tcl { script } => println!("{}", engine.tcl(&script)?),
                 XschemCommand::Version => println!("xschem {}", engine.xschem_version()),

@@ -1,0 +1,92 @@
+# Smoke test of the embedded xschem on examples/buffer. Changes nothing on disk.
+#
+#   XDG_DATA_HOME=$(mktemp -d) cargo run -q -- -p examples/buffer gui \
+#       --script cdept-gui/scripts/buffer-smoke.script
+#
+# Exit status 0: every check passed.
+
+open bench tb_buf schematic
+wait_frame
+expect_documents 1
+expect_title tb_buf (schematic)
+key f
+# What is on screen is the frame, pixel for pixel.
+check_picture
+
+# Select by click; the instance is found through xschem's own coordinates.
+click_instance x1
+tcl_expect {{x1}} xschem selected_set
+
+# Descend into the buffer and come back.
+key e
+tcl_expect buf.sch file tail [xschem get schname]
+# The tab says which design it shows now.
+expect_title buf (in tb_buf)
+key e ctrl
+tcl_expect tb_buf.sch file tail [xschem get schname]
+expect_title tb_buf (schematic)
+
+# Move the instance, then undo. (Two clicks on the same spot in quick succession are
+# a double click, which opens the attribute dialog: let some time pass first.)
+wait 0.7
+click_instance x1
+key m
+move_by 100 0
+click_here
+expect_title tb_buf (schematic)*
+key u
+key Escape
+
+# The attribute dialog, through the mirrored widgets.
+tcl xschem select instance Vdd
+move 200 200
+key q
+expect_dialog Edit Properties
+dialog_type .dialog.symprop name=Vdd value=3.3 savecurrent=false
+dialog_click OK
+tcl_expect 3.3 xschem getprop instance Vdd value
+
+# A message box of xschem's Tk code, answered with its button.
+tcl_send set ::answer [tk_messageBox -message {Keep going?} -type yesno]
+wait 0.3
+dialog_click Yes
+tcl_expect yes set ::answer
+
+# The Inspector shows what is selected in the schematic.
+panel Inspector
+click_instance x1
+expect_selected x1
+key Escape
+expect_selected none
+
+# The Hierarchy panel follows the document; a double-click there opens a cell.
+panel Hierarchy
+expect_hierarchy x1 buf
+expect_hierarchy x2 inv
+hierarchy_open inv
+expect_documents 2
+expect_title inv (schematic)
+expect_hierarchy inv
+close
+expect_documents 1
+
+# The Inspector draws a picture of the selected schematic or symbol.
+panel Inspector
+key Escape
+select logic inv symbol
+expect_preview
+select bench tb_buf schematic
+expect_preview
+
+# Closing a changed document: xschem asks its own question. Cancel keeps the
+# document, No closes it without saving.
+close_tab
+expect_dialog Ask Save
+dialog_click Cancel
+wait 0.3
+expect_documents 1
+close_tab
+expect_dialog Ask Save
+dialog_click No
+expect_documents 0
+quit

@@ -234,6 +234,7 @@ typedef int (*XErrorHandler)(Display *, XErrorEvent *);
 #define GXclear 0x0
 #define GXcopy 0x3
 #define GXnoop 0x5
+#define GXinvert 0xa
 #define GXxor 0x6
 #define GXset 0xf
 

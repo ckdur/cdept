@@ -1,0 +1,95 @@
+# The embedded xschem on a COPY of examples/buffer: this script writes files.
+#
+#   cdept-gui/scripts/run.sh          runs it (and buffer-smoke.script) the right way
+#
+# Exit status 0: every check passed. `$PROJECT` is the folder of the project.
+
+open bench tb_buf schematic
+wait_frame
+key f
+
+# File > Open asks through CDePT's library picker; Cancel changes nothing.
+menu File / Open
+expect_picker open
+picker_cancel
+tcl_expect tb_buf.sch file tail [xschem get schname]
+menu File / Open
+expect_picker open
+picker logic buf schematic
+tcl_expect buf.sch file tail [xschem get schname]
+expect_title buf (in tb_buf)
+
+# The Insert key asks for a symbol the same way; a click places it.
+move 300 200
+key Insert
+expect_picker symbol
+picker logic inv symbol
+move 320 220
+click_here
+key Escape
+tcl_expect 7 llength [split [xschem instance_list] "\n"]
+expect_title buf (in tb_buf)*
+
+# Save As into a new cell: the file is written and the libraries show the cell.
+menu File / Save as
+expect_picker save
+picker_file $PROJECT/libs/logic/buf3/schematic/buf3.sch
+tcl_expect buf3.sch file tail [xschem get schname]
+expect_view logic buf3 schematic
+expect_title buf3 (in tb_buf)
+
+# Symbol > Make symbol from schematic: xschem asks, then the symbol appears as the
+# symbol view of the cell, not as a file next to the schematic.
+menu Symbol / Make symbol from schematic
+dialog_click OK
+expect_view logic buf3 symbol
+tcl_expect 0 file exists $PROJECT/libs/logic/buf3/schematic/buf3.sym
+tcl_expect 1 file exists $PROJECT/libs/logic/buf3/symbol/buf3.sym
+expect_title buf3 (in tb_buf)
+
+# "Open in new window" becomes another document.
+menu File / Open in new window
+expect_picker open
+picker logic inv schematic
+expect_documents 2
+expect_title inv (schematic)
+close
+expect_documents 1
+
+# A netlist written into the cell, as its netlist view.
+netlist logic buf
+expect_view logic buf netlist
+netlist logic inv verilog
+expect_view logic inv netlist
+
+# Closing a changed document with Yes saves it first.
+wait 0.7
+click_instance x1
+key m
+move_by 60 0
+click_here
+expect_title buf3 (in tb_buf)*
+close_tab
+expect_dialog Ask Save
+dialog_click Yes
+expect_documents 0
+
+# Closing the project with a changed document asks; Save All saves and closes.
+open bench tb_buf schematic
+wait_frame
+key f
+wait 0.7
+click_instance x1
+key m
+move_by 60 0
+click_here
+expect_title tb_buf (schematic)*
+close_project
+leave_answer cancel
+expect_project buffer
+expect_documents 1
+close_project
+leave_answer save
+expect_project none
+expect_documents 0
+quit

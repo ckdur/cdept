@@ -4,25 +4,30 @@
 //! (`libcdept::xschem::protocol`). xschem's own code does the work; this program is
 //! therefore GPL-2.0-or-later, while CDePT itself stays MIT.
 //!
-//! Step 0 of docs/XSCHEM.md: no drawing yet. xschem runs as with `xschem --no_x`:
-//! load, save, netlist, SVG export and queries.
+//! The program is one thread running the Tcl event loop. The socket is a file the loop
+//! watches, so requests are also served while xschem waits inside a nested loop (a
+//! dialog it wants answered). After each batch of requests, and after timers, the part
+//! of the drawing window that changed is copied to the shared frame.
 
-mod xschem;
-
-use std::io::BufReader;
+use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
+use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
+use std::rc::Rc;
 
-use libcdept::xschem::protocol::{self, Message, PROTOCOL_VERSION, Request};
+use cdept_xschem::start::{self, StartOptions};
+use cdept_xschem::xschem::{self, Xschem};
+use libcdept::xschem::frame::{FrameWriter, Rect};
+use libcdept::xschem::protocol::{self, Message, PROTOCOL_VERSION, Request, UiEvent, UiUpdate};
 use libcdept::xschem::tcl;
-
-use crate::xschem::Xschem;
 
 const USAGE: &str = "\
 cdept-xschem: xschem engine for CDePT (started by cdept, not by hand)
 
-Usage: cdept-xschem --connect <socket> [--rcfile <file>] [--sharedir <folder>]
+Usage: cdept-xschem --connect <socket> [options]
        cdept-xschem --version
 
   --connect <socket>   Unix socket CDePT listens on
@@ -30,12 +35,16 @@ Usage: cdept-xschem --connect <socket> [--rcfile <file>] [--sharedir <folder>]
   --sharedir <folder>  xschem's runtime files: xschem.tcl, the awk scripts and
                        xschem_library/devices (default: $CDEPT_XSCHEM_SHAREDIR, then
                        ../share/cdept-xschem next to this program, then the build tree)
+  --display            draw: xschem gets a window, whose pixels go to frame files
+  --frame-dir <folder> where to create the frame files (needed with --display)
 ";
 
 struct Args {
     connect: PathBuf,
     rcfile: Option<PathBuf>,
     sharedir: Option<PathBuf>,
+    display: bool,
+    frame_dir: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -60,12 +69,16 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Option<Args>, St
     let mut connect = None;
     let mut rcfile = None;
     let mut sharedir = None;
+    let mut display = false;
+    let mut frame_dir = None;
     while let Some(arg) = args.next() {
         let mut value = |name: &str| args.next().ok_or(format!("{name} needs a value"));
         match arg.as_str() {
             "--connect" => connect = Some(PathBuf::from(value("--connect")?)),
             "--rcfile" => rcfile = Some(PathBuf::from(value("--rcfile")?)),
             "--sharedir" => sharedir = Some(PathBuf::from(value("--sharedir")?)),
+            "--frame-dir" => frame_dir = Some(PathBuf::from(value("--frame-dir")?)),
+            "--display" => display = true,
             "--version" => {
                 println!(
                     "cdept-xschem {} (xschem {}, protocol {PROTOCOL_VERSION})",
@@ -82,23 +95,277 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Option<Args>, St
         }
     }
     let connect = connect.ok_or("--connect is required")?;
+    if display && frame_dir.is_none() {
+        return Err("--display needs --frame-dir".into());
+    }
     Ok(Some(Args {
         connect,
         rcfile,
         sharedir,
+        display,
+        frame_dir,
     }))
+}
+
+/// Everything the request handlers share. xschem calls back into this program while a
+/// request is being handled (a script opens a dialog and waits: the event loop runs
+/// nested and serves further requests), so nothing here is borrowed across a call into
+/// xschem.
+struct Helper {
+    xschem: Xschem,
+    writer: RefCell<UnixStream>,
+    reader: RefCell<UnixStream>,
+    /// Bytes read from the socket that do not yet end in a newline.
+    partial: RefCell<Vec<u8>>,
+    /// Requests read but not handled yet.
+    queue: RefCell<VecDeque<Request>>,
+    /// Where frame files go; `None` without `--display`.
+    frame_dir: Option<PathBuf>,
+    frame: RefCell<Option<FrameWriter>>,
+    serial: Cell<u64>,
+}
+
+impl Helper {
+    fn send(&self, message: &Message) {
+        // A failed write means CDePT is gone; the read side notices and exits.
+        let _ = protocol::write_message(&mut *self.writer.borrow_mut(), message);
+    }
+
+    /// Leave through Tcl's `exit`: it runs xschem's exit handler (which removes its
+    /// undo folder) and ends the process.
+    fn exit(&self) -> ! {
+        if let Some(frame) = self.frame.borrow().as_ref() {
+            frame.unlink();
+        }
+        let _ = self.xschem.eval("exit 0");
+        std::process::exit(0)
+    }
+
+    /// The socket has data: read what is there and handle the complete requests.
+    fn readable(&self) {
+        let mut buffer = [0u8; 16384];
+        // One read per call: the event loop said it will not block, and calls again
+        // while more is waiting.
+        let count = match self.reader.borrow_mut().read(&mut buffer) {
+            Ok(0) => self.exit(), // CDePT closed the connection, or died
+            Ok(count) => count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => return,
+            Err(_) => self.exit(),
+        };
+        {
+            let mut partial = self.partial.borrow_mut();
+            let mut queue = self.queue.borrow_mut();
+            partial.extend_from_slice(&buffer[..count]);
+            while let Some(end) = partial.iter().position(|&byte| byte == b'\n') {
+                let line: Vec<u8> = partial.drain(..=end).collect();
+                match serde_json::from_slice::<Request>(&line) {
+                    Ok(request) => queue.push_back(request),
+                    Err(error) => eprintln!("cdept-xschem: bad request: {error}"),
+                }
+            }
+        }
+        self.drain();
+        self.present();
+    }
+
+    /// Handle the queued requests, oldest first.
+    fn drain(&self) {
+        loop {
+            let request = {
+                let mut queue = self.queue.borrow_mut();
+                let Some(request) = queue.pop_front() else {
+                    return;
+                };
+                // Of a run of pointer movements, or of sizes, only the last counts.
+                let superseded = match (&request, queue.front()) {
+                    (Request::Input { input }, Some(Request::Input { input: next })) => {
+                        input.is_motion() && next.is_motion()
+                    }
+                    (Request::Resize { .. }, _) => {
+                        queue.iter().any(|r| matches!(r, Request::Resize { .. }))
+                    }
+                    _ => false,
+                };
+                if superseded {
+                    continue;
+                }
+                if !queue.is_empty() {
+                    // Handling this request may not return for a long time (xschem
+                    // opens a dialog and waits for it): the requests behind it are
+                    // then served from the event loop running inside that wait.
+                    self.xschem.when_idle();
+                }
+                request
+            };
+            self.handle(request);
+        }
+    }
+
+    fn handle(&self, request: Request) {
+        match request {
+            Request::Tcl { id, script } => {
+                let (ok, value) = match self.xschem.eval(&script) {
+                    Ok(value) => (true, value),
+                    Err(error) => (false, error),
+                };
+                self.send(&Message::Reply { id, ok, value });
+            }
+            Request::Shutdown { id } => {
+                self.send(&Message::Reply {
+                    id,
+                    ok: true,
+                    value: String::new(),
+                });
+                let _ = self.writer.borrow_mut().flush();
+                self.exit();
+            }
+            Request::Resize { width, height } => {
+                if self.frame_dir.is_some() {
+                    self.xschem.resize(width, height);
+                    self.new_frame();
+                }
+            }
+            Request::Input { input } => {
+                if self.frame_dir.is_some() {
+                    self.xschem.input(input);
+                }
+            }
+            Request::Ui { event } => {
+                if let Err(error) = self.xschem.eval(&ui_event_script(&event)) {
+                    eprintln!("cdept-xschem: {event:?}: {error}");
+                }
+            }
+        }
+    }
+
+    /// Start a new frame file matching the size of the drawing window, and announce it.
+    fn new_frame(&self) {
+        let (Some(dir), Some((width, height))) = (&self.frame_dir, self.xschem.display_size())
+        else {
+            return;
+        };
+        let serial = self.serial.get() + 1;
+        self.serial.set(serial);
+        match FrameWriter::create(dir, serial, width, height) {
+            Ok(writer) => {
+                self.send(&Message::Frame {
+                    serial,
+                    path: writer.path().to_string_lossy().into_owned(),
+                    width,
+                    height,
+                    stride: writer.stride(),
+                });
+                if let Some(old) = self.frame.borrow_mut().replace(writer) {
+                    old.unlink();
+                }
+                // Nothing is in the new file yet: copy the whole window, which covers
+                // whatever is reported as changed.
+                let _ = self.xschem.take_damage_rects();
+                self.copy_out(Rect::new(0, 0, width, height));
+            }
+            Err(error) => eprintln!("cdept-xschem: cannot create a frame file: {error}"),
+        }
+    }
+
+    /// Copy what changed in the drawing window to the frame and tell CDePT.
+    fn present(&self) {
+        if self.frame_dir.is_none() {
+            return;
+        }
+        let Some((width, height)) = self.xschem.display_size() else {
+            return;
+        };
+        let fits = self
+            .frame
+            .borrow()
+            .as_ref()
+            .is_some_and(|f| f.width() == width && f.height() == height);
+        if !fits {
+            // xschem changed the window size on its own.
+            return self.new_frame();
+        }
+        // Far-apart changes (the strips of a cross-hair cursor) stay separate
+        // rectangles instead of one around them all.
+        for rect in self.xschem.take_damage_rects() {
+            self.copy_out(rect);
+        }
+    }
+
+    fn copy_out(&self, rect: Rect) {
+        let mut frame = self.frame.borrow_mut();
+        let Some(frame) = frame.as_mut() else {
+            return;
+        };
+        let rect = rect.clamp(frame.width(), frame.height());
+        if rect.is_empty() {
+            return;
+        }
+        let stride = frame.stride();
+        self.xschem.read_pixels(frame.pixels_mut(), stride, rect);
+        self.send(&Message::Damage {
+            serial: self.serial.get(),
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+        });
+    }
+
+    /// A widget update from the Tcl side: check it and pass it on.
+    fn ui_update(&self, json: &str) {
+        match serde_json::from_str::<UiUpdate>(json) {
+            Ok(update) => self.send(&Message::Ui { update }),
+            Err(error) => {
+                let start: String = json.chars().take(200).collect();
+                eprintln!("cdept-xschem: bad widget update ({error}): {start}");
+            }
+        }
+    }
+}
+
+/// The Tcl call that tells the Tk stand-in (`shim/tcl/faketk.tcl`) what the user did.
+fn ui_event_script(event: &UiEvent) -> String {
+    let q = tcl::quote;
+    match event {
+        UiEvent::Menu { menu, index } => format!("faketk::event menu {} {index}", q(menu)),
+        UiEvent::PopupClosed => "faketk::event popup_closed".into(),
+        UiEvent::Invoke { path } => format!("faketk::event invoke {}", q(path)),
+        UiEvent::Text { path, text } => format!("faketk::event text {} {}", q(path), q(text)),
+        UiEvent::Select { path, selection } => {
+            let list: Vec<String> = selection.iter().map(u32::to_string).collect();
+            format!("faketk::event select {} {}", q(path), q(&list.join(" ")))
+        }
+        UiEvent::Activate { path, index } => {
+            format!("faketk::event activate {} {index}", q(path))
+        }
+        UiEvent::Key { path, key } => format!("faketk::event key {} {}", q(path), q(key)),
+        UiEvent::Focus { path } => format!("faketk::event focus {}", q(path)),
+        UiEvent::Close { path } => format!("faketk::event close {}", q(path)),
+    }
 }
 
 fn run(args: Args) -> Result<(), String> {
     let stream = UnixStream::connect(&args.connect)
         .map_err(|e| format!("cannot connect to {}: {e}", args.connect.display()))?;
     let mut writer = stream.try_clone().map_err(|e| e.to_string())?;
-    let mut reader = BufReader::new(stream);
-    let mut send = move |message: Message| {
+    let mut send = |message: Message| {
         protocol::write_message(&mut writer, &message).map_err(|e| format!("socket: {e}"))
     };
 
-    let xschem = match start_xschem(&args) {
+    // Widget updates reported while xschem starts (it builds its menus then) are kept
+    // until the connection is ready for them.
+    let early: Rc<RefCell<Vec<String>>> = Rc::default();
+    {
+        let early = early.clone();
+        xschem::on_ui(move |json| early.borrow_mut().push(json.to_string()));
+    }
+
+    let options = StartOptions {
+        rcfile: args.rcfile.clone(),
+        sharedir: args.sharedir.clone(),
+        display: args.display,
+    };
+    let xschem = match start::start(&options) {
         Ok(xschem) => xschem,
         Err(error) => {
             send(Message::Failed {
@@ -112,122 +379,39 @@ fn run(args: Args) -> Result<(), String> {
         xschem: xschem::version(),
     })?;
 
+    let fd = stream.as_raw_fd();
+    let helper = Rc::new(Helper {
+        xschem,
+        writer: RefCell::new(writer),
+        reader: RefCell::new(stream),
+        partial: RefCell::new(Vec::new()),
+        queue: RefCell::new(VecDeque::new()),
+        frame_dir: args.display.then_some(args.frame_dir).flatten(),
+        frame: RefCell::new(None),
+        serial: Cell::new(0),
+    });
+    {
+        let helper = helper.clone();
+        helper.clone().xschem.on_idle(move || {
+            helper.drain();
+            helper.present();
+        });
+    }
+    for json in early.take() {
+        helper.ui_update(&json);
+    }
+    {
+        let helper = helper.clone();
+        xschem::on_ui(move |json| helper.ui_update(json));
+    }
+    {
+        let helper = helper.clone();
+        helper.clone().xschem.watch(fd, move || helper.readable());
+    }
+
+    // The process ends in `Helper::exit`, on Shutdown or when the socket closes.
     loop {
-        // `None`: CDePT closed the connection (or died). Leave like on Shutdown.
-        let request =
-            protocol::read_message::<Request>(&mut reader).map_err(|e| format!("socket: {e}"))?;
-        match request {
-            Some(Request::Tcl { id, script }) => {
-                let (ok, value) = match xschem.eval(&script) {
-                    Ok(value) => (true, value),
-                    Err(error) => (false, error),
-                };
-                send(Message::Reply { id, ok, value })?;
-                xschem.run_pending_events();
-            }
-            Some(Request::Shutdown { id }) => {
-                send(Message::Reply {
-                    id,
-                    ok: true,
-                    value: String::new(),
-                })?;
-                break;
-            }
-            None => break,
-        }
+        helper.xschem.do_one_event(true);
+        helper.present();
     }
-
-    // Tcl's `exit` runs xschem's exit handler (removes its undo folder) and ends the
-    // process; it does not return.
-    let _ = xschem.eval("exit 0");
-    Ok(())
-}
-
-/// Locate xschem's runtime files and start it without a display.
-fn start_xschem(args: &Args) -> Result<Xschem, String> {
-    let sharedir = find_sharedir(args.sharedir.as_deref())?;
-    let libraries = sharedir.join("xschem_library");
-
-    // SAFETY: no other thread exists yet.
-    unsafe { std::env::set_var("XSCHEM_SHAREDIR", &sharedir) };
-    create_user_conf_dir(&sharedir)?;
-
-    // Runs before the rc file: start the symbol search path with xschem's own devices
-    // library, reachable both as `res.sym` and as `devices/res.sym` (schematics in the
-    // wild use both). The rc file appends the project's libraries.
-    let search_path = format!(
-        "{}:{}",
-        libraries.join("devices").to_string_lossy(),
-        libraries.to_string_lossy()
-    );
-    let mut argv: Vec<String> = vec![
-        "cdept-xschem".into(),
-        "--no_x".into(),
-        "--no_readline".into(),
-        "--preinit".into(),
-        format!("set XSCHEM_LIBRARY_PATH {}", tcl::quote(&search_path)),
-    ];
-    match &args.rcfile {
-        Some(rcfile) => {
-            argv.push("--rcfile".into());
-            argv.push(rcfile.to_string_lossy().into_owned());
-        }
-        // Without a start-up file, do not pick up the user's own xschemrc either: the
-        // engine should behave the same for everybody.
-        None => argv.push("--no_rcload".into()),
-    }
-    Xschem::start(&argv)
-}
-
-/// Create xschem's folder in the user's home (`USER_CONF_DIR` in `xschem_config.h`) if
-/// it is missing, with the template `xschemrc`, as xschem itself does at start-up.
-///
-/// xschem checks for the folder and then creates it, and exits when the folder appeared
-/// in between. That happens when several helpers start at the same moment on a machine
-/// where xschem never ran. Creating it here first is safe against that.
-fn create_user_conf_dir(sharedir: &Path) -> Result<(), String> {
-    use std::os::unix::fs::DirBuilderExt;
-
-    let Some(home) = std::env::var_os("HOME") else {
-        return Ok(()); // xschem asks the system for the home folder itself
-    };
-    let dir = Path::new(&home).join(".xschem");
-    match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
-        Ok(()) => {
-            // Only the process that created the folder fills it.
-            let _ = std::fs::copy(sharedir.join("xschemrc"), dir.join("xschemrc"));
-            Ok(())
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-        Err(error) => Err(format!("cannot create {}: {error}", dir.display())),
-    }
-}
-
-/// The folder holding `xschem.tcl` and `xschem_library/devices`.
-fn find_sharedir(explicit: Option<&Path>) -> Result<PathBuf, String> {
-    let is_sharedir = |dir: &Path| {
-        dir.join("xschem.tcl").is_file() && dir.join("xschem_library/devices").is_dir()
-    };
-    if let Some(dir) = explicit {
-        return if is_sharedir(dir) {
-            Ok(dir.to_path_buf())
-        } else {
-            Err(format!(
-                "--sharedir {}: xschem.tcl or xschem_library/devices not found",
-                dir.display()
-            ))
-        };
-    }
-    let from_env = std::env::var_os("CDEPT_XSCHEM_SHAREDIR").map(PathBuf::from);
-    let installed = std::env::current_exe()
-        .ok()
-        .and_then(|exe| Some(exe.parent()?.parent()?.join("share/cdept-xschem")));
-    let build_tree = Some(PathBuf::from(env!("CDEPT_XSCHEM_DEFAULT_SHAREDIR")));
-    [from_env, installed, build_tree]
-        .into_iter()
-        .flatten()
-        .find(|dir| is_sharedir(dir))
-        .ok_or_else(|| {
-            "xschem's runtime files (xschem.tcl) were not found; set CDEPT_XSCHEM_SHAREDIR".into()
-        })
 }

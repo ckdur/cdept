@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// xschem's sources as listed in `xschem/src/Makefile.in`, without `main.c` (replaced
-/// by `shim/engine.c`) and `cairo_jpg.c` (needs libjpeg, left out for now).
+/// by `shim/engine.c`) and `cairo_jpg.c` (added below when libjpeg is installed).
 const XSCHEM_SOURCES: &[&str] = &[
     "icon.c",
     "callback.c",
@@ -85,6 +85,9 @@ fn main() {
     let cairo = pkg_config::Config::new()
         .probe("cairo")
         .expect("cairo development files not found (pkg-config: cairo). Install libcairo2-dev.");
+    // Optional: JPEG pictures embedded in schematics. Without libjpeg xschem leaves
+    // them out, as its own build does.
+    let jpeg = pkg_config::Config::new().probe("libjpeg").ok();
     println!("cargo:rustc-link-lib=m");
 
     let configure = |build: &mut cc::Build| {
@@ -100,6 +103,11 @@ fn main() {
             .flag("-include")
             .flag(include.join("xschem_config.h"))
             .flag("-std=gnu99");
+        if let Some(jpeg) = &jpeg {
+            build
+                .includes(&jpeg.include_paths)
+                .define("HAS_LIBJPEG", "1");
+        }
     };
 
     // xschem itself: upstream code, compiled as upstream does (no extra warnings).
@@ -112,14 +120,18 @@ fn main() {
     for file in ["expandlabel.c", "eval_expr.c", "parselabel.c"] {
         xschem.file(out.join(file));
     }
+    if jpeg.is_some() {
+        xschem.file(src.join("cairo_jpg.c"));
+    }
     xschem.compile("xschem");
 
     // Our own C code, with warnings on.
     let mut glue = cc::Build::new();
     configure(&mut glue);
-    for file in ["xshim.c", "engine.c"] {
+    for file in ["xshim.c", "engine.c", "display.c"] {
         glue.file(shim.join(file));
     }
+    glue.include(&shim);
     glue.compile("cdxshim");
 
     for path in ["build.rs", "shim", "xschem/src"] {
@@ -137,8 +149,9 @@ fn main() {
     );
 }
 
-/// Build an xschem share folder out of symbolic links into the submodule: the Tcl and
-/// awk scripts and `systemlib` from `src/`, and `xschem_library/`.
+/// Build an xschem share folder out of symbolic links: the Tcl and awk scripts and
+/// `systemlib` from the submodule's `src/`, its `xschem_library/`, and `shim/tcl` as
+/// `cdept/`.
 fn assemble_share(xschem: &Path, share: &Path) {
     use std::os::unix::fs::symlink;
 
@@ -163,6 +176,9 @@ fn assemble_share(xschem: &Path, share: &Path) {
         }
     }
     symlink(xschem.join("xschem_library"), share.join("xschem_library")).unwrap();
+    // Our own Tcl files (the stand-in for the Tk commands), where the stub of Tk_Init
+    // looks for them: $XSCHEM_SHAREDIR/cdept.
+    symlink(xschem.join("../shim/tcl"), share.join("cdept")).unwrap();
 }
 
 fn generate(tool: &str, args: &[&str], output: &Path, input: &Path) {

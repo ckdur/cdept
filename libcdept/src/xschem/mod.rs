@@ -9,10 +9,22 @@
 
 #[cfg(unix)]
 mod engine;
+pub mod frame;
+pub mod input;
 pub mod protocol;
+#[cfg(unix)]
+pub mod service;
+#[cfg(unix)]
+pub mod session;
 pub mod setup;
 pub mod symbol;
 pub mod tcl;
 
 #[cfg(unix)]
-pub use engine::{Engine, EngineOptions, Instance, NetlistFormat};
+pub use engine::{
+    Engine, EngineOptions, Hierarchy, HierarchyCell, HierarchyInstance, Instance, NetlistFormat,
+};
+#[cfg(unix)]
+pub use service::{Pending, Service};
+#[cfg(unix)]
+pub use session::{Session, SessionOptions, Status};

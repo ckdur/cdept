@@ -42,6 +42,11 @@ name = ""
 # Optional  layout = "cells"  (<library>/<cell>/<view>/<files>)  or  "flat"
 # (<library>/<cell>.<ext>, one view per file); detected from the folder when left out.
 [libraries]
+
+# Start-up file of the PDK for the embedded xschem (it is read before the libraries
+# above are added to xschem's search path):
+#   [xschem]
+#   rc = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/xschemrc"
 "#;
 
 /// Options for [`Project::add_library`].
@@ -64,6 +69,9 @@ pub struct Project {
     pub description: Option<String>,
     /// Technology (PDK) name. Used from Phase 2 on.
     pub technology: Option<String>,
+    /// Start-up files (`xschemrc`, Tcl) the embedded xschem reads before the project's
+    /// libraries are added, typically the PDK's. From `[xschem] rc = …`.
+    pub xschem_rc: Vec<PathBuf>,
     /// Libraries in definition order: the project file first, then included files.
     pub libraries: Vec<Library>,
     /// Problems found while loading that did not prevent it.
@@ -137,14 +145,42 @@ impl Project {
             }),
             description: text("description")?,
             technology: text("technology")?,
+            xschem_rc: Vec::new(),
             root,
             file: file.clone(),
             libraries: Vec::new(),
             warnings: Vec::new(),
         };
+        project.load_xschem_rc(&doc);
         let mut seen = HashSet::from([file.clone()]);
         project.load_definitions(&file, &doc, &mut seen)?;
         Ok(project)
+    }
+
+    /// `[xschem] rc`: one file or a list. A file that cannot be found is left out,
+    /// with a warning.
+    fn load_xschem_rc(&mut self, doc: &DocumentMut) {
+        let Some(item) = doc.get("xschem").and_then(|table| table.get("rc")) else {
+            return;
+        };
+        let names: Vec<&str> = match (item.as_str(), item.as_array()) {
+            (Some(name), _) => vec![name],
+            (None, Some(list)) => list.iter().filter_map(|v| v.as_str()).collect(),
+            (None, None) => {
+                self.warnings
+                    .push("[xschem] rc must be a file name or a list of them".into());
+                return;
+            }
+        };
+        for name in names {
+            match resolve(name, &self.root) {
+                Ok(file) if file.is_file() => self.xschem_rc.push(file),
+                Ok(file) => self
+                    .warnings
+                    .push(format!("[xschem] rc: {} not found", file.display())),
+                Err(error) => self.warnings.push(format!("[xschem] rc '{name}': {error}")),
+            }
+        }
     }
 
     /// Read the project file and all libraries from disk again.

@@ -5,15 +5,21 @@
 //! views bring their own menus without the shell changing.
 
 mod console;
+mod hierarchy;
 mod inspector;
 mod library;
 mod placeholder;
+mod schematic;
 mod start;
 mod tools;
 
+use std::collections::HashMap;
+
 use egui::Ui;
 
-use crate::dock::Tab;
+pub use self::hierarchy::HierarchyView;
+pub use self::schematic::{CloseChoice, NETLIST_FORMATS, Picture, SchematicView, Selected};
+use crate::dock::{DocId, Tab};
 use crate::state::AppCtx;
 
 /// Which Edit-menu actions the active document supports.
@@ -61,12 +67,16 @@ pub struct Views {
     start: start::StartView,
     library_manager: library::LibraryManagerView,
     libraries: library::LibrariesView,
-    hierarchy: placeholder::Placeholder,
+    hierarchy: HierarchyView,
     inspector: inspector::InspectorView,
     tools: tools::ToolsView,
     console: console::ConsoleView,
     jobs: placeholder::Placeholder,
     problems: placeholder::Placeholder,
+    /// The open documents, by the id of their tab.
+    documents: HashMap<DocId, SchematicView>,
+    /// Stands in for a document tab that has no view (any more).
+    missing: placeholder::Placeholder,
 }
 
 impl Default for Views {
@@ -76,16 +86,14 @@ impl Default for Views {
             start: Default::default(),
             library_manager: Default::default(),
             libraries: Default::default(),
-            hierarchy: Placeholder::new(
-                "Hierarchy",
-                "Open a cell to see its hierarchy.",
-                "a later Phase 1 step",
-            ),
+            hierarchy: Default::default(),
             inspector: Default::default(),
             tools: Default::default(),
             console: Default::default(),
             jobs: Placeholder::new("Jobs", "No simulation or verification jobs.", "Phase 4"),
             problems: Placeholder::new("Problems", "No DRC/LVS results.", "Phase 7"),
+            documents: HashMap::new(),
+            missing: Placeholder::new("Document", "This document is closed.", "a later step"),
         }
     }
 }
@@ -102,7 +110,37 @@ impl Views {
             Tab::Console => &mut self.console,
             Tab::Jobs => &mut self.jobs,
             Tab::Problems => &mut self.problems,
+            Tab::Document(id) => match self.documents.get_mut(&id) {
+                Some(view) => view,
+                None => &mut self.missing,
+            },
         }
+    }
+
+    pub fn hierarchy(&self) -> &HierarchyView {
+        &self.hierarchy
+    }
+
+    /// The open documents.
+    pub fn documents(&self) -> impl Iterator<Item = (DocId, &SchematicView)> {
+        self.documents.iter().map(|(id, view)| (*id, view))
+    }
+
+    pub fn add_document(&mut self, id: DocId, view: SchematicView) {
+        self.documents.insert(id, view);
+    }
+
+    pub fn document(&self, id: DocId) -> Option<&SchematicView> {
+        self.documents.get(&id)
+    }
+
+    pub fn document_mut(&mut self, id: DocId) -> Option<&mut SchematicView> {
+        self.documents.get_mut(&id)
+    }
+
+    /// Close the documents `keep` rejects; their xschem ends with them.
+    pub fn retain_documents(&mut self, keep: impl Fn(DocId) -> bool) {
+        self.documents.retain(|id, _| keep(*id));
     }
 }
 

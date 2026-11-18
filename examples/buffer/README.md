@@ -37,6 +37,12 @@ cargo run -q -- xschem link                      # are all symbols linked to a s
 cargo run -q --                                  # the main window, on this project
 ```
 
+In the main window, double-click a schematic or symbol view in the Libraries panel:
+it opens in a tab with xschem inside (xschem's keys and menus work as usual; `e`
+descends into the selected instance, Ctrl+`e` comes back). The Hierarchy panel shows
+`tb_buf → x1 buf → x1 inv, x2 inv`, the Inspector shows a picture of the selected view,
+and the "Cell" menu has "Netlist to View".
+
 The netlist of `tb_buf` holds its own transistor models (level 1), a `.tran` command
 and a delay measurement, so `ngspice -b tb_buf.spice` runs it as it is and prints the
 delay of the buffer.

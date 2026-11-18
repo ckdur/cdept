@@ -11,15 +11,19 @@ use egui::{
 };
 use egui_dock::{DockArea, Style};
 
+use libcdept::xschem::NetlistFormat;
+use libcdept::{Cell, Entry, Format, Project};
+
 use crate::dialogs::{self, Dialog};
-use crate::dock::{Geometry, Layout, Tab, Viewer, WindowId};
+use crate::dock::{DocId, DocRef, Geometry, Layout, Tab, Viewer, WindowId};
 use crate::log::LogBuffer;
-use crate::state::{Action, AppCtx, PickFor, Settings};
-use crate::views::{EditAction, Views};
+use crate::script::Script;
+use crate::state::{Action, ActiveSchematic, AppCtx, PickFor, Selection, Settings};
+use crate::views::{CloseChoice, EditAction, SchematicView, View, Views};
 use crate::{APP_ID, GuiOptions};
 
 // Bump the suffix when `Layout` or `Tab` change incompatibly, so stale layouts are dropped.
-const LAYOUT_KEY: &str = "cdept.layout.v2";
+const LAYOUT_KEY: &str = "cdept.layout.v3";
 const SETTINGS_KEY: &str = "cdept.settings";
 
 const QUIT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, egui::Key::Q);
@@ -29,6 +33,55 @@ const PHASE3: &str = "Launching tools arrives in Phase 3";
 const LAUNCHERS: [&str; 4] = ["xschem", "KLayout", "Magic", "ngspice"];
 
 const DETACHED_SIZE: [f32; 2] = [1000.0, 700.0];
+
+/// Whether a view opens in a document tab: xschem schematics and symbols do.
+pub(crate) fn has_viewer(entry: &Entry) -> bool {
+    matches!(
+        entry.format,
+        Some(Format::XschemSchematic | Format::XschemSymbol)
+    ) && entry.main_file.is_some()
+}
+
+/// The xschem schematic of a cell: the view named `schematic` if it is one, else the
+/// first.
+pub(crate) fn schematic_file(cell: &Cell) -> Option<&std::path::PathBuf> {
+    let mut views = cell
+        .entries
+        .iter()
+        .filter(|e| e.format == Some(Format::XschemSchematic) && e.main_file.is_some());
+    let view = views
+        .clone()
+        .find(|e| e.name == "schematic")
+        .or_else(|| views.next())?;
+    view.main_file.as_ref()
+}
+
+/// Something that closes documents, held back while the user decides what to do with
+/// their unsaved changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Leaving {
+    CloseProject,
+    LoadProject(std::path::PathBuf),
+    NewProject(std::path::PathBuf),
+    Quit,
+}
+
+/// The answer to "these documents have unsaved changes".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeaveChoice {
+    SaveAll,
+    DiscardAll,
+    Cancel,
+}
+
+/// The question about unsaved changes before a [`Leaving`].
+struct Guard {
+    leaving: Leaving,
+    /// The documents with unsaved changes.
+    documents: Vec<DocId>,
+    /// "Save All" was chosen: the save requests still unanswered.
+    saving: Option<Vec<(DocId, u64)>>,
+}
 
 pub struct CdeptApp {
     layout: Layout,
@@ -43,10 +96,21 @@ pub struct CdeptApp {
     /// the same across frames, or egui would keep moving the window back.
     spawn_geometry: HashMap<u64, Option<Geometry>>,
     about: Option<WindowId>,
+    /// The question about unsaved changes, while closing the project or quitting.
+    guard: Option<Guard>,
+    /// The user agreed to quit (or nothing stood in the way): let the window close.
+    quit_confirmed: bool,
+    /// The test script being run, if any.
+    script: Option<Script>,
 }
 
 impl CdeptApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, options: GuiOptions, log: LogBuffer) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        options: GuiOptions,
+        log: LogBuffer,
+        script: Option<Script>,
+    ) -> Self {
         log.set_repaint_context(cc.egui_ctx.clone());
 
         let (layout, settings) = match cc.storage {
@@ -58,15 +122,26 @@ impl CdeptApp {
             ),
             None => (Layout::default(), Settings::default()),
         };
+        Self::start(&cc.egui_ctx, layout, settings, options, log, script)
+    }
 
+    /// Start with a layout and settings, as restored from the last run or new.
+    fn start(
+        egui_ctx: &Context,
+        layout: Layout,
+        settings: Settings,
+        options: GuiOptions,
+        log: LogBuffer,
+        script: Option<Script>,
+    ) -> Self {
         let mut ctx = AppCtx::new(settings, log);
         tracing::info!(target: "cdept", "CDePT {} started", libcdept::version::long_version());
         if let Some(path) = options.project {
             ctx.load_project(&path);
         }
-        ctx.tools.start_detection(&cc.egui_ctx);
+        ctx.tools.start_detection(egui_ctx);
 
-        Self {
+        let mut app = Self {
             layout,
             views: Views::default(),
             ctx,
@@ -74,7 +149,496 @@ impl CdeptApp {
             window_names: Vec::new(),
             spawn_geometry: HashMap::new(),
             about: None,
+            guard: None,
+            quit_confirmed: false,
+            script,
+        };
+        app.restore_documents(egui_ctx);
+        app
+    }
+
+    /// The file `doc` stands for, if it is one that opens in a document tab.
+    fn document_file(&self, doc: &DocRef) -> Option<std::path::PathBuf> {
+        if let Some(file) = &doc.file {
+            let known = matches!(
+                Format::of_file(file),
+                Some(Format::XschemSchematic | Format::XschemSymbol)
+            );
+            return (known && file.is_file()).then(|| file.clone());
         }
+        let entry = self
+            .ctx
+            .project
+            .as_ref()?
+            .library(&doc.library)?
+            .cell(&doc.cell)?
+            .entry(&doc.view)?;
+        has_viewer(entry).then(|| entry.main_file.clone()).flatten()
+    }
+
+    fn start_document(&mut self, ctx: &Context, id: DocId, doc: DocRef) -> bool {
+        let (Some(file), Some(project)) = (self.document_file(&doc), &self.ctx.project) else {
+            return false;
+        };
+        let view = SchematicView::open(id, doc, file, project, ctx);
+        self.views.add_document(id, view);
+        true
+    }
+
+    /// After a start: reopen the documents that were open in this project.
+    fn restore_documents(&mut self, ctx: &Context) {
+        let root = self.ctx.project.as_ref().map(|p| p.root.clone());
+        if self.layout.documents.project != root {
+            self.layout.retain_documents(|_| false);
+            self.layout.documents.project = root;
+        }
+        let open: Vec<(DocId, DocRef)> = self
+            .layout
+            .documents
+            .iter()
+            .map(|(id, doc)| (id, doc.clone()))
+            .collect();
+        for (id, doc) in open {
+            if !self.start_document(ctx, id, doc) {
+                self.layout.close_tab(Tab::Document(id));
+            }
+        }
+        self.layout.sync_documents();
+    }
+
+    /// Open a view of a cell in a document tab, or show the tab it is already in.
+    fn open_view(&mut self, ctx: &Context, selection: Selection) {
+        if let (Some(library), Some(cell), Some(view)) =
+            (selection.library, selection.cell, selection.view)
+        {
+            self.open_document(ctx, DocRef::view(&library, &cell, &view));
+        }
+    }
+
+    /// Open a file in a document tab: as the view of a library cell when it is one.
+    fn open_file(&mut self, ctx: &Context, file: &std::path::Path) {
+        let same = |a: &std::path::Path| match (a.canonicalize(), file.canonicalize()) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => a == file,
+        };
+        let view = self.ctx.project.as_ref().and_then(|project| {
+            project.libraries.iter().find_map(|library| {
+                library.cells.iter().find_map(|cell| {
+                    let entry = cell
+                        .entries
+                        .iter()
+                        .find(|e| e.main_file.as_deref().is_some_and(same))?;
+                    Some(DocRef::view(&library.name, &cell.name, &entry.name))
+                })
+            })
+        });
+        let doc = view.unwrap_or_else(|| DocRef::file(file.to_path_buf()));
+        self.open_document(ctx, doc);
+    }
+
+    fn open_document(&mut self, ctx: &Context, doc: DocRef) {
+        if self.document_file(&doc).is_none() {
+            let name = match &doc.file {
+                Some(file) => file.display().to_string(),
+                None => format!("{}/{}/{}", doc.library, doc.cell, doc.view),
+            };
+            tracing::info!(
+                target: "cdept::library",
+                "{name}: no embedded viewer for this kind of view yet"
+            );
+            return;
+        }
+        let (id, win, new) = self.layout.open_document(doc.clone());
+        if new {
+            self.start_document(ctx, id, doc);
+        }
+        Self::focus(ctx, win);
+    }
+
+    /// The document a test script acts on: the active one of the main window, else of
+    /// another window, else the one opened last.
+    pub(crate) fn script_document(&self) -> Option<Tab> {
+        let active = |win: &WindowId| match self.active_docs.get(win) {
+            Some(tab @ Tab::Document(id)) if self.layout.documents.get(*id).is_some() => Some(*tab),
+            _ => None,
+        };
+        self.layout
+            .window_ids()
+            .iter()
+            .find_map(active)
+            .or_else(|| {
+                let last = self.layout.documents.iter().last()?;
+                Some(Tab::Document(last.0))
+            })
+    }
+
+    pub(crate) fn script_schematic(&mut self) -> Option<&mut SchematicView> {
+        match self.script_document()? {
+            Tab::Document(id) => self.views.document_mut(id),
+            _ => None,
+        }
+    }
+
+    /// Where a position given in frame pixels of the script's schematic is on screen.
+    /// Without a schematic on screen the position is taken as window points.
+    pub(crate) fn script_screen(&self, pos: egui::Pos2) -> egui::Pos2 {
+        let view = match self.script_document() {
+            Some(Tab::Document(id)) => self.views.document(id),
+            _ => None,
+        };
+        view.and_then(|v| v.frame_to_screen(pos.x, pos.y))
+            .unwrap_or(pos)
+    }
+
+    pub(crate) fn script_request(&mut self, action: Action) {
+        self.ctx.request(action);
+    }
+
+    /// Close the script's document the way the X on its tab does: a document with
+    /// unsaved changes asks first. Returns whether it is asking.
+    pub(crate) fn script_close_tab(&mut self) -> Option<bool> {
+        let tab = self.script_document()?;
+        let view = self.script_schematic()?;
+        if view.may_close() {
+            self.ctx.request(Action::CloseTab(tab));
+        }
+        Some(self.script_schematic()?.is_closing())
+    }
+
+    /// Answer the question about unsaved changes of the script's document.
+    pub(crate) fn script_close_with(&mut self, choice: CloseChoice) -> bool {
+        let Some(Tab::Document(id)) = self.script_document() else {
+            return false;
+        };
+        match self.views.document_mut(id) {
+            Some(view) if view.asks_to_close() => {
+                view.close_with(choice, &mut self.ctx);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Title of the script's document tab.
+    pub(crate) fn script_title(&mut self) -> Option<String> {
+        let tab = self.script_document()?;
+        Some(self.views.get(tab).title(&self.ctx))
+    }
+
+    pub(crate) fn script_document_count(&self) -> usize {
+        self.layout.documents.iter().count()
+    }
+
+    /// Bring the panel with this title (`Hierarchy`, `Inspector`, …) to the front.
+    pub(crate) fn script_show_panel(&mut self, name: &str) -> bool {
+        let tab = Tab::ALL.into_iter().find(|tab| {
+            self.views
+                .get(*tab)
+                .title(&self.ctx)
+                .eq_ignore_ascii_case(name.trim())
+        });
+        tab.inspect(|tab| self.ctx.request(Action::OpenTab(*tab)))
+            .is_some()
+    }
+
+    /// The lines of the Hierarchy panel.
+    pub(crate) fn script_hierarchy(&self) -> Vec<String> {
+        self.views.hierarchy().lines()
+    }
+
+    /// The schematic of a cell shown in the Hierarchy panel.
+    pub(crate) fn script_hierarchy_file(&self, cell: &str) -> Option<std::path::PathBuf> {
+        self.views.hierarchy().schematic_of(cell)
+    }
+
+    /// Whether the Inspector shows the picture of the selected view.
+    pub(crate) fn script_preview(&self) -> bool {
+        let file = self.ctx.selected_view().and_then(|e| e.main_file.as_ref());
+        file.is_some_and(|file| self.ctx.engines.preview_shows(file))
+    }
+
+    pub(crate) fn script_select(&mut self, selection: Selection) {
+        self.ctx.selection = selection;
+        self.ctx.validate_selection();
+    }
+
+    pub(crate) fn script_project(&self) -> Option<&Project> {
+        self.ctx.project.as_ref()
+    }
+
+    /// What the Inspector shows as selected in the schematic in front.
+    pub(crate) fn script_selected(&self) -> Vec<String> {
+        let selection = self
+            .ctx
+            .schematic
+            .as_ref()
+            .and_then(|s| s.selection.as_ref());
+        selection.map_or_else(Vec::new, |s| {
+            s.instances.iter().map(|i| i.name.clone()).collect()
+        })
+    }
+
+    pub(crate) fn script_netlisting(&self) -> bool {
+        self.ctx.engines.netlisting()
+    }
+
+    /// Answer the question about unsaved changes asked before closing the project or
+    /// quitting. Returns whether it was being asked.
+    pub(crate) fn script_leave_with(&mut self, ctx: &Context, choice: LeaveChoice) -> bool {
+        let asking = self.guard.as_ref().is_some_and(|g| g.saving.is_none());
+        if asking {
+            self.leave_with(ctx, choice);
+        }
+        asking
+    }
+
+    /// End the program without asking about unsaved changes.
+    pub(crate) fn script_quit(&mut self, ctx: &Context) {
+        self.guard = None;
+        self.quit_confirmed = true;
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close);
+    }
+
+    /// A script command failed: end the program at the end of this frame, without
+    /// asking about unsaved changes.
+    pub(crate) fn script_fail(&mut self) {
+        self.guard = None;
+        self.quit_confirmed = true;
+        self.ctx.request(Action::Quit);
+    }
+
+    /// The documents with changes that are not saved.
+    fn modified_documents(&self) -> Vec<DocId> {
+        let mut modified: Vec<DocId> = self
+            .views
+            .documents()
+            .filter(|(_, view)| view.is_modified())
+            .map(|(id, _)| id)
+            .collect();
+        modified.sort();
+        modified
+    }
+
+    /// Do something that closes the open documents: right away when none has unsaved
+    /// changes, else after asking.
+    fn leave(&mut self, ctx: &Context, leaving: Leaving) {
+        // Opening the project that is open keeps its documents.
+        let stays = match &leaving {
+            Leaving::LoadProject(path) | Leaving::NewProject(path) => {
+                let root = Project::find_root(path).unwrap_or_else(|| path.clone());
+                self.ctx.project.as_ref().is_some_and(|p| p.root == root)
+            }
+            Leaving::CloseProject | Leaving::Quit => false,
+        };
+        let documents = self.modified_documents();
+        let agreed = leaving == Leaving::Quit && self.quit_confirmed;
+        if stays || agreed || documents.is_empty() {
+            return self.do_leave(ctx, leaving);
+        }
+        self.guard = Some(Guard {
+            leaving,
+            documents,
+            saving: None,
+        });
+        Self::focus(ctx, WindowId::Main);
+    }
+
+    fn do_leave(&mut self, ctx: &Context, leaving: Leaving) {
+        self.guard = None;
+        self.ctx.window = WindowId::Main;
+        match leaving {
+            Leaving::CloseProject => self.ctx.close_project(),
+            Leaving::LoadProject(path) => self.ctx.load_project(&path),
+            Leaving::NewProject(path) => self.ctx.new_project(&path),
+            Leaving::Quit => {
+                self.quit_confirmed = true;
+                ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close);
+            }
+        }
+    }
+
+    fn leave_with(&mut self, ctx: &Context, choice: LeaveChoice) {
+        let Some(guard) = &mut self.guard else {
+            return;
+        };
+        match choice {
+            LeaveChoice::Cancel => self.guard = None,
+            LeaveChoice::DiscardAll => {
+                let leaving = guard.leaving.clone();
+                self.do_leave(ctx, leaving);
+            }
+            LeaveChoice::SaveAll => {
+                let requests = guard
+                    .documents
+                    .iter()
+                    .filter_map(|id| Some((*id, self.views.document(*id)?.save())))
+                    .collect();
+                guard.saving = Some(requests);
+            }
+        }
+    }
+
+    /// The question about unsaved changes, and the wait for the saves.
+    fn guard_ui(&mut self, ctx: &Context) {
+        let Some(guard) = &mut self.guard else {
+            return;
+        };
+        if let Some(saving) = &mut guard.saving {
+            // xschem may ask where to save (a new file): no dialog of ours in its way.
+            let mut failed = None;
+            saving.retain(|(id, request)| {
+                let Some(view) = self.views.document_mut(*id) else {
+                    return false;
+                };
+                match view.take_reply(*request).map(SchematicView::saved) {
+                    None => view.status() == libcdept::xschem::Status::Running,
+                    Some(Ok(())) => false,
+                    Some(Err(error)) => {
+                        let title = view.title(&self.ctx);
+                        let title = title.trim_end_matches('*');
+                        failed = Some(format!("{title} was not saved: {error}"));
+                        false
+                    }
+                }
+            });
+            if let Some(message) = failed {
+                self.guard = None;
+                self.ctx.window = WindowId::Main;
+                self.ctx.error(message);
+            } else if saving.is_empty() {
+                let leaving = guard.leaving.clone();
+                self.do_leave(ctx, leaving);
+            }
+            return;
+        }
+
+        let titles: Vec<String> = guard
+            .documents
+            .iter()
+            .filter_map(|id| {
+                let title = self.views.document(*id)?.title(&self.ctx);
+                Some(title.trim_end_matches('*').to_string())
+            })
+            .collect();
+        let heading = match guard.leaving {
+            Leaving::Quit => "Quit with unsaved changes?",
+            _ => "Close the project with unsaved changes?",
+        };
+        let mut choice = None;
+        let response = egui::Modal::new(Id::new("unsaved-documents")).show(ctx, |ui| {
+            ui.set_max_width(440.0);
+            ui.heading(heading);
+            ui.label("These documents have changes that are not saved:");
+            for title in &titles {
+                ui.label(format!("    {title}"));
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                for (label, answer) in [
+                    ("Save All", LeaveChoice::SaveAll),
+                    ("Discard All", LeaveChoice::DiscardAll),
+                    ("Cancel", LeaveChoice::Cancel),
+                ] {
+                    if ui.button(label).clicked() {
+                        choice = Some(answer);
+                    }
+                }
+            });
+        });
+        if response.should_close() {
+            choice.get_or_insert(LeaveChoice::Cancel);
+        }
+        if let Some(choice) = choice {
+            self.leave_with(ctx, choice);
+        }
+    }
+
+    /// Tell the panels which schematic is in front: the active document of the main
+    /// window, else of another window.
+    fn publish_schematic(&mut self) {
+        let active =
+            self.layout
+                .window_ids()
+                .into_iter()
+                .find_map(|win| match self.active_docs.get(&win) {
+                    Some(Tab::Document(id)) => Some(*id),
+                    _ => None,
+                });
+        self.ctx.schematic = active.and_then(|id| {
+            let view = self.views.document(id)?;
+            Some(ActiveSchematic {
+                id,
+                doc: view.doc().clone(),
+                file: view.file().to_path_buf(),
+                title: view.title(&self.ctx),
+                modified: view.is_modified(),
+                selection: view.selection().cloned(),
+            })
+        });
+    }
+
+    /// Start writing the netlist of a cell into its `netlist` view.
+    fn netlist_to_view(&mut self, ctx: &Context, library: &str, cell: &str, format: NetlistFormat) {
+        let Some(project) = &self.ctx.project else {
+            return;
+        };
+        let Some(lib) = project.library(library) else {
+            tracing::error!(target: "cdept::netlist", "no library '{library}'");
+            return;
+        };
+        // The netlist comes from the files: say so when a document has moved on.
+        let schematic = lib.cell(cell).and_then(schematic_file);
+        let unsaved = self.views.documents().any(|(_, view)| {
+            view.is_modified() && Some(view.file()) == schematic.map(|f| f.as_path())
+        });
+        if unsaved {
+            tracing::warn!(
+                target: "cdept::netlist",
+                "{library}/{cell} has changes that are not saved: the netlist is made from \
+                 the file on disk"
+            );
+        }
+        tracing::info!(
+            target: "cdept::netlist",
+            "writing the {} netlist of {library}/{cell}…",
+            format.name()
+        );
+        self.ctx.engines.netlist(project, ctx, lib, cell, format);
+    }
+
+    /// Take in the netlists that are done: show the new views, report failures.
+    fn finish_netlists(&mut self) {
+        let done = self.ctx.engines.finished_netlists();
+        let mut written = false;
+        for (cell, result) in done {
+            match result {
+                Ok(file) => {
+                    written = true;
+                    tracing::info!(target: "cdept::netlist", "{cell}: wrote {}", file.display());
+                }
+                Err(error) => {
+                    tracing::error!(target: "cdept::netlist", "{cell}: no netlist: {error}");
+                }
+            }
+        }
+        if written {
+            self.ctx.reload_project();
+        }
+    }
+
+    /// Keep the documents in step with the tabs and the project: a closed tab closes
+    /// its document, another project closes them all.
+    fn sync_documents(&mut self) {
+        let root = self.ctx.project.as_ref().map(|p| p.root.clone());
+        if self.layout.documents.project != root {
+            self.layout.retain_documents(|_| false);
+            self.layout.documents.project = root;
+            self.ctx.engines.reset();
+        }
+        self.layout.sync_documents();
+        let documents = &self.layout.documents;
+        self.views
+            .retain_documents(|id| documents.get(id).is_some());
     }
 
     fn active_doc(&self, win: WindowId) -> Option<Tab> {
@@ -179,6 +743,9 @@ impl CdeptApp {
 
         if self.about == Some(win) {
             self.about(ui.ctx());
+        }
+        if win == WindowId::Main {
+            self.guard_ui(ui.ctx());
         }
         dialogs::show(ui.ctx(), &mut self.ctx);
     }
@@ -343,6 +910,17 @@ impl CdeptApp {
                 }
             }
         }
+        let documents: Vec<DocId> = self.layout.documents.iter().map(|(id, _)| id).collect();
+        if !documents.is_empty() {
+            ui.separator();
+        }
+        for id in documents {
+            let tab = Tab::Document(id);
+            let title = self.views.get(tab).title(&self.ctx);
+            if ui.button(title).clicked() {
+                self.ctx.request(Action::OpenTab(tab));
+            }
+        }
         ui.separator();
         let active = self.active_doc(win);
         if ui
@@ -417,7 +995,7 @@ impl CdeptApp {
     }
 
     fn toolbar(&mut self, ui: &mut Ui, win: WindowId) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             match &self.ctx.project {
                 Some(project) => ui
                     .label(format!("📁 {}", project.name))
@@ -518,6 +1096,9 @@ impl CdeptApp {
                 let win = self.layout.open_tab(tab);
                 Self::focus(ctx, win);
             }
+            Action::CloseTab(tab) => self.layout.close_tab(tab),
+            Action::OpenView(selection) => self.open_view(ctx, selection),
+            Action::OpenFile(file) => self.open_file(ctx, &file),
             Action::DetachTab(tab) => {
                 if let Some(id) = self.layout.detach(tab) {
                     Self::focus(ctx, WindowId::Detached(id));
@@ -542,14 +1123,17 @@ impl CdeptApp {
                 }
             }
             Action::PickFolder(purpose) => self.ctx.pick_folder(ctx, purpose),
-            Action::LoadProject(path) => self.ctx.load_project(&path),
+            Action::LoadProject(path) => self.leave(ctx, Leaving::LoadProject(path)),
             Action::ReloadProject => self.ctx.reload_project(),
-            Action::CloseProject => self.ctx.close_project(),
+            Action::CloseProject => self.leave(ctx, Leaving::CloseProject),
+            Action::NetlistToView {
+                library,
+                cell,
+                format,
+            } => self.netlist_to_view(ctx, &library, &cell, format),
             Action::DetectTools => self.ctx.tools.start_detection(ctx),
             Action::ShowAbout(win) => self.about = Some(win),
-            Action::Quit => {
-                ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close)
-            }
+            Action::Quit => self.leave(ctx, Leaving::Quit),
         }
     }
 
@@ -568,12 +1152,12 @@ impl CdeptApp {
     }
 
     /// Act on the folder chosen in the native folder dialog.
-    fn picked(&mut self, purpose: PickFor, path: std::path::PathBuf) {
+    fn picked(&mut self, ctx: &Context, purpose: PickFor, path: std::path::PathBuf) {
         // Dialogs opened from here belong to the main window.
         self.ctx.window = WindowId::Main;
         match purpose {
-            PickFor::NewProject => self.ctx.new_project(&path),
-            PickFor::OpenProject => self.ctx.load_project(&path),
+            PickFor::NewProject => self.leave(ctx, Leaving::NewProject(path)),
+            PickFor::OpenProject => self.leave(ctx, Leaving::LoadProject(path)),
             PickFor::AddLibrary => {
                 if let Some(project) = &self.ctx.project {
                     let dialog = Dialog::add_library(project, &path);
@@ -588,6 +1172,19 @@ impl eframe::App for CdeptApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = &ui.ctx().clone();
         self.refresh_window_names();
+        self.publish_schematic();
+
+        // The close button of the main window: not with unsaved changes unasked.
+        if ctx.input(|i| i.viewport().close_requested()) && !self.quit_confirmed {
+            if self.modified_documents().is_empty() {
+                self.quit_confirmed = true;
+            } else {
+                ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::CancelClose);
+                if self.guard.is_none() {
+                    self.leave(ctx, Leaving::Quit);
+                }
+            }
+        }
 
         self.window_ui(ui, WindowId::Main);
         let detached: Vec<u64> = self.layout.windows.iter().map(|w| w.id).collect();
@@ -600,10 +1197,20 @@ impl eframe::App for CdeptApp {
             self.apply(ctx, action);
         }
         if let Some((purpose, path)) = self.ctx.take_picked() {
-            self.picked(purpose, path);
+            self.picked(ctx, purpose, path);
         }
+        self.finish_netlists();
         // A detached window whose last tab was closed or dragged away disappears.
         let before: Vec<u64> = self.layout.windows.iter().map(|w| w.id).collect();
+        self.sync_documents();
+        if let Some(mut script) = self.script.take() {
+            // The script acts on the active document as the actions above left it.
+            for win in self.layout.window_ids() {
+                self.update_active_doc(win);
+            }
+            script.advance(self, ctx);
+            self.script = Some(script);
+        }
         self.layout.prune();
         for id in before {
             if self.layout.detached_mut(id).is_none() {
@@ -612,8 +1219,209 @@ impl eframe::App for CdeptApp {
         }
     }
 
+    fn raw_input_hook(&mut self, _ctx: &Context, raw_input: &mut egui::RawInput) {
+        if let Some(mut script) = self.script.take() {
+            script.hook(self, raw_input);
+            self.script = Some(script);
+        }
+    }
+
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, LAYOUT_KEY, &self.layout);
         eframe::set_value(storage, SETTINGS_KEY, &self.ctx.settings);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::Path;
+
+    use super::*;
+
+    /// A project with one cell: a schematic, a symbol and a layout.
+    fn project(root: &Path) {
+        for (view, file) in [
+            ("schematic", "ota.sch"),
+            ("symbol", "ota.sym"),
+            ("layout", "ota.gds"),
+        ] {
+            let dir = root.join("libs/analog/ota").join(view);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join(file), "").unwrap();
+        }
+        fs::write(
+            root.join(libcdept::PROJECT_FILE),
+            "name = \"demo\"\n[libraries]\nanalog = \"libs/analog\"\n",
+        )
+        .unwrap();
+    }
+
+    fn app(ctx: &Context, root: &Path, layout: Layout) -> CdeptApp {
+        let options = GuiOptions {
+            project: Some(root.to_path_buf()),
+            script: None,
+        };
+        CdeptApp::start(
+            ctx,
+            layout,
+            Settings::default(),
+            options,
+            LogBuffer::new(),
+            None,
+        )
+    }
+
+    fn open(app: &mut CdeptApp, ctx: &Context, view: &str) {
+        app.open_view(ctx, Selection::view("analog", "ota", view));
+    }
+
+    fn titles(app: &mut CdeptApp) -> Vec<String> {
+        let ids: Vec<DocId> = app.layout.documents.iter().map(|(id, _)| id).collect();
+        ids.into_iter()
+            .map(|id| app.views.get(Tab::Document(id)).title(&app.ctx))
+            .collect()
+    }
+
+    /// The layout as the next start finds it.
+    fn saved(app: &CdeptApp) -> Layout {
+        let text = ron::to_string(&app.layout).unwrap();
+        ron::from_str::<Layout>(&text).unwrap().restored()
+    }
+
+    #[test]
+    fn views_open_once_in_document_tabs() {
+        let tmp = tempfile::tempdir().unwrap();
+        project(tmp.path());
+        let ctx = Context::default();
+        let mut app = app(&ctx, tmp.path(), Layout::default());
+
+        open(&mut app, &ctx, "schematic");
+        open(&mut app, &ctx, "schematic");
+        assert_eq!(titles(&mut app), ["ota (schematic)"]);
+        open(&mut app, &ctx, "symbol");
+        // No embedded viewer for layouts yet, and nothing to open for a missing view.
+        open(&mut app, &ctx, "layout");
+        open(&mut app, &ctx, "nothing");
+        assert_eq!(titles(&mut app), ["ota (schematic)", "ota (symbol)"]);
+        assert_eq!(app.script_document_count(), 2);
+
+        // A file opens as the view it is; a file outside the libraries as itself.
+        let symbol_file = tmp.path().join("libs/analog/ota/symbol/ota.sym");
+        app.open_file(&ctx, &symbol_file);
+        let loose = tmp.path().join("scratch.sch");
+        fs::write(&loose, "").unwrap();
+        app.open_file(&ctx, &loose);
+        app.open_file(&ctx, &loose);
+        app.open_file(&ctx, &tmp.path().join("notes.txt"));
+        assert_eq!(
+            titles(&mut app),
+            ["ota (schematic)", "ota (symbol)", "scratch.sch"]
+        );
+        let scratch = app.script_document().unwrap();
+        app.layout.close_tab(scratch);
+        app.sync_documents();
+
+        // The X on the symbol's tab closes that document and ends its xschem.
+        let symbol = app.script_document().unwrap();
+        let path = app.layout.main.find_tab(&symbol).unwrap();
+        app.layout.main.remove_tab(path);
+        app.sync_documents();
+        assert_eq!(titles(&mut app), ["ota (schematic)"]);
+        assert!(matches!(symbol, Tab::Document(id) if app.views.document(id).is_none()));
+
+        // Closing the project closes what is left.
+        app.ctx.close_project();
+        app.sync_documents();
+        assert_eq!(app.script_document_count(), 0);
+        assert_eq!(app.layout.documents.project, None);
+    }
+
+    #[test]
+    fn leaving_without_unsaved_changes_does_not_ask() {
+        let tmp = tempfile::tempdir().unwrap();
+        project(tmp.path());
+        let ctx = Context::default();
+        let mut app = app(&ctx, tmp.path(), Layout::default());
+        open(&mut app, &ctx, "schematic");
+        assert!(app.modified_documents().is_empty());
+
+        // Opening the project that is open keeps it and its documents.
+        app.apply(&ctx, Action::LoadProject(tmp.path().join("libs")));
+        app.sync_documents();
+        assert!(app.guard.is_none());
+        assert_eq!(app.script_document_count(), 1);
+
+        app.apply(&ctx, Action::CloseProject);
+        app.sync_documents();
+        assert!(app.guard.is_none());
+        assert!(app.ctx.project.is_none());
+        assert_eq!(app.script_document_count(), 0);
+
+        // Nothing to answer when nothing was asked.
+        assert!(!app.script_leave_with(&ctx, LeaveChoice::Cancel));
+        app.apply(&ctx, Action::Quit);
+        assert!(app.quit_confirmed);
+    }
+
+    #[test]
+    fn the_schematic_of_a_cell_is_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        project(tmp.path());
+        let dir = tmp.path().join("libs/analog/ota/schematic_old");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("ota.sch"), "").unwrap();
+        let project = Project::load(tmp.path()).unwrap();
+        let cell = project.library("analog").unwrap().cell("ota").unwrap();
+        // The view named `schematic` wins over other schematics.
+        assert_eq!(
+            schematic_file(cell),
+            Some(&tmp.path().join("libs/analog/ota/schematic/ota.sch"))
+        );
+        let none = Cell::default();
+        assert_eq!(schematic_file(&none), None);
+    }
+
+    #[test]
+    fn documents_come_back_in_their_project_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        project(tmp.path());
+        let ctx = Context::default();
+        let mut first = app(&ctx, tmp.path(), Layout::default());
+        open(&mut first, &ctx, "schematic");
+        open(&mut first, &ctx, "symbol");
+        let layout = saved(&first);
+        drop(first);
+
+        // The same project: both are back, each with a view behind its tab.
+        let mut again = app(&ctx, tmp.path(), layout);
+        assert_eq!(titles(&mut again), ["ota (schematic)", "ota (symbol)"]);
+        let ids: Vec<DocId> = again.layout.documents.iter().map(|(id, _)| id).collect();
+        assert!(ids.iter().all(|id| again.views.document(*id).is_some()));
+        assert!(
+            ids.iter()
+                .all(|id| again.layout.find(Tab::Document(*id)).is_some())
+        );
+
+        // A view that is gone from disk does not come back.
+        let layout = saved(&again);
+        drop(again);
+        fs::remove_dir_all(tmp.path().join("libs/analog/ota/symbol")).unwrap();
+        let mut fewer = app(&ctx, tmp.path(), layout);
+        assert_eq!(titles(&mut fewer), ["ota (schematic)"]);
+
+        // Another project: nothing comes back, and no tab is left over.
+        let layout = saved(&fewer);
+        drop(fewer);
+        let other = tempfile::tempdir().unwrap();
+        project(other.path());
+        let elsewhere = app(&ctx, other.path(), layout);
+        assert_eq!(elsewhere.script_document_count(), 0);
+        let stray = elsewhere
+            .layout
+            .main
+            .iter_all_tabs()
+            .any(|(_, tab)| matches!(tab, Tab::Document(_)));
+        assert!(!stray);
     }
 }

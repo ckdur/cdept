@@ -11,7 +11,6 @@ use crate::dock::Tab;
 use crate::state::{Action, AppCtx, PickFor, Selection};
 
 const READ_ONLY: &str = "The library is read-only";
-const OPEN_PHASE: &str = "opening views in their tool arrives in Phase 3";
 
 /// What the user asked for while the project was borrowed for drawing.
 enum Cmd {
@@ -31,14 +30,8 @@ fn run(cmds: Vec<Cmd>, ui: &Ui, ctx: &mut AppCtx) {
             Cmd::Action(action) => ctx.request(action),
             Cmd::CopyText(text) => ui.ctx().copy_text(text),
             Cmd::Open(selection) => {
-                tracing::info!(
-                    target: "cdept::library",
-                    "{}/{}/{}: {OPEN_PHASE}",
-                    selection.library.as_deref().unwrap_or_default(),
-                    selection.cell.as_deref().unwrap_or_default(),
-                    selection.view.as_deref().unwrap_or_default(),
-                );
-                ctx.selection = selection;
+                ctx.selection = selection.clone();
+                ctx.request(Action::OpenView(selection));
             }
         }
     }
@@ -142,6 +135,24 @@ fn cell_items(ui: &mut Ui, project: &Project, lib: &Library, cell: &Cell, cmds: 
     if ui.button("Copy Cell…").clicked() {
         cmds.push(Cmd::Dialog(copy_cell_dialog(project, lib, cell)));
     }
+    let netlist = ui.add_enabled_ui(rw && crate::app::schematic_file(cell).is_some(), |ui| {
+        ui.menu_button("Netlist to View", |ui| {
+            for (label, format) in super::NETLIST_FORMATS {
+                if ui.button(label).clicked() {
+                    cmds.push(Cmd::Action(Action::NetlistToView {
+                        library: lib.name.clone(),
+                        cell: cell.name.clone(),
+                        format,
+                    }));
+                }
+            }
+        });
+    });
+    netlist.response.on_disabled_hover_text(if rw {
+        "The cell has no xschem schematic"
+    } else {
+        READ_ONLY
+    });
     if ui
         .add_enabled(rw, Button::new("Rename Cell…"))
         .on_disabled_hover_text(READ_ONLY)
@@ -166,6 +177,18 @@ fn cell_items(ui: &mut Ui, project: &Project, lib: &Library, cell: &Cell, cmds: 
 }
 
 fn view_items(ui: &mut Ui, lib: &Library, cell: &Cell, entry: &Entry, cmds: &mut Vec<Cmd>) {
+    if ui
+        .add_enabled(crate::app::has_viewer(entry), Button::new("Open"))
+        .on_disabled_hover_text("No embedded viewer for this kind of view yet")
+        .clicked()
+    {
+        cmds.push(Cmd::Open(Selection::view(
+            &lib.name,
+            &cell.name,
+            &entry.name,
+        )));
+    }
+    ui.separator();
     if ui
         .add_enabled(writable(lib), Button::new("Delete View…"))
         .on_disabled_hover_text(READ_ONLY)
