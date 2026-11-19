@@ -4,7 +4,7 @@ What is still to do and what may cause trouble. [ROADMAP.md](ROADMAP.md) is the 
 file is the running list behind it. Update it when an item is done or a new problem shows
 up. Items marked **(verify)** are suspicions, not confirmed facts.
 
-Last updated: 2026-11-18 (embedded xschem: steps 1–4 done, CI green).
+Last updated: 2026-11-20 (embedded KLayout: steps 0–3 built).
 
 ---
 
@@ -123,6 +123,31 @@ Last updated: 2026-11-18 (embedded xschem: steps 1–4 done, CI green).
       export" was there all along, but under the "Schematic" menu where xschem's File
       menu is merged, so nobody found it.
 
+### Embedded KLayout ([KLAYOUT.md](KLAYOUT.md))
+- [x] Decisions (2026-11-19): helper process (KLayout is GPL-3.0), submodule
+      `cdept-klayout/klayout` pinned to v0.30.12 (asic-all), no patches; full Qt5 build
+      with `cdept-klayout/build.sh` into `cdept-klayout/.bin` (~20 min at -j30).
+- [x] References between layout views: ghost cells + `<file>.json` sidecar (own schema
+      `cdept-layout` v1); resolved through the sidecar, else searched by name in the
+      libraries; not found → red box with X and "<label> cannot be found". Save writes
+      only the file's own cells. `libcdept::layout` (GDS reader/renamer, sidecar,
+      resolver); create/copy/rename keep sidecars and the top structure name right.
+- [x] CLI: `cdept klayout version|python`, `cdept layout refs [--fix]`, `export`
+      (self-contained stream), `png`.
+- [x] Helper: frames (bgra), input, all edit modes, undo/redo, copy/paste, layers,
+      cells, selection, status, notices; 15 protocol tests (`cdept-klayout/tests/run.sh`).
+      1920×1080: ~17 ms per change; 4K: ~75–85 ms (whole frame each time).
+- [x] GUI: layout document tab (toolbar, Layers/Cells/Selection panels, Place Cell…,
+      export, close flow, Inspector preview, script commands; `layout-smoke.script`).
+- [ ] Not done: properties dialog, PCell parameter dialog (KLayout's are Qt), editing
+      inside external cells (open the view instead), DRC/LVS, OASIS references (no
+      reader: OASIS views are leaves), `.gds.gz` (no reader), renames do not yet
+      rewrite *other* views that reference the renamed cell.
+- [ ] Press-drag-release does not draw a box in box mode; two clicks do (as in KLayout?).
+- [ ] KLayout is not built in CI; its tests skip there. `install.sh` installs the helper
+      script only, KLayout comes from the system or `cdept-klayout/.bin`.
+- [ ] Try it by hand.
+
 ### Smaller gaps left in what exists
 - [x] Edit project fields (name, description, technology, PDK folder) from the GUI.
 - [ ] Edit or remove libraries that come from an `include` file; today the GUI refuses.
@@ -214,6 +239,14 @@ Last updated: 2026-11-18 (embedded xschem: steps 1–4 done, CI green).
   the format changes incompatibly.
 - **Multi-cell GDS** is one cell, so the layout view of a standard cell cannot be
   selected individually yet.
+- **Ghost references in stock KLayout.** A layout view opened outside CDePT shows its
+  placed cells empty (they are references only). For DRC, LVS and tape-out use
+  `cdept layout export`. A copy made with `cp` keeps the old sidecar identity;
+  `cdept layout refs` reports it.
+- **Structure names are global per stream.** Two views whose cells share a name are
+  told apart by the sidecar. When the cells of two files clash inside one layout, the
+  helper renames the external copy in memory, so an exported stream can carry such
+  renamed cells (not yet checked against a real clash).
 
 ### 2.3 File operations
 - **Delete is permanent.** No trash, no undo, git is not consulted. There is a
@@ -249,7 +282,7 @@ Last updated: 2026-11-18 (embedded xschem: steps 1–4 done, CI green).
 ### 2.5 Dependencies
 - `egui_dock` has no release for egui 0.37, so we stay on egui/eframe 0.36.
 - `rfd` pulls the portal stack (`ashpd`, `zbus`); watch build time and the MSRV.
-- xschem (as a program) and KLayout are not installed on the development host. Templates were checked
+- xschem (as a program) is not installed on the development host; KLayout is built in `cdept-klayout/.bin`. Templates were checked
   in the asic-all image (`docker run --entrypoint bash asic-all:dev-amd64-new`); the
   host-built `cdept` binary cannot run in that image (glibc too old there).
 

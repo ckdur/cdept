@@ -39,7 +39,7 @@ cdept (GUI binary, egui/eframe)
       ├── tech/        PDK discovery + technology description
       ├── tools/       ToolAdapter trait, process supervisor, IPC clients
       │    ├── xschem   (helper process cdept-xschem, see XSCHEM.md)
-      │    ├── klayout  (Python plugin, JSON-RPC over TCP)
+      │    ├── klayout  (helper process cdept-klayout, see KLAYOUT.md)
       │    ├── magic    (Tcl over stdin/pipe or Tcl socket script)
       │    ├── ngspice  (libngspice shared API, in-process)
       │    ├── uberwave (launch with a file; IPC to agree with the uberWAVE team)
@@ -184,10 +184,12 @@ To do:
   engine does netlists, hierarchy and previews in the background. It draws the same as
   stock xschem, so the fallback (a separate xschem window driven over its TCP
   listener) is not needed. Plan, results and known gaps: [XSCHEM.md](XSCHEM.md).
-- **KLayout:** ship an CDePT macro/plugin (`klayout -rm cdept_bridge.py`) that opens a TCP/JSON-RPC
-  server via `pya.QTcpServer` or a polling `QTimer`. Commands: load cell, select/zoom, highlight
-  net, run DRC, report selection back. Risk: some distro builds lack Qt bindings, so detect this
-  and fall back to batch mode.
+- **KLayout:** embedded (started 2026-11-19). KLayout v0.30.12 is built from a
+  submodule; a GPL helper (`cdept-klayout`, a Python program run by `klayout -z`)
+  drives a widget-less editable `LayoutView` whose pixels show in a CDePT tab; layers,
+  cells and selection are CDePT panels. Layout views reference each other through
+  ghost cells and `<file>.json` sidecars; missing cells show as a red X. Plan,
+  results and gaps: [KLAYOUT.md](KLAYOUT.md).
 - **Magic:** `magic -dnull -noconsole` with Tcl over a pipe for batch (ext, LEF, DRC). For the
   GUI, source a Tcl socket-server script.
 - **ngspice:** in-process via `libngspice` (shared API: `ngSpice_Init`, `ngSpice_Command`,

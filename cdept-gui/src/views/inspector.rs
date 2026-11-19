@@ -162,7 +162,10 @@ impl View for InspectorView {
             if let Some(format) = entry.format {
                 row(ui, "Format", format.label());
                 let embedded = matches!(format, Format::XschemSchematic | Format::XschemSymbol);
+                let layout = matches!(format, Format::Gds | Format::Oasis);
                 let tool = match format.tool() {
+                    // KLayout runs in a helper of its own and is shown in a tab.
+                    Some(_) if layout => "KLayout, in a tab".into(),
                     // xschem is built in: it needs its engine, not the program.
                     Some(_) if embedded => match ctx.tools.helper() {
                         Some(helper) if helper.path.is_none() => {
@@ -220,13 +223,20 @@ impl View for InspectorView {
         }
 
         // A picture of what xschem can draw.
+        let layout = matches!(entry.format, Some(Format::Gds | Format::Oasis));
         let drawable = matches!(
             entry.format,
             Some(Format::XschemSchematic | Format::XschemSymbol)
         );
-        if let (true, Some(file)) = (drawable, entry.main_file.clone()) {
+        let main_file = entry.main_file.clone();
+        if let (true, Some(file)) = (drawable, main_file.clone()) {
             ui.add_space(6.0);
             ctx.engines.preview(ui, project, &file);
+        }
+        // A picture of a layout, drawn by a KLayout of its own.
+        if let (true, Some(file)) = (layout, main_file) {
+            ui.add_space(6.0);
+            ctx.engines.layout_preview(ui, project, &file);
         }
     }
 }

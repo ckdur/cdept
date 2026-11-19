@@ -1,3 +1,6 @@
 [submodule "cdept-xschem/xschem"]
 	path = cdept-xschem/xschem
 	url = https://github.com/StefanSchippers/xschem.git
+[submodule "cdept-klayout/klayout"]
+	path = cdept-klayout/klayout
+	url = https://github.com/KLayout/klayout.git

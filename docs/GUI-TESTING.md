@@ -2,7 +2,8 @@
 
 `cdept gui --script <file>` runs the real program and, while it is on screen, executes
 the commands of the file in order. It is how the embedded tools are tested end to end:
-open a view, move the mouse, press keys, look at xschem's answers, take screenshots.
+open a view, move the mouse, press keys, look at xschem's or KLayout's answers, take
+screenshots.
 
 ```sh
 XDG_DATA_HOME=$(mktemp -d) target/debug/cdept -p examples/buffer gui --script my.script
@@ -24,7 +25,7 @@ XDG_DATA_HOME=$(mktemp -d) target/debug/cdept -p examples/buffer gui --script my
   target `cdept::script`. `-v` also shows each command as it starts, and what the
   xschem helper prints.
 
-Three scripts check the embedded xschem on `examples/buffer`, and
+Scripts check the embedded xschem and KLayout on `examples/buffer`, and
 `cdept-gui/scripts/run.sh` runs them with scratch settings, a scratch home folder and
 a scratch copy of the project:
 
@@ -34,22 +35,24 @@ a scratch copy of the project:
 | `cdept-gui/scripts/buffer-edit.script` | the library picker (open, insert a symbol, save as), "open in new window", netlist to a view, saving on close and on closing the project | into the project: run it on a copy |
 | `cdept-gui/scripts/buffer-sim.script` | the simulator configuration, Netlist and Simulate as a background job (a copy command stands in for the simulator, so no ngspice is needed), failed jobs, a waveform graph with its dialog, cursors and zoom | a netlist, a raw file and a graph into the project |
 | `cdept-gui/scripts/buffer-preview.script` | pictures xschem draws inside its own dialogs (key cheat sheet, its file browser), pasting the desktop's clipboard into a dialog, Tcl's `clipboard get` / `selection get` (run it by name: `run.sh cdept-gui/scripts/buffer-preview.script`) | nothing |
+| `cdept-gui/scripts/layout-smoke.script` | the embedded KLayout: the picture, layers and cells (external cells), modes, notices, drawing, undo/redo, save (sidecar), Place Cell, self-contained export, opening an external cell, closing a changed layout (needs `cdept-klayout/.bin/klayout`, see cdept-klayout/README.md) | into the project: run it on a copy (`run.sh cdept-gui/scripts/layout-smoke.script`) |
+
 
 `$PROJECT` in a script stands for the folder of the project being opened.
 
 ## Coordinates
 
-Positions are in **pixels of the frame** of the schematic the script acts on: (0, 0) is
+Positions are in **pixels of the frame** of the schematic or layout the script acts on: (0, 0) is
 the top-left corner of the drawing. Positions outside the drawing work too (negative
 numbers reach the panels to the left and above), which is how a script clicks other
 parts of the window.
 
-Without a schematic on screen, positions are window coordinates in points.
+Without a document on screen, positions are window coordinates in points.
 
 Pixel positions depend on the size of the drawing. Prefer `click_instance`, which asks
 xschem where the instance is.
 
-The script acts on the active document of the main window (else of a detached window,
+The script acts on the active document (a schematic or a layout) of the main window (else of a detached window,
 else the document opened last). Mouse and keyboard commands only work in the main
 window; `tcl`, `wait_frame`, `frame` and `pixel` work in detached windows too.
 
@@ -153,6 +156,43 @@ with spaces that is not the last one is written in braces: `{Instance name}`.
 | `zoom <factor>` | Scale the whole GUI, e.g. `1.5`: the way to test screens with more pixels per point |
 | `log <text>` | Write a line to the log |
 | `quit` | End the program, without asking about changed documents |
+
+## Layouts (KLayout)
+
+The commands of the sections above that do not mention xschem work on a layout
+document too: `open <library> <cell> <layout view>`, `close`, `close_tab`,
+`close_answer`, `detach`, `expect_documents`, `expect_title`, `wait_frame`, `sync`
+(waits until KLayout has handled everything sent so far), `move`, `click`,
+`double_click`, `press`, `release`, `drag`, `wheel`, `key` (`F2`, `Plus ctrl`, `Delete`,
+`Escape`), `text`, `frame`, `pixel`, `expect_pixel`, `check_picture`, `screenshot`.
+Pixel positions are those of the picture. The xschem commands (`tcl`, `menu`,
+`click_instance`, dialogs, the picker) fail on a layout. Note that KLayout's box, polygon
+and path tools take **clicks**, not a drag.
+
+| Command | Does |
+|---|---|
+| `mode <name>` | Switch the editor: `select`, `move`, `box`, `polygon`, `path`, `text`, `instance`, `ruler`, `partial` |
+| `layout_zoom <fit\|in\|out>` | Zoom |
+| `layout_edit <action>` | `undo`, `redo`, `delete`, `select_all`, `clear_selection`, `copy`, `cut`, `paste` |
+| `save` | Save and wait for the answer (the sidecar of the references is written too) |
+| `place <library> <cell> <view>` | Place Cell: load that layout view as an external cell and switch to instance mode |
+| `export <file>` | Write the self-contained stream (every reference filled in) |
+| `add_layer <layer> <datatype> [name]` | Add a layer (the form of the Layers panel) |
+| `current_layer <name or source>` | Choose the layer to draw on; `1/0` finds `1/0@1` |
+| `layer_visible <name or source> <on\|off>` | Show or hide a layer |
+| `show_cell <cell> [<cell> ...]` | Show a cell, given as the path from the top (double click on a local cell) |
+| `cell_open <cell>` | What a double click on a cell of the Cells panel does: a local cell is shown, an external one opens its view in a tab of its own |
+| `levels <n>` | Hierarchy levels shown (16 and more: all) |
+| `layout_call <method> [<json>]` | Call a helper method (docs/KLAYOUT.md §4) and log the answer |
+| `expect_notice <text>` | Fail unless a message of the editor (the transient line over the picture, also in the Console) contains the text |
+| `expect_layer <name or source>` | Fail unless the layer list has it |
+| `expect_cell <name> [local\|external\|missing]` | Fail unless the cell tree has this cell (of this kind) |
+| `expect_selection <n>` | Fail unless `n` objects are selected |
+| `expect_modified <yes\|no>` | Fail unless the layout does (not) have unsaved changes (the tab's star) |
+| `expect_mode <name>` | Fail unless the editor is in this mode |
+
+KLayout reports a changed modified flag with the next request it handles, so the
+`expect_*` commands above ask it for a sign of life while they wait.
 
 ## Notes
 

@@ -1,0 +1,327 @@
+# cdept-klayout: one layout with its references filled in (docs/KLAYOUT.md §3).
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""A layout file and the cells it places from other views.
+
+The root file is read as it is. Every ghost cell in it (placed, not defined) is
+looked up in the reference table CDePT sent: found -> the other file's top cell is
+copied into the ghost cell ("external"); not found -> the ghost cell gets a red box
+with an X and "<label> cannot be found" on a layer that is never written
+("missing"). The same happens, recursively, to the ghost cells of external files.
+
+Saving writes the root's own cells only: external and missing cells become ghost
+cells again, cells that came with external files are left out.
+"""
+
+import os
+
+import pya
+
+# Layer of the "cannot be found" markers. It has no GDS number, lives only in memory
+# and is removed before anything is written.
+MARKER_LAYER = "CDEPT_MISSING"
+# Size of a marker when no bounding box is known, in µm.
+DEFAULT_BBOX = [0.0, 0.0, 2.0, 2.0]
+
+
+class RefTable:
+    """The reference table of docs/KLAYOUT.md §3.3."""
+
+    def __init__(self, table):
+        table = table or {}
+        self.root = table.get("root") or ""
+        self.files = {}
+        for name, entry in (table.get("files") or {}).items():
+            self.files[os.path.normpath(name)] = entry or {}
+
+    def entry(self, path):
+        return self.files.get(os.path.normpath(path), {})
+
+    def label(self, path):
+        return self.entry(path).get("label") or os.path.basename(path)
+
+    def ref(self, path, name):
+        """The table's entry for ghost `name` of file `path`, or None."""
+        return (self.entry(path).get("refs") or {}).get(name)
+
+    def merge(self, other):
+        """Add the files of another table (after `place`)."""
+        for name, entry in other.files.items():
+            self.files.setdefault(name, entry)
+
+
+def _bbox(value):
+    if isinstance(value, (list, tuple)) and len(value) == 4:
+        try:
+            b = [float(v) for v in value]
+        except (TypeError, ValueError):
+            return None
+        if b[0] <= b[2] and b[1] <= b[3]:
+            return b
+    return None
+
+
+class Document:
+    """The layout `layout` built from a reference table.
+
+    `foreign` maps the index of every cell that did not come from the root file to
+    what it is: {"file", "label", "missing", "bbox", "top", "reason"}. `top` is true
+    for the cell standing for a whole file (what a ghost name refers to).
+    """
+
+    def __init__(self, layout, table):
+        self.layout = layout
+        self.table = table
+        self.root = os.path.normpath(table.root)
+        self.foreign = {}
+        self.by_file = {}
+        self._layers = {}
+        self.marker = None
+        self.notes = []
+
+    # -- loading ---------------------------------------------------------------
+
+    def load(self):
+        """Read the root file and fill all its ghost cells."""
+        self.layout.read(self.root)
+        for ci in [c.cell_index() for c in self.layout.each_cell() if c.is_ghost_cell()]:
+            self._fill(ci, self.root, [self.root])
+        return self
+
+    def top_cell(self):
+        """The root's own top cell (the first one when there are several)."""
+        tops = [c for c in self.layout.top_cells() if c.cell_index() not in self.foreign]
+        if not tops:
+            return None
+        base = os.path.basename(self.root).split(".")[0]
+        for c in tops:
+            if c.name == base:
+                return c
+        return tops[0]
+
+    def missing(self):
+        return sorted(self.layout.cell(ci).name for ci, f in self.foreign.items() if f["missing"])
+
+    def external(self):
+        return sorted(
+            self.layout.cell(ci).name
+            for ci, f in self.foreign.items()
+            if f["top"] and not f["missing"]
+        )
+
+    def place(self, path, name=None):
+        """Load file `path` (in the table) as an external cell; returns its cell."""
+        path = os.path.normpath(path)
+        if path in self.by_file:
+            return self.layout.cell(self.by_file[path])
+        cell = self.layout.create_cell(self._unique(name or self._file_top_name(path)))
+        ci = cell.cell_index()
+        self._import(ci, path, self.table.label(path), [self.root, path])
+        return self.layout.cell(ci)
+
+    def _file_top_name(self, path):
+        return os.path.basename(path).split(".")[0]
+
+    def _fill(self, ci, from_file, stack):
+        """Give ghost cell `ci` (named as in file `from_file`) its content."""
+        name = self.layout.cell(ci).name
+        ref = self.table.ref(from_file, name)
+        if ref is None:
+            self._mark_missing(ci, name, None, "not in the reference table")
+            return ci
+        label = ref.get("label") or name
+        path = ref.get("file")
+        if not path:
+            self._mark_missing(ci, label, ref.get("bbox"), ref.get("reason") or "not found")
+            return ci
+        path = os.path.normpath(path)
+        if path in self.by_file:
+            target = self.by_file[path]
+            self._redirect(ci, target)
+            return target
+        if path in stack:
+            self._mark_missing(ci, label, ref.get("bbox"), "it contains itself")
+            return ci
+        try:
+            self._import(ci, path, label, stack + [path])
+        except Exception as error:  # unreadable file and the like
+            self._mark_missing(ci, label, ref.get("bbox"), str(error))
+        return ci
+
+    def _import(self, ci, path, label, stack):
+        """Copy the top cell of file `path` (and what it places) into cell `ci`."""
+        src = pya.Layout()
+        src.read(path)
+        tops = [c for c in src.top_cells() if not c.is_ghost_cell()]
+        if not tops:
+            raise RuntimeError("%s has no cell" % path)
+        base = self._file_top_name(path)
+        top = next((c for c in tops if c.name == base), tops[0])
+        if len(tops) > 1:
+            self.notes.append("%s has %d top cells, using %s" % (path, len(tops), top.name))
+
+        self.by_file[path] = ci
+        self.foreign[ci] = {"file": path, "label": label, "missing": False,
+                            "bbox": None, "top": True, "reason": ""}
+        cell = self.layout.cell(ci)
+        cell.ghost_cell = False
+
+        # A target cell for every cell below the top.
+        mapping = {top.cell_index(): ci}
+        owned = {top.cell_index()}  # cells whose content comes from this file
+        for sci in top.called_cells():
+            sc = src.cell(sci)
+            if sc.is_ghost_cell():
+                mapping[sci] = self._nested(sc.name, path, stack)
+            else:
+                new = self.layout.create_cell(self._unique(sc.name))
+                mapping[sci] = new.cell_index()
+                owned.add(sci)
+                self.foreign[new.cell_index()] = {"file": path, "label": label, "missing": False,
+                                                  "bbox": None, "top": False, "reason": ""}
+
+        scale = pya.ICplxTrans(src.dbu / self.layout.dbu)
+        layers = {li: self._layer(src.get_info(li)) for li in src.layer_indexes()}
+        for sci in owned:
+            sc = src.cell(sci)
+            target = self.layout.cell(mapping[sci])
+            for li, tl in layers.items():
+                shapes = sc.shapes(li)
+                if not shapes.is_empty():
+                    target.shapes(tl).insert(shapes, scale)
+            for inst in sc.each_inst():
+                array = inst.dcell_inst  # in µm: independent of the database unit
+                array.cell_index = mapping[inst.cell_index]
+                if inst.prop_id:
+                    target.insert(array, inst.prop_id)
+                else:
+                    target.insert(array)
+        self.foreign[ci]["bbox"] = self._dbbox(ci)
+
+    def _nested(self, name, path, stack):
+        """The target cell for ghost `name` of external file `path`."""
+        ref = self.table.ref(path, name)
+        if ref and ref.get("file") and os.path.normpath(ref["file"]) in self.by_file:
+            return self.by_file[os.path.normpath(ref["file"])]
+        cell = self.layout.create_cell(self._unique(name))
+        return self._fill(cell.cell_index(), path, stack)
+
+    def _redirect(self, ci, target):
+        """Make every instance of cell `ci` place `target` instead, then delete `ci`."""
+        cell = self.layout.cell(ci)
+        for parent in list(cell.each_parent_inst()):
+            parent.child_inst().cell_index = target
+        self.layout.delete_cell(ci)
+
+    def _mark_missing(self, ci, label, bbox, reason):
+        """Draw the "cannot be found" marker into cell `ci`."""
+        b = _bbox(bbox) or list(DEFAULT_BBOX)
+        cell = self.layout.cell(ci)
+        cell.clear()
+        cell.ghost_cell = False
+        shapes = cell.shapes(self.marker_layer())
+        l, bo, r, t = b
+        shapes.insert(pya.DBox(l, bo, r, t))
+        shapes.insert(pya.DPath([pya.DPoint(l, bo), pya.DPoint(r, t)], 0))
+        shapes.insert(pya.DPath([pya.DPoint(l, t), pya.DPoint(r, bo)], 0))
+        text = pya.DText("%s cannot be found" % label, pya.DTrans(pya.DVector(l, t)))
+        text.size = max((t - bo) / 10.0, self.layout.dbu)
+        shapes.insert(text)
+        self.foreign[ci] = {"file": None, "label": label, "missing": True,
+                            "bbox": b, "top": True, "reason": reason or ""}
+
+    def marker_layer(self):
+        if self.marker is None:
+            self.marker = self.layout.layer(pya.LayerInfo(MARKER_LAYER))
+        return self.marker
+
+    def _layer(self, info):
+        key = str(info)
+        if key not in self._layers:
+            self._layers[key] = self.layout.layer(info)
+        return self._layers[key]
+
+    def _unique(self, name):
+        if not self.layout.has_cell(name):
+            return name
+        n = 1
+        while self.layout.has_cell("%s$%d" % (name, n)):
+            n += 1
+        return "%s$%d" % (name, n)
+
+    def _dbbox(self, ci):
+        box = self.layout.cell(ci).dbbox()
+        if box.empty():
+            return None
+        return [box.left, box.bottom, box.right, box.top]
+
+    # -- writing ---------------------------------------------------------------
+
+    def _without(self, ghost_foreign):
+        """A copy of the layout ready to write: missing cells (and all foreign cells
+        when `ghost_foreign`) are ghosts again, cells nothing uses are gone, the
+        marker layer is removed. Returns (layout, {ghost cell index: info})."""
+        # A copy without the undo manager: changing a managed layout outside a
+        # transaction would wipe the editor's undo list.
+        out = pya.Layout()
+        out.assign(self.layout)
+        ghosts = {}
+        for ci, info in self.foreign.items():
+            if info["missing"] or ghost_foreign:
+                out.cell(ci).clear()
+        # Keep what the root's own cells reach.
+        own = [ci for ci in range(out.cells()) if out.is_valid_cell_index(ci)
+               and ci not in self.foreign]
+        keep = set(own)
+        for ci in own:
+            keep.update(out.cell(ci).called_cells())
+        drop = [ci for ci in self.foreign if out.is_valid_cell_index(ci) and ci not in keep]
+        if drop:
+            out.delete_cells(drop)
+        for ci, info in self.foreign.items():
+            if ci in keep and (info["missing"] or ghost_foreign):
+                out.cell(ci).ghost_cell = True
+                ghosts[ci] = info
+        if self.marker is not None:
+            out.delete_layer(self.marker)
+        return out, ghosts
+
+    def save(self, path=None):
+        """Write the root's own cells to `path` (default: the root file). Returns the
+        SaveReport of docs/KLAYOUT.md §4."""
+        path = os.path.normpath(path or self.root)
+        out, ghosts = self._without(ghost_foreign=True)
+        _write(out, path)
+        references = {}
+        for ci, info in ghosts.items():
+            name = self.layout.cell(ci).name
+            if not info["top"]:
+                self.notes.append("%s is a cell inside %s, not a view; saved as a reference "
+                                  "that will not be found" % (name, info["file"]))
+            references[name] = {
+                "file": info["file"] if info["top"] else None,
+                "missing": info["missing"] or not info["top"],
+                "bbox": info["bbox"] if info["missing"] else (self._dbbox(ci) or info["bbox"]),
+            }
+        top = self.top_cell()
+        return {"file": path, "top": top.name if top else "", "references": references}
+
+    def export(self, path):
+        """Write a self-contained file: every reference filled in, missing ones left as
+        ghost cells. Returns {file, missing: [names]}."""
+        out, ghosts = self._without(ghost_foreign=False)
+        _write(out, path)
+        return {"file": os.path.normpath(path),
+                "missing": sorted(self.layout.cell(ci).name for ci in ghosts)}
+
+
+def _write(layout, path):
+    """Write through a temporary file so a failure leaves the old file intact."""
+    folder, name = os.path.split(path)
+    # Keep the suffix: KLayout picks the format (and compression) from it.
+    tmp = os.path.join(folder, ".%s.tmp-%d.%s" % (name.split(".")[0], os.getpid(), name.split(".", 1)[-1]))
+    try:
+        layout.write(tmp)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)

@@ -10,6 +10,9 @@ libs/logic/                     library "logic" (cells layout)
   inv/schematic/inv.sch         ... and schematic (one NMOS, one PMOS)
   buf/symbol/buf.sym            buffer: symbol ...
   buf/schematic/buf.sch         ... and schematic (two inverters)
+  inv/layout/inv.gds            inverter layout (generic layers 1/0, 2/0, 3/0)
+  buf/layout/buf.gds            buffer layout: places inv twice as a reference only
+  */layout/*.gds.json           sidecars: what each file is and where its references live
 libs/bench/                     library "bench"
   tb_buf/schematic/tb_buf.sch   testbench: buffer, sources, load, simulation commands
 ```

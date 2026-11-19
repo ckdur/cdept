@@ -1,5 +1,6 @@
 #!/bin/sh
-# Build CDePT and its xschem helper in release mode and install them.
+# Build CDePT and its xschem helper in release mode and install them, with the
+# KLayout helper script.
 #
 #   scripts/install.sh [--prefix P] [--destdir D] [--no-build] [--no-helper]
 #
@@ -8,6 +9,9 @@
 #   bin/cdept-xschem           the GPL helper (cdept looks next to its own executable)
 #   share/cdept-xschem/        what the helper reads at run time: xschem's Tcl and awk
 #                              files, systemlib, xschem_library/devices, cdept/ (Tcl)
+#   share/cdept-klayout/       the KLayout helper (Python, GPL), run by `klayout -zz`;
+#                              KLayout itself is not installed: cdept uses $CDEPT_KLAYOUT
+#                              or `klayout` next to cdept or on PATH
 #   share/doc/cdept/           licences
 #
 # --prefix   where it will run from (default /usr/local); the files do not depend on it
@@ -28,7 +32,7 @@ while [ $# -gt 0 ]; do
         --destdir=*) destdir=${1#*=}; shift ;;
         --no-build) build=0; shift ;;
         --no-helper) helper=0; shift ;;
-        -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "install.sh: unknown argument '$1'" >&2; exit 2 ;;
     esac
 done
@@ -59,6 +63,15 @@ if [ $helper = 1 ]; then
     cp -rL "$share/." "$dest/share/cdept-xschem/"
     rm -rf "$dest/share/cdept-xschem/cdept/tests"
     [ -f "$dest/share/cdept-xschem/xschem.tcl" ] || { echo "install.sh: share copy failed" >&2; exit 1; }
+fi
+
+if [ -f cdept-klayout/helper/cdept_klayout/main.py ]; then
+    rm -rf "$dest/share/cdept-klayout"
+    install -d "$dest/share/cdept-klayout"
+    cp -r cdept-klayout/helper/. "$dest/share/cdept-klayout/"
+    find "$dest/share/cdept-klayout" \( -name __pycache__ -o -name tests \) -prune -exec rm -rf {} +
+    [ ! -f cdept-klayout/LICENSE ] ||
+        install -m 644 cdept-klayout/LICENSE "$dest/share/doc/cdept/LICENSE.cdept-klayout"
 fi
 
 echo "installed to $dest"

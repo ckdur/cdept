@@ -14,8 +14,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      # Only xschem: KLayout (cdept-klayout/klayout) is large and not built in CI; tests
+      # that need it skip themselves.
+      - run: git submodule update --init cdept-xschem/xschem
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -38,13 +39,17 @@ jobs:
           env -u CDEPT_XSCHEM -u CDEPT_XSCHEM_SHAREDIR "$RUNNER_TEMP/prefix/bin/cdept" xschem version
           env -u CDEPT_XSCHEM -u CDEPT_XSCHEM_SHAREDIR "$RUNNER_TEMP/prefix/bin/cdept" netlist logic buf -o buf.spice
           grep -q '^x1 ' buf.spice
+          if [ -f "$GITHUB_WORKSPACE/cdept-klayout/helper/cdept_klayout/main.py" ]; then
+            test -f "$RUNNER_TEMP/prefix/share/cdept-klayout/cdept_klayout/main.py"
+          fi
 
   msrv:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      # Only xschem: KLayout (cdept-klayout/klayout) is large and not built in CI; tests
+      # that need it skip themselves.
+      - run: git submodule update --init cdept-xschem/xschem
       - uses: dtolnay/rust-toolchain@1.95
       - name: System libraries for eframe (X11/Wayland)
         run: |

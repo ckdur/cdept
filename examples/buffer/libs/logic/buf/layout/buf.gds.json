@@ -1,0 +1,21 @@
+{
+  "format": "cdept-layout",
+  "version": 1,
+  "library": "logic",
+  "cell": "buf",
+  "view": "layout",
+  "top": "buf",
+  "references": {
+    "inv": {
+      "library": "logic",
+      "cell": "inv",
+      "view": "layout",
+      "bbox": [
+        0.0,
+        -0.2,
+        2.0,
+        4.4
+      ]
+    }
+  }
+}

@@ -5,8 +5,10 @@
 //! views bring their own menus without the shell changing.
 
 mod console;
+mod document;
 mod hierarchy;
 mod inspector;
+mod layout;
 mod library;
 mod placeholder;
 mod schematic;
@@ -17,7 +19,9 @@ use std::collections::HashMap;
 
 use egui::Ui;
 
+pub use self::document::Document;
 pub use self::hierarchy::HierarchyView;
+pub use self::layout::LayoutView;
 pub use self::schematic::{
     CloseChoice, NETLIST_FORMATS, Picture, SchematicView, Selected, pretend_clipboard,
 };
@@ -79,7 +83,7 @@ pub struct Views {
     jobs: placeholder::Placeholder,
     problems: placeholder::Placeholder,
     /// The open documents, by the id of their tab.
-    documents: HashMap<DocId, SchematicView>,
+    documents: HashMap<DocId, Document>,
     /// Stands in for a document tab that has no view (any more).
     missing: placeholder::Placeholder,
 }
@@ -127,19 +131,19 @@ impl Views {
     }
 
     /// The open documents.
-    pub fn documents(&self) -> impl Iterator<Item = (DocId, &SchematicView)> {
+    pub fn documents(&self) -> impl Iterator<Item = (DocId, &Document)> {
         self.documents.iter().map(|(id, view)| (*id, view))
     }
 
-    pub fn add_document(&mut self, id: DocId, view: SchematicView) {
-        self.documents.insert(id, view);
+    pub fn add_document(&mut self, id: DocId, view: impl Into<Document>) {
+        self.documents.insert(id, view.into());
     }
 
-    pub fn document(&self, id: DocId) -> Option<&SchematicView> {
+    pub fn document(&self, id: DocId) -> Option<&Document> {
         self.documents.get(&id)
     }
 
-    pub fn document_mut(&mut self, id: DocId) -> Option<&mut SchematicView> {
+    pub fn document_mut(&mut self, id: DocId) -> Option<&mut Document> {
         self.documents.get_mut(&id)
     }
 

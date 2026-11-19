@@ -1,0 +1,9 @@
+{
+  "format": "cdept-layout",
+  "version": 1,
+  "library": "logic",
+  "cell": "inv",
+  "view": "layout",
+  "top": "inv",
+  "references": {}
+}

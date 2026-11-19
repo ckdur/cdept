@@ -6,6 +6,8 @@
 
 pub mod cell;
 pub mod entry;
+pub mod klayout;
+pub mod layout;
 pub mod library;
 pub mod project;
 pub mod technology;

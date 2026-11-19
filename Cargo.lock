@@ -360,6 +360,7 @@ dependencies = [
  "rfd",
  "ron 0.11.0",
  "serde",
+ "serde_json",
  "tempfile",
  "tracing",
  "tracing-subscriber",

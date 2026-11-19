@@ -10,6 +10,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use egui::{Color32, Context, Pos2, Rect, Sense, Ui, Vec2};
+use libcdept::klayout;
+use libcdept::layout::refs;
 use libcdept::xschem::tcl;
 use libcdept::xschem::{
     EngineOptions, Hierarchy, NetlistFormat, Pending, Service, Session, SessionOptions, Status,
@@ -116,9 +118,45 @@ impl Preview {
     }
 }
 
+/// The picture of a layout view, drawn by a KLayout service (`render`) into a PNG file.
+struct LayoutPreview {
+    setup: (Option<PathBuf>, Vec<(OsString, OsString)>),
+    service: klayout::service::Service,
+    wanted: Debounce<PathBuf>,
+    /// The file being drawn, its size and the job.
+    job: Option<(PathBuf, (u32, u32), klayout::service::Pending<PathBuf>)>,
+    /// The file the texture shows, and its size.
+    shown: Option<(PathBuf, (u32, u32), egui::TextureHandle)>,
+    error: Option<(PathBuf, String)>,
+}
+
+impl LayoutPreview {
+    fn new(options: klayout::EngineOptions, ctx: &Context) -> Self {
+        let ctx = ctx.clone();
+        Self {
+            setup: (options.cwd.clone(), options.env.clone()),
+            service: klayout::service::Service::new(
+                options,
+                Arc::new(move || ctx.request_repaint()),
+            ),
+            wanted: Debounce::new(PREVIEW_DELAY),
+            job: None,
+            shown: None,
+            error: None,
+        }
+    }
+}
+
+/// A scratch file for a rendered preview (one per process; the job is one at a time).
+fn preview_png() -> PathBuf {
+    std::env::temp_dir().join(format!("cdept-layout-preview-{}.png", std::process::id()))
+}
+
 /// The xschem engines of the open project besides its documents.
 #[derive(Default)]
 pub struct Engines {
+    /// The picture of a layout view in the Inspector.
+    layout_preview: Option<LayoutPreview>,
     service: Option<(Setup, Service)>,
     netlists: Vec<NetlistJob>,
     preview: Option<Preview>,
@@ -204,6 +242,105 @@ impl Engines {
     /// Whether the Inspector's picture shows `file`.
     pub fn preview_shows(&self, file: &Path) -> bool {
         self.preview.as_ref().is_some_and(|p| p.shows(file))
+            || self
+                .layout_preview
+                .as_ref()
+                .is_some_and(|p| p.shown.as_ref().is_some_and(|(f, ..)| f == file))
+    }
+
+    /// Draw the picture of the layout `file` (GDS or OASIS), as wide as the space left.
+    /// A KLayout of its own draws it (`render`); nothing can change the file.
+    pub fn layout_preview(&mut self, ui: &mut Ui, project: &Project, file: &Path) {
+        let options = klayout::EngineOptions::for_project(project);
+        let setup = (options.cwd.clone(), options.env.clone());
+        if self
+            .layout_preview
+            .as_ref()
+            .is_none_or(|p| p.setup != setup)
+        {
+            self.layout_preview = Some(LayoutPreview::new(options, ui.ctx()));
+        }
+        let preview = self.layout_preview.as_mut().expect("just set");
+        let now = Instant::now();
+        let scale = ui.ctx().pixels_per_point();
+        let width = (ui.available_width() * scale).floor().max(64.0);
+        let size = (width as u32, (width * PREVIEW_ASPECT).round() as u32);
+
+        // A finished job: take the picture in.
+        if let Some((job_file, job_size, pending)) = &preview.job
+            && let Some(result) = pending.poll()
+        {
+            let (job_file, job_size) = (job_file.clone(), *job_size);
+            preview.job = None;
+            let loaded = result.and_then(|png| {
+                let image = image::open(&png).map_err(|e| e.to_string())?.to_rgba8();
+                let _ = std::fs::remove_file(&png);
+                let size = [image.width() as usize, image.height() as usize];
+                Ok(egui::ColorImage::from_rgba_unmultiplied(
+                    size,
+                    image.as_raw(),
+                ))
+            });
+            match loaded {
+                Ok(image) => {
+                    let texture = ui.ctx().load_texture(
+                        "klayout-preview",
+                        image,
+                        egui::TextureOptions::NEAREST,
+                    );
+                    preview.shown = Some((job_file, job_size, texture));
+                    preview.error = None;
+                }
+                Err(error) => preview.error = Some((job_file, error)),
+            }
+        }
+
+        preview.wanted.set(file.to_path_buf(), now);
+        let current = preview
+            .shown
+            .as_ref()
+            .is_some_and(|(f, s, _)| f == file && *s == size);
+        let failed = preview.error.as_ref().is_some_and(|(f, _)| f == file);
+        if preview.job.is_none() && !current && !failed {
+            if let Some(file) = preview.wanted.settled(now) {
+                let (render_file, project) = (file.clone(), project.clone());
+                let out = preview_png();
+                let pending = preview.service.run(move |engine| {
+                    let table = refs::resolve(&project, &render_file);
+                    engine.render_png(&table, size.0, size.1, &out)?;
+                    Ok(out)
+                });
+                preview.job = Some((file.clone(), size, pending));
+            } else if let Some(wait) = preview.wanted.remaining(now) {
+                ui.ctx().request_repaint_after(wait);
+            }
+        }
+
+        let area = Vec2::new(width, size.1 as f32) / scale;
+        let (rect, _) = ui.allocate_exact_size(area, Sense::hover());
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 2.0, Color32::BLACK);
+        let note = |text: &str| {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                text,
+                egui::TextStyle::Small.resolve(ui.style()),
+                Color32::from_gray(150),
+            );
+        };
+        match (&preview.shown, &preview.error) {
+            (Some((shown, _, texture)), _) if shown == file => {
+                painter.image(
+                    texture.id(),
+                    rect,
+                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            }
+            (_, Some((failed, error))) if failed == file => note(error),
+            _ => note("…"),
+        }
     }
 
     /// Draw the picture of the schematic or symbol `file`, as wide as the space left.

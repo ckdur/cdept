@@ -56,6 +56,13 @@ name = ""
 # above are added to xschem's search path):
 #   [xschem]
 #   rc = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/xschemrc"
+
+# The embedded KLayout: folders for KLAYOUT_PATH (default: the PDK's libs.tech/klayout),
+# the technology (a name or a .lyt file) and the layer properties (.lyp):
+#   [klayout]
+#   path = ["$PDK_ROOT/ihp-sg13g2/libs.tech/klayout"]
+#   tech = "sg13g2"
+#   layer_properties = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/sg13g2.lyp"
 "#;
 
 /// Options for [`Project::add_library`].
@@ -86,12 +93,27 @@ pub struct Project {
     /// Start-up files (`xschemrc`, Tcl) the embedded xschem reads before the project's
     /// libraries are added, typically the PDK's. From `[xschem] rc = …`.
     pub xschem_rc: Vec<PathBuf>,
+    /// Settings of the embedded KLayout, from `[klayout]`.
+    pub klayout: KlayoutSettings,
     /// Libraries in definition order: the project file first, then included files.
     pub libraries: Vec<Library>,
     /// Problems found while loading that did not prevent it.
     pub warnings: Vec<String>,
     /// Reads the environment. A function pointer so tests can replace it.
     env: EnvFn,
+}
+
+/// `[klayout]` in the project file (docs/KLAYOUT.md §5).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KlayoutSettings {
+    /// `path`: folders for `KLAYOUT_PATH` (technologies, macros, PCell libraries).
+    /// Empty: the PDK's `libs.tech/klayout` folder is used, see
+    /// [`Project::klayout_path`].
+    pub path: Vec<PathBuf>,
+    /// `tech`: the technology, as a name KLayout knows or a `.lyt` file.
+    pub tech: Option<String>,
+    /// `layer_properties`: a `.lyp` file.
+    pub layer_properties: Option<PathBuf>,
 }
 
 /// The environment lookup of a project (not part of what makes two projects equal).
@@ -229,6 +251,7 @@ impl Project {
             pdk_root,
             pdk,
             xschem_rc: Vec::new(),
+            klayout: KlayoutSettings::default(),
             root,
             file: file.clone(),
             libraries: Vec::new(),
@@ -236,6 +259,7 @@ impl Project {
             env: EnvFn(env),
         };
         project.load_xschem_rc(&doc);
+        project.load_klayout(&doc);
         let mut seen = HashSet::from([file.clone()]);
         project.load_definitions(&file, &doc, &mut seen)?;
         Ok(project)
@@ -265,6 +289,87 @@ impl Project {
                 Err(error) => self.warnings.push(format!("[xschem] rc '{name}': {error}")),
             }
         }
+    }
+
+    /// `[klayout]`: `path` (one folder or a list), `tech`, `layer_properties`. Folders
+    /// and files that cannot be found are left out, with a warning.
+    fn load_klayout(&mut self, doc: &DocumentMut) {
+        let Some(table) = doc.get("klayout") else {
+            return;
+        };
+        if let Some(item) = table.get("path") {
+            let names: Vec<&str> = match (item.as_str(), item.as_array()) {
+                (Some(name), _) => vec![name],
+                (None, Some(list)) => list.iter().filter_map(|v| v.as_str()).collect(),
+                (None, None) => {
+                    self.warnings
+                        .push("[klayout] path must be a folder or a list of them".into());
+                    Vec::new()
+                }
+            };
+            for name in names {
+                match self.resolve(name, &self.root) {
+                    Ok(dir) if dir.is_dir() => self.klayout.path.push(dir),
+                    Ok(dir) => self
+                        .warnings
+                        .push(format!("[klayout] path: {} not found", dir.display())),
+                    Err(error) => self
+                        .warnings
+                        .push(format!("[klayout] path '{name}': {error}")),
+                }
+            }
+        }
+        if let Some(tech) = table.get("tech") {
+            match tech.as_str() {
+                Some(name) if name.ends_with(".lyt") => match self.resolve(name, &self.root) {
+                    Ok(file) if file.is_file() => {
+                        self.klayout.tech = Some(file.to_string_lossy().into_owned())
+                    }
+                    Ok(file) => self
+                        .warnings
+                        .push(format!("[klayout] tech: {} not found", file.display())),
+                    Err(error) => self
+                        .warnings
+                        .push(format!("[klayout] tech '{name}': {error}")),
+                },
+                Some(name) => self.klayout.tech = Some(name.to_string()),
+                None => self.warnings.push("[klayout] tech must be a text".into()),
+            }
+        }
+        if let Some(lyp) = table.get("layer_properties") {
+            match lyp
+                .as_str()
+                .map(|name| (name, self.resolve(name, &self.root)))
+            {
+                Some((_, Ok(file))) if file.is_file() => self.klayout.layer_properties = Some(file),
+                Some((_, Ok(file))) => self.warnings.push(format!(
+                    "[klayout] layer_properties: {} not found",
+                    file.display()
+                )),
+                Some((name, Err(error))) => self
+                    .warnings
+                    .push(format!("[klayout] layer_properties '{name}': {error}")),
+                None => self
+                    .warnings
+                    .push("[klayout] layer_properties must be a file name".into()),
+            }
+        }
+    }
+
+    /// Folders for `KLAYOUT_PATH`: `[klayout] path`, else the PDK's
+    /// `$PDK_ROOT/$PDK/libs.tech/klayout` when it exists (and `$PDK` names one PDK).
+    pub fn klayout_path(&self) -> Vec<PathBuf> {
+        if !self.klayout.path.is_empty() {
+            return self.klayout.path.clone();
+        }
+        let (Some(root), Some(name)) = (self.pdk.var("PDK_ROOT"), self.pdk.var("PDK")) else {
+            return Vec::new();
+        };
+        if name.is_empty() || name.contains(':') {
+            return Vec::new();
+        }
+        let dir = Path::new(root).join(name).join("libs.tech").join("klayout");
+        if dir.is_dir() { vec![dir] } else { Vec::new() }
     }
 
     /// The value of environment variable `name` as seen in the project's paths:
@@ -881,6 +986,42 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
             .unwrap();
         assert!(project.technology.is_none() && project.pdk_root.is_none());
         assert!(project.description.is_none());
+    }
+
+    #[test]
+    fn klayout_settings_and_the_pdk_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pdks = tmp.path().join("pdks");
+        let tech = pdks.join("ihp/libs.tech/klayout");
+        fs::create_dir_all(tech.join("tech")).unwrap();
+        fs::write(tech.join("tech/a.lyp"), "").unwrap();
+        let root = tmp.path().join("p");
+        let project =
+            Project::create_with(&root, Some("p"), Some("ihp"), Some(pdks.to_str().unwrap()))
+                .unwrap();
+        assert!(project.klayout.path.is_empty());
+        assert_eq!(project.klayout_path(), vec![tech.clone()]);
+        let text = fs::read_to_string(&project.file).unwrap();
+        assert!(text.contains("#   [klayout]"));
+
+        let mut text = text;
+        text.push_str(
+            "[klayout]\npath = [\"$PDK_ROOT/ihp/libs.tech/klayout\", \"nope\"]\ntech = \"sg13g2\"\n\
+             layer_properties = \"$PDK_ROOT/ihp/libs.tech/klayout/tech/a.lyp\"\n",
+        );
+        fs::write(&project.file, text).unwrap();
+        let project = Project::load(&root).unwrap();
+        assert_eq!(project.klayout.path, vec![tech.clone()]);
+        assert_eq!(project.klayout.tech.as_deref(), Some("sg13g2"));
+        assert_eq!(
+            project.klayout.layer_properties,
+            Some(tech.join("tech/a.lyp"))
+        );
+        assert!(
+            project.warnings.iter().any(|w| w.contains("nope")),
+            "{:?}",
+            project.warnings
+        );
     }
 
     #[test]

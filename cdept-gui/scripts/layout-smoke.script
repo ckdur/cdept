@@ -1,0 +1,108 @@
+# Smoke test of the embedded KLayout on examples/buffer. Writes into the project (a
+# layout is saved, a stream exported): run it on a copy, as cdept-gui/scripts/run.sh does.
+#
+#   cdept-gui/scripts/run.sh cdept-gui/scripts/layout-smoke.script
+#
+# Exit status 0: every check passed. Positions are pixels of the picture.
+
+open logic buf layout
+wait_frame
+expect_documents 1
+expect_title buf (layout)
+# buf holds only its own cell: inv comes from its own view (an external cell).
+expect_cell buf local
+expect_cell inv external
+expect_layer 1/0
+expect_modified no
+# What is on screen is the frame, pixel for pixel.
+check_picture
+screenshot /tmp/cdept-layout-1-open.png
+
+# Select mode: a click on the left inverter selects its instance.
+expect_mode select
+click 170 40
+expect_selection 1
+layout_edit clear_selection
+expect_selection 0
+key Escape
+
+# Zoom with KLayout's own keys (F2 fits, Ctrl++ and Ctrl+- zoom) and the wheel.
+key F2
+key Plus ctrl
+key Minus ctrl
+wheel 300 300 up 2
+layout_zoom fit
+layout_zoom out
+layout_zoom fit
+
+# KLayout's complaints reach the user: a box needs a current layer.
+mode box
+click 200 300
+click 260 360
+expect_notice select a layer
+mode select
+
+# Draw a box on a new layer: two clicks in box mode.
+add_layer 10 0 smoke
+expect_layer smoke
+current_layer smoke
+mode box
+expect_mode box
+click 200 300
+click 260 360
+expect_modified yes
+expect_title buf (layout)*
+mode select
+click 230 330
+expect_selection 1
+screenshot /tmp/cdept-layout-2-box.png
+
+# Undo and redo, with the shortcuts and with the commands.
+key z ctrl
+expect_selection 0
+key y ctrl
+expect_modified yes
+layout_edit undo
+layout_edit redo
+expect_modified yes
+
+# A layer that is hidden is not drawn.
+layer_visible smoke off
+layer_visible smoke on
+
+# Save; the document is clean again and its references are recorded.
+save
+expect_modified no
+expect_title buf (layout)
+
+# Place a cell of another view (instance mode), save, export the self-contained stream.
+place logic inv layout
+expect_mode instance
+click 500 450
+mode select
+expect_modified yes
+save
+expect_modified no
+export $PROJECT/buf-export.gds
+
+# A double click on an external cell in the Cells panel opens its view in its own tab.
+cell_open inv
+expect_documents 2
+expect_title inv (layout)
+wait_frame
+screenshot /tmp/cdept-layout-3-inv.png
+close
+expect_documents 1
+
+# A changed layout asks before it closes.
+mode box
+click 100 200
+click 160 260
+expect_title buf (layout)*
+close_tab
+close_answer cancel
+expect_documents 1
+close_tab
+close_answer discard
+expect_documents 0
+quit

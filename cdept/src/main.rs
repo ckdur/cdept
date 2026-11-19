@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use cdept_gui::{GuiOptions, LogBuffer};
 use clap::{Parser, Subcommand, ValueEnum};
 use eyre::{Result, bail, eyre};
+use libcdept::klayout::{Engine as KlayoutEngine, EngineOptions as KlayoutOptions};
 use libcdept::xschem::symbol::{self, Problem};
 use libcdept::xschem::{Engine, Hierarchy, NetlistFormat};
 use libcdept::{AddLibrary, Format, LibraryLayout, Project};
@@ -83,6 +84,12 @@ enum Command {
     /// Use the embedded xschem engine directly.
     #[command(subcommand)]
     Xschem(XschemCommand),
+    /// Layout views: references between them, export, pictures (uses KLayout).
+    #[command(subcommand)]
+    Layout(LayoutCommand),
+    /// Use the embedded KLayout directly.
+    #[command(subcommand)]
+    Klayout(KlayoutCommand),
     /// List the external tools found on PATH.
     Tools,
     /// Print version and build information.
@@ -183,6 +190,71 @@ enum XschemCommand {
     Tcl { script: String },
     /// Print the version of the engine.
     Version,
+}
+
+#[derive(Subcommand)]
+enum LayoutCommand {
+    /// Check the references of a cell's layout to cells of other views.
+    ///
+    /// A layout holds its own cell; the cells it places are found through its sidecar
+    /// (`<file>.json`) or by searching the libraries for a cell of that name. Lists
+    /// every reference and how it was resolved; fails if one cannot be found.
+    Refs {
+        library: String,
+        cell: String,
+        /// Record what was found by searching, and fix a sidecar that names another
+        /// cell, in the sidecar.
+        #[arg(long)]
+        fix: bool,
+    },
+    /// Write a self-contained GDS (or OASIS) of a cell's layout, with every
+    /// referenced cell filled in, e.g. for DRC, LVS and tape-out.
+    Export {
+        library: String,
+        cell: String,
+        /// Output file; `.oas` writes OASIS.
+        #[arg(short, long)]
+        output: PathBuf,
+        /// The layout view, when the cell has several.
+        #[arg(long)]
+        view: Option<String>,
+    },
+    /// Draw a cell's layout into a PNG file.
+    Png {
+        library: String,
+        cell: String,
+        /// Output file. Defaults to <cell>.png in the current folder.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Picture size in pixels, as WIDTHxHEIGHT.
+        #[arg(long, default_value = "800x600", value_parser = parse_size)]
+        size: (u32, u32),
+        #[arg(long)]
+        view: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum KlayoutCommand {
+    /// Print the version of KLayout the helper runs in.
+    Version,
+    /// Run Python in the helper and print the value of the last expression (for
+    /// debugging).
+    Python { code: String },
+}
+
+fn parse_size(text: &str) -> Result<(u32, u32), String> {
+    let (width, height) = text
+        .split_once(['x', 'X'])
+        .ok_or_else(|| format!("'{text}' is not WIDTHxHEIGHT"))?;
+    let number = |v: &str| {
+        v.trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|n| (1..=16384).contains(n))
+            .ok_or_else(|| format!("'{v}' is not a size between 1 and 16384"))
+    };
+    Ok((number(width)?, number(height)?))
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -359,6 +431,58 @@ fn xschem_view(
 }
 
 /// What `cdept info` prints: the project and the PDK in use.
+/// The layout file of a cell: the view `view`, else the one named `layout`, else the
+/// first GDS or OASIS view.
+fn layout_view(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+) -> Result<PathBuf> {
+    let lib = project
+        .library(library)
+        .ok_or_else(|| eyre!("no library '{library}'"))?;
+    let Some(view) = view else {
+        return libcdept::klayout::cell_layout(lib, cell);
+    };
+    lib.cell(cell)
+        .ok_or_else(|| eyre!("library '{library}' has no cell '{cell}'"))?
+        .entry(view)
+        .filter(|e| matches!(e.format, Some(Format::Gds | Format::Oasis)))
+        .and_then(|e| e.main_file.clone())
+        .ok_or_else(|| eyre!("cell '{cell}' has no GDS or OASIS view '{view}'"))
+}
+
+fn layout_refs(project: &Project, library: &str, cell: &str, fix: bool) -> Result<()> {
+    let findings = if fix {
+        libcdept::layout::refs::fix(project, library, cell)?
+    } else {
+        libcdept::layout::refs::check(project, library, cell)?
+    };
+    if findings.is_empty() {
+        println!("no references");
+    }
+    for finding in &findings {
+        let mark = if finding.is_error() {
+            "error"
+        } else if finding.fixable() {
+            if fix { "fixed" } else { "fix" }
+        } else {
+            "ok"
+        };
+        println!("{mark:<6} {finding}");
+    }
+    let errors = findings.iter().filter(|f| f.is_error()).count();
+    let fixable = findings.iter().filter(|f| f.fixable()).count();
+    if fixable > 0 && !fix {
+        println!("{fixable} can be fixed with --fix");
+    }
+    if errors > 0 {
+        bail!("{errors} reference(s) cannot be found");
+    }
+    Ok(())
+}
+
 fn info(project: &Project) {
     println!("project      {}", project.name);
     println!("file         {}", project.file.display());
@@ -615,6 +739,60 @@ fn main() -> Result<()> {
                 }
                 XschemCommand::Tcl { script } => println!("{}", engine.tcl(&script)?),
                 XschemCommand::Version => println!("xschem {}", engine.xschem_version()),
+            }
+            engine.shutdown()?;
+            Ok(())
+        }
+        Command::Layout(command) => {
+            init_tracing(cli.verbose, None);
+            let project = open_project(cli.project)?;
+            match command {
+                LayoutCommand::Refs { library, cell, fix } => {
+                    layout_refs(&project, &library, &cell, fix)
+                }
+                LayoutCommand::Export {
+                    library,
+                    cell,
+                    output,
+                    view,
+                } => {
+                    let file = layout_view(&project, &library, &cell, view.as_deref())?;
+                    let refs = libcdept::layout::refs::resolve(&project, &file);
+                    let mut engine = KlayoutEngine::for_project(&project)?;
+                    engine.export(&refs, &output)?;
+                    engine.shutdown()?;
+                    println!("{}", output.display());
+                    Ok(())
+                }
+                LayoutCommand::Png {
+                    library,
+                    cell,
+                    output,
+                    size: (width, height),
+                    view,
+                } => {
+                    let file = layout_view(&project, &library, &cell, view.as_deref())?;
+                    let refs = libcdept::layout::refs::resolve(&project, &file);
+                    let output = output.unwrap_or_else(|| PathBuf::from(format!("{cell}.png")));
+                    let mut engine = KlayoutEngine::for_project(&project)?;
+                    engine.render_png(&refs, width, height, &output)?;
+                    engine.shutdown()?;
+                    println!("{}", output.display());
+                    Ok(())
+                }
+            }
+        }
+        Command::Klayout(command) => {
+            init_tracing(cli.verbose, None);
+            // Works outside a project too, with KLayout's defaults.
+            let options = match open_project(cli.project) {
+                Ok(project) => KlayoutOptions::for_project(&project),
+                Err(_) => KlayoutOptions::default(),
+            };
+            let mut engine = KlayoutEngine::start(options)?;
+            match command {
+                KlayoutCommand::Version => println!("{}", engine.klayout_version()),
+                KlayoutCommand::Python { code } => println!("{}", engine.python(&code)?),
             }
             engine.shutdown()?;
             Ok(())

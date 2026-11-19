@@ -19,7 +19,7 @@ use crate::dock::{DocId, DocRef, Geometry, Layout, Tab, Viewer, WindowId};
 use crate::log::LogBuffer;
 use crate::script::Script;
 use crate::state::{Action, ActiveSchematic, AppCtx, PickFor, Selection, Settings};
-use crate::views::{CloseChoice, EditAction, SchematicView, View, Views};
+use crate::views::{CloseChoice, Document, EditAction, LayoutView, SchematicView, View, Views};
 use crate::{APP_ID, GuiOptions};
 
 // Bump the suffix when `Layout` or `Tab` change incompatibly, so stale layouts are dropped.
@@ -34,12 +34,18 @@ const LAUNCHERS: [&str; 4] = ["xschem", "KLayout", "Magic", "ngspice"];
 
 const DETACHED_SIZE: [f32; 2] = [1000.0, 700.0];
 
-/// Whether a view opens in a document tab: xschem schematics and symbols do.
-pub(crate) fn has_viewer(entry: &Entry) -> bool {
+/// The formats that open in a document tab: xschem schematics and symbols, and layouts
+/// (KLayout).
+fn embedded_format(format: Option<Format>) -> bool {
     matches!(
-        entry.format,
-        Some(Format::XschemSchematic | Format::XschemSymbol)
-    ) && entry.main_file.is_some()
+        format,
+        Some(Format::XschemSchematic | Format::XschemSymbol | Format::Gds | Format::Oasis)
+    )
+}
+
+/// Whether a view opens in a document tab: schematics, symbols and layouts do.
+pub(crate) fn has_viewer(entry: &Entry) -> bool {
+    embedded_format(entry.format) && entry.main_file.is_some()
 }
 
 /// The xschem schematic of a cell: the view named `schematic` if it is one, else the
@@ -160,10 +166,7 @@ impl CdeptApp {
     /// The file `doc` stands for, if it is one that opens in a document tab.
     fn document_file(&self, doc: &DocRef) -> Option<std::path::PathBuf> {
         if let Some(file) = &doc.file {
-            let known = matches!(
-                Format::of_file(file),
-                Some(Format::XschemSchematic | Format::XschemSymbol)
-            );
+            let known = embedded_format(Format::of_file(file));
             return (known && file.is_file()).then(|| file.clone());
         }
         let entry = self
@@ -180,8 +183,20 @@ impl CdeptApp {
         let (Some(file), Some(project)) = (self.document_file(&doc), &self.ctx.project) else {
             return false;
         };
-        let view = SchematicView::open(id, doc, file, project, ctx);
-        self.views.add_document(id, view);
+        match Format::of_file(&file) {
+            Some(Format::Gds | Format::Oasis) => {
+                // Layouts of read-only libraries open for looking only.
+                let editable = project
+                    .library(&doc.library)
+                    .is_none_or(|library| !library.read_only);
+                let view = LayoutView::open(id, doc, file, editable, project, ctx);
+                self.views.add_document(id, view);
+            }
+            _ => {
+                let view = SchematicView::open(id, doc, file, project, ctx);
+                self.views.add_document(id, view);
+            }
+        }
         true
     }
 
@@ -272,11 +287,44 @@ impl CdeptApp {
             })
     }
 
-    pub(crate) fn script_schematic(&mut self) -> Option<&mut SchematicView> {
+    /// The document the script acts on, whatever it is.
+    pub(crate) fn script_view(&mut self) -> Option<&mut Document> {
         match self.script_document()? {
             Tab::Document(id) => self.views.document_mut(id),
             _ => None,
         }
+    }
+
+    pub(crate) fn script_schematic(&mut self) -> Option<&mut SchematicView> {
+        self.script_view()?.as_schematic_mut()
+    }
+
+    pub(crate) fn script_layout(&mut self) -> Option<&mut LayoutView> {
+        self.script_view()?.as_layout_mut()
+    }
+
+    /// Place a cell of the project into the script's layout.
+    pub(crate) fn script_place(&mut self, selection: &Selection) -> Result<u64, String> {
+        let project = self.ctx.project.as_ref().ok_or("no project is open")?;
+        let (library, cell, view) = match (&selection.library, &selection.cell, &selection.view) {
+            (Some(l), Some(c), Some(v)) => (l, c, v),
+            _ => return Err("place needs a library, a cell and a view".into()),
+        };
+        let file = project
+            .library(library)
+            .and_then(|l| l.cell(cell))
+            .and_then(|c| c.entry(view))
+            .and_then(|e| e.main_file.clone())
+            .ok_or("there is no such view")?;
+        let Some(Tab::Document(id)) = self.script_document() else {
+            return Err("no layout is open".into());
+        };
+        let layout = self
+            .views
+            .document_mut(id)
+            .and_then(Document::as_layout_mut)
+            .ok_or("no layout is open")?;
+        Ok(layout.place(project, cell, &file))
     }
 
     /// Where a position given in frame pixels of the script's schematic is on screen.
@@ -298,11 +346,11 @@ impl CdeptApp {
     /// unsaved changes asks first. Returns whether it is asking.
     pub(crate) fn script_close_tab(&mut self) -> Option<bool> {
         let tab = self.script_document()?;
-        let view = self.script_schematic()?;
+        let view = self.script_view()?;
         if view.may_close() {
             self.ctx.request(Action::CloseTab(tab));
         }
-        Some(self.script_schematic()?.is_closing())
+        Some(self.script_view()?.is_closing())
     }
 
     /// Answer the question about unsaved changes of the script's document.
@@ -471,7 +519,7 @@ impl CdeptApp {
                 let requests = guard
                     .documents
                     .iter()
-                    .filter_map(|id| Some((*id, self.views.document(*id)?.save())))
+                    .filter_map(|id| Some((*id, self.views.document_mut(*id)?.save())))
                     .collect();
                 guard.saving = Some(requests);
             }
@@ -490,8 +538,8 @@ impl CdeptApp {
                 let Some(view) = self.views.document_mut(*id) else {
                     return false;
                 };
-                match view.take_reply(*request).map(SchematicView::saved) {
-                    None => view.status() == libcdept::xschem::Status::Running,
+                match view.take_saved(*request) {
+                    None => view.is_running(),
                     Some(Ok(())) => false,
                     Some(Err(error)) => {
                         let title = view.title(&self.ctx);
@@ -565,7 +613,7 @@ impl CdeptApp {
                     _ => None,
                 });
         self.ctx.schematic = active.and_then(|id| {
-            let view = self.views.document(id)?;
+            let view = self.views.document(id)?.as_schematic()?;
             Some(ActiveSchematic {
                 id,
                 doc: view.doc().clone(),
@@ -1321,8 +1369,11 @@ mod tests {
         open(&mut app, &ctx, "schematic");
         assert_eq!(titles(&mut app), ["ota (schematic)"]);
         open(&mut app, &ctx, "symbol");
-        // No embedded viewer for layouts yet, and nothing to open for a missing view.
-        open(&mut app, &ctx, "layout");
+        // Layouts have a viewer (KLayout; not started here), a missing view has none.
+        assert!(
+            app.document_file(&DocRef::view("analog", "ota", "layout"))
+                .is_some_and(|file| file.ends_with("ota.gds"))
+        );
         open(&mut app, &ctx, "nothing");
         assert_eq!(titles(&mut app), ["ota (schematic)", "ota (symbol)"]);
         assert_eq!(app.script_document_count(), 2);

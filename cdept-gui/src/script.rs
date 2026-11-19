@@ -14,7 +14,7 @@ use egui::{
     Context, Event, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, RawInput, TouchPhase,
     Vec2, ViewportCommand,
 };
-use libcdept::xschem::{NetlistFormat, Status};
+use libcdept::xschem::NetlistFormat;
 
 use crate::app::{CdeptApp, LeaveChoice};
 use crate::state::{Action, Selection};
@@ -93,7 +93,35 @@ enum Command {
     Screenshot(PathBuf),
     CheckPicture,
     Log(String),
+    Layout(LayoutCommand),
     Quit,
+}
+
+/// Commands for a layout document (KLayout).
+#[derive(Debug, Clone, PartialEq)]
+enum LayoutCommand {
+    Mode(String),
+    Zoom(String),
+    /// `undo`, `redo`, `delete`, `select_all`, `clear_selection`, `copy`, `cut`, `paste`.
+    Edit(String),
+    Save,
+    Place(Selection),
+    Export(PathBuf),
+    AddLayer(i32, i32, String),
+    CurrentLayer(String),
+    LayerVisible(String, bool),
+    ShowCell(Vec<String>),
+    /// A double click on a cell of the Cells panel.
+    CellOpen(String),
+    Levels(u32),
+    Call(String, serde_json::Value),
+    ExpectNotice(String),
+    ExpectLayer(String),
+    /// A cell of the tree, and what kind it is (`local`, `external`, `missing`).
+    ExpectCell(String, Option<String>),
+    ExpectSelection(usize),
+    ExpectModified(bool),
+    ExpectMode(String),
 }
 
 impl Command {
@@ -121,6 +149,18 @@ impl Command {
                 | Command::ExpectPicker(_)
                 | Command::Picker(_)
                 | Command::PickerFile(_)
+                | Command::Layout(
+                    LayoutCommand::Place(_)
+                        | LayoutCommand::CurrentLayer(_)
+                        | LayoutCommand::LayerVisible(..)
+                        | LayoutCommand::ShowCell(_)
+                        | LayoutCommand::ExpectNotice(_)
+                        | LayoutCommand::ExpectLayer(_)
+                        | LayoutCommand::ExpectCell(..)
+                        | LayoutCommand::ExpectSelection(_)
+                        | LayoutCommand::ExpectModified(_)
+                        | LayoutCommand::ExpectMode(_),
+                )
         )
     }
 }
@@ -141,6 +181,8 @@ enum Waiting {
     Frame(Instant),
     /// The answer to a Tcl request, then what to do with it.
     Reply(u64, Instant, Answer),
+    /// The outcome of a layout's save, place or export.
+    Done(u64, Instant),
     /// The screenshot asked for: to save, or (`None`) to compare with the frame.
     Screenshot(Option<PathBuf>, Instant),
 }
@@ -433,6 +475,90 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
         "check_picture" => Command::CheckPicture,
         "log" => Command::Log(rest.to_string()),
         "quit" => Command::Quit,
+        "mode" => Command::Layout(LayoutCommand::Mode(text()?)),
+        "layout_zoom" => match args.first().copied() {
+            Some(what @ ("fit" | "in" | "out")) => {
+                Command::Layout(LayoutCommand::Zoom(what.to_string()))
+            }
+            _ => return Err("usage: layout_zoom <fit|in|out>".into()),
+        },
+        "layout_edit" => match args.first().copied() {
+            Some(
+                what @ ("undo" | "redo" | "delete" | "select_all" | "clear_selection" | "copy"
+                | "cut" | "paste"),
+            ) => Command::Layout(LayoutCommand::Edit(what.to_string())),
+            _ => {
+                return Err(
+                    "usage: layout_edit <undo|redo|delete|select_all|clear_selection|\
+                            copy|cut|paste>"
+                        .into(),
+                );
+            }
+        },
+        "save" => Command::Layout(LayoutCommand::Save),
+        "place" => match args.as_slice() {
+            [library, cell, view] => {
+                Command::Layout(LayoutCommand::Place(Selection::view(library, cell, view)))
+            }
+            _ => return Err("usage: place <library> <cell> <view>".into()),
+        },
+        "export" => Command::Layout(LayoutCommand::Export(PathBuf::from(text()?))),
+        "add_layer" => {
+            let name = args.get(2..).map(|rest| rest.join(" ")).unwrap_or_default();
+            let whole = |at: usize| -> Result<i32, String> {
+                let text = args
+                    .get(at)
+                    .ok_or("usage: add_layer <layer> <datatype> [name]")?;
+                text.parse()
+                    .map_err(|_| format!("'{text}' is not a whole number"))
+            };
+            Command::Layout(LayoutCommand::AddLayer(whole(0)?, whole(1)?, name))
+        }
+        "current_layer" => Command::Layout(LayoutCommand::CurrentLayer(text()?)),
+        "layer_visible" => match args.as_slice() {
+            [layer, on @ ("on" | "off")] => {
+                Command::Layout(LayoutCommand::LayerVisible(layer.to_string(), *on == "on"))
+            }
+            _ => return Err("usage: layer_visible <layer name or source> <on|off>".into()),
+        },
+        "show_cell" => {
+            if args.is_empty() {
+                return Err("usage: show_cell <cell> [<cell> ...] (the path from the top)".into());
+            }
+            Command::Layout(LayoutCommand::ShowCell(
+                args.iter().map(|a| a.to_string()).collect(),
+            ))
+        }
+        "cell_open" => Command::Layout(LayoutCommand::CellOpen(text()?)),
+        "levels" => Command::Layout(LayoutCommand::Levels(whole(0)?)),
+        "layout_call" => {
+            let (method, params) = word(rest);
+            if method.is_empty() {
+                return Err("usage: layout_call <method> [<json params>]".into());
+            }
+            let params = if params.is_empty() {
+                serde_json::json!({})
+            } else {
+                serde_json::from_str(params).map_err(|e| format!("the parameters: {e}"))?
+            };
+            Command::Layout(LayoutCommand::Call(method.to_string(), params))
+        }
+        "expect_notice" => Command::Layout(LayoutCommand::ExpectNotice(text()?)),
+        "expect_layer" => Command::Layout(LayoutCommand::ExpectLayer(text()?)),
+        "expect_cell" => match args.as_slice() {
+            [name] => Command::Layout(LayoutCommand::ExpectCell(name.to_string(), None)),
+            [name, kind @ ("local" | "external" | "missing")] => Command::Layout(
+                LayoutCommand::ExpectCell(name.to_string(), Some(kind.to_string())),
+            ),
+            _ => return Err("usage: expect_cell <name> [local|external|missing]".into()),
+        },
+        "expect_selection" => Command::Layout(LayoutCommand::ExpectSelection(whole(0)? as usize)),
+        "expect_modified" => match args.first().copied() {
+            Some("yes") => Command::Layout(LayoutCommand::ExpectModified(true)),
+            Some("no") => Command::Layout(LayoutCommand::ExpectModified(false)),
+            _ => return Err("usage: expect_modified <yes|no>".into()),
+        },
+        "expect_mode" => Command::Layout(LayoutCommand::ExpectMode(text()?)),
         other => return Err(format!("unknown command '{other}'")),
     };
     Ok(Some(command))
@@ -540,8 +666,13 @@ impl Script {
             Ok(false) => return,
             Err(message) => return self.fail(app, &message),
         }
-        if std::mem::take(&mut self.settle) && app.script_schematic().is_some() {
-            return self.ask(app, "expr 1", Answer::Settle);
+        if std::mem::take(&mut self.settle)
+            && let Some(view) = app.script_view()
+        {
+            let id = view.sync_request();
+            self.nudge = Instant::now() + NUDGE;
+            self.waiting = Waiting::Reply(id, Instant::now() + TIMEOUT, Answer::Settle);
+            return;
         }
         if !self.steps.is_empty() {
             return;
@@ -586,30 +717,32 @@ impl Script {
                 *left == 0
             }
             Waiting::Frame(deadline) => {
-                let view = app.script_schematic().ok_or("no schematic is open")?;
-                if let Status::Failed(reason) = view.status() {
-                    return Err(format!("the xschem engine stopped: {reason}"));
+                let view = app.script_view().ok_or("no document is open")?;
+                if let Some(reason) = view.failure() {
+                    return Err(format!("the engine stopped: {reason}"));
                 }
                 view.has_frame() || late(deadline, "a frame")?
             }
             Waiting::Reply(id, deadline, answer) => {
                 let settling = matches!(answer, Answer::Settle);
-                let Some(view) = app.script_schematic() else {
+                let Some(view) = app.script_view() else {
                     // The step closed the document: nothing left to wait for.
                     if settling {
                         self.waiting = Waiting::Frames(SETTLE_FRAMES);
                         return Ok(false);
                     }
-                    return Err("no schematic is open".into());
+                    return Err("no document is open".into());
                 };
-                let gone = settling && view.status() != Status::Running;
+                let gone = settling && !view.is_running();
                 if Instant::now() >= self.nudge {
                     self.nudge = Instant::now() + NUDGE;
-                    view.tcl("expr 1");
+                    if let Some(schematic) = view.as_schematic_mut() {
+                        schematic.tcl("expr 1");
+                    }
                 }
                 match view.take_reply(*id) {
                     None if gone => true,
-                    None => late(deadline, "xschem's answer")?,
+                    None => late(deadline, "the helper's answer")?,
                     Some(result) => {
                         match (answer.clone(), result) {
                             (Answer::Settle, _) => {}
@@ -641,6 +774,19 @@ impl Script {
                     }
                 }
             }
+            Waiting::Done(id, deadline) => {
+                let view = app.script_layout().ok_or("no layout is open")?;
+                match view.take_done(*id) {
+                    None => late(deadline, "KLayout's answer")?,
+                    Some(Ok(value)) => {
+                        if !value.is_empty() {
+                            tracing::info!(target: "cdept::script", "done: {value}");
+                        }
+                        true
+                    }
+                    Some(Err(error)) => return Err(format!("KLayout answered: {error}")),
+                }
+            }
             Waiting::Screenshot(path, deadline) => {
                 let path = path.clone();
                 let image = ctx.input(|i| {
@@ -652,7 +798,7 @@ impl Script {
                 match (image, path) {
                     (None, _) => late(deadline, "the screenshot")?,
                     (Some(image), None) => {
-                        let view = app.script_schematic().ok_or("no schematic is open")?;
+                        let view = app.script_view().ok_or("no document is open")?;
                         view.compare_with_screen(&image)?;
                         tracing::info!(target: "cdept::script", "the picture on screen is the frame");
                         true
@@ -720,6 +866,100 @@ impl Script {
         }
     }
 
+    /// The commands for a layout document.
+    fn layout_command(&mut self, app: &mut CdeptApp, command: LayoutCommand) -> Result<(), String> {
+        let wrong = |what: &str| format!("{what}: no layout is open");
+        if let LayoutCommand::Place(selection) = &command {
+            let id = app.script_place(selection)?;
+            self.waiting = Waiting::Done(id, Instant::now() + TIMEOUT);
+            self.settle = true;
+            return Ok(());
+        }
+        let view = app.script_layout().ok_or_else(|| wrong("layout command"))?;
+        match command {
+            LayoutCommand::Mode(name) => view.set_mode(&name),
+            LayoutCommand::Zoom(what) => view.zoom(&what),
+            LayoutCommand::Edit(method) => view.simple(&method),
+            LayoutCommand::Save => {
+                let id = view.save();
+                self.waiting = Waiting::Done(id, Instant::now() + TIMEOUT);
+            }
+            LayoutCommand::Place(_) => {}
+            LayoutCommand::Export(out) => {
+                let id = view.export(&out);
+                self.waiting = Waiting::Done(id, Instant::now() + TIMEOUT);
+            }
+            LayoutCommand::AddLayer(layer, datatype, name) => {
+                view.add_layer(layer, datatype, &name);
+            }
+            LayoutCommand::CurrentLayer(name) => {
+                let id = view
+                    .find_layer(&name)
+                    .map(|l| l.id)
+                    .ok_or(format!("there is no layer '{name}'"))?;
+                view.set_current_layer(id);
+            }
+            LayoutCommand::LayerVisible(name, visible) => {
+                let id = view
+                    .find_layer(&name)
+                    .map(|l| l.id)
+                    .ok_or(format!("there is no layer '{name}'"))?;
+                view.set_layer_visible(id, visible);
+            }
+            LayoutCommand::ShowCell(path) => view.show_cell(&path),
+            LayoutCommand::CellOpen(name) => view.open_cell(&name)?,
+            LayoutCommand::Levels(max) => view.set_levels(max),
+            LayoutCommand::Call(method, params) => {
+                let id = view.raw_call(&method, params);
+                self.nudge = Instant::now() + NUDGE;
+                self.waiting = Waiting::Reply(id, Instant::now() + TIMEOUT, Answer::Log);
+            }
+            LayoutCommand::ExpectNotice(text) => {
+                view.nudge();
+                if !view.has_notice(&text) {
+                    return Err(format!("no notice mentions '{text}'"));
+                }
+            }
+            LayoutCommand::ExpectLayer(text) => {
+                if view.find_layer(&text).is_none() {
+                    return Err(format!("there is no layer '{text}'"));
+                }
+            }
+            LayoutCommand::ExpectCell(name, kind) => match (view.cell_kind(&name), kind) {
+                (None, _) => return Err(format!("there is no cell '{name}'")),
+                (Some(found), Some(wanted)) if found != wanted => {
+                    return Err(format!("cell '{name}' is {found}, expected {wanted}"));
+                }
+                _ => {}
+            },
+            LayoutCommand::ExpectSelection(wanted) => {
+                let count = view.selection_count();
+                if count != wanted {
+                    return Err(format!("{count} objects are selected, expected {wanted}"));
+                }
+            }
+            LayoutCommand::ExpectModified(wanted) => {
+                view.nudge();
+                if view.is_modified() != wanted {
+                    return Err(format!(
+                        "the layout is {}modified",
+                        if wanted { "not " } else { "" }
+                    ));
+                }
+            }
+            LayoutCommand::ExpectMode(wanted) => {
+                if view.mode() != wanted {
+                    return Err(format!(
+                        "the mode is '{}', expected '{wanted}'",
+                        view.mode()
+                    ));
+                }
+            }
+        }
+        self.settle = true;
+        Ok(())
+    }
+
     fn start(&mut self, app: &mut CdeptApp, ctx: &Context, command: Command) -> Result<(), String> {
         let press = |x: f32, y: f32, button, pressed| Event::PointerButton {
             pos: Pos2::new(x, y),
@@ -735,11 +975,11 @@ impl Script {
                 app.script_request(Action::CloseTab(tab));
             }
             Command::CloseTab => {
-                let asking = app.script_close_tab().ok_or("no schematic is open")?;
+                let asking = app.script_close_tab().ok_or("no document is open")?;
                 if asking {
                     tracing::info!(target: "cdept::script", "asking about unsaved changes");
                 }
-                self.settle = app.script_schematic().is_some();
+                self.settle = app.script_view().is_some();
             }
             Command::CloseAnswer(choice) => {
                 if !app.script_close_with(choice) {
@@ -767,7 +1007,7 @@ impl Script {
                 self.waiting = Waiting::Frame(Instant::now() + TIMEOUT);
             }
             Command::Sync => {
-                app.script_schematic().ok_or("no schematic is open")?;
+                app.script_view().ok_or("no document is open")?;
                 self.settle = true;
             }
             Command::Move(x, y) => self.events(vec![Event::PointerMoved(Pos2::new(x, y))], none),
@@ -933,17 +1173,17 @@ impl Script {
                 }
             }
             Command::Frame => {
-                let view = app.script_schematic().ok_or("no schematic is open")?;
+                let view = app.script_view().ok_or("no document is open")?;
                 let [width, height] = view.frame_size().ok_or("there is no frame yet")?;
                 tracing::info!(target: "cdept::script", "frame: {width} x {height}");
             }
             Command::Pixel(x, y) => {
-                let view = app.script_schematic().ok_or("no schematic is open")?;
+                let view = app.script_view().ok_or("no document is open")?;
                 let [r, g, b, _] = view.pixel(x, y).ok_or("no such pixel")?;
                 tracing::info!(target: "cdept::script", "pixel {x} {y}: {r:02x}{g:02x}{b:02x}");
             }
             Command::ExpectPixel(x, y, wanted) => {
-                let view = app.script_schematic().ok_or("no schematic is open")?;
+                let view = app.script_view().ok_or("no document is open")?;
                 let [r, g, b, _] = view.pixel(x, y).ok_or("no such pixel")?;
                 if [r, g, b] != wanted {
                     let [wr, wg, wb] = wanted;
@@ -1091,10 +1331,11 @@ impl Script {
                 self.waiting = Waiting::Screenshot(Some(path), Instant::now() + TIMEOUT);
             }
             Command::CheckPicture => {
-                app.script_schematic().ok_or("no schematic is open")?;
+                app.script_view().ok_or("no document is open")?;
                 ctx.send_viewport_cmd(ViewportCommand::Screenshot(egui::UserData::default()));
                 self.waiting = Waiting::Screenshot(None, Instant::now() + TIMEOUT);
             }
+            Command::Layout(command) => self.layout_command(app, command)?,
             Command::Log(text) => tracing::info!(target: "cdept::script", "{text}"),
             Command::Quit => {
                 self.finished = true;
@@ -1196,6 +1437,65 @@ mod tests {
             parse("screenshot /tmp/a b.png"),
             Ok(Some(Command::Screenshot(PathBuf::from("/tmp/a b.png"))))
         );
+    }
+
+    #[test]
+    fn layout_commands_parse() {
+        let layout = |c| Ok(Some(Command::Layout(c)));
+        assert_eq!(parse("mode box"), layout(LayoutCommand::Mode("box".into())));
+        assert_eq!(
+            parse("layout_zoom fit"),
+            layout(LayoutCommand::Zoom("fit".into()))
+        );
+        assert_eq!(parse("save"), layout(LayoutCommand::Save));
+        assert_eq!(
+            parse("place logic inv layout"),
+            layout(LayoutCommand::Place(Selection::view(
+                "logic", "inv", "layout"
+            )))
+        );
+        assert_eq!(
+            parse("add_layer 10 0 metal one"),
+            layout(LayoutCommand::AddLayer(10, 0, "metal one".into()))
+        );
+        assert_eq!(
+            parse("layer_visible 1/0 off"),
+            layout(LayoutCommand::LayerVisible("1/0".into(), false))
+        );
+        assert_eq!(
+            parse("show_cell top sub"),
+            layout(LayoutCommand::ShowCell(vec!["top".into(), "sub".into()]))
+        );
+        assert_eq!(
+            parse("expect_cell inv external"),
+            layout(LayoutCommand::ExpectCell(
+                "inv".into(),
+                Some("external".into())
+            ))
+        );
+        assert_eq!(
+            parse("expect_notice select a layer"),
+            layout(LayoutCommand::ExpectNotice("select a layer".into()))
+        );
+        assert_eq!(
+            parse(r#"layout_call zoom {"what": "fit"}"#),
+            layout(LayoutCommand::Call(
+                "zoom".into(),
+                serde_json::json!({"what": "fit"})
+            ))
+        );
+        for bad in [
+            "layout_zoom sideways",
+            "layout_edit explode",
+            "layer_visible 1/0 maybe",
+            "expect_modified perhaps",
+            "layout_call",
+            "layout_call zoom {broken",
+            "add_layer 1",
+            "show_cell",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

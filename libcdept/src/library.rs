@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use eyre::{Context, Result, bail, eyre};
 use toml_edit::DocumentMut;
 
+use crate::layout::{self, meta};
 use crate::xschem::symbol;
 use crate::{Cell, Entry, Format, Template, ViewKind};
 
@@ -181,6 +182,9 @@ impl Library {
                 .into_bytes();
         }
         fs::write(&file, contents).wrap_err_with(|| format!("cannot write {}", file.display()))?;
+        if template == Template::GdsLayout {
+            meta::Meta::new(&self.name, cell, template.view_name(), cell).write_for(&file)?;
+        }
         Ok(file)
     }
 
@@ -208,7 +212,8 @@ impl Library {
                 }
             }
         }
-        self.relink_symbols(new, self, old)
+        self.relink_symbols(new, self, old)?;
+        self.retarget_layouts(new, old)
     }
 
     /// Copy a cell into `to` (which may be this library) under the name `new`.
@@ -233,7 +238,9 @@ impl Library {
                     for file in &entry.files {
                         let name = file_name(file);
                         let name = renamed(&name, cell, new).unwrap_or(name);
-                        copy_file(file, &dir.join(name))?;
+                        for (from, name) in with_sidecar(file, name) {
+                            copy_file(&from, &dir.join(name))?;
+                        }
                     }
                 }
             }
@@ -243,7 +250,39 @@ impl Library {
                 }
             }
         }
-        to.relink_symbols(new, self, cell)
+        to.relink_symbols(new, self, cell)?;
+        to.retarget_layouts(new, cell)
+    }
+
+    /// After cell `old` was copied or renamed to `new` in this library: the GDS layout
+    /// views name their top structure `new` and their sidecars say library/cell/view.
+    /// A layout that cannot be rewritten (not valid GDSII) is logged and left as is.
+    fn retarget_layouts(&self, new: &str, old: &str) -> Result<()> {
+        let cell = match self.layout {
+            LibraryLayout::Cells => {
+                let dir = self.path.join(new);
+                Cell {
+                    name: new.to_string(),
+                    entries: scan_cell(new, &dir)?,
+                    path: Some(dir),
+                }
+            }
+            LibraryLayout::Flat => {
+                let Some(cell) = scan_flat(&self.path)?.into_iter().find(|c| c.name == new) else {
+                    return Ok(());
+                };
+                cell
+            }
+        };
+        for entry in &cell.entries {
+            if let (Some(Format::Gds | Format::Oasis), Some(file)) =
+                (entry.format, &entry.main_file)
+                && let Err(e) = layout::retarget(file, &self.name, new, &entry.name, old, new)
+            {
+                tracing::warn!("{e:#}");
+            }
+        }
+        Ok(())
     }
 
     /// After cell `old` of `source` was copied or renamed to `new` in this library:
@@ -397,8 +436,8 @@ fn scan_cell(cell: &str, dir: &Path) -> Result<Vec<Entry>> {
 fn scan_view(cell: &str, name: String, dir: PathBuf) -> Result<Entry> {
     let files: Vec<PathBuf> = list(&dir)?
         .into_iter()
+        .filter(|(name, path)| path.is_file() && !meta::is_sidecar_name(name))
         .map(|(_, path)| path)
-        .filter(|path| path.is_file())
         .collect();
     // The main file is the design file named after the cell, else the first design file.
     let formats: Vec<(&PathBuf, &str, Format)> = files
@@ -522,17 +561,29 @@ fn flat_targets(cell: &Cell, old: &str, new: &str, dir: &Path) -> Result<Vec<(Pa
     let mut moves = Vec::new();
     for file in cell.entries.iter().flat_map(|e| &e.files) {
         if let Some(name) = renamed(&file_name(file), old, new) {
-            let target = dir.join(name);
-            if target.exists() {
-                bail!("{} already exists", target.display());
+            for (from, name) in with_sidecar(file, name) {
+                let target = dir.join(name);
+                if target.exists() {
+                    bail!("{} already exists", target.display());
+                }
+                moves.push((from, target));
             }
-            moves.push((file.clone(), target));
         }
     }
     if moves.is_empty() {
         bail!("cell '{old}' has no file named after it to put in a flat library");
     }
     Ok(moves)
+}
+
+/// A layout file and its sidecar (if it has one), each with the file name it gets.
+fn with_sidecar(file: &Path, name: String) -> Vec<(PathBuf, String)> {
+    let mut items = vec![(file.to_path_buf(), name.clone())];
+    let sidecar = meta::sidecar_path(file);
+    if sidecar.is_file() {
+        items.push((sidecar, format!("{name}.json")));
+    }
+    items
 }
 
 fn copy_file(from: &Path, to: &Path) -> Result<()> {
@@ -561,7 +612,14 @@ fn remove_entry(entry: &Entry) -> Result<()> {
     } else {
         fs::remove_file(&entry.path)
     };
-    result.wrap_err_with(|| format!("cannot delete {}", entry.path.display()))
+    result.wrap_err_with(|| format!("cannot delete {}", entry.path.display()))?;
+    // A loose layout file takes its sidecar with it.
+    let sidecar = meta::sidecar_path(&entry.path);
+    if sidecar.is_file() {
+        fs::remove_file(&sidecar)
+            .wrap_err_with(|| format!("cannot delete {}", sidecar.display()))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -652,6 +710,87 @@ mod tests {
             names(&lib),
             pairs(&[("empty", &[]), ("ota3", &["schematic", "symbol", "tb_ac"])])
         );
+    }
+
+    fn top_of(file: &Path) -> Vec<String> {
+        layout::gds::read_structure(file).unwrap().top_cells()
+    }
+
+    #[test]
+    fn layout_views_have_sidecars_that_follow_rename_and_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut lib = library(tmp.path(), LibraryLayout::Cells);
+        lib.name = "analog".into();
+        let gds = lib.create_view("inv", Template::GdsLayout).unwrap();
+        lib.scan();
+        let side = meta::sidecar_path(&gds);
+        let m = meta::Meta::read(&side).unwrap();
+        assert_eq!(m, meta::Meta::new("analog", "inv", "layout", "inv"));
+        // The sidecar is not a view or a file of the view.
+        let layout = lib.cell("inv").unwrap().entry("layout").unwrap();
+        assert_eq!(layout.files, std::slice::from_ref(&gds));
+        assert_eq!(lib.cell("inv").unwrap().entries.len(), 1);
+
+        lib.rename_cell("inv", "inv1").unwrap();
+        lib.scan();
+        let gds = tmp.path().join("inv1/layout/inv1.gds");
+        assert_eq!(top_of(&gds), ["inv1"]);
+        assert!(!tmp.path().join("inv1/layout/inv.gds.json").exists());
+        let m = meta::Meta::read_for(&gds).unwrap().unwrap();
+        assert_eq!((m.cell.as_str(), m.top.as_str()), ("inv1", "inv1"));
+
+        let mut other = library(&tmp.path().join("other"), LibraryLayout::Cells);
+        fs::create_dir(tmp.path().join("other")).unwrap();
+        other.name = "digital".into();
+        other.scan();
+        lib.copy_cell("inv1", &other, "inv2").unwrap();
+        let copy = tmp.path().join("other/inv2/layout/inv2.gds");
+        assert_eq!(top_of(&copy), ["inv2"]);
+        let m = meta::Meta::read_for(&copy).unwrap().unwrap();
+        assert_eq!(m.label(), "digital/inv2/layout");
+        assert_eq!(m.top, "inv2");
+        // The original is untouched.
+        assert_eq!(top_of(&gds), ["inv1"]);
+        assert_eq!(
+            meta::Meta::read_for(&gds).unwrap().unwrap().label(),
+            "analog/inv1/layout"
+        );
+    }
+
+    #[test]
+    fn flat_layout_sidecars_follow_their_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut lib = library(tmp.path(), LibraryLayout::Flat);
+        lib.name = "gds".into();
+        lib.create_view("inv", Template::GdsLayout).unwrap();
+        lib.scan();
+        assert_eq!(lib.cells.len(), 1);
+        assert!(tmp.path().join("inv.gds.json").is_file());
+        lib.copy_cell("inv", &lib, "buf").unwrap();
+        lib.rename_cell("inv", "inv9").unwrap();
+        lib.scan();
+        for (cell, other) in [("buf", "inv9"), ("inv9", "buf")] {
+            let file = tmp.path().join(format!("{cell}.gds"));
+            assert_eq!(top_of(&file), [cell]);
+            let m = meta::Meta::read_for(&file).unwrap().unwrap();
+            assert_eq!((m.cell.as_str(), m.top.as_str()), (cell, cell));
+            assert!(tmp.path().join(format!("{other}.gds")).is_file());
+        }
+        assert!(!tmp.path().join("inv.gds.json").exists());
+        // Into a cells library.
+        let dir = tempfile::tempdir().unwrap();
+        let mut cells = library(dir.path(), LibraryLayout::Cells);
+        cells.name = "c".into();
+        lib.copy_cell("buf", &cells, "buf2").unwrap();
+        let copy = dir.path().join("buf2/layout/buf2.gds");
+        assert_eq!(top_of(&copy), ["buf2"]);
+        assert_eq!(
+            meta::Meta::read_for(&copy).unwrap().unwrap().label(),
+            "c/buf2/layout"
+        );
+        // Deleting the cell deletes its sidecar.
+        lib.delete_cell("buf").unwrap();
+        assert!(!tmp.path().join("buf.gds.json").exists());
     }
 
     #[test]
