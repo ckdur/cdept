@@ -28,6 +28,8 @@ for _n in range(1, 13):
 
 # Most selected objects described in a selection event.
 MAX_SELECTION_ITEMS = 200
+# Pixels the pointer moves with the button down before a press is a drag (box mode).
+DRAG_PIXELS = 4
 
 
 def modifiers(m):
@@ -99,9 +101,16 @@ class Editor:
         # (None once a new change was made after undoing past it).
         self.depth = 0
         self.saved_depth = 0
+        # Editing in place: the file each undo step changed (steps[i] is step i + 1),
+        # and the external files changed since the last save (at most: undone changes
+        # stay in). The root file is not in `unsaved`: it is always written.
+        self.steps = []
+        self.unsaved = set()
         # Zoom to fit once the view has a size (open may come before resize).
         self.fit_pending = False
         self.layer_iters = []
+        # Box mode by dragging (see _box_drag): the press held back.
+        self.drag = None
 
     # -- opening ---------------------------------------------------------------
 
@@ -135,6 +144,7 @@ class Editor:
         self.doc = doc
         self.sent = {}
         self.depth = 0
+        self.steps = []
         self.mark_saved()
         self.fit_pending = not (self.width and self.height)
         self.dirty_frame = True
@@ -212,7 +222,9 @@ class Editor:
         x, y = float(event.get("x", 0.0)), float(event.get("y", 0.0))
         point = pya.DPoint(x, y)
         try:
-            if kind == "move":
+            if self._box_drag(kind, event, point, mods):
+                pass
+            elif kind == "move":
                 buttons = 0
                 for b in event.get("buttons") or []:
                     buttons |= BUTTONS.get(b, 0)
@@ -245,6 +257,48 @@ class Editor:
             self.notice("error", _message(error))
         self.dirty_frame = True
 
+    def _box_drag(self, kind, event, point, mods):
+        """KLayout draws a box with two clicks. In box mode a press, drag and release
+        draws one too: it becomes a click where the button went down and one where it
+        came up (a box begun by a click before is given up). True when the event was
+        dealt with here."""
+        view = self.view
+        if view.mode_name() != "box":
+            self.drag = None
+            return False
+        if kind == "press":
+            if event.get("button", "left") != "left":
+                return False
+            self.drag = {"start": point, "mods": mods, "dragging": False}
+            return True  # a click or a drag: known when it moves or comes up
+        drag = self.drag
+        if drag is None or kind not in ("move", "release"):
+            return False
+        if kind == "release" and event.get("button", "left") != "left":
+            return False
+
+        def click(at, m):
+            view.send_mouse_press_event(at, LEFT | m)
+            view.send_mouse_release_event(at, LEFT | m)
+
+        start = drag["start"]
+        if kind == "move":
+            far = max(abs(point.x - start.x), abs(point.y - start.y)) > DRAG_PIXELS
+            if not drag["dragging"] and far:
+                drag["dragging"] = True
+                view.cancel()
+                click(start, drag["mods"])  # the first corner
+            view.send_mouse_move_event(point, mods)  # no button: the box follows
+            self.pointer = self._micron(point.x, point.y)
+            return True
+        self.drag = None
+        if drag["dragging"]:
+            view.send_mouse_move_event(point, mods)
+            click(point, mods)  # the second corner
+        else:
+            click(start, drag["mods"])
+        return True
+
     def _micron(self, x, y):
         """Pixel position (y down) → µm."""
         if not self.height:
@@ -252,24 +306,97 @@ class Editor:
         p = self.view.viewport_trans().inverted() * pya.DPoint(x, self.height - 1 - y)
         return (round(p.x, 6), round(p.y, 6))
 
+    # -- editing in place (docs/KLAYOUT.md §3.4) --------------------------------
+
+    def context_file(self):
+        """The file edits go to: that of the cell shown (after a descent, the external
+        cell descended into), or None for a cell that cannot be found."""
+        cv = self.cellview()
+        if not cv.is_valid():
+            return self.doc.root
+        return self.doc.file_of(cv.cell_index)
+
+    def context(self):
+        """{file, label, writable, reason} of the cell edited in place; None at the
+        root's own cells."""
+        path = self.context_file()
+        if path == self.doc.root:
+            return None
+        reason = self.doc.why_not_writable(path)
+        return {"file": path, "label": self.doc.table.label(path) if path else "",
+                "writable": reason is None, "reason": reason or ""}
+
+    def _blocked(self, sel):
+        """True for a selected object that must not be edited: inside a cell of another
+        file than the one edited, or of a file that may not be written."""
+        path = self.doc.file_of(owner(sel))
+        if path == self.doc.root:
+            # The root's own cell: blocked only when the root is not to be changed.
+            return self.doc.why_not_writable(path) is not None
+        return path != self.context_file() or self.doc.why_not_writable(path) is not None
+
     def foreign_selection(self):
-        """Selected objects that live inside external or missing cells."""
+        """Selected objects that must not be edited (see `_blocked`)."""
         if self.view is None or self.doc is None:
             return []
-        return [s for s in self.view.each_object_selected()
-                if owner(s) in self.doc.foreign]
+        return [s for s in self.view.each_object_selected() if self._blocked(s)]
 
     def drop_foreign_selection(self):
-        """Unselect objects inside cells of other views (they would be edited but never
+        """Unselect objects that must not be edited (they would be edited but never
         saved) and cancel a move that may have started with them."""
         if not self.foreign_selection():
             return
-        keep = [s for s in self.view.each_object_selected() if owner(s) not in self.doc.foreign]
+        keep = [s for s in self.view.each_object_selected() if not self._blocked(s)]
         self.view.cancel()
         self.view.object_selection = keep
         self.notice("warning", "objects inside cells of other views cannot be edited here; "
-                               "open that view to change them")
+                               "descend into the instance (Shift+X) or open that view")
         self.dirty_frame = True
+
+    def descend(self):
+        """Edit the external (or local) cell of the selected instance in place."""
+        view = self.require()
+        sel = next((s for s in view.each_object_selected() if s.is_cell_inst()), None)
+        if sel is None:
+            raise RuntimeError("select an instance to descend into")
+        ci = sel.inst().cell_index
+        path = self.doc.file_of(ci)
+        reason = self.doc.why_not_writable(path)
+        if reason is not None:
+            self.notice("warning", "cannot edit in place: " + reason)
+            raise RuntimeError("cannot edit in place: " + reason)
+        view.cancel()
+        view.descend(sel.path, 0)
+        view.clear_selection()
+        self.dirty_frame = True
+        return {"cell": self.doc.layout.cell(ci).name, "context": self.context()}
+
+    def ascend(self, all_levels=False):
+        """One level up from a descent (all of them with `all_levels`)."""
+        view = self.require()
+        view.cancel()
+        view.clear_selection()
+        cv = self.cellview()
+        while len(cv.context_path) > 0:
+            view.ascend(0)
+            cv = self.cellview()
+            if not all_levels:
+                break
+        self.dirty_frame = True
+        return {"cell": cv.cell.name if cv.is_valid() else "", "context": self.context()}
+
+    def set_locked(self, files):
+        """Files with unsaved changes in other tabs. Leaves a descent into one of them."""
+        self.doc.locked = {os.path.normpath(f) for f in files or []}
+        ctx = self.context()
+        if ctx is not None and not ctx["writable"] and len(self.cellview().context_path):
+            self.ascend(all_levels=True)
+            self.notice("warning", "left %s: %s" % (ctx["label"], ctx["reason"]))
+        self.drop_foreign_selection()
+
+    def edited_files(self):
+        """External files this tab has unsaved changes in."""
+        return sorted(self.unsaved) if self.is_dirty() else []
 
     def notice(self, level, text):
         self.send({"type": "event", "event": {"kind": "notice", "level": level, "text": text}})
@@ -314,15 +441,33 @@ class Editor:
         return True
 
     def track(self):
-        """Count one step if the layout changed (after an input event or a call)."""
+        """Count one step if the layout changed (after an input event or a call). A
+        change to a file that may not be changed is undone at once."""
         if self.view is None or not self._changed():
+            return
+        path = self.context_file()
+        reason = self.doc.why_not_writable(path)
+        if reason is not None and self.manager.has_undo():
+            self.view.cancel()
+            self.manager.undo()  # leaves a redo that can_redo does not offer
+            self._changed()
+            self.notice("warning", "not changed: " + reason)
             return
         if self.saved_depth is not None and self.saved_depth > self.depth:
             self.saved_depth = None  # changed after undoing past the save: no way back
+        del self.steps[self.depth:]
+        self.steps.append(path)
+        if path is not None and path != self.doc.root:
+            self.unsaved.add(path)
         self.depth += 1
 
     def undone(self, step):
         """After undo (step -1) or redo (+1)."""
+        index = self.depth - 1 if step < 0 else self.depth
+        if 0 <= index < len(self.steps):
+            path = self.steps[index]
+            if path is not None and path != self.doc.root:
+                self.unsaved.add(path)
         self.depth += step
         self._changed()
 
@@ -331,16 +476,22 @@ class Editor:
         if self.view is not None:
             self._changed()
 
+    def can_redo(self):
+        """Redo is there and is a change this helper counted (not one it refused)."""
+        return self.manager.has_redo() and self.depth < len(self.steps)
+
     def is_dirty(self):
         return self.view is not None and self.depth != self.saved_depth
 
     def mark_saved(self):
         self.forget_changes()
         self.saved_depth = self.depth
+        self.unsaved = set()
 
     def modified_event(self):
         return {"kind": "modified", "dirty": self.is_dirty(),
-                "can_undo": self.manager.has_undo(), "can_redo": self.manager.has_redo()}
+                "can_undo": self.manager.has_undo(), "can_redo": self.can_redo(),
+                "edited": self.edited_files()}
 
     def layers(self):
         """The flattened layer list: [(iterator, node, depth)]."""
@@ -397,7 +548,8 @@ class Editor:
                 "missing": bool(info and info["missing"]),
                 "file": info["file"] if info else None,
             })
-        return {"kind": "cells", "top": top.name if top else "", "path": path, "cells": cells}
+        return {"kind": "cells", "top": top.name if top else "", "path": path, "cells": cells,
+                "context": self.context()}
 
     def selection_event(self):
         view = self.view

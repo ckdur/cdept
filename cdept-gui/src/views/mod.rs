@@ -147,6 +147,16 @@ impl Views {
         self.documents.get_mut(&id)
     }
 
+    /// Keep the layout tabs in step (editing in place, docs/KLAYOUT.md §3.4).
+    pub fn coordinate_layouts(&mut self) {
+        layout::coordinate(
+            self.documents
+                .values_mut()
+                .filter_map(Document::as_layout_mut)
+                .collect(),
+        );
+    }
+
     /// Close the documents `keep` rejects; their xschem ends with them.
     pub fn retain_documents(&mut self, keep: impl Fn(DocId) -> bool) {
         self.documents.retain(|id, _| keep(*id));

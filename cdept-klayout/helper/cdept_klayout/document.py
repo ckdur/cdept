@@ -9,7 +9,10 @@ with an X and "<label> cannot be found" on a layer that is never written
 ("missing"). The same happens, recursively, to the ghost cells of external files.
 
 Saving writes the root's own cells only: external and missing cells become ghost
-cells again, cells that came with external files are left out.
+cells again, cells that came with external files are left out. External cells edited
+in place (descended into) are written back to their own files the same way: each file
+gets its own cells, with the cells of other files as ghosts under the names that file
+uses for them.
 """
 
 import os
@@ -39,6 +42,10 @@ class RefTable:
     def label(self, path):
         return self.entry(path).get("label") or os.path.basename(path)
 
+    def read_only(self, path):
+        """True when CDePT says the file must not be written (read-only library)."""
+        return bool(self.entry(path).get("read_only"))
+
     def ref(self, path, name):
         """The table's entry for ghost `name` of file `path`, or None."""
         return (self.entry(path).get("refs") or {}).get(name)
@@ -64,8 +71,10 @@ class Document:
     """The layout `layout` built from a reference table.
 
     `foreign` maps the index of every cell that did not come from the root file to
-    what it is: {"file", "label", "missing", "bbox", "top", "reason"}. `top` is true
-    for the cell standing for a whole file (what a ghost name refers to).
+    what it is: {"file", "label", "missing", "bbox", "top", "reason", "name"}. `top` is
+    true for the cell standing for a whole file (what a ghost name refers to); `name` is
+    the cell's name inside its file (the copy may have been renamed here).
+    `ghost_names[file][cell index]` is the name `file` uses for a cell of another file.
     """
 
     def __init__(self, layout, table):
@@ -74,6 +83,10 @@ class Document:
         self.root = os.path.normpath(table.root)
         self.foreign = {}
         self.by_file = {}
+        self.ghost_names = {}
+        self.dbu_of = {}  # database unit of each external file
+        # Files another tab is editing (docs/KLAYOUT.md §3.4): not to be changed here.
+        self.locked = set()
         self._layers = {}
         self.marker = None
         self.notes = []
@@ -161,7 +174,8 @@ class Document:
 
         self.by_file[path] = ci
         self.foreign[ci] = {"file": path, "label": label, "missing": False,
-                            "bbox": None, "top": True, "reason": ""}
+                            "bbox": None, "top": True, "reason": "", "name": top.name}
+        self.dbu_of[path] = src.dbu
         cell = self.layout.cell(ci)
         cell.ghost_cell = False
 
@@ -172,12 +186,14 @@ class Document:
             sc = src.cell(sci)
             if sc.is_ghost_cell():
                 mapping[sci] = self._nested(sc.name, path, stack)
+                self.ghost_names.setdefault(path, {})[mapping[sci]] = sc.name
             else:
                 new = self.layout.create_cell(self._unique(sc.name))
                 mapping[sci] = new.cell_index()
                 owned.add(sci)
                 self.foreign[new.cell_index()] = {"file": path, "label": label, "missing": False,
-                                                  "bbox": None, "top": False, "reason": ""}
+                                                  "bbox": None, "top": False, "reason": "",
+                                                  "name": sc.name}
 
         scale = pya.ICplxTrans(src.dbu / self.layout.dbu)
         layers = {li: self._layer(src.get_info(li)) for li in src.layer_indexes()}
@@ -227,7 +243,8 @@ class Document:
         text.size = max((t - bo) / 10.0, self.layout.dbu)
         shapes.insert(text)
         self.foreign[ci] = {"file": None, "label": label, "missing": True,
-                            "bbox": b, "top": True, "reason": reason or ""}
+                            "bbox": b, "top": True, "reason": reason or "",
+                            "name": self.layout.cell(ci).name}
 
     def marker_layer(self):
         if self.marker is None:
@@ -253,6 +270,26 @@ class Document:
         if box.empty():
             return None
         return [box.left, box.bottom, box.right, box.top]
+
+    # -- editing in place ------------------------------------------------------
+
+    def file_of(self, ci):
+        """The file cell `ci` belongs to: the root, an external file, or None (missing)."""
+        info = self.foreign.get(ci)
+        if info is None:
+            return self.root
+        return None if info["missing"] else info["file"]
+
+    def why_not_writable(self, path):
+        """None when `path` may be changed here, else the reason (a sentence)."""
+        if path is None:
+            return "a cell that cannot be found cannot be edited"
+        label = self.table.label(path)
+        if path in self.locked:
+            return "%s has unsaved changes in another tab" % label
+        if path != self.root and self.table.read_only(path):
+            return "%s belongs to a read-only library" % label
+        return None
 
     # -- writing ---------------------------------------------------------------
 
@@ -285,9 +322,72 @@ class Document:
             out.delete_layer(self.marker)
         return out, ghosts
 
-    def save(self, path=None):
-        """Write the root's own cells to `path` (default: the root file). Returns the
-        SaveReport of docs/KLAYOUT.md §4."""
+    def save(self, path=None, also=()):
+        """Write the root's own cells to `path` (default: the root file), and each
+        external file of `also` back to itself. Returns the SaveReport of
+        docs/KLAYOUT.md §4; the reports of `also` are in its "also"."""
+        report = self._save_root(path)
+        report["also"] = [self.save_external(f) for f in sorted(also)
+                          if f in self.by_file and f != self.root]
+        return report
+
+    def save_external(self, path):
+        """Write the cells that came from external file `path` back to it: its top cell
+        under its own name, its own cells, the cells of other files as ghosts."""
+        top = self.by_file[path]
+        out = pya.Layout()
+        out.assign(self.layout)
+
+        def own(ci):
+            info = self.foreign.get(ci)
+            return info is not None and not info["missing"] and info["file"] == path
+        # Every cell that is not this file's is emptied first, so that what it places
+        # is not reached from here.
+        for ci in range(out.cells()):
+            if out.is_valid_cell_index(ci) and not own(ci):
+                out.cell(ci).clear()
+        keep = {top} | set(out.cell(top).called_cells())
+        drop = [ci for ci in range(out.cells())
+                if out.is_valid_cell_index(ci) and ci not in keep]
+        names = {}
+        ghosts = {}
+        for ci in keep:
+            if own(ci):
+                names[ci] = self.foreign[ci]["name"]
+                continue
+            # Another file's cell (or the root's, or a missing one): a reference.
+            out.cell(ci).ghost_cell = True
+            names[ci] = self.ghost_names.get(path, {}).get(ci) or self.layout.cell(ci).name
+            ghosts[ci] = self.foreign.get(ci)
+        if drop:
+            out.delete_cells(drop)
+        # Two rounds, so that no name is taken while renaming.
+        for ci in names:
+            out.rename_cell(ci, "cdept$tmp$%d" % ci)
+        for ci, name in names.items():
+            out.rename_cell(ci, name)
+        if self.marker is not None:
+            out.delete_layer(self.marker)
+        dbu = self.dbu_of.get(path)
+        if dbu is not None and abs(dbu - out.dbu) > 1e-12:
+            self.notes.append("%s was written with database unit %g (it had %g)"
+                              % (path, out.dbu, dbu))
+        _write(out, path)
+        references = {}
+        for ci, info in ghosts.items():
+            if info is None:  # the root's own cell, placed by an external one
+                references[names[ci]] = {"file": self.root, "missing": False,
+                                         "bbox": self._dbbox(ci)}
+                continue
+            references[names[ci]] = {
+                "file": info["file"] if info["top"] and not info["missing"] else None,
+                "missing": info["missing"] or not info["top"],
+                "bbox": info["bbox"] if info["missing"] else (self._dbbox(ci) or info["bbox"]),
+            }
+        self.foreign[top]["bbox"] = self._dbbox(top)
+        return {"file": path, "top": self.foreign[top]["name"], "references": references}
+
+    def _save_root(self, path=None):
         path = os.path.normpath(path or self.root)
         out, ghosts = self._without(ghost_foreign=True)
         _write(out, path)

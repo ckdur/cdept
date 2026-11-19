@@ -6,9 +6,13 @@
 //! picture with egui: the tool bar, the layer list, the cell tree, the selection and the
 //! status line.
 
+mod checks;
+mod inplace;
 mod keys;
 mod panels;
+mod pcell;
 mod place;
+mod properties;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -24,6 +28,7 @@ use libcdept::layout::RefTable;
 use libcdept::layout::refs::{self, SaveReport};
 use serde_json::{Value, json};
 
+pub use self::inplace::coordinate;
 use self::keys::Shortcut;
 use super::{CloseChoice, EditAction, EditCaps, Picture, View};
 use crate::dock::{DocId, DocRef, Tab};
@@ -175,6 +180,18 @@ pub struct LayoutView {
     /// (see [`LayoutView::nudge`]).
     refresh_at: Option<Instant>,
     nudged: Option<Instant>,
+    /// DRC and LVS runs and their results.
+    checks: checks::Checks,
+    /// Editing in place (see `inplace`): the external cell edited, the external files
+    /// with unsaved changes, the locks last sent (with the helper's epoch), and the
+    /// files saves wrote that other tabs have not heard of yet.
+    in_place: Option<libcdept::klayout::protocol::InPlace>,
+    edited: Vec<PathBuf>,
+    locks_sent: Option<(u64, Vec<PathBuf>)>,
+    written: Vec<PathBuf>,
+    /// The properties dialog and "Place Library Cell…", while open.
+    properties: Option<properties::PropertiesDialog>,
+    library_picker: Option<pcell::LibraryPicker>,
 }
 
 impl LayoutView {
@@ -246,6 +263,13 @@ impl LayoutView {
             fit_pending: true,
             refresh_at: None,
             nudged: None,
+            checks: checks::Checks::default(),
+            in_place: None,
+            edited: Vec::new(),
+            locks_sent: None,
+            written: Vec::new(),
+            properties: None,
+            library_picker: None,
         }
     }
 
@@ -350,6 +374,8 @@ impl LayoutView {
     fn saved(&mut self, value: Value) -> Result<String, String> {
         let report: SaveReport =
             serde_json::from_value(value).map_err(|e| format!("unexpected answer to save: {e}"))?;
+        self.written
+            .extend(report.files().into_iter().map(Path::to_path_buf));
         refs::update_after_save(&self.project, &report)
             .map_err(|e| format!("saved, but the references were not recorded: {e:#}"))?;
         Ok(report.file.display().to_string())
@@ -512,8 +538,14 @@ impl LayoutView {
     fn apply(&mut self, event: KEvent) {
         match event {
             KEvent::Layers { layers } => self.layers = layers,
-            KEvent::Cells { top, path, cells } => {
+            KEvent::Cells {
+                top,
+                path,
+                cells,
+                context,
+            } => {
                 self.cells = Some(Cells { top, path, cells });
+                self.in_place = context;
                 // The first sight of a layout is all of it.
                 if std::mem::take(&mut self.fit_pending) {
                     self.zoom("fit");
@@ -538,8 +570,10 @@ impl LayoutView {
                 dirty,
                 can_undo,
                 can_redo,
+                edited,
             } => {
                 self.dirty = dirty;
+                self.edited = edited;
                 self.can_undo = can_undo;
                 self.can_redo = can_redo;
             }
@@ -561,11 +595,16 @@ impl LayoutView {
             self.at = (None, None);
             self.mode.clear();
             self.dirty = false;
+            self.edited.clear();
+            self.in_place = None;
             self.can_undo = false;
             self.can_redo = false;
             self.requested = None;
             self.fit_pending = true;
             self.pending.clear();
+            // Their questions went to the helper that is gone.
+            self.properties = None;
+            self.library_picker = None;
             if matches!(self.closing, Some(Closing::Saving(_))) {
                 self.closing = None;
             }
@@ -666,6 +705,14 @@ impl LayoutView {
                     self.simple(method::DELETE);
                 }
             }
+            Shortcut::Descend => {
+                if self.editable {
+                    self.descend();
+                }
+            }
+            Shortcut::Ascend => self.ascend(false),
+            Shortcut::Properties => self.open_properties(),
+            Shortcut::AscendAll => self.ascend(true),
         }
     }
 
@@ -733,6 +780,10 @@ impl LayoutView {
                                 button,
                                 modifiers,
                             });
+                            // A double click on an object shows its properties.
+                            if self.mode == "select" && button == Button::Left {
+                                self.open_properties_if_selected();
+                            }
                         } else {
                             self.last_press = Some((Instant::now(), *pos, button));
                             self.session.input(Input::Press {
@@ -977,6 +1028,7 @@ impl LayoutView {
                 ui.separator();
                 ui.weak("read-only");
             }
+            self.in_place_status(ui);
             if let Some(version) = self.session.klayout_version() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.weak(version);
@@ -1125,6 +1177,8 @@ impl View for LayoutView {
                 .size_range(160.0..=600.0)
                 .show(ui, |ui| self.side_panels(ui));
         }
+        self.poll_checks(ui.ctx());
+        self.checks_panel(ui);
         self.drawing(ui);
 
         if let Some(picker) = &mut self.place
@@ -1152,6 +1206,8 @@ impl View for LayoutView {
                 self.export(&out);
             }
         }
+        self.properties_ui(ui.ctx());
+        self.library_picker_ui(ui.ctx());
         for file in std::mem::take(&mut self.open_requests) {
             ctx.request(Action::OpenFile(file));
         }
@@ -1174,6 +1230,22 @@ impl View for LayoutView {
                     self.place = Some(place::PlacePicker::default());
                     ui.close();
                 }
+                if ui
+                    .add_enabled(editable, egui::Button::new("Place Library Cell…"))
+                    .on_hover_text("Place a cell or PCell of KLayout's libraries (PDK, Basic)")
+                    .clicked()
+                {
+                    self.open_library_picker();
+                    ui.close();
+                }
+                if ui
+                    .add(egui::Button::new("Properties…").shortcut_text("Q"))
+                    .on_hover_text("Properties of the selection")
+                    .clicked()
+                {
+                    self.open_properties();
+                    ui.close();
+                }
                 ui.separator();
                 if ui
                     .add_enabled(editable, egui::Button::new("Delete").shortcut_text("Del"))
@@ -1186,6 +1258,7 @@ impl View for LayoutView {
                     self.simple(method::CLEAR_SELECTION);
                     ui.close();
                 }
+                self.in_place_menu(ui, editable);
                 ui.separator();
                 ui.menu_button("Mode", |ui| {
                     for (name, label, hover) in MODES {
@@ -1215,6 +1288,8 @@ impl View for LayoutView {
                     }
                 });
             });
+            ui.separator();
+            self.checks_menu(ui, ready);
             ui.separator();
             ui.checkbox(&mut self.side, "Layers, Cells and Selection");
             if ui.button("Select in Libraries").clicked() {
@@ -1266,6 +1341,13 @@ impl View for LayoutView {
                 self.simple(method::REDO);
             }
             if ui
+                .add_enabled(self.selection.count > 0, egui::Button::new("Properties"))
+                .on_hover_text("Properties of the selection (Q, or a double click)")
+                .clicked()
+            {
+                self.open_properties();
+            }
+            if ui
                 .add_enabled(editable && self.dirty, egui::Button::new("Save"))
                 .on_hover_text("Save (Ctrl+S)")
                 .clicked()
@@ -1292,6 +1374,8 @@ impl View for LayoutView {
             if changed {
                 self.set_levels(levels);
             }
+            ui.separator();
+            self.checks_toolbar(ui, ready);
         });
     }
 

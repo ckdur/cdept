@@ -4,7 +4,7 @@ What is still to do and what may cause trouble. [ROADMAP.md](ROADMAP.md) is the 
 file is the running list behind it. Update it when an item is done or a new problem shows
 up. Items marked **(verify)** are suspicions, not confirmed facts.
 
-Last updated: 2026-11-20 (embedded KLayout: steps 0–3 built).
+Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built: edit in place, properties, PCells, OASIS, renames, DRC/LVS).
 
 ---
 
@@ -135,17 +135,61 @@ Last updated: 2026-11-20 (embedded KLayout: steps 0–3 built).
 - [x] CLI: `cdept klayout version|python`, `cdept layout refs [--fix]`, `export`
       (self-contained stream), `png`.
 - [x] Helper: frames (bgra), input, all edit modes, undo/redo, copy/paste, layers,
-      cells, selection, status, notices; 15 protocol tests (`cdept-klayout/tests/run.sh`).
+      cells, selection, status, notices; 30 protocol tests (`cdept-klayout/tests/run.sh`).
       1920×1080: ~17 ms per change; 4K: ~75–85 ms (whole frame each time).
 - [x] GUI: layout document tab (toolbar, Layers/Cells/Selection panels, Place Cell…,
       export, close flow, Inspector preview, script commands; `layout-smoke.script`).
-- [ ] Not done: properties dialog, PCell parameter dialog (KLayout's are Qt), editing
-      inside external cells (open the view instead), DRC/LVS, OASIS references (no
-      reader: OASIS views are leaves), `.gds.gz` (no reader), renames do not yet
-      rewrite *other* views that reference the renamed cell.
-- [ ] Press-drag-release does not draw a box in box mode; two clicks do (as in KLayout?).
-- [ ] KLayout is not built in CI; its tests skip there. `install.sh` installs the helper
-      script only, KLayout comes from the system or `cdept-klayout/.bin`.
+- [x] Edit in place (2026-11-20): Shift+X / Layout › Edit in Place descends into the selected
+      instance, Shift+B returns (Ctrl+Shift+B to the top; Ctrl+Shift+X is taken: any Ctrl+X is
+      a cut). Save writes the root and every external file changed in place (own cells
+      under their own names, references kept under the file's names; SaveReport `also`,
+      one sidecar each). Read-only libraries and files with unsaved changes in another tab
+      are locked (`locks`); a change to a locked file is undone at once. Other tabs showing
+      a written file reload (a warning instead when they have unsaved changes).
+      `layout-inplace.script`, helper tests `InPlace`, `edit_inv_in_place_from_buf`.
+- [x] Properties dialog in egui (`views/layout/properties.rs`, helper `properties.py`):
+      box, polygon (move by offset), path (width, ends, points), text, instance
+      (transform, array); one undo step per Apply; instances of external cells change
+      place only. Opens with Q, a double click in select mode, the tool bar, Layout menu.
+- [x] PCells: Layout › Place Library Cell… lists KLayout's libraries (PDK on KLAYOUT_PATH,
+      also those bound to a technology such as IHP's SG13_dev; Basic); the parameter form
+      is built from the PCell declaration (all types, choices, groups, hidden/readonly);
+      PCell instances change parameters in the properties dialog. Helper test places an
+      IHP nmos when the PDK is on this machine.
+- [x] Box mode: press-drag-release draws a box (the helper turns it into KLayout's two
+      clicks); two clicks still work.
+- [x] OASIS views are followed like GDS (`libcdept::layout::oasis`: CELLNAME tables, CELL,
+      PLACEMENT, CBLOCK; rename rewrites the file uncompressed, non-strict, S_CELL_OFFSET
+      and the END signature recomputed). Checked against KLayout's writer in all modes
+      (`libcdept/tests/oasis.rs`). `.gds.gz`/`.oas.gz` are not supported (not needed:
+      CDePT is the editor and writes its own views).
+- [x] Renaming a cell rewrites the layout views that place it (`layout::follow`,
+      `Library::rename_cell_following`, used by the GUI): sidecar entry, structure name in
+      the file (when it was the cell name and the new name is free), sidecar re-keyed.
+      Read-only libraries are reported, not changed. Deleting a cell/view logs the views
+      that now show "cannot be found". `refs --fix` repairs a library renamed outside
+      CDePT (search by the sidecar's cell name); a cell renamed outside stays missing.
+- [x] DRC/LVS (`libcdept::klayout::verify`, KLAYOUT.md §8): the PDK's decks (`[klayout]
+      drc`/`lvs`, else found in the KLAYOUT_PATH folders, e.g. IHP `ihp-sg13g2.drc`,
+      `sg13g2.lvs`) run by `klayout -b` on an exported self-contained GDS; `.lyrdb` read in
+      Rust (quick-xml), `.lvsdb` summarised by the helper script `lvsdb.py`; schematic
+      netlisted by xschem with `lvs_netlist`. CLI `cdept layout drc|lvs`; GUI Layout › Run
+      DRC/LVS (background, unsaved edits included), results panel, click → highlight +
+      zoom. Tested on the PDK's sg13g2_inv_1 (DRC M1.a found; LVS match and mismatch).
+- [x] CI job `klayout`: builds KLayout from the submodule (cached on commit + build.sh),
+      runs the helper tests and the Rust KLayout tests. Not yet seen running on GitHub.
+- [ ] Edit in place: locks are exchanged once per GUI frame; a reload loses zoom and
+      selection; a different database unit in an external file is rewritten with the root's.
+- [ ] PCell shape parameters (handles) are shown, not edited; changing the cell an
+      instance places is not offered.
+- [ ] DRC/LVS: no cancel in the GUI; deck variables (-D) only from the CLI; only
+      input/topcell/report/schematic/target_netlist are passed (IHP's names).
+- [ ] No library rename in CDePT yet (`layout::follow::library_renamed` is ready for it);
+      xschem instances are not rewritten when a cell is renamed.
+- [ ] In the properties script, a single click on a just-placed PCell sometimes selected
+      nothing in the GUI (helper tests select it fine); not tracked down.
+- [ ] `install.sh` installs the helper script only, KLayout comes from the system or
+      `cdept-klayout/.bin`.
 - [ ] Try it by hand.
 
 ### Smaller gaps left in what exists

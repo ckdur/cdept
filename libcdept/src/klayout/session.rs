@@ -626,6 +626,7 @@ mod tests {
                 dirty,
                 can_undo: dirty,
                 can_redo: false,
+                edited: Vec::new(),
             },
         };
         let notice = |text: &str| Message::Event {

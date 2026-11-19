@@ -591,8 +591,9 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
             name,
         } => {
             let name = name.trim();
-            library(project, lib)?.rename_cell(cell, name)?;
+            let followed = library(project, lib)?.rename_cell_following(project, cell, name)?;
             tracing::info!(target: TARGET, "renamed {lib}/{cell} to {name}");
+            report_layouts(&followed);
             Selection::cell(lib, name)
         }
         Dialog::CopyCell {
@@ -607,7 +608,9 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
             Selection::cell(to, name)
         }
         Dialog::DeleteCell { library: lib, cell } => {
+            let orphans = libcdept::layout::follow::placed_by(project, lib, cell, None);
             library(project, lib)?.delete_cell(cell)?;
+            report_layouts(&orphans);
             tracing::info!(target: TARGET, "deleted cell {lib}/{cell}");
             Selection::library(lib)
         }
@@ -616,7 +619,9 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
             cell,
             view,
         } => {
+            let orphans = libcdept::layout::follow::placed_by(project, lib, cell, Some(view));
             library(project, lib)?.delete_view(cell, view)?;
+            report_layouts(&orphans);
             tracing::info!(target: TARGET, "deleted view {lib}/{cell}/{view}");
             Selection::cell(lib, cell)
         }
@@ -626,6 +631,18 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
     app.selection = selection;
     app.validate_selection();
     Ok(())
+}
+
+/// Log what a rename or deletion did to the layout views placing the cell: a line per
+/// view, warnings for the ones now wrong.
+fn report_layouts(followed: &[libcdept::layout::follow::Followed]) {
+    for f in followed {
+        if f.is_problem() {
+            tracing::warn!(target: "cdept::library", "{f}");
+        } else {
+            tracing::info!(target: "cdept::library", "{f}");
+        }
+    }
 }
 
 #[cfg(test)]

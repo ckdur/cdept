@@ -1,0 +1,56 @@
+# Editing in place (docs/KLAYOUT.md §3.4) on examples/buffer: from buf, edit inv where
+# it is placed; the save writes inv's view too, and a tab showing inv opens it again.
+# Writes into the project: run it on a copy, as cdept-gui/scripts/run.sh does.
+#
+#   cdept-gui/scripts/run.sh cdept-gui/scripts/layout-inplace.script
+
+# inv in a tab of its own first: it is reloaded after buf's save.
+open logic inv layout
+wait_frame
+expect_modified no
+
+open logic buf layout
+wait_frame
+expect_documents 2
+expect_in_place none
+# Select the left inverter, Shift+X: edit it in place.
+mode select
+click 170 40
+expect_selection 1
+key X shift
+expect_in_place logic/inv/layout
+add_layer 10 0 smoke
+current_layer smoke
+mode box
+click 150 30
+click 190 70
+expect_modified yes
+expect_title buf (layout)*
+screenshot /tmp/cdept-inplace-1-edited.png
+
+# inv's own tab may not change inv now: buf has unsaved changes in it.
+open logic inv layout
+expect_title inv (layout)
+current_layer 1/0
+mode box
+click 20 20
+click 60 60
+expect_notice not changed
+expect_modified no
+
+# Save buf: inv.gds is written too; inv's tab opens it again.
+open logic buf layout
+save
+expect_modified no
+expect_notice Saved
+# Shift+B returns (a click first: the drawing takes the keys).
+mode select
+click 600 400
+key B shift
+expect_in_place none
+open logic inv layout
+wait_frame
+expect_modified no
+expect_layer 10/0
+screenshot /tmp/cdept-inplace-2-inv.png
+quit

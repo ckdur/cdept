@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use cdept_gui::{GuiOptions, LogBuffer};
 use clap::{Parser, Subcommand, ValueEnum};
 use eyre::{Result, bail, eyre};
+use libcdept::klayout::verify::{self, Check};
 use libcdept::klayout::{Engine as KlayoutEngine, EngineOptions as KlayoutOptions};
 use libcdept::xschem::symbol::{self, Problem};
 use libcdept::xschem::{Engine, Hierarchy, NetlistFormat};
@@ -232,6 +233,152 @@ enum LayoutCommand {
         #[arg(long)]
         view: Option<String>,
     },
+    /// Run the PDK's DRC deck on a cell's layout (KLayout in batch mode).
+    ///
+    /// The deck is `[klayout] drc` in cdept.toml, else found in the PDK's
+    /// libs.tech/klayout. Prints the violations per rule; fails if there are any.
+    Drc {
+        library: String,
+        cell: String,
+        #[command(flatten)]
+        check: CheckArgs,
+    },
+    /// Compare a cell's layout with its schematic, with the PDK's LVS deck.
+    ///
+    /// The schematic is netlisted by xschem for LVS. The deck is `[klayout] lvs` in
+    /// cdept.toml, else found in the PDK. Fails if the netlists do not match.
+    Lvs {
+        library: String,
+        cell: String,
+        /// The schematic view, when the cell has several.
+        #[arg(long)]
+        schematic: Option<String>,
+        /// Compare with this SPICE netlist instead of netlisting the schematic.
+        #[arg(long, conflicts_with = "schematic")]
+        netlist: Option<PathBuf>,
+        #[command(flatten)]
+        check: CheckArgs,
+    },
+}
+
+/// What `layout drc` and `layout lvs` share.
+#[derive(clap::Args)]
+struct CheckArgs {
+    /// The deck to run instead of the project's.
+    #[arg(long)]
+    deck: Option<PathBuf>,
+    /// The layout view, when the cell has several.
+    #[arg(long)]
+    view: Option<String>,
+    /// Further variables for the deck, as NAME=VALUE (`-rd` of KLayout).
+    #[arg(short = 'D', long = "define", value_parser = parse_define)]
+    defines: Vec<(String, String)>,
+    /// Folder for the stream, the report and KLayout's output. Defaults to
+    /// ~/.cache/cdept/verify/<project>/<library>/<cell>/<drc|lvs>.
+    #[arg(long)]
+    dir: Option<PathBuf>,
+}
+
+fn parse_define(text: &str) -> Result<(String, String), String> {
+    match text.split_once('=') {
+        Some((name, value)) if !name.is_empty() => Ok((name.to_string(), value.to_string())),
+        _ => Err(format!("'{text}' is not NAME=VALUE")),
+    }
+}
+
+/// Run DRC or LVS on `library/cell` from the command line.
+fn layout_check(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    check: Check,
+    args: &CheckArgs,
+    schematic: Option<(Option<&str>, Option<&std::path::Path>)>,
+) -> Result<()> {
+    let deck = match &args.deck {
+        Some(deck) => deck.clone(),
+        None => verify::find_deck(project, check).ok_or_else(|| {
+            eyre!(
+                "no {} deck: set [klayout] {} in cdept.toml or pass --deck (none found in \
+                 the PDK's libs.tech/klayout)",
+                check.label(),
+                check.name()
+            )
+        })?,
+    };
+    let file = layout_view(project, library, cell, args.view.as_deref())?;
+    let dir = match &args.dir {
+        Some(dir) => {
+            std::fs::create_dir_all(dir)?;
+            dir.clone()
+        }
+        None => verify::work_dir(project, library, cell, check)?,
+    };
+    let stream = verify::export_stream(project, &file, &dir.join(format!("{cell}.gds")))?;
+    if !stream.missing.is_empty() {
+        tracing::warn!(
+            "cells not found, checked as empty: {} (see `cdept layout refs`)",
+            stream.missing.join(", ")
+        );
+    }
+    println!("deck    {}", deck.display());
+    println!(
+        "layout  {} (top cell {})",
+        stream.file.display(),
+        stream.top
+    );
+    if check == Check::Drc {
+        let run = verify::run_drc(project, &deck, &stream, &dir, &args.defines)?;
+        let counts = run.rdb.counts();
+        let total: usize = counts.iter().map(|(_, n)| n).sum();
+        for (category, n) in &counts {
+            println!("{n:6}  {}  {}", category.name(), category.description);
+        }
+        println!("report  {}", run.report.display());
+        if total > 0 {
+            bail!("{total} DRC violation(s) in {} rule(s)", counts.len());
+        }
+        println!("DRC clean");
+        return Ok(());
+    }
+    let (view, netlist) = schematic.unwrap_or_default();
+    let netlist = match netlist {
+        Some(netlist) => netlist.to_path_buf(),
+        None => {
+            let schematic = verify::schematic_file(project, library, cell, view)?;
+            verify::schematic_netlist(project, &schematic, &dir.join(format!("{cell}.spice")))?
+        }
+    };
+    println!("netlist {}", netlist.display());
+    let run = verify::run_lvs(project, &deck, &stream, &netlist, &dir, &args.defines)?;
+    for circuit in &run.summary.circuits {
+        println!(
+            "{:<16} layout {} / schematic {}",
+            circuit.status, circuit.layout, circuit.schematic
+        );
+        for (kind, pair) in circuit.pairs() {
+            let name = |n: &str| {
+                if n.is_empty() {
+                    "-".to_string()
+                } else {
+                    n.to_string()
+                }
+            };
+            println!(
+                "  {:<16} {kind:<10} {} / {}",
+                pair.status,
+                name(&pair.layout),
+                name(&pair.schematic)
+            );
+        }
+    }
+    println!("report  {}", run.report.display());
+    println!("extracted {}", run.extracted.display());
+    if !run.summary.matched {
+        bail!("the layout does not match the schematic");
+    }
+    println!("LVS match");
+    Ok(())
 }
 
 #[derive(Subcommand)]
@@ -780,6 +927,25 @@ fn main() -> Result<()> {
                     println!("{}", output.display());
                     Ok(())
                 }
+                LayoutCommand::Drc {
+                    library,
+                    cell,
+                    check,
+                } => layout_check(&project, &library, &cell, Check::Drc, &check, None),
+                LayoutCommand::Lvs {
+                    library,
+                    cell,
+                    schematic,
+                    netlist,
+                    check,
+                } => layout_check(
+                    &project,
+                    &library,
+                    &cell,
+                    Check::Lvs,
+                    &check,
+                    Some((schematic.as_deref(), netlist.as_deref())),
+                ),
             }
         }
         Command::Klayout(command) => {

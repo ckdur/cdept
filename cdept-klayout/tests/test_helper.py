@@ -420,5 +420,437 @@ class DisplayOpenFirst(unittest.TestCase):
         self.assertFalse(h.last_event("modified")["dirty"])
 
 
+class InPlace(unittest.TestCase):
+    """Editing an external cell in place: descend, edit, save both files, locks."""
+
+    W, H = 640, 400
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(prefix="cdk-")
+        self.helper = Helper(self.folder, display=True)
+        self.helper.call("python", code="FOLDER = %r\n" % self.folder + FIXTURES)
+        self.helper.send({"type": "resize", "width": self.W, "height": self.H})
+
+    def tearDown(self):
+        self.helper.close()
+        shutil.rmtree(self.folder, ignore_errors=True)
+
+    def open(self, t=None):
+        h = self.helper
+        h.call("open", refs=t or table(self.folder))
+        h.call("zoom", what="box", box=[-1, -4, 15, 6])
+        h.settle()
+
+    def readback(self, path):
+        return eval(self.helper.call("python", code="PATH = %r\n" % path + READBACK))
+
+    def to_pixel(self, x, y):
+        return eval(self.helper.call("python", code=(
+            "p = view.viewport_trans() * pya.DPoint(%r, %r)\n"
+            "(p.x, %d - 1 - p.y)" % (x, y, self.H))))
+
+    def select_inv(self):
+        h = self.helper
+        h.call("mode", name="select")
+        h.call("clear_selection")
+        h.click(*self.to_pixel(0.5, 1.5))
+        h.settle()
+        self.assertEqual(h.last_event("selection")["items"][0]["kind"], "instance")
+
+    def inv_shapes(self, layer=1):
+        return int(self.helper.call("python", code=(
+            "layout.cell('inv').shapes(layout.find_layer(%d, 0)).size()" % layer)))
+
+    def draw_box(self, a, b, layer="1/0"):
+        h = self.helper
+        current = next(l for l in h.last_event("layers")["layers"] if l["source"].startswith(layer))
+        h.call("current_layer", id=current["id"])
+        h.call("mode", name="box")
+        h.click(*self.to_pixel(*a))
+        h.click(*self.to_pixel(*b))
+        h.settle()
+
+    def test_descend_edit_save(self):
+        h = self.helper
+        self.open()
+        inv = os.path.join(self.folder, "inv.gds")
+        buf = os.path.join(self.folder, "buf.gds")
+        self.select_inv()
+        value = h.call("descend")
+        self.assertEqual(value["cell"], "inv")
+        self.assertEqual(value["context"]["label"], "logic/inv/layout")
+        self.assertTrue(value["context"]["writable"])
+        h.settle()
+        self.assertEqual(h.last_event("cells")["context"]["file"], inv)
+
+        # Shapes of the cell descended into can be selected now.
+        h.call("mode", name="select")
+        h.click(*self.to_pixel(0.1, 0.1))
+        h.settle()
+        sel = h.last_event("selection")
+        self.assertEqual([(i["kind"], i["cell"]) for i in sel["items"]], [("box", "inv")], sel)
+        h.call("clear_selection")
+
+        self.draw_box((0.2, 0.2), (0.4, 0.4))
+        self.assertEqual(self.inv_shapes(), 2)
+        modified = h.last_event("modified")
+        self.assertTrue(modified["dirty"])
+        self.assertEqual(modified["edited"], [inv])
+
+        report = h.call("save")
+        self.assertEqual(report["file"], buf)
+        self.assertEqual([r["file"] for r in report["also"]], [inv])
+        self.assertEqual(report["also"][0]["top"], "inv")
+        self.assertEqual(report["also"][0]["references"], {})
+        self.assertFalse(h.last_event("modified")["dirty"])
+        self.assertEqual(h.last_event("modified")["edited"], [])
+        cells = self.readback(inv)
+        self.assertEqual(cells, {"inv": [False, 3, []]})
+        cells = self.readback(buf)
+        self.assertEqual(cells["inv"][:2], [True, 0])  # still a reference
+        self.assertEqual(cells["buf"][1], 1)
+
+        # Undo past the save: inv is edited again; redo comes back to the saved state.
+        h.call("undo")
+        h.settle()
+        self.assertEqual(h.last_event("modified")["edited"], [inv])
+        h.call("redo")
+        h.settle()
+        self.assertFalse(h.last_event("modified")["dirty"])
+
+        value = h.call("ascend")
+        self.assertEqual(value["cell"], "buf")
+        self.assertIsNone(value["context"])
+
+    def test_nested_external_keeps_its_ghosts(self):
+        # mid places inv; top places mid. Editing mid in place writes mid with inv as a
+        # reference under the name mid uses for it.
+        h = self.helper
+        f = self.folder
+        h.call("python", code=(
+            "import pya\n"
+            "ly = pya.Layout(); mid = ly.create_cell('mid')\n"
+            "mid.shapes(ly.layer(5, 0)).insert(pya.Box(0, 0, 100, 100))\n"
+            "g = ly.create_cell('inv_x'); g.ghost_cell = True\n"
+            "mid.insert(pya.CellInstArray(g.cell_index(), pya.Trans(2000, 0)))\n"
+            "ly.write(%r)\n"
+            "ly = pya.Layout(); top = ly.create_cell('top')\n"
+            "g = ly.create_cell('mid'); g.ghost_cell = True\n"
+            "top.insert(pya.CellInstArray(g.cell_index(), pya.Trans(0, 0)))\n"
+            "ly.write(%r)" % (os.path.join(f, "mid.gds"), os.path.join(f, "top.gds"))))
+        t = table(f, "top.gds")
+        mid, inv = os.path.join(f, "mid.gds"), os.path.join(f, "inv.gds")
+        t["files"][os.path.join(f, "top.gds")] = {"label": "t/top/layout", "refs": {
+            "mid": {"file": mid, "label": "t/mid/layout"}}}
+        t["files"][mid] = {"label": "t/mid/layout", "refs": {
+            "inv_x": {"file": inv, "label": "logic/inv/layout"}}}
+        self.open(t)
+        h.call("mode", name="select")
+        h.click(*self.to_pixel(0.05, 0.05))
+        h.settle()
+        h.call("descend")
+        h.settle()
+        self.draw_box((0.2, 0.2), (0.4, 0.4), layer="5/0")
+        report = h.call("save")
+        self.assertEqual([r["file"] for r in report["also"]], [mid])
+        self.assertEqual(sorted(report["also"][0]["references"]), ["inv_x"])
+        self.assertEqual(report["also"][0]["references"]["inv_x"]["file"], inv)
+        cells = self.readback(mid)
+        self.assertEqual(cells["mid"], [False, 2, ["inv_x"]])
+        self.assertEqual(cells["inv_x"][:2], [True, 0])
+        self.assertEqual(set(cells), {"mid", "inv_x"})
+        self.assertEqual(self.readback(inv)["inv"][1], 2)  # not written
+
+    def test_read_only_and_locked(self):
+        h = self.helper
+        t = table(self.folder)
+        inv = os.path.join(self.folder, "inv.gds")
+        t["files"][inv]["read_only"] = True
+        self.open(t)
+        self.select_inv()
+        with self.assertRaises(CallError) as e:
+            h.call("descend")
+        self.assertIn("read-only", str(e.exception))
+
+        self.open()
+        self.select_inv()
+        h.call("descend")
+        n = len(h.events)
+        h.call("locks", files=[inv])  # another tab changed inv: leave it
+        h.settle()
+        self.assertIsNone(h.last_event("cells")["context"])
+        notices = [e["text"] for e in h.events[n:] if e["kind"] == "notice"]
+        self.assertTrue(any("another tab" in t for t in notices), notices)
+        self.select_inv()
+        with self.assertRaises(CallError):
+            h.call("descend")
+
+        # The root itself locked: a change is undone at once.
+        h.call("locks", files=[os.path.join(self.folder, "buf.gds")])
+        before = int(h.call("python", code="layout.cell('buf').shapes(layout.find_layer(3, 0)).size()"))
+        n = len(h.events)
+        self.draw_box((2.0, 4.0), (3.0, 5.0), layer="3/0")
+        after = int(h.call("python", code="layout.cell('buf').shapes(layout.find_layer(3, 0)).size()"))
+        self.assertEqual(after, before)
+        self.assertFalse(h.last_event("modified")["dirty"])
+        self.assertFalse(h.last_event("modified")["can_redo"])
+        notices = [e["text"] for e in h.events[n:] if e["kind"] == "notice"]
+        self.assertTrue(any("not changed" in t for t in notices), notices)
+
+
+class Properties(unittest.TestCase):
+    """The properties dialog, PCells of KLayout's libraries, boxes by dragging."""
+
+    W, H = 600, 400
+
+    @classmethod
+    def setUpClass(cls):
+        cls.folder = tempfile.mkdtemp(prefix="cdk-")
+        cls.helper = Helper(cls.folder, display=True)
+        cls.helper.call("python", code="FOLDER = %r\n" % cls.folder + FIXTURES)
+        cls.helper.send({"type": "resize", "width": cls.W, "height": cls.H})
+        cls.helper.call("open", refs=table(cls.folder))
+        cls.helper.call("zoom", what="box", box=[-1, -4, 15, 6])
+        cls.helper.settle()
+        layer = next(l for l in cls.helper.last_event("layers")["layers"]
+                     if l["source"].startswith("3/0"))
+        cls.helper.call("current_layer", id=layer["id"])
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.helper.close()
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    def py(self, code):
+        return eval(self.helper.call("python", code=code))
+
+    def to_pixel(self, x, y):
+        return self.py("p = view.viewport_trans() * pya.DPoint(%r, %r)\n(p.x, %d - 1 - p.y)"
+                       % (x, y, self.H))
+
+    def select(self, code):
+        """Select what `code` (a list of ObjectInstPath) gives; returns the properties."""
+        h = self.helper
+        h.call("mode", name="select")
+        h.call("python", code="view.object_selection = " + code)
+        return h.call("properties")
+
+    def shape_path(self, layer, index=0):
+        return ("[p for p in [pya.ObjectInstPath()] if setattr(p, 'top', layout.cell('buf').cell_index()) "
+                "or setattr(p, 'layer', layout.find_layer(%d, 0)) or setattr(p, 'shape', "
+                "list(layout.cell('buf').shapes(layout.find_layer(%d, 0)).each())[%d]) or True]"
+                % (layer, layer, index))
+
+    def test_1_libraries_and_form(self):
+        h = self.helper
+        libs = {l["name"]: l for l in h.call("libraries")}
+        self.assertIn("Basic", libs)
+        circle = next(c for c in libs["Basic"]["cells"] if c["name"] == "CIRCLE")
+        self.assertTrue(circle["pcell"])
+        form = h.call("pcell_form", library="Basic", cell="CIRCLE")
+        params = {p["name"]: p for p in form["params"]}
+        self.assertEqual(params["layer"]["type"], "layer")
+        self.assertEqual(params["npoints"]["type"], "int")
+        self.assertEqual(params["actual_radius"]["unit"], "micron")
+        self.assertTrue(params["radius"]["hidden"])
+        # A layer without a default is the current layer.
+        self.assertEqual(form["values"]["layer"], "3/0")
+        text = {p["name"]: p for p in h.call("pcell_form", library="Basic", cell="TEXT")["params"]}
+        self.assertEqual(text["eff_cw"]["group"], "Computed parameters")
+        self.assertTrue(text["eff_cw"]["readonly"])
+        with self.assertRaises(CallError):
+            h.call("pcell_form", library="Basic", cell="NOPE")
+
+    def test_2_place_pcell_and_save(self):
+        h = self.helper
+        placed = h.call("place_library", library="Basic", cell="CIRCLE",
+                        values={"actual_radius": 0.5, "layer": "3/0", "npoints": 32})
+        self.assertEqual(placed, {"name": "CIRCLE", "pcell": True})
+        x, y = self.to_pixel(7, 2)
+        h.click(x, y)
+        h.call("mode", name="select")
+        h.settle()
+        found = self.py("[(i.pcell_parameters_by_name()['actual_radius'], "
+                        "i.pcell_parameters_by_name()['npoints'], i.cell.library().name()) "
+                        "for i in layout.cell('buf').each_inst() if i.is_pcell()]")
+        self.assertEqual(found, [(0.5, 32, "Basic")])
+        self.assertTrue(h.last_event("modified")["dirty"])
+        # Saved and read again: still a PCell of Basic.
+        out = os.path.join(self.folder, "pcell.gds")
+        h.call("python", code="doc.save(%r)" % out)
+        again = self.py("ly = pya.Layout(); ly.read(%r)\n"
+                        "[i.pcell_parameters_by_name()['actual_radius'] for i in "
+                        "ly.cell('buf').each_inst() if i.is_pcell()]" % out)
+        self.assertEqual(again, [0.5])
+        # A static cell of a library, and a library that is not there.
+        with self.assertRaises(CallError):
+            h.call("place_library", library="Nope", cell="X")
+
+    def test_3_box(self):
+        h = self.helper
+        props = self.select(self.shape_path(3))
+        self.assertEqual(len(props["objects"]), 1)
+        box = props["objects"][0]
+        self.assertEqual((box["kind"], box["layer"], box["parent"], box["editable"]),
+                         ("box", "3/0", "buf", True))
+        self.assertEqual(box["bbox"], [-0.5, -0.5, 12.0, -0.1])
+        self.assertIn("1/0", props["layers"])
+        changed = dict(box, bbox=[-1, -1, 2, 0], layer="1/0")
+        after = h.call("set_properties", index=0, key=box["key"], object=changed)
+        self.assertEqual(after["objects"][0]["bbox"], [-1.0, -1.0, 2.0, 0.0])
+        self.assertEqual(after["objects"][0]["layer"], "1/0")
+        h.settle()
+        self.assertEqual(h.last_event("selection")["count"], 1)
+        # The old key no longer fits.
+        with self.assertRaises(CallError):
+            h.call("set_properties", index=0, key=box["key"], object=changed)
+        # One step back undoes both changes.
+        h.call("undo")
+        self.assertEqual(self.py("[str(s) for s in layout.cell('buf').shapes("
+                                 "layout.find_layer(3, 0)).each() if s.is_box()]"),
+                         ["box (-500,-500;12000,-100)"])
+
+    def test_4_path_text_polygon(self):
+        h = self.helper
+        h.call("python", code=(
+            "c = layout.cell('buf'); li = layout.find_layer(3, 0)\n"
+            "c.shapes(li).insert(pya.DPath([pya.DPoint(0, 4), pya.DPoint(3, 4)], 0.2))\n"
+            "c.shapes(li).insert(pya.DText('A', pya.DTrans(1, 2)))\n"
+            "c.shapes(li).insert(pya.DPolygon([pya.DPoint(8, 3), pya.DPoint(9, 3), pya.DPoint(9, 5)]))"))
+        h.call("python", code=(
+            "def pick(test):\n"
+            "  c = layout.cell('buf'); li = layout.find_layer(3, 0)\n"
+            "  s = [s for s in c.shapes(li).each() if test(s)][0]\n"
+            "  p = pya.ObjectInstPath(); p.top = c.cell_index(); p.layer = li; p.shape = s\n"
+            "  return [p]"))
+        path = self.select("pick(lambda s: s.is_path())")["objects"][0]
+        self.assertEqual((path["kind"], path["width"], path["points"]),
+                         ("path", 0.2, [[0.0, 4.0], [3.0, 4.0]]))
+        path.update(width=0.4, points=[[0, 4], [3, 4], [3, 6]], end_ext=0.2, round=False)
+        out = h.call("set_properties", index=0, key=path["key"], object=path)["objects"][0]
+        self.assertEqual((out["width"], len(out["points"]), out["end_ext"]), (0.4, 3, 0.2))
+
+        text = self.select("pick(lambda s: s.is_text())")["objects"][0]
+        self.assertEqual((text["kind"], text["string"]), ("text", "A"))
+        text.update(string="OUT", x=4, y=5, rotation=1, size=0.5)
+        out = h.call("set_properties", index=0, key=text["key"], object=text)["objects"][0]
+        self.assertEqual((out["string"], out["x"], out["y"], out["rotation"], out["size"]),
+                         ("OUT", 4.0, 5.0, 1, 0.5))
+
+        poly = self.select("pick(lambda s: s.is_polygon() or s.is_simple_polygon())")["objects"][0]
+        self.assertEqual(poly["kind"], "polygon")
+        self.assertEqual(len(poly["points"]), 3)
+        poly["offset"] = [1, -1]
+        out = h.call("set_properties", index=0, key=poly["key"], object=poly)["objects"][0]
+        self.assertIn([9.0, 2.0], out["points"])
+
+    def test_5_instances(self):
+        h = self.helper
+        h.call("python", code=(
+            "def inst(test):\n"
+            "  c = layout.cell('buf')\n"
+            "  i = [i for i in c.each_inst() if test(i)][0]\n"
+            "  p = pya.ObjectInstPath(); p.top = c.cell_index(); p.append_path(pya.InstElement(i))\n"
+            "  return [p]"))
+        inv = self.select("inst(lambda i: i.cell.name == 'inv')")["objects"][0]
+        self.assertEqual((inv["kind"], inv["cell"], inv["external"], inv["pcell"]),
+                         ("instance", "inv", "logic/inv/layout", None))
+        self.assertTrue(inv["editable"])  # its place, not its content
+        inv.update(x=1, y=-2, angle=90, mirror=True,
+                   array={"a": [3, 0], "b": [0, 4], "na": 2, "nb": 3})
+        out = h.call("set_properties", index=0, key=inv["key"], object=inv)["objects"][0]
+        self.assertEqual((out["x"], out["y"], out["angle"], out["mirror"]), (1.0, -2.0, 90.0, True))
+        self.assertEqual(out["array"], {"a": [3.0, 0.0], "b": [0.0, 4.0], "na": 2, "nb": 3})
+        with self.assertRaises(CallError):  # inv is not a PCell
+            h.call("set_properties", index=0, key=out["key"], object=out, pcell={"x": 1})
+        h.call("undo")
+        self.assertEqual(self.py("sorted(str(i.dcplx_trans) for i in layout.cell('buf').each_inst() "
+                                 "if i.cell.name == 'inv')"), ["r0 *1 0,0", "r0 *1 5,0"])
+
+        circle = self.select("inst(lambda i: i.is_pcell())")["objects"][0]
+        self.assertEqual((circle["cell"], circle["library"]), ("CIRCLE", "Basic"))
+        self.assertEqual(circle["pcell"]["name"], "CIRCLE")
+        self.assertEqual(circle["pcell"]["values"]["actual_radius"], 0.5)
+        out = h.call("set_properties", index=0, key=circle["key"], object=circle,
+                     pcell={"actual_radius": 1.25, "layer": "1/0"})["objects"][0]
+        self.assertEqual(out["pcell"]["values"]["actual_radius"], 1.25)
+        self.assertEqual(out["pcell"]["values"]["layer"], "1/0")
+        h.call("undo")
+        self.assertEqual(self.py("[i.pcell_parameters_by_name()['actual_radius'] "
+                                 "for i in layout.cell('buf').each_inst() if i.is_pcell()]"), [0.5])
+
+    def test_6_box_by_dragging(self):
+        h = self.helper
+        h.call("clear_selection")
+        h.call("mode", name="box")
+        count = "layout.cell('buf').shapes(layout.find_layer(3, 0)).size()"
+        before = self.py(count)
+        (x0, y0), (x1, y1) = self.to_pixel(1, 3), self.to_pixel(3, 5)
+        h.input(kind="move", x=x0, y=y0, buttons=[])
+        h.input(kind="press", x=x0, y=y0, button="left")
+        for k in range(1, 6):
+            h.input(kind="move", x=x0 + (x1 - x0) * k / 5, y=y0 + (y1 - y0) * k / 5,
+                    buttons=["left"])
+        h.input(kind="release", x=x1, y=y1, button="left")
+        h.settle()
+        self.assertEqual(self.py(count), before + 1)
+        box = self.py("[ [round(v, 1) for v in (s.dbox.left, s.dbox.bottom, s.dbox.right, s.dbox.top)] "
+                      "for s in layout.cell('buf').shapes(layout.find_layer(3, 0)).each() "
+                      "if s.is_box()][-1]")
+        self.assertEqual(box, [1.0, 3.0, 3.0, 5.0])
+        # Two clicks still draw one.
+        h.click(x0, y1)
+        h.click(x1, y0 + 5)
+        h.settle()
+        self.assertEqual(self.py(count), before + 2)
+        h.call("mode", name="select")
+
+
+PDK_KLAYOUT = os.environ.get("CDEPT_TEST_PDK_KLAYOUT",
+                             "/opt/ext/OpenPDKs/ihp-sg13g2/libs.tech/klayout")
+
+
+@unittest.skipUnless(os.path.isdir(os.path.join(PDK_KLAYOUT, "python", "sg13g2_pycell_lib")),
+                     "IHP sg13g2 PDK not found (CDEPT_TEST_PDK_KLAYOUT)")
+class PdkPcells(unittest.TestCase):
+    """PCells of a PDK library bound to a technology (IHP SG13_dev)."""
+
+    W, H = 600, 400
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ["KLAYOUT_PATH"] = PDK_KLAYOUT
+        cls.folder = tempfile.mkdtemp(prefix="cdk-")
+        cls.helper = Helper(cls.folder, display=True)
+        cls.helper.call("python", code="FOLDER = %r\n" % cls.folder + FIXTURES)
+        cls.helper.send({"type": "resize", "width": cls.W, "height": cls.H})
+        cls.helper.call("open", refs=table(cls.folder), technology="sg13g2")
+        cls.helper.call("zoom", what="box", box=[-1, -4, 15, 6])
+        cls.helper.settle()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.helper.close()
+        shutil.rmtree(cls.folder, ignore_errors=True)
+        os.environ.pop("KLAYOUT_PATH", None)
+
+    def test_place_nmos(self):
+        h = self.helper
+        libs = {l["name"]: l for l in h.call("libraries")}
+        self.assertIn("SG13_dev", libs)
+        form = h.call("pcell_form", library="SG13_dev", cell="nmos")
+        self.assertIn("w", form["values"])
+        h.call("place_library", library="SG13_dev", cell="nmos", values={"w": "1u"})
+        p = eval(h.call("python", code="p = view.viewport_trans() * pya.DPoint(7, 2)\n"
+                        "(p.x, %d - 1 - p.y)" % self.H))
+        h.click(*p)
+        h.call("mode", name="select")
+        h.settle()
+        found = eval(h.call("python", code="[(i.cell.library().name(), "
+                            "i.pcell_parameters_by_name()['w'], i.bbox().width() > 0) "
+                            "for i in layout.cell('buf').each_inst() if i.is_pcell()]"))
+        self.assertEqual(found, [("SG13_dev", "1u", True)])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

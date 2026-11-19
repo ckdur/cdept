@@ -32,6 +32,8 @@ clap = { version = "4", features = ["derive"] }
 eyre = "0.6.12"
 image = { version = "0.25", default-features = false, features = ["gif", "png"] }
 memmap2 = "0.9"
+quick-xml = "0.39"
+miniz_oxide = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rfd = "0.18"

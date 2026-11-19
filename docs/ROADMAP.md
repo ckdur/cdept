@@ -188,7 +188,8 @@ To do:
   submodule; a GPL helper (`cdept-klayout`, a Python program run by `klayout -z`)
   drives a widget-less editable `LayoutView` whose pixels show in a CDePT tab; layers,
   cells and selection are CDePT panels. Layout views reference each other through
-  ghost cells and `<file>.json` sidecars; missing cells show as a red X. Plan,
+  ghost cells and `<file>.json` sidecars; missing cells show as a red X. Edit in
+  place, properties and PCell forms, OASIS references, DRC/LVS with the PDK decks. Plan,
   results and gaps: [KLAYOUT.md](KLAYOUT.md).
 - **Magic:** `magic -dnull -noconsole` with Tcl over a pipe for batch (ext, LEF, DRC). For the
   GUI, source a Tcl socket-server script.

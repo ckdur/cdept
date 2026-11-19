@@ -29,7 +29,7 @@ fn empty_layout(dir: &Path, name: &str) -> RefTable {
             file,
             FileRefs {
                 label: format!("test/{name}/layout"),
-                refs: Default::default(),
+                ..Default::default()
             },
         )]
         .into(),
@@ -146,4 +146,80 @@ fn a_session_draws_and_answers() {
     assert_eq!(session.status(), Status::Running);
     let version = session.klayout_version().unwrap();
     assert!(version.starts_with("KLayout"), "{version}");
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
+/// Editing in place (docs/KLAYOUT.md §3.4): from buf, descend into an inv instance,
+/// add a box; the save writes inv.gds too, and buf.gds still only references inv.
+#[test]
+fn edit_inv_in_place_from_buf() {
+    if !available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/buffer");
+    copy_tree(&example, dir.path());
+    let project = libcdept::Project::load(dir.path()).unwrap();
+    let logic = project.library("logic").unwrap();
+    let buf = libcdept::klayout::cell_layout(logic, "buf").unwrap();
+    let inv = libcdept::klayout::cell_layout(logic, "inv").unwrap();
+    let before = std::fs::read(&inv).unwrap();
+    let refs = libcdept::layout::refs::resolve(&project, &buf);
+    assert!(!refs.files[&inv].read_only);
+    let mut engine = Engine::for_project(&project).unwrap();
+    // Shapes of `inv` in inv.gds, read by KLayout.
+    let count = format!(
+        "ly = pya.Layout(); ly.read({:?})\n\
+         c = ly.cell('inv'); sum(c.shapes(li).size() for li in ly.layer_indexes())",
+        inv.display().to_string()
+    );
+    let inv_before: u32 = engine.python(&count).unwrap().parse().unwrap();
+    engine.open(&refs, true).unwrap();
+    // Select the first instance of inv, descend, draw a box (as one undo step).
+    engine
+        .python(
+            "inst = next(layout.cell('buf').each_inst())\n\
+             p = pya.ObjectInstPath()\n\
+             p.top = layout.cell('buf').cell_index()\n\
+             p.append_path(pya.InstElement.new(inst))\n\
+             view.select_object(p)",
+        )
+        .unwrap();
+    let value = engine.call(method::DESCEND, json!({})).unwrap();
+    assert_eq!(value["cell"], "inv", "{value}");
+    assert_eq!(value["context"]["writable"], true, "{value}");
+    engine
+        .python(
+            "view.transaction('box')\n\
+             view.cellview(0).cell.shapes(layout.layer(1, 0)).insert(pya.DBox(0, 0, 0.1, 0.1))\n\
+             view.commit()",
+        )
+        .unwrap();
+    let report = engine.save(None).unwrap();
+    assert_eq!(report.files(), [buf.as_path(), inv.as_path()]);
+    libcdept::layout::refs::update_after_save(&project, &report).unwrap();
+    let inv_after: u32 = engine.python(&count).unwrap().parse().unwrap();
+    engine.shutdown().unwrap();
+
+    assert_ne!(std::fs::read(&inv).unwrap(), before);
+    assert_eq!(inv_after, inv_before + 1);
+    let summary = libcdept::layout::gds::read_structure(&buf).unwrap();
+    assert!(!summary.defines("inv"), "buf.gds must only reference inv");
+    assert_eq!(summary.ghosts(), ["inv"]);
+    let meta = libcdept::layout::Meta::read_for(&inv).unwrap().unwrap();
+    assert_eq!(meta.label(), "logic/inv/layout");
+    let meta = libcdept::layout::Meta::read_for(&buf).unwrap().unwrap();
+    assert_eq!(meta.references["inv"].cell, "inv");
 }

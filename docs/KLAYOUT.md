@@ -6,9 +6,10 @@ drawing, editing, undo and file I/O are exactly KLayout's. Layout views referenc
 other the way Virtuoso cellviews do: a GDS holds only its own cell; the cells it
 places live in other views and are found through the project's libraries.
 
-Status (2026-11-20): steps 0–3 built and tested (helper protocol tests, Rust
-integration tests, `layout-smoke.script` in the real GUI). Open items: §7 and
-docs/NOTES.md.
+Status (2026-11-20): steps 0–4 built and tested (helper protocol tests, Rust
+integration tests, GUI scripts `layout-*.script`): editing, references, edit in place,
+properties and PCell forms, OASIS references, renames that follow, DRC/LVS (§8).
+Open items: §7 and docs/NOTES.md.
 
 Decided:
 - **Helper process.** KLayout is GPL-3.0-or-later; CDePT must stay MIT (NLnet). The
@@ -173,6 +174,29 @@ already resolved:
 A ghost name of a file that is not in its `refs` is treated as missing with the name
 as label. Rust types: `libcdept::layout::RefTable`, `FileRefs`, `Ref`.
 
+OASIS views are read the same way (`libcdept::layout::oasis`: CELLNAME tables, CELL,
+PLACEMENT, CBLOCK); KLayout writes a ghost cell as a CELLNAME without a CELL record.
+Compressed files (`.gds.gz`, `.oas.gz`) are not supported: CDePT writes its own views.
+
+### 3.4 Editing in place
+Descending into an instance (`descend`) makes its cell the one edited; edits go to that
+cell's file. The next `save` writes the root as before and, for every external file
+changed in place, that file with its own cells (original names) and the cells of other
+files as ghosts under the names it uses for them. The SaveReport lists those files in
+`also` (each a SaveReport); CDePT writes one sidecar per file. A file may not be changed
+when its `FileRefs.read_only` is set (read-only library) or when CDePT lists it in
+`locks` (unsaved changes in another tab); descending is refused, and a change detected
+in such a file is undone at once. After a save, tabs showing or placing a written file
+reload unless they have unsaved changes.
+
+### 3.5 Renames
+Renaming a cell (`Library::rename_cell_following`, `layout::follow`) rewrites the
+layout views that place it: the sidecar entry points at the new name; the structure in
+the file is renamed when it carried the old cell name and the new one is free there
+(GDS, or OASIS written back uncompressed and non-strict); the sidecar is re-keyed.
+Read-only libraries are reported, not changed. Deleting a cell or view lists the views
+that will show "cannot be found".
+
 ## 4. Protocol (`libcdept::klayout::protocol`, version 1)
 
 Transport as for xschem: Unix socket, UTF-8, one JSON object per line. CDePT listens,
@@ -195,12 +219,14 @@ Helper → CDePT:
     list, colours `#rrggbb`.
   - `cells {top, path, cells: [CellNode]}`: `CellNode {name, children: [name],
     external: label|null, missing: bool, file: path|null}`; `path` is the shown cell
-    path from the top.
+    path from the top; `context` = `{file, label, writable, reason}` while editing in
+    place, else null.
   - `selection {count, bbox, items: [SelItem]}`: `SelItem {kind, layer, cell, text}`,
     at most 200 items.
   - `status {x, y, mode, message}`: pointer position in µm (throttled), current mode,
     KLayout's one-line hint if any.
-  - `modified {dirty, can_undo, can_redo}`
+  - `modified {dirty, can_undo, can_redo, edited}`: `edited` = external files with
+    unsaved in-place changes.
   - `notice {level, text}`: errors from editing (e.g. "Please select a layer first").
 
 Input (`input`): `{kind, x, y, button, buttons, modifiers, delta, horizontal, key,
@@ -213,8 +239,11 @@ Methods (`call`):
 
 | method | params | value |
 |--------|--------|-------|
-| `open` | `{refs: RefTable, editable, technology?, layer_properties?}` | `{top, dbu, missing: [name], external: [name], notes}` |
-| `save` | `{file?}` (default: the root) | `{file, top, references: {name: {file, missing, bbox}}}` |
+| `open` | `{refs: RefTable, editable, technology?, layer_properties?, locked?}` | `{top, dbu, missing: [name], external: [name], notes}` |
+| `save` | `{file?}` (default: the root) | `{file, top, references: {name: {file, missing, bbox}}, also: [SaveReport]}` |
+| `descend` | `{}` (the selected instance) | `{cell, context}`: edit that cell in place (§3.4) |
+| `ascend` | `{all?}` | `{cell, context}` |
+| `locks` | `{files}` | files with unsaved changes elsewhere (not to be changed) |
 | `mode` | `{name}` | |
 | `zoom` | `{what: fit|in|out|box|selection, box?: [l,b,r,t] µm}` | |
 | `undo` / `redo` / `delete` / `select_all` / `clear_selection` | | |
@@ -229,6 +258,12 @@ Methods (`call`):
 | `render` | `{refs?, width, height, out}` | writes a PNG (previews; works without display) |
 | `export` | `{refs?, out}` (no `refs`: the open layout) | writes a self-contained GDS/OASIS (all references filled); `{file, missing}` |
 | `info` | | `{klayout, technology, file, top, cells, dbu}` |
+| `properties` | `{}` | `{objects: [Object], count, layers}`: the selection as the properties dialog shows it (µm) |
+| `set_properties` | `{index, key, object, pcell}` | as `properties`; one undo step; refused when the selection changed or the object is inside another view's cell |
+| `libraries` | `{}` | `[{name, description, technologies, cells: [{name, pcell}]}]`: KLayout's libraries (also those bound to a technology) |
+| `pcell_form` | `{library, cell}` | `{library, name, params, values}`: the parameter declarations and defaults |
+| `place_library` | `{library, cell, values}` | `{name, pcell}`: instance mode with a library cell or PCell |
+| `markers` | `{shapes: [{kind: polygon\|box\|edge\|text, …}], color?, zoom?}` | `{markers}`; empty clears (DRC/LVS highlights, never part of the layout) |
 | `python` | `{code}` | `repr` of the last expression (tests, power users) |
 
 Unknown method → `ok: false`, error "unknown method …".
@@ -260,14 +295,37 @@ Unknown method → `ok: false`, error "unknown method …".
    CLI `refs`, `export`, `png`.
 2. Display: frames, input, modes, layers, cells, status; `Session`.
 3. GUI tab, panels, place cell, Inspector preview, double-click opens a layout view.
-4. Gaps (§7): properties dialog, PCell parameters, copy/paste, edit-in-place of
-   external cells, DRC.
+4. Properties dialog, PCell parameters, copy/paste, edit in place of external cells,
+   OASIS references, renames that follow, DRC/LVS (§8), KLayout in CI. ✔
 
 ## 7. Known gaps and risks
-- No properties dialog or PCell parameter dialog yet (Qt in KLayout); to be made in
-  egui from the API.
+- Properties and PCell forms are CDePT's (egui); shape-type PCell parameters (handles)
+  are read-only; an instance's cell cannot be changed from the dialog.
 - Full-frame transfer on every change; 4K costs 50–85 ms. Damage rectangles or
   tile diffing later if it feels slow.
-- External cells are read-only; edits inside them are lost on save (warned).
+- External cells are edited in place after a descent (§3.4); without one they stay
+  read-only. Locks are exchanged once per GUI frame; a reload loses zoom and selection.
+- Renaming an OASIS file's cells writes it back without CBLOCKs and non-strict (table
+  offsets "not given"); KLayout reads it the same.
+- DRC/LVS pass only the deck variables `input`, `topcell`, `report`, `schematic`,
+  `target_netlist` (IHP's names); others with `-D` on the CLI. No cancel in the GUI.
 - Name clashes between structures of different views are resolved by renaming the
   external copies in memory; the saved file keeps the names of its sidecar.
+
+## 8. DRC and LVS
+- Deck: `[klayout] drc` / `lvs` in cdept.toml, else the first `*.drc` / `*.lvs` in
+  `<KLAYOUT_PATH dir>/tech/<check>/`, `<dir>/<check>/`, `<dir>/tech/` (PDK-named first,
+  partial decks such as antenna/density last).
+- Run: export a self-contained GDS (helper `export`; in the GUI from the open document,
+  unsaved edits included), then `klayout -b -r <deck> -rd input=<gds> -rd topcell=<top>
+  -rd report=<file>` (LVS also `schematic=<spice>`, `target_netlist=<file>`), with the
+  project's environment, in ~/.cache/cdept/verify/<project>/<lib>/<cell>/<check>/.
+- DRC results: the `.lyrdb` XML read in Rust (`verify::Rdb`), shapes in µm in top-cell
+  coordinates. LVS results: `cdept_klayout/lvsdb.py` (GPL, run by `klayout -b`) writes
+  `{matched, circuits: [{layout, schematic, status, nets, devices, pins, subcircuits}]}`.
+- Schematic netlist for LVS: xschem with `lvs_netlist` set (top cell is a `.subckt`,
+  devices use `lvs_format`).
+- CLI `cdept layout drc|lvs <lib> <cell> [--deck] [--view] [-D NAME=VALUE]`, exit 1 on
+  violations / mismatch. GUI: Layout › Run DRC / Run LVS (background), results panel,
+  a click highlights (`markers`) and zooms.
+- Highlights: helper method `markers`, `pya.Marker` objects.

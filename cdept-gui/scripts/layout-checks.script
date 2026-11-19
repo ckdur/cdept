@@ -1,0 +1,27 @@
+# DRC and LVS from a layout tab, on examples/buffer with the IHP SG13G2 decks. The
+# example's layouts use made-up layers and generic devices, so DRC finds violations and
+# LVS does not match: this checks the flow, not the design. Needs the PDK in the
+# environment and KLayout built (cdept-klayout/build.sh):
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs PDK=ihp-sg13g2 \
+#       cdept-gui/scripts/run.sh cdept-gui/scripts/layout-checks.script
+
+open logic buf layout
+wait_frame
+expect_cell inv external
+
+layout_check drc
+expect_check DRC: 8 violation(s) of 2 rule(s)
+expect_notice DRC: 8 violation(s)
+screenshot /tmp/cdept-layout-checks-drc.png
+
+# A result highlighted over the picture and zoomed to, as a click on it does.
+check_show 3
+wait_frame
+screenshot /tmp/cdept-layout-checks-marker.png
+
+layout_check lvs
+expect_check LVS: the netlists do not match
+screenshot /tmp/cdept-layout-checks-lvs.png
+
+quit

@@ -53,7 +53,9 @@ pub fn key_name(key: Key) -> Option<&'static str> {
 }
 
 /// What CDePT does itself with a key, with KLayout's default shortcuts where it has them
-/// (Ctrl+Z, Ctrl+Y, Delete, F2, Ctrl++, Ctrl+-; Ctrl+S is CDePT's save).
+/// (Ctrl+Z, Ctrl+Y, Delete, F2, Ctrl++, Ctrl+-; Ctrl+S is CDePT's save). Editing in place
+/// takes Virtuoso-like keys: Shift+X descends, Shift+B returns one level, Ctrl+Shift+B
+/// to the top (not Ctrl+Shift+X: the window system makes any Ctrl+X a cut).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shortcut {
     Undo,
@@ -64,12 +66,20 @@ pub enum Shortcut {
     ZoomOut,
     SelectAll,
     Delete,
+    Descend,
+    Ascend,
+    AscendAll,
+    /// Q: the properties of the selection (KLayout's key).
+    Properties,
 }
 
 pub fn shortcut(key: Key, m: Modifiers) -> Option<Shortcut> {
     let command = m.command || m.ctrl;
     Some(match (key, command) {
         (Key::Z, true) if m.shift => Shortcut::Redo,
+        (Key::X, false) if m.shift => Shortcut::Descend,
+        (Key::B, false) if m.shift => Shortcut::Ascend,
+        (Key::B, true) if m.shift => Shortcut::AscendAll,
         (Key::Z, true) => Shortcut::Undo,
         (Key::Y, true) => Shortcut::Redo,
         (Key::S, true) => Shortcut::Save,
@@ -77,6 +87,7 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Shortcut> {
         (Key::Plus | Key::Equals, true) => Shortcut::ZoomIn,
         (Key::Minus, true) => Shortcut::ZoomOut,
         (Key::F2, false) => Shortcut::ZoomFit,
+        (Key::Q, false) if !m.shift && !m.alt => Shortcut::Properties,
         (Key::Delete, false) => Shortcut::Delete,
         _ => return None,
     })
@@ -122,6 +133,17 @@ mod tests {
         assert_eq!(
             shortcut(Key::Delete, Modifiers::NONE),
             Some(Shortcut::Delete)
+        );
+        assert_eq!(shortcut(Key::X, Modifiers::SHIFT), Some(Shortcut::Descend));
+        assert_eq!(shortcut(Key::B, Modifiers::SHIFT), Some(Shortcut::Ascend));
+        assert_eq!(
+            shortcut(Key::B, ctrl | Modifiers::SHIFT),
+            Some(Shortcut::AscendAll)
+        );
+        assert_eq!(shortcut(Key::X, Modifiers::NONE), None);
+        assert_eq!(
+            shortcut(Key::Q, Modifiers::NONE),
+            Some(Shortcut::Properties)
         );
         assert_eq!(shortcut(Key::Escape, Modifiers::NONE), None);
         assert_eq!(shortcut(Key::Z, Modifiers::NONE), None);

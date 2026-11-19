@@ -7,12 +7,14 @@
 //! - [`Engine`]: one helper, one call at a time (CLI, tests).
 //! - [`Session`]: a helper per layout tab, never blocking, restarted when it stops.
 //! - [`service::Service`]: a background helper for previews and exports.
+//! - [`verify`]: DRC and LVS with the PDK's decks, KLayout in batch mode.
 
 mod engine;
 pub mod protocol;
 pub mod service;
 pub mod session;
 pub mod setup;
+pub mod verify;
 
 pub use engine::{Engine, EngineOptions, OpenInfo, cell_layout};
 pub use protocol::{Event, Input, PROTOCOL_VERSION};

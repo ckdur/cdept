@@ -190,9 +190,10 @@ impl Library {
 
     /// Rename a cell, together with the files named after it.
     ///
-    /// The `schematic=` attribute of the cell's xschem symbols follows. References to the
-    /// cell from other cells (xschem instances, GDS cell references) and the structure
-    /// name inside layout files are not rewritten yet.
+    /// The `schematic=` attribute of the cell's xschem symbols follows, and so does the
+    /// top structure name inside its own layout files. References to the cell from other
+    /// cells are not rewritten here: xschem instances not yet, layout views by
+    /// [`Library::rename_cell_following`].
     pub fn rename_cell(&self, old: &str, new: &str) -> Result<()> {
         self.writable()?;
         let cell = self.existing(old)?;
@@ -214,6 +215,20 @@ impl Library {
         }
         self.relink_symbols(new, self, old)?;
         self.retarget_layouts(new, old)
+    }
+
+    /// [`Library::rename_cell`], then make the layout views of `project` that place the
+    /// cell follow ([`layout::follow::cell_renamed`]: sidecar entries, and the structure
+    /// names inside the files). `project` holds this library and is not rescanned yet.
+    /// Views that could not follow (read-only libraries, write errors) are in the result.
+    pub fn rename_cell_following(
+        &self,
+        project: &crate::Project,
+        old: &str,
+        new: &str,
+    ) -> Result<Vec<layout::follow::Followed>> {
+        self.rename_cell(old, new)?;
+        Ok(layout::follow::cell_renamed(project, &self.name, old, new))
     }
 
     /// Copy a cell into `to` (which may be this library) under the name `new`.

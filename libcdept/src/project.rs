@@ -58,11 +58,14 @@ name = ""
 #   rc = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/xschemrc"
 
 # The embedded KLayout: folders for KLAYOUT_PATH (default: the PDK's libs.tech/klayout),
-# the technology (a name or a .lyt file) and the layer properties (.lyp):
+# the technology (a name or a .lyt file), the layer properties (.lyp) and the DRC and
+# LVS decks (default: found in the KLAYOUT_PATH folders):
 #   [klayout]
 #   path = ["$PDK_ROOT/ihp-sg13g2/libs.tech/klayout"]
 #   tech = "sg13g2"
 #   layer_properties = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/sg13g2.lyp"
+#   drc = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/drc/ihp-sg13g2.drc"
+#   lvs = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/lvs/sg13g2.lvs"
 "#;
 
 /// Options for [`Project::add_library`].
@@ -114,6 +117,11 @@ pub struct KlayoutSettings {
     pub tech: Option<String>,
     /// `layer_properties`: a `.lyp` file.
     pub layer_properties: Option<PathBuf>,
+    /// `drc`: the DRC deck (`.drc`, `.lydrc`). `None`: looked for in the
+    /// `KLAYOUT_PATH` folders, see [`crate::klayout::verify::find_deck`].
+    pub drc: Option<PathBuf>,
+    /// `lvs`: the LVS deck (`.lvs`, `.lylvs`), like `drc`.
+    pub lvs: Option<PathBuf>,
 }
 
 /// The environment lookup of a project (not part of what makes two projects equal).
@@ -352,6 +360,36 @@ impl Project {
                 None => self
                     .warnings
                     .push("[klayout] layer_properties must be a file name".into()),
+            }
+        }
+        for key in ["drc", "lvs"] {
+            let Some(item) = table.get(key) else {
+                continue;
+            };
+            let deck = match item
+                .as_str()
+                .map(|name| (name, self.resolve(name, &self.root)))
+            {
+                Some((_, Ok(file))) if file.is_file() => Some(file),
+                Some((_, Ok(file))) => {
+                    let text = format!("[klayout] {key}: {} not found", file.display());
+                    self.warnings.push(text);
+                    None
+                }
+                Some((name, Err(error))) => {
+                    let text = format!("[klayout] {key} '{name}': {error}");
+                    self.warnings.push(text);
+                    None
+                }
+                None => {
+                    let text = format!("[klayout] {key} must be a file name");
+                    self.warnings.push(text);
+                    None
+                }
+            };
+            match key {
+                "drc" => self.klayout.drc = deck,
+                _ => self.klayout.lvs = deck,
             }
         }
     }
@@ -995,6 +1033,7 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
         let tech = pdks.join("ihp/libs.tech/klayout");
         fs::create_dir_all(tech.join("tech")).unwrap();
         fs::write(tech.join("tech/a.lyp"), "").unwrap();
+        fs::write(tech.join("tech/a.drc"), "").unwrap();
         let root = tmp.path().join("p");
         let project =
             Project::create_with(&root, Some("p"), Some("ihp"), Some(pdks.to_str().unwrap()))
@@ -1007,7 +1046,8 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
         let mut text = text;
         text.push_str(
             "[klayout]\npath = [\"$PDK_ROOT/ihp/libs.tech/klayout\", \"nope\"]\ntech = \"sg13g2\"\n\
-             layer_properties = \"$PDK_ROOT/ihp/libs.tech/klayout/tech/a.lyp\"\n",
+             layer_properties = \"$PDK_ROOT/ihp/libs.tech/klayout/tech/a.lyp\"\n\
+             drc = \"$PDK_ROOT/ihp/libs.tech/klayout/tech/a.drc\"\nlvs = \"no.lvs\"\n",
         );
         fs::write(&project.file, text).unwrap();
         let project = Project::load(&root).unwrap();
@@ -1017,6 +1057,9 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
             project.klayout.layer_properties,
             Some(tech.join("tech/a.lyp"))
         );
+        assert_eq!(project.klayout.drc, Some(tech.join("tech/a.drc")));
+        assert_eq!(project.klayout.lvs, None);
+        assert!(project.warnings.iter().any(|w| w.contains("[klayout] lvs")));
         assert!(
             project.warnings.iter().any(|w| w.contains("nope")),
             "{:?}",

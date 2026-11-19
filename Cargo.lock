@@ -1440,6 +1440,8 @@ version = "0.1.0"
 dependencies = [
  "eyre",
  "memmap2",
+ "miniz_oxide",
+ "quick-xml",
  "serde",
  "serde_json",
  "tempfile",

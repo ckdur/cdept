@@ -23,6 +23,10 @@ pub struct RefTable {
 pub struct FileRefs {
     /// `library/cell/view`, or the file name for a file outside the libraries.
     pub label: String,
+    /// The file belongs to a read-only library: its cells are not edited in place
+    /// (docs/KLAYOUT.md §3.4).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
     /// Key: ghost structure name in this file.
     pub refs: BTreeMap<String, Ref>,
 }
@@ -49,6 +53,19 @@ pub struct SaveReport {
     pub top: String,
     #[serde(default)]
     pub references: BTreeMap<String, SavedRef>,
+    /// Other files written by the same save: external cells edited in place, each with
+    /// its own references (docs/KLAYOUT.md §3.4).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also: Vec<SaveReport>,
+}
+
+impl SaveReport {
+    /// Every file the save wrote: this one, then those of [`also`](Self::also).
+    pub fn files(&self) -> Vec<&Path> {
+        let mut out = vec![self.file.as_path()];
+        out.extend(self.also.iter().flat_map(SaveReport::files));
+        out
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -63,7 +80,7 @@ pub struct SavedRef {
 
 /// How one ghost name was resolved.
 #[derive(Debug, Clone, PartialEq)]
-enum How {
+pub(super) enum How {
     /// The sidecar names the cell and it exists.
     Sidecar,
     /// No sidecar entry; a cell of that name was found in the libraries.
@@ -72,15 +89,15 @@ enum How {
 }
 
 #[derive(Debug, Clone)]
-struct Resolved {
-    how: How,
-    file: Option<PathBuf>,
+pub(super) struct Resolved {
+    pub(super) how: How,
+    pub(super) file: Option<PathBuf>,
     /// `library/cell/view` of the target, or the bare name.
-    label: String,
+    pub(super) label: String,
     /// What to record in the sidecar (not for missing references).
-    meta: Option<MetaRef>,
-    bbox: Option<[f64; 4]>,
-    reason: String,
+    pub(super) meta: Option<MetaRef>,
+    pub(super) bbox: Option<[f64; 4]>,
+    pub(super) reason: String,
 }
 
 fn label(library: &str, cell: &str, view: &str) -> String {
@@ -88,7 +105,7 @@ fn label(library: &str, cell: &str, view: &str) -> String {
 }
 
 /// The GDS or OASIS file of a layout view.
-fn layout_file(entry: &Entry) -> Option<&Path> {
+pub(super) fn layout_file(entry: &Entry) -> Option<&Path> {
     match entry.format? {
         Format::Gds | Format::Oasis => entry.main_file.as_deref(),
         _ => None,
@@ -108,48 +125,12 @@ fn find_layout(cell: &Cell) -> Option<(&Entry, &Path)> {
     layouts().min_by_key(rank)
 }
 
-/// Resolve one ghost name of a file whose sidecar is `meta`.
-fn resolve_name(project: &Project, meta: Option<&Meta>, name: &str) -> Resolved {
-    if let Some(r) = meta.and_then(|m| m.references.get(name)) {
-        let label = label(&r.library, &r.cell, &r.view);
-        let missing = |reason: String| Resolved {
-            how: How::Missing,
-            file: None,
-            label: label.clone(),
-            meta: None,
-            bbox: r.bbox,
-            reason,
-        };
-        let Some(lib) = project.library(&r.library) else {
-            return missing(format!("library '{}' is not in the project", r.library));
-        };
-        let Some(cell) = lib.cell(&r.cell) else {
-            return missing(format!("library '{}' has no cell '{}'", r.library, r.cell));
-        };
-        let Some(entry) = cell.entry(&r.view) else {
-            return missing(format!("cell '{}' has no view '{}'", r.cell, r.view));
-        };
-        let Some(file) = layout_file(entry) else {
-            return missing(format!("view '{}' of '{}' is not a layout", r.view, r.cell));
-        };
-        if !file.is_file() {
-            return missing(format!("{} does not exist", file.display()));
-        }
-        return Resolved {
-            how: How::Sidecar,
-            file: Some(file.to_path_buf()),
-            label,
-            meta: Some(r.clone()),
-            bbox: r.bbox,
-            reason: String::new(),
-        };
-    }
-    for lib in &project.libraries {
-        let Some(cell) = lib.cell(name) else { continue };
-        let Some((entry, file)) = find_layout(cell) else {
-            continue;
-        };
-        return Resolved {
+/// The first library (in project order) with a cell `name` that has a layout view.
+fn search(project: &Project, name: &str) -> Option<Resolved> {
+    project.libraries.iter().find_map(|lib| {
+        let cell = lib.cell(name)?;
+        let (entry, file) = find_layout(cell)?;
+        Some(Resolved {
             how: How::Search,
             file: Some(file.to_path_buf()),
             label: label(&lib.name, &cell.name, &entry.name),
@@ -161,16 +142,76 @@ fn resolve_name(project: &Project, meta: Option<&Meta>, name: &str) -> Resolved 
             }),
             bbox: None,
             reason: String::new(),
+        })
+    })
+}
+
+/// Resolve one ghost name of a file whose sidecar is `meta`.
+///
+/// The sidecar entry wins when its view exists. When it does not (a library or view
+/// renamed or deleted behind CDePT's back), the cell it names, then the ghost name, are
+/// searched for in the libraries; a hit counts as found by search, which `fix`
+/// records.
+pub(super) fn resolve_name(project: &Project, meta: Option<&Meta>, name: &str) -> Resolved {
+    if let Some(r) = meta.and_then(|m| m.references.get(name)) {
+        let label = label(&r.library, &r.cell, &r.view);
+        let target = || -> Result<PathBuf, String> {
+            let lib = project
+                .library(&r.library)
+                .ok_or_else(|| format!("library '{}' is not in the project", r.library))?;
+            let cell = lib
+                .cell(&r.cell)
+                .ok_or_else(|| format!("library '{}' has no cell '{}'", r.library, r.cell))?;
+            let entry = cell
+                .entry(&r.view)
+                .ok_or_else(|| format!("cell '{}' has no view '{}'", r.cell, r.view))?;
+            let file = layout_file(entry)
+                .ok_or_else(|| format!("view '{}' of '{}' is not a layout", r.view, r.cell))?;
+            if !file.is_file() {
+                return Err(format!("{} does not exist", file.display()));
+            }
+            Ok(file.to_path_buf())
+        };
+        return match target() {
+            Ok(file) => Resolved {
+                how: How::Sidecar,
+                file: Some(file),
+                label,
+                meta: Some(r.clone()),
+                bbox: r.bbox,
+                reason: String::new(),
+            },
+            Err(reason) => {
+                let found = search(project, &r.cell)
+                    .or_else(|| (r.cell != name).then(|| search(project, name)).flatten());
+                match found {
+                    Some(mut found) => {
+                        found.bbox = r.bbox;
+                        if let Some(m) = &mut found.meta {
+                            m.bbox = r.bbox;
+                        }
+                        found
+                    }
+                    None => Resolved {
+                        how: How::Missing,
+                        file: None,
+                        label,
+                        meta: None,
+                        bbox: r.bbox,
+                        reason,
+                    },
+                }
+            }
         };
     }
-    Resolved {
+    search(project, name).unwrap_or_else(|| Resolved {
         how: How::Missing,
         file: None,
         label: name.to_string(),
         meta: None,
         bbox: None,
         reason: format!("no cell '{name}' with a layout view in the project's libraries"),
-    }
+    })
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {
@@ -195,13 +236,13 @@ fn locate<'a>(project: &'a Project, file: &Path) -> Option<(&'a Library, &'a Cel
     None
 }
 
-/// Ghost names of a file; empty (with a warning) when it cannot be read, and for OASIS,
-/// which has no reader.
+/// Ghost names of a file; empty (with a warning) when it cannot be read, and for
+/// compressed files, which are not read.
 fn ghosts_of(file: &Path) -> Vec<String> {
-    if Format::of_file(file) != Some(Format::Gds) {
+    if !super::is_readable(file) {
         return Vec::new();
     }
-    match gds::read_structure(file) {
+    match super::read_summary(file) {
         Ok(summary) => summary.ghosts(),
         Err(e) => {
             tracing::warn!("{e:#}");
@@ -234,8 +275,9 @@ fn file_label(project: &Project, file: &Path, meta: Option<&Meta>) -> String {
 /// ghost cells, then theirs, resolved through sidecars and by searching the libraries
 /// (§3.1). Never fails: what cannot be found becomes a [`Ref`] with `file: None`.
 ///
-/// Every reachable file appears once, so cycles end. OASIS files are leaves (no
-/// reader); unreadable GDS files are leaves too, with a warning in the log.
+/// Every reachable file appears once, so cycles end. GDSII and OASIS files are
+/// followed; compressed files are leaves, and so are unreadable files (with a warning
+/// in the log).
 pub fn resolve(project: &Project, file: &Path) -> RefTable {
     let mut table = RefTable {
         root: file.to_path_buf(),
@@ -249,6 +291,7 @@ pub fn resolve(project: &Project, file: &Path) -> RefTable {
         let meta = read_meta(&current);
         let mut entry = FileRefs {
             label: file_label(project, &current, meta.as_ref()),
+            read_only: locate(project, &current).is_some_and(|(lib, _, _)| lib.read_only),
             refs: BTreeMap::new(),
         };
         for name in ghosts_of(&current) {
@@ -279,7 +322,18 @@ pub fn resolve(project: &Project, file: &Path) -> RefTable {
 /// view of the project is recorded as `library/cell/view` with its bounding box; a
 /// missing reference keeps the entry the old sidecar had (bounding box updated);
 /// names no longer in the file are dropped.
+///
+/// The files of [`SaveReport::also`] (external cells edited in place) get theirs the
+/// same way.
 pub fn update_after_save(project: &Project, report: &SaveReport) -> Result<()> {
+    update_one_after_save(project, report)?;
+    for other in &report.also {
+        update_after_save(project, other)?;
+    }
+    Ok(())
+}
+
+fn update_one_after_save(project: &Project, report: &SaveReport) -> Result<()> {
     let file = &report.file;
     let old = Meta::read_for(file)?;
     let mut meta = match old.clone() {
@@ -383,7 +437,7 @@ impl fmt::Display for Finding {
     }
 }
 
-/// The layout views (GDS) of `library/cell`, as `(view, file)`.
+/// The layout views (GDS, OASIS) of `library/cell`, as `(view, file)`.
 fn cell_layouts(project: &Project, library: &str, cell: &str) -> Result<Vec<(String, PathBuf)>> {
     let lib = project
         .library(library)
@@ -394,11 +448,11 @@ fn cell_layouts(project: &Project, library: &str, cell: &str) -> Result<Vec<(Str
     let views: Vec<_> = c
         .entries
         .iter()
-        .filter(|e| e.format == Some(Format::Gds))
-        .filter_map(|e| Some((e.name.clone(), e.main_file.clone()?)))
+        .filter_map(|e| Some((e.name.clone(), layout_file(e)?.to_path_buf())))
+        .filter(|(_, f)| super::is_readable(f))
         .collect();
     if views.is_empty() {
-        bail!("cell '{library}/{cell}' has no GDS layout view");
+        bail!("cell '{library}/{cell}' has no GDS or OASIS layout view");
     }
     Ok(views)
 }
@@ -418,7 +472,7 @@ fn examine(
         kind,
     };
     let mut findings = Vec::new();
-    let summary = match gds::read_structure(file) {
+    let summary = match super::read_summary(file) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!("{e:#}");
@@ -611,11 +665,16 @@ mod tests {
     }
 
     #[test]
-    fn oasis_is_a_leaf_and_unreadable_gds_too() {
+    fn oasis_is_followed_and_unreadable_files_are_leaves() {
         let (tmp, mut project) = setup();
         let dir = tmp.path().join("libs/a/pad/layout");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("pad.oas"), "x").unwrap();
+        // pad.oas places inv (a ghost there).
+        fs::write(
+            dir.join("pad.oas"),
+            super::super::oasis::tests::build(&[("pad", &["inv"])], true, false),
+        )
+        .unwrap();
         fs::write(gds(&tmp, "a", "inv"), "garbage").unwrap();
         project.rescan();
         let table = resolve(&project, &gds(&tmp, "a", "buf"));
@@ -628,6 +687,13 @@ mod tests {
             table.files[&gds(&tmp, "a", "buf")].refs["pad"].file,
             Some(pad.clone())
         );
+        assert_eq!(
+            table.files[&pad].refs["inv"].file,
+            Some(gds(&tmp, "a", "inv"))
+        );
+        // Garbage in an OASIS file: a leaf.
+        fs::write(&pad, "x").unwrap();
+        let table = resolve(&project, &gds(&tmp, "a", "buf"));
         assert!(table.files[&pad].refs.is_empty());
     }
 
@@ -653,7 +719,7 @@ mod tests {
         let mut report = SaveReport {
             file: buf.clone(),
             top: "buf".into(),
-            references: BTreeMap::new(),
+            ..Default::default()
         };
         report.references.insert(
             "inv".into(),
@@ -700,6 +766,40 @@ mod tests {
         assert_eq!(meta.top, "buf_top");
         assert_eq!(meta.references.keys().collect::<Vec<_>>(), ["res"]);
         assert_eq!(meta.references["res"].bbox, Some([0.0, 0.0, 2.0, 2.0]));
+    }
+
+    #[test]
+    fn a_save_that_wrote_an_external_cell_too_updates_both_sidecars() {
+        let (tmp, project) = setup();
+        let buf = gds(&tmp, "a", "buf");
+        let inv = gds(&tmp, "a", "inv");
+        let mut report = SaveReport {
+            file: buf.clone(),
+            top: "buf".into(),
+            also: vec![SaveReport {
+                file: inv.clone(),
+                top: "inv".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        report.references.insert(
+            "inv".into(),
+            SavedRef {
+                file: Some(inv.clone()),
+                missing: false,
+                bbox: Some([0.0, 0.0, 1.0, 2.0]),
+            },
+        );
+        assert_eq!(report.files(), [buf.as_path(), inv.as_path()]);
+        update_after_save(&project, &report).unwrap();
+        assert_eq!(Meta::read_for(&buf).unwrap().unwrap().references.len(), 1);
+        let meta = Meta::read_for(&inv).unwrap().unwrap();
+        assert_eq!(meta.label(), "a/inv/layout");
+        assert!(meta.references.is_empty());
+        // The table tells the helper what may be edited in place.
+        let table = resolve(&project, &buf);
+        assert!(!table.files[&inv].read_only);
     }
 
     #[test]

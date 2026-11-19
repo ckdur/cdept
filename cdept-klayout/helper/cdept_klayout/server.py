@@ -14,7 +14,9 @@ import traceback
 import pya
 
 from .document import RefTable
+from . import properties
 from .editor import Editor, _message
+from .markers import Markers
 
 PROTOCOL_VERSION = 1
 # How long one wait for requests lasts; KLayout's own events are processed between.
@@ -96,6 +98,7 @@ class Server:
         self.python_globals = {"pya": pya, "server": self}
         self.last_status = 0.0
         self.guard = ModalGuard(self.editor.notice)
+        self.markers = Markers()
 
     def send(self, message):
         self.conn.send(message)
@@ -179,14 +182,18 @@ class Server:
         table = RefTable(p.get("refs"))
         if not table.root:
             raise ValueError("open: the reference table has no root")
-        return self.editor.open(table, editable=p.get("editable", True),
-                                technology=p.get("technology"),
-                                layer_properties=p.get("layer_properties"))
+        value = self.editor.open(table, editable=p.get("editable", True),
+                                 technology=p.get("technology"),
+                                 layer_properties=p.get("layer_properties"))
+        self.editor.doc.locked = {os.path.normpath(f) for f in p.get("locked") or []}
+        return value
 
     def m_save(self, p):
         doc = self._doc()
-        report = doc.save(p.get("file"))
-        if not p.get("file") or os.path.normpath(p["file"]) == doc.root:
+        in_place = not p.get("file") or os.path.normpath(p["file"]) == doc.root
+        # External cells edited in place go back to their files with the root.
+        report = doc.save(p.get("file"), also=self.editor.unsaved if in_place else ())
+        if in_place:
             self.editor.mark_saved()
             self.editor.report(full=False)  # "modified" goes out before the reply
         self._notes(doc)
@@ -260,6 +267,10 @@ class Server:
         else:
             raise ValueError("zoom: unknown %s" % what)
 
+    def m_markers(self, p):
+        """DRC/LVS highlights (markers.py); empty `shapes` clears them."""
+        return self.markers.set(self._view(), p)
+
     def m_undo(self, p):
         view = self._view()
         view.cancel()
@@ -270,13 +281,14 @@ class Server:
     def m_redo(self, p):
         view = self._view()
         view.cancel()
-        if self.editor.manager.has_redo():
+        if self.editor.can_redo():
             self.editor.manager.redo()
             self.editor.undone(+1)
 
     def _refuse_foreign(self, what):
         if self.editor.foreign_selection():
-            text = "cannot %s objects inside cells of other views; open that view" % what
+            text = ("cannot %s objects inside cells of other views; descend into the "
+                    "instance or open that view" % what)
             self.editor.notice("warning", text)
             raise RuntimeError(text)
 
@@ -338,9 +350,21 @@ class Server:
         if not path:
             raise ValueError("show_cell: empty path")
         view.select_cell_path(path, 0)
-        if any(self._doc().foreign.get(ci) for ci in path):
-            self.editor.notice("warning", "this cell belongs to another view: "
-                                          "changes made here are not saved")
+        ctx = self.editor.context()
+        if ctx is not None and not ctx["writable"]:
+            self.editor.notice("warning", "this cell belongs to another view and cannot be "
+                                          "changed here: " + ctx["reason"])
+
+    # -- editing in place (docs/KLAYOUT.md §3.4) ---------------------------------
+
+    def m_descend(self, p):
+        return self.editor.descend()
+
+    def m_ascend(self, p):
+        return self.editor.ascend(all_levels=bool(p.get("all")))
+
+    def m_locks(self, p):
+        self.editor.set_locked(p.get("files"))
 
     def m_levels(self, p):
         view = self._view()
@@ -362,6 +386,26 @@ class Server:
         view.set_config("edit-inst-pcell-parameters", "")
         view.switch_mode("instance")
         return {"name": cell.name}
+
+    # -- properties and PCells (properties.py) ------------------------------------
+
+    def m_properties(self, p):
+        self._doc()
+        return properties.describe(self.editor)
+
+    def m_set_properties(self, p):
+        self._doc()
+        return properties.apply(self.editor, p)
+
+    def m_libraries(self, p):
+        return properties.libraries()
+
+    def m_pcell_form(self, p):
+        return properties.pcell_form(self.editor, p["library"], p["cell"])
+
+    def m_place_library(self, p):
+        self._doc()
+        return properties.place_library(self.editor, p["library"], p["cell"], p.get("values"))
 
     def m_config(self, p):
         self._view().set_config(p["name"], str(p.get("value", "")))

@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      # Only xschem: KLayout (cdept-klayout/klayout) is large and not built in CI; tests
-      # that need it skip themselves.
+      # Only xschem: KLayout (cdept-klayout/klayout) is built in the job `klayout`; here
+      # the tests that need it skip themselves.
       - run: git submodule update --init cdept-xschem/xschem
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -42,6 +42,46 @@ jobs:
           if [ -f "$GITHUB_WORKSPACE/cdept-klayout/helper/cdept_klayout/main.py" ]; then
             test -f "$RUNNER_TEMP/prefix/share/cdept-klayout/cdept_klayout/main.py"
           fi
+
+  # KLayout built from the submodule (cached: the build takes about an hour on a
+  # runner), then the helper's protocol tests and the Rust tests that start it.
+  klayout:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init cdept-xschem/xschem cdept-klayout/klayout
+      - name: KLayout commit
+        id: klayout
+        run: echo "commit=$(git rev-parse HEAD:cdept-klayout/klayout)" >> "$GITHUB_OUTPUT"
+      - name: Build tools and libraries for KLayout
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential qt5-qmake qtbase5-dev qttools5-dev \
+            libqt5svg5-dev libqt5xmlpatterns5-dev qtmultimedia5-dev python3-dev ruby-dev \
+            zlib1g-dev libgit2-dev
+      - name: Build tools and libraries for the xschem helper
+        run: sudo apt-get install -y flex bison tcl-dev libcairo2-dev libjpeg-dev fonts-dejavu-core
+      - name: Cached KLayout build
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: cdept-klayout/.bin
+          key: klayout-${{ runner.os }}-${{ steps.klayout.outputs.commit }}-${{ hashFiles('cdept-klayout/build.sh') }}
+      - name: Build KLayout
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: cdept-klayout/build.sh
+      - run: cdept-klayout/.bin/klayout -v
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/cdept-klayout/.bin
+          QT_QPA_PLATFORM: offscreen
+      - name: Helper protocol tests
+        run: cdept-klayout/tests/run.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # DRC/LVS (tests/verify.rs) skip themselves: there is no PDK on the runner.
+      - name: Rust tests that start KLayout
+        run: cargo test -p libcdept --test klayout --test verify
 
   msrv:
     runs-on: ubuntu-24.04

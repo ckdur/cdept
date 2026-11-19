@@ -122,6 +122,25 @@ enum LayoutCommand {
     ExpectSelection(usize),
     ExpectModified(bool),
     ExpectMode(String),
+    // --- properties and library cells ---
+    /// Open the properties of the selection.
+    Properties,
+    /// Apply the form (`true`: and close, as OK).
+    PropertiesApply(bool),
+    /// A field of the form (`x`, `bbox.2`, `pcell.radius`) and its JSON value.
+    SetProperty(String, String),
+    ExpectProperty(String, String),
+    /// Instance mode with a cell of a KLayout library, and PCell values.
+    PlaceLibrary(String, String, serde_json::Value),
+    // --- end properties ---
+    /// The external cell edited in place (`library/cell/view`), or `None`.
+    ExpectInPlace(Option<String>),
+    /// Run DRC or LVS (`drc`, `lvs`).
+    Check(String),
+    /// The last check is done and its summary contains the text.
+    ExpectCheck(String),
+    /// Highlight DRC result n (from 1), as a click in the results panel does.
+    CheckShow(usize),
 }
 
 impl Command {
@@ -159,7 +178,11 @@ impl Command {
                         | LayoutCommand::ExpectCell(..)
                         | LayoutCommand::ExpectSelection(_)
                         | LayoutCommand::ExpectModified(_)
-                        | LayoutCommand::ExpectMode(_),
+                        | LayoutCommand::ExpectMode(_)
+                        | LayoutCommand::SetProperty(..)
+                        | LayoutCommand::ExpectProperty(..)
+                        | LayoutCommand::ExpectInPlace(_)
+                        | LayoutCommand::ExpectCheck(_),
                 )
         )
     }
@@ -552,13 +575,55 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
             ),
             _ => return Err("usage: expect_cell <name> [local|external|missing]".into()),
         },
+        "properties" => Command::Layout(LayoutCommand::Properties),
+        "properties_apply" => Command::Layout(LayoutCommand::PropertiesApply(false)),
+        "properties_ok" => Command::Layout(LayoutCommand::PropertiesApply(true)),
+        "set_property" | "expect_property" => match args.as_slice() {
+            [field, _, ..] => {
+                let value = rest[field.len()..].trim().to_string();
+                Command::Layout(if name == "set_property" {
+                    LayoutCommand::SetProperty(field.to_string(), value)
+                } else {
+                    LayoutCommand::ExpectProperty(field.to_string(), value)
+                })
+            }
+            _ => return Err(format!("usage: {name} <field> <value>")),
+        },
+        "place_library" => match args.as_slice() {
+            [library, cell, ..] => {
+                let after = rest[rest.find(cell).unwrap_or(0) + cell.len()..].trim();
+                let values = if after.is_empty() {
+                    serde_json::json!({})
+                } else {
+                    serde_json::from_str(after).map_err(|e| format!("the values: {e}"))?
+                };
+                Command::Layout(LayoutCommand::PlaceLibrary(
+                    library.to_string(),
+                    cell.to_string(),
+                    values,
+                ))
+            }
+            _ => return Err("usage: place_library <library> <cell> [<json values>]".into()),
+        },
         "expect_selection" => Command::Layout(LayoutCommand::ExpectSelection(whole(0)? as usize)),
+        "expect_in_place" => {
+            Command::Layout(LayoutCommand::ExpectInPlace(match text()?.as_str() {
+                "none" => None,
+                label => Some(label.to_string()),
+            }))
+        }
         "expect_modified" => match args.first().copied() {
             Some("yes") => Command::Layout(LayoutCommand::ExpectModified(true)),
             Some("no") => Command::Layout(LayoutCommand::ExpectModified(false)),
             _ => return Err("usage: expect_modified <yes|no>".into()),
         },
         "expect_mode" => Command::Layout(LayoutCommand::ExpectMode(text()?)),
+        "layout_check" => match args.as_slice() {
+            [check @ ("drc" | "lvs")] => Command::Layout(LayoutCommand::Check(check.to_string())),
+            _ => return Err("usage: layout_check <drc|lvs>".into()),
+        },
+        "expect_check" => Command::Layout(LayoutCommand::ExpectCheck(text()?)),
+        "check_show" => Command::Layout(LayoutCommand::CheckShow(whole(0)? as usize)),
         other => return Err(format!("unknown command '{other}'")),
     };
     Ok(Some(command))
@@ -945,6 +1010,59 @@ impl Script {
                         "the layout is {}modified",
                         if wanted { "not " } else { "" }
                     ));
+                }
+            }
+            LayoutCommand::ExpectInPlace(wanted) => {
+                let found = view.in_place().map(|c| c.label.clone());
+                if found != wanted {
+                    return Err(format!(
+                        "editing in place: {}, expected {}",
+                        found.as_deref().unwrap_or("none"),
+                        wanted.as_deref().unwrap_or("none")
+                    ));
+                }
+            }
+            LayoutCommand::Properties => view.open_properties(),
+            LayoutCommand::PropertiesApply(close) => view.apply_properties(close)?,
+            LayoutCommand::SetProperty(field, value) => {
+                view.set_properties_field(&field, &value)?
+            }
+            LayoutCommand::ExpectProperty(field, wanted) => {
+                let form = view
+                    .properties_form()
+                    .ok_or("the properties are not shown")?;
+                let mut at = &form;
+                for part in field.split('.') {
+                    at = match part.parse::<usize>() {
+                        Ok(n) => at.get(n),
+                        Err(_) => at.get(part),
+                    }
+                    .ok_or(format!("the form has no field '{field}'"))?;
+                }
+                let wanted_value: serde_json::Value =
+                    serde_json::from_str(&wanted).unwrap_or_else(|_| serde_json::json!(wanted));
+                let same = match (at.as_f64(), wanted_value.as_f64()) {
+                    (Some(a), Some(b)) => (a - b).abs() < 1e-9,
+                    _ => *at == wanted_value,
+                };
+                if !same {
+                    return Err(format!("{field} is {at}, expected {wanted}"));
+                }
+            }
+            LayoutCommand::PlaceLibrary(library, cell, values) => {
+                let values = values.as_object().cloned().unwrap_or_default();
+                view.place_library(&library, &cell, values);
+            }
+            LayoutCommand::Check(check) => view.run_check(if check == "lvs" {
+                libcdept::klayout::verify::Check::Lvs
+            } else {
+                libcdept::klayout::verify::Check::Drc
+            }),
+            LayoutCommand::CheckShow(n) => view.show_check_item(n)?,
+            LayoutCommand::ExpectCheck(text) => {
+                let status = view.check_status();
+                if status.starts_with("running") || !status.contains(&text) {
+                    return Err(format!("the check: '{status}', expected '{text}'"));
                 }
             }
             LayoutCommand::ExpectMode(wanted) => {
@@ -1440,6 +1558,37 @@ mod tests {
     }
 
     #[test]
+    fn properties_commands_parse() {
+        let layout = |c| Ok(Some(Command::Layout(c)));
+        assert_eq!(parse("properties"), layout(LayoutCommand::Properties));
+        assert_eq!(
+            parse("properties_ok"),
+            layout(LayoutCommand::PropertiesApply(true))
+        );
+        assert_eq!(
+            parse("set_property pcell.text hello world"),
+            layout(LayoutCommand::SetProperty(
+                "pcell.text".into(),
+                "hello world".into()
+            ))
+        );
+        assert_eq!(
+            parse("expect_property bbox.2 1.5"),
+            layout(LayoutCommand::ExpectProperty("bbox.2".into(), "1.5".into()))
+        );
+        assert_eq!(
+            parse(r#"place_library Basic CIRCLE {"actual_radius": 2}"#),
+            layout(LayoutCommand::PlaceLibrary(
+                "Basic".into(),
+                "CIRCLE".into(),
+                serde_json::json!({"actual_radius": 2})
+            ))
+        );
+        assert!(parse("set_property x").is_err());
+        assert!(parse("place_library Basic").is_err());
+    }
+
+    #[test]
     fn layout_commands_parse() {
         let layout = |c| Ok(Some(Command::Layout(c)));
         assert_eq!(parse("mode box"), layout(LayoutCommand::Mode("box".into())));
@@ -1448,6 +1597,15 @@ mod tests {
             layout(LayoutCommand::Zoom("fit".into()))
         );
         assert_eq!(parse("save"), layout(LayoutCommand::Save));
+        assert_eq!(
+            parse("layout_check lvs"),
+            layout(LayoutCommand::Check("lvs".into()))
+        );
+        assert_eq!(
+            parse("expect_check DRC clean"),
+            layout(LayoutCommand::ExpectCheck("DRC clean".into()))
+        );
+        assert!(parse("layout_check erc").is_err());
         assert_eq!(
             parse("place logic inv layout"),
             layout(LayoutCommand::Place(Selection::view(

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<report-database>
+ <description/>
+ <original-file/>
+ <generator/>
+ <top-cell/>
+ <tags>
+ </tags>
+ <categories>
+  <category>
+   <name>a.b</name>
+   <description/>
+   <categories>
+    <category>
+     <name>sub</name>
+     <description/>
+     <categories>
+     </categories>
+    </category>
+   </categories>
+  </category>
+ </categories>
+ <cells>
+  <cell>
+   <name>TOP</name>
+   <variant/>
+   <layout-name/>
+   <references>
+   </references>
+  </cell>
+  <cell>
+   <name>SUB</name>
+   <variant>1</variant>
+   <layout-name/>
+   <references>
+    <ref>
+     <parent>TOP</parent>
+     <trans>m45 *1 10,0</trans>
+    </ref>
+   </references>
+  </cell>
+ </cells>
+ <items>
+  <item>
+   <tags/>
+   <category>'a.b'.sub</category>
+   <cell>SUB:1</cell>
+   <visited>false</visited>
+   <multiplicity>1</multiplicity>
+   <comment/>
+   <image/>
+   <values>
+    <value>box: (0,0;1,2)</value>
+   </values>
+  </item>
+  <item>
+   <tags/>
+   <category>'a.b'</category>
+   <cell>TOP</cell>
+   <visited>false</visited>
+   <multiplicity>1</multiplicity>
+   <comment/>
+   <image/>
+   <values>
+    <value>edge-pair: (0,0;1,0)/(0,1;1,1)</value>
+    <value>label: ('hi &amp;&lt;',r0 1,1)</value>
+    <value>float: 3.5</value>
+    <value>text: 'str\'x'</value>
+    <value>path: (0,0;1,0) w=0.2 bx=0 ex=0 r=false</value>
+    <value>polygon: (0,0;0,4;4,4;4,0/1,1;2,1;2,2;1,2)</value>
+    <value>polygon: (0,0;0,4;4,4;4,0/1,1;2,1;2,2;1,2)</value>
+    <value>edge: (0,0;3,3)</value>
+   </values>
+  </item>
+ </items>
+</report-database>

@@ -36,6 +36,9 @@ a scratch copy of the project:
 | `cdept-gui/scripts/buffer-sim.script` | the simulator configuration, Netlist and Simulate as a background job (a copy command stands in for the simulator, so no ngspice is needed), failed jobs, a waveform graph with its dialog, cursors and zoom | a netlist, a raw file and a graph into the project |
 | `cdept-gui/scripts/buffer-preview.script` | pictures xschem draws inside its own dialogs (key cheat sheet, its file browser), pasting the desktop's clipboard into a dialog, Tcl's `clipboard get` / `selection get` (run it by name: `run.sh cdept-gui/scripts/buffer-preview.script`) | nothing |
 | `cdept-gui/scripts/layout-smoke.script` | the embedded KLayout: the picture, layers and cells (external cells), modes, notices, drawing, undo/redo, save (sidecar), Place Cell, self-contained export, opening an external cell, closing a changed layout (needs `cdept-klayout/.bin/klayout`, see cdept-klayout/README.md) | into the project: run it on a copy (`run.sh cdept-gui/scripts/layout-smoke.script`) |
+| `cdept-gui/scripts/layout-inplace.script` | edit in place: descend into an external cell (Shift+X), draw, save writes both files, the other tab reloads | into the project: run it on a copy |
+| `cdept-gui/scripts/layout-properties.script` | the properties dialog (box, instance, PCell parameters), Place Library Cell (Basic CIRCLE), box by dragging | into the project: run it on a copy |
+| `cdept-gui/scripts/layout-checks.script` | Run DRC / Run LVS, the results panel, highlight and zoom (needs `PDK_ROOT=/opt/ext/OpenPDKs PDK=ihp-sg13g2` or similar; not in the default set) | nothing |
 
 
 `$PROJECT` in a script stands for the folder of the project being opened.
@@ -167,7 +170,7 @@ document too: `open <library> <cell> <layout view>`, `close`, `close_tab`,
 `Escape`), `text`, `frame`, `pixel`, `expect_pixel`, `check_picture`, `screenshot`.
 Pixel positions are those of the picture. The xschem commands (`tcl`, `menu`,
 `click_instance`, dialogs, the picker) fail on a layout. Note that KLayout's box, polygon
-and path tools take **clicks**, not a drag.
+and path tools take **clicks**; a box can also be dragged (press, move, release).
 
 | Command | Does |
 |---|---|
@@ -190,6 +193,14 @@ and path tools take **clicks**, not a drag.
 | `expect_selection <n>` | Fail unless `n` objects are selected |
 | `expect_modified <yes\|no>` | Fail unless the layout does (not) have unsaved changes (the tab's star) |
 | `expect_mode <name>` | Fail unless the editor is in this mode |
+| `expect_in_place <library/cell/view\|none>` | Fail unless that external cell is being edited in place (Shift+X) |
+| `properties` / `properties_apply` / `properties_ok` | Open / apply / apply and close the properties of the selection |
+| `set_property <field> <json>` | Change a field of the properties form (`x`, `bbox.2`, `array.na`, `pcell.<name>`) |
+| `expect_property <field> <json>` | Fail unless a field of the properties form has this value |
+| `place_library <library> <cell> [<json values>]` | Instance mode with a cell or PCell of a KLayout library (PDK, Basic) |
+| `layout_check <drc\|lvs>` | Run DRC or LVS on the open layout (needs the PDK in the environment) |
+| `expect_check <text>` | Wait until the last check is done and fail unless its summary contains the text |
+| `check_show <n>` | Highlight DRC result n (from 1), as a click in the results panel does |
 
 KLayout reports a changed modified flag with the next request it handles, so the
 `expect_*` commands above ask it for a sign of life while they wait.

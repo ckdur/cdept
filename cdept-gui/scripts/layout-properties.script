@@ -1,0 +1,68 @@
+# The properties dialog, PCells of KLayout's libraries and boxes drawn by dragging, on
+# examples/buffer. Writes into the project: run it on a copy, as run.sh does.
+#
+#   cdept-gui/scripts/run.sh cdept-gui/scripts/layout-properties.script
+#
+# Positions are pixels of the picture (as in layout-smoke.script).
+
+open logic buf layout
+wait_frame
+expect_cell inv external
+
+# A box by press, drag and release (KLayout itself takes two clicks).
+add_layer 10 0 props
+current_layer props
+mode box
+drag 200 300 260 360
+expect_modified yes
+mode select
+click 230 330
+expect_selection 1
+
+# Its properties: the box, in µm; a new right edge is one undo step.
+properties
+expect_property kind box
+expect_property layer "props (10/0)"
+set_property bbox.2 30
+properties_apply
+expect_property bbox.2 30
+layout_edit undo
+layout_edit redo
+expect_modified yes
+
+# A double click on the left inverter: an external cell, whose place can change.
+layout_edit clear_selection
+double_click 170 40
+expect_selection 1
+expect_property kind instance
+expect_property cell inv
+expect_property external "logic/inv/layout"
+set_property y -1.5
+properties_ok
+expect_modified yes
+
+# A PCell of KLayout's "Basic" library, placed and then changed in the dialog.
+place_library Basic CIRCLE {"actual_radius": 0.5, "layer": "10/0"}
+expect_mode instance
+click 60 60
+mode select
+layout_edit clear_selection
+# (not at once: two clicks in the same place are a double click)
+wait 0.5
+click 60 60
+expect_selection 1
+properties
+expect_property kind instance
+expect_property cell CIRCLE
+expect_property library Basic
+expect_property pcell.actual_radius 0.5
+set_property pcell.actual_radius 1.25
+properties_apply
+expect_property pcell.actual_radius 1.25
+screenshot /tmp/cdept-layout-properties.png
+
+save
+expect_modified no
+close
+expect_documents 0
+quit
