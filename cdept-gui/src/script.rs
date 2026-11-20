@@ -133,6 +133,12 @@ enum LayoutCommand {
     /// Instance mode with a cell of a KLayout library, and PCell values.
     PlaceLibrary(String, String, serde_json::Value),
     // --- end properties ---
+    // --- PCells: another cell for the instance shown in the properties ---
+    /// A cell of a KLayout library, with PCell values.
+    ReplaceLibrary(String, String, serde_json::Value),
+    /// A layout view of the project: library, cell, view.
+    ReplaceView(String, String, String),
+    // --- end PCells ---
     /// The external cell edited in place (`library/cell/view`), or `None`.
     ExpectInPlace(Option<String>),
     /// Run DRC or LVS (`drc`, `lvs`).
@@ -141,6 +147,16 @@ enum LayoutCommand {
     ExpectCheck(String),
     /// Highlight DRC result n (from 1), as a click in the results panel does.
     CheckShow(usize),
+    // --- linking with the schematic (docs/LINKING.md) ---
+    /// Generate / Update from Schematic (`true`: also remove extra instances).
+    LinkGenerate(bool),
+    /// Select instances by schematic name, as a click in the Link panel does.
+    LinkSelect(Vec<String>),
+    /// The Link panel shows this status for a schematic instance.
+    ExpectLink(String, String),
+    /// The names bound to the layout's selection, as cross-probing last saw them.
+    ExpectProbed(Vec<String>),
+    // --- end linking ---
 }
 
 impl Command {
@@ -182,7 +198,9 @@ impl Command {
                         | LayoutCommand::SetProperty(..)
                         | LayoutCommand::ExpectProperty(..)
                         | LayoutCommand::ExpectInPlace(_)
-                        | LayoutCommand::ExpectCheck(_),
+                        | LayoutCommand::ExpectCheck(_)
+                        | LayoutCommand::ExpectLink(..)
+                        | LayoutCommand::ExpectProbed(_),
                 )
         )
     }
@@ -605,6 +623,32 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
             }
             _ => return Err("usage: place_library <library> <cell> [<json values>]".into()),
         },
+        // --- PCells ---
+        "replace_library" => match args.as_slice() {
+            [library, cell, ..] => {
+                let after = rest[rest.find(cell).unwrap_or(0) + cell.len()..].trim();
+                let values = if after.is_empty() {
+                    serde_json::json!({})
+                } else {
+                    serde_json::from_str(after).map_err(|e| format!("the values: {e}"))?
+                };
+                Command::Layout(LayoutCommand::ReplaceLibrary(
+                    library.to_string(),
+                    cell.to_string(),
+                    values,
+                ))
+            }
+            _ => return Err("usage: replace_library <library> <cell> [<json values>]".into()),
+        },
+        "replace_view" => match args.as_slice() {
+            [library, cell, view] => Command::Layout(LayoutCommand::ReplaceView(
+                library.to_string(),
+                cell.to_string(),
+                view.to_string(),
+            )),
+            _ => return Err("usage: replace_view <library> <cell> <view>".into()),
+        },
+        // --- end PCells ---
         "expect_selection" => Command::Layout(LayoutCommand::ExpectSelection(whole(0)? as usize)),
         "expect_in_place" => {
             Command::Layout(LayoutCommand::ExpectInPlace(match text()?.as_str() {
@@ -624,6 +668,26 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
         },
         "expect_check" => Command::Layout(LayoutCommand::ExpectCheck(text()?)),
         "check_show" => Command::Layout(LayoutCommand::CheckShow(whole(0)? as usize)),
+        // --- linking with the schematic ---
+        "link_generate" => match args.as_slice() {
+            [] => Command::Layout(LayoutCommand::LinkGenerate(false)),
+            ["remove"] => Command::Layout(LayoutCommand::LinkGenerate(true)),
+            _ => return Err("usage: link_generate [remove]".into()),
+        },
+        "link_select" => Command::Layout(LayoutCommand::LinkSelect(
+            args.iter().map(|a| a.to_string()).collect(),
+        )),
+        "expect_link" => match args.as_slice() {
+            [name, status] => Command::Layout(LayoutCommand::ExpectLink(
+                name.to_string(),
+                status.to_string(),
+            )),
+            _ => return Err("usage: expect_link <instance> <status>".into()),
+        },
+        "expect_probed" => Command::Layout(LayoutCommand::ExpectProbed(match args.as_slice() {
+            ["none"] => Vec::new(),
+            names => names.iter().map(|a| a.to_string()).collect(),
+        })),
         other => return Err(format!("unknown command '{other}'")),
     };
     Ok(Some(command))
@@ -1053,12 +1117,45 @@ impl Script {
                 let values = values.as_object().cloned().unwrap_or_default();
                 view.place_library(&library, &cell, values);
             }
+            LayoutCommand::ReplaceLibrary(library, cell, values) => {
+                let values = values.as_object().cloned().unwrap_or_default();
+                view.replace_shown(crate::views::Replacement::Library {
+                    library,
+                    cell,
+                    values,
+                })?;
+            }
+            LayoutCommand::ReplaceView(library, cell, name) => {
+                let file = view
+                    .project_file(&library, &cell, &name)
+                    .ok_or(format!("there is no view {library}/{cell}/{name}"))?;
+                view.replace_shown(crate::views::Replacement::View { cell, file })?;
+            }
             LayoutCommand::Check(check) => view.run_check(if check == "lvs" {
                 libcdept::klayout::verify::Check::Lvs
             } else {
                 libcdept::klayout::verify::Check::Drc
             }),
             LayoutCommand::CheckShow(n) => view.show_check_item(n)?,
+            LayoutCommand::LinkGenerate(remove) => view.generate_from_schematic(None, remove),
+            LayoutCommand::LinkSelect(names) => view.link_select(&names),
+            LayoutCommand::ExpectLink(name, wanted) => {
+                let found = view.link_status(&name);
+                if view.link_busy() || found != Some(wanted.as_str()) {
+                    return Err(format!(
+                        "the Link panel says {name} is {}, expected {wanted}",
+                        found.unwrap_or("not in the schematic")
+                    ));
+                }
+            }
+            LayoutCommand::ExpectProbed(wanted) => {
+                if view.link_probed() != wanted.as_slice() {
+                    return Err(format!(
+                        "the layout's selection is {:?}, expected {wanted:?}",
+                        view.link_probed()
+                    ));
+                }
+            }
             LayoutCommand::ExpectCheck(text) => {
                 let status = view.check_status();
                 if status.starts_with("running") || !status.contains(&text) {
@@ -1586,6 +1683,23 @@ mod tests {
         );
         assert!(parse("set_property x").is_err());
         assert!(parse("place_library Basic").is_err());
+        assert_eq!(
+            parse(r#"replace_library Basic TEXT {"text": "a"}"#),
+            layout(LayoutCommand::ReplaceLibrary(
+                "Basic".into(),
+                "TEXT".into(),
+                serde_json::json!({"text": "a"})
+            ))
+        );
+        assert_eq!(
+            parse("replace_view logic inv layout"),
+            layout(LayoutCommand::ReplaceView(
+                "logic".into(),
+                "inv".into(),
+                "layout".into()
+            ))
+        );
+        assert!(parse("replace_view logic inv").is_err());
     }
 
     #[test]

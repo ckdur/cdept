@@ -10,17 +10,19 @@ pub enum Template {
     GdsLayout,
     SpiceNetlist,
     Verilog,
+    KlayoutPcell,
 }
 
 const XSCHEM_HEADER: &str = "v {xschem version=3.4.5 file_version=1.2\n}\n";
 
 impl Template {
-    pub const ALL: [Template; 5] = [
+    pub const ALL: [Template; 6] = [
         Self::XschemSchematic,
         Self::XschemSymbol,
         Self::GdsLayout,
         Self::SpiceNetlist,
         Self::Verilog,
+        Self::KlayoutPcell,
     ];
 
     pub fn label(self) -> &'static str {
@@ -30,6 +32,7 @@ impl Template {
             Self::GdsLayout => "Layout (GDSII)",
             Self::SpiceNetlist => "Netlist (SPICE)",
             Self::Verilog => "HDL (Verilog)",
+            Self::KlayoutPcell => "PCell (KLayout, Python)",
         }
     }
 
@@ -40,6 +43,7 @@ impl Template {
             Self::GdsLayout => Format::Gds,
             Self::SpiceNetlist => Format::Spice,
             Self::Verilog => Format::Verilog,
+            Self::KlayoutPcell => Format::KlayoutPcell,
         }
     }
 
@@ -60,6 +64,7 @@ impl Template {
             Self::GdsLayout => "gds",
             Self::SpiceNetlist => "spice",
             Self::Verilog => "v",
+            Self::KlayoutPcell => "pcell.py",
         }
     }
 
@@ -81,9 +86,68 @@ impl Template {
             Self::GdsLayout => empty_gds(cell),
             Self::SpiceNetlist => format!("* {cell}\n.subckt {cell}\n.ends {cell}\n").into_bytes(),
             Self::Verilog => format!("module {cell} ();\n\nendmodule\n").into_bytes(),
+            Self::KlayoutPcell => pcell_python(cell).into_bytes(),
         }
     }
 }
+
+/// A working PCell: a resistor-like bar of `l` × `w` µm with a contact square at each
+/// end, on layers that are parameters (docs/KLAYOUT.md §3.6 for the conventions).
+fn pcell_python(cell: &str) -> String {
+    let class: String = cell
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            let mut chars = p.chars();
+            chars.next().map_or(String::new(), |c| {
+                c.to_ascii_uppercase().to_string() + chars.as_str()
+            })
+        })
+        .collect();
+    let class = if class.is_empty() || class.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("Pcell{class}")
+    } else {
+        class
+    };
+    PCELL_TEMPLATE
+        .replace("@CELL@", cell)
+        .replace("@CLASS@", &class)
+}
+
+const PCELL_TEMPLATE: &str = r#"# PCell "@CELL@" for KLayout, registered by CDePT in the KLayout library named after
+# this CDePT library. Conventions (docs/KLAYOUT.md §3.6):
+# - the file is <cell>.pcell.py in the cell's pcell view; the PCell is named after the cell;
+# - it defines one subclass of pya.PCellDeclarationHelper (or names it: PCELL = ...);
+# - saving this file updates every layout open in CDePT that places the PCell.
+import pya
+
+
+class @CLASS@(pya.PCellDeclarationHelper):
+    def __init__(self):
+        super().__init__()
+        self.param("body", self.TypeLayer, "Body layer", default=pya.LayerInfo(1, 0))
+        self.param("contact", self.TypeLayer, "Contact layer", default=pya.LayerInfo(2, 0))
+        self.param("l", self.TypeDouble, "Length", default=2.0, unit="µm")
+        self.param("w", self.TypeDouble, "Width", default=0.5, unit="µm")
+        self.param("c", self.TypeDouble, "Contact size", default=0.3, unit="µm")
+
+    def display_text_impl(self):
+        return "@CELL@(l=%g, w=%g)" % (self.l, self.w)
+
+    def coerce_parameters_impl(self):
+        self.w = max(self.w, self.c)
+        self.l = max(self.l, 2 * self.c)
+
+    def produce_impl(self):
+        l, w, c = self.l, self.w, self.c
+        self.cell.shapes(self.body_layer).insert(pya.DBox(0, 0, l, w))
+        y = (w - c) / 2
+        for x in (0, l - c):
+            self.cell.shapes(self.contact_layer).insert(pya.DBox(x, y, x + c, y + c))
+
+
+PCELL = @CLASS@
+"#;
 
 /// A GDSII stream with one empty structure named `cell`.
 /// Database unit 1 nm, user unit 1 µm.
@@ -161,6 +225,18 @@ mod tests {
         );
         // The odd-length name is padded.
         assert!(gds.windows(4).any(|w| w == b"ota\0"));
+    }
+
+    #[test]
+    fn pcell_template_names_its_class() {
+        let text = String::from_utf8(Template::KlayoutPcell.contents("r_poly-2")).unwrap();
+        assert!(
+            text.contains("class RPoly2(pya.PCellDeclarationHelper):"),
+            "{text}"
+        );
+        assert!(text.contains("PCELL = RPoly2"));
+        let text = String::from_utf8(Template::KlayoutPcell.contents("2r")).unwrap();
+        assert!(text.contains("class Pcell2r("));
     }
 
     #[test]

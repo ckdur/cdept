@@ -16,7 +16,7 @@ pub mod meta;
 pub mod oasis;
 pub mod refs;
 
-pub use meta::{Meta, MetaRef};
+pub use meta::{Linked, Meta, MetaRef, Source};
 pub use refs::{FileRefs, Ref, RefTable};
 
 /// Write `bytes` to `path` through a temporary file in the same folder, then rename.
@@ -40,6 +40,20 @@ pub fn read_summary(file: &std::path::Path) -> eyre::Result<gds::GdsSummary> {
     } else {
         gds::read_structure(file)
     }
+}
+
+/// Every cell placement of a layout file (GDSII or OASIS) with the value of its GDS
+/// property `attr` (the schematic instance name of docs/LINKING.md uses
+/// [`crate::link::NAME_PROPERTY`]).
+pub fn read_placements(file: &std::path::Path, attr: u16) -> eyre::Result<Vec<gds::Placement>> {
+    use eyre::Context;
+    let bytes = std::fs::read(file).wrap_err_with(|| format!("cannot read {}", file.display()))?;
+    if is_oasis(file) {
+        oasis::placements(&bytes, u64::from(attr))
+    } else {
+        gds::placements(&bytes, attr)
+    }
+    .wrap_err_with(|| format!("cannot read the placements of {}", file.display()))
 }
 
 /// Rename cells (structures) in a layout file and the placements of them, GDSII or

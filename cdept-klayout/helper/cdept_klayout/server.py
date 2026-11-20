@@ -15,6 +15,8 @@ import pya
 
 from .document import RefTable
 from . import properties
+from . import link
+from . import pcells
 from .editor import Editor, _message
 from .markers import Markers
 
@@ -23,6 +25,8 @@ PROTOCOL_VERSION = 1
 POLL = 0.01
 # Pointer-only status updates are sent at most this often.
 STATUS_INTERVAL = 0.03
+# Seconds between looks at the project's PCell files (pcells.py).
+PCELL_CHECK = 1.0
 
 
 class Connection:
@@ -99,6 +103,7 @@ class Server:
         self.last_status = 0.0
         self.guard = ModalGuard(self.editor.notice)
         self.markers = Markers()
+        self.last_pcell_check = time.monotonic()
 
     def send(self, message):
         self.conn.send(message)
@@ -116,6 +121,7 @@ class Server:
                 if not self.running:
                     break
             self.process_events()
+            self.pcells_tick()
             self.editor.render()
             now = time.monotonic()
             if full or (messages and now - self.last_status >= STATUS_INTERVAL):
@@ -125,6 +131,35 @@ class Server:
                 except Exception as error:
                     print("cdept-klayout: report: %s" % error, file=sys.stderr)
         self.editor.close()
+
+    # -- PCells of the project (pcells.py) ------------------------------------------
+
+    def pcells_tick(self):
+        """Now and then: register PCell files that changed again (KLayout rebuilds
+        their instances, which is not an edit), and show what went wrong in them."""
+        now = time.monotonic()
+        if now - self.last_pcell_check >= PCELL_CHECK:
+            self.last_pcell_check = now
+            self.refresh_pcells()
+        for level, text in pcells.take_messages():
+            self.editor.notice(level, text)
+
+    def refresh_pcells(self):
+        try:
+            changed = pcells.refresh()
+        except Exception as error:
+            self.editor.notice("error", "PCells: %s" % _message(error))
+            return False
+        if changed and self.editor.view is not None:
+            self.editor.forget_changes()
+            self.editor.dirty_frame = True
+        return changed
+
+    def m_refresh_pcells(self, p):
+        if "pcells" in p:
+            pcells.want(p["pcells"])
+        changed = self.refresh_pcells()
+        return {"changed": changed, "libraries": pcells.libraries()}
 
     def process_events(self):
         if self.app is not None and hasattr(self.app, "process_events"):
@@ -230,12 +265,14 @@ class Server:
         view = pya.LayoutView(False)
         index = view.create_layout(False)
         cv = view.cellview(index)
-        doc = Document(cv.layout(), RefTable(refs)).load()
+        if technology:
+            cv.technology = technology
+        table = RefTable(refs)
+        pcells.sync(table.pcells)
+        doc = Document(cv.layout(), table).load()
         top = doc.top_cell()
         if top is not None:
             cv.cell = top
-        if technology:
-            cv.technology = technology
         if layer_properties:
             view.load_layer_props(layer_properties, True)
         view.add_missing_layers()
@@ -377,6 +414,7 @@ class Server:
         if not table.root:
             raise ValueError("place: the reference table has no root")
         doc.table.merge(table)
+        pcells.sync(doc.table.pcells)
         cell = doc.place(table.root, p.get("name"))
         self.editor.forget_changes()  # loading is not an edit
         self._notes(doc)
@@ -406,6 +444,39 @@ class Server:
     def m_place_library(self, p):
         self._doc()
         return properties.place_library(self.editor, p["library"], p["cell"], p.get("values"))
+
+    def m_replace_cell(self, p):
+        doc = self._doc()
+        if p.get("refs"):  # another layout view of the project
+            table = RefTable(p["refs"])
+            doc.table.merge(table)
+            pcells.sync(doc.table.pcells)
+            cell = doc.place(table.root, p.get("name"))
+            self.editor.forget_changes()  # loading is not an edit
+            self._notes(doc)
+            p = dict(p, target=cell.cell_index())
+        return properties.replace_cell(self.editor, p)
+
+    # -- linking with a schematic (link.py, docs/LINKING.md) ------------------------
+
+    def m_link_apply(self, p):
+        return link.apply(self.editor, p)
+
+    def m_link_instances(self, p):
+        return link.instances(self.editor)
+
+    def m_link_select(self, p):
+        return link.select(self.editor, p.get("names"), zoom=bool(p.get("zoom")))
+
+    def m_link_selected(self, p):
+        return link.selected(self.editor)
+
+    def m_link_highlight(self, p):
+        """Markers around the instances of these names (empty: clear)."""
+        boxes = link.boxes(self.editor, p.get("names"))
+        shapes = [{"kind": "box", "box": b} for b in boxes]
+        return self.markers.set(self._view(), {"shapes": shapes, "color": p.get("color"),
+                                               "zoom": bool(p.get("zoom"))})
 
     def m_config(self, p):
         self._view().set_config(p["name"], str(p.get("value", "")))

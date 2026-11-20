@@ -1,0 +1,51 @@
+# Linking a schematic with its layout (docs/LINKING.md) on examples/buffer: buf's
+# schematic places inv twice and buf's layout has two inv instances that are not
+# linked yet. Generate takes them over; then the selection follows between the
+# schematic tab and the layout tab (cross-probing).
+# Writes into the project: run it on a copy, as cdept-gui/scripts/run.sh does.
+#
+#   cdept-gui/scripts/run.sh cdept-gui/scripts/layout-link.script
+
+open logic buf schematic
+wait_frame
+open logic buf layout
+wait_frame
+expect_documents 2
+expect_modified no
+
+# Generate / Update from Schematic: x1 and x2 are the inv instances already there.
+link_generate
+expect_link x1 ok
+expect_link x2 ok
+expect_notice 2 taken over
+expect_modified yes
+screenshot /tmp/cdept-link-1-generated.png
+save
+expect_modified no
+layout_call link_instances
+
+# Layout -> schematic: a click on x2 in the Link panel selects x2 in the schematic.
+link_select x2
+expect_selection 1
+expect_probed x2
+open logic buf schematic
+expect_selected x2
+screenshot /tmp/cdept-link-2-probe-schematic.png
+
+# Schematic -> layout: x1 clicked in the schematic is selected in the layout.
+click_instance x1
+expect_selected x1
+open logic buf layout
+expect_probed x1
+expect_selection 1
+screenshot /tmp/cdept-link-3-probe-layout.png
+
+# Undo takes the generate back; generating again is one step, then nothing to do.
+layout_edit undo
+link_generate
+expect_link x1 ok
+link_generate
+expect_notice 0 added
+save
+expect_modified no
+quit

@@ -9,6 +9,7 @@ pub mod entry;
 pub mod klayout;
 pub mod layout;
 pub mod library;
+pub mod link;
 pub mod project;
 pub mod technology;
 pub mod template;

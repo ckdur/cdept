@@ -1,0 +1,103 @@
+# CDePT device map for IHP SG13G2 (docs/LINKING.md §3): which PCell of KLayout's
+# SG13_dev library an xschem symbol of sg13g2_pr becomes when a layout is generated
+# from a schematic. Templates: @attr is the instance's attribute (else the symbol's
+# default), @{attr|u} that value as a SPICE number written in µm with "u" (what the
+# SG13_dev PCells expect: "0.15u").
+format = "cdept-devices"
+version = 1
+
+# Labels for ipin/opin/iopin: text on Metal1.text (8/25), the layer IHP's LVS deck
+# reads pin names from.
+[pins]
+layer = "8/25"
+size = 0.1
+
+[[device]]
+symbol = "sg13g2_pr/sg13_lv_nmos.sym"
+library = "SG13_dev"
+cell = "nmos"
+params = { model = "@model", w = "@{w|u}", l = "@{l|u}", ng = "@ng", m = "@m" }
+
+[[device]]
+symbol = "sg13g2_pr/sg13_lv_pmos.sym"
+library = "SG13_dev"
+cell = "pmos"
+params = { model = "@model", w = "@{w|u}", l = "@{l|u}", ng = "@ng", m = "@m" }
+
+[[device]]
+symbol = "sg13g2_pr/sg13_hv_nmos.sym"
+library = "SG13_dev"
+cell = "nmosHV"
+params = { model = "@model", w = "@{w|u}", l = "@{l|u}", ng = "@ng", m = "@m" }
+
+[[device]]
+symbol = "sg13g2_pr/sg13_hv_pmos.sym"
+library = "SG13_dev"
+cell = "pmosHV"
+params = { model = "@model", w = "@{w|u}", l = "@{l|u}", ng = "@ng", m = "@m" }
+
+[[device]]
+symbol = "sg13g2_pr/rsil.sym"
+library = "SG13_dev"
+cell = "rsil"
+params = { w = "@{w|u}", l = "@{l|u}" }
+
+[[device]]
+symbol = "sg13g2_pr/rppd.sym"
+library = "SG13_dev"
+cell = "rppd"
+params = { w = "@{w|u}", l = "@{l|u}", b = "@b" }
+
+[[device]]
+symbol = "sg13g2_pr/rhigh.sym"
+library = "SG13_dev"
+cell = "rhigh"
+params = { w = "@{w|u}", l = "@{l|u}", b = "@b" }
+
+[[device]]
+symbol = "sg13g2_pr/cap_cmim.sym"
+library = "SG13_dev"
+cell = "cmim"
+params = { w = "@{w|u}", l = "@{l|u}", m = "@m" }
+
+[[device]]
+symbol = "sg13g2_pr/cap_rfcmim.sym"
+library = "SG13_dev"
+cell = "rfcmim"
+params = { w = "@{w|u}", l = "@{l|u}", wfeed = "@{wfeed|u}" }
+
+[[device]]
+symbol = "sg13g2_pr/ntap1.sym"
+library = "SG13_dev"
+cell = "ntap1"
+params = { w = "@{w|u}", l = "@{l|u}" }
+
+[[device]]
+symbol = "sg13g2_pr/ptap1.sym"
+library = "SG13_dev"
+cell = "ptap1"
+params = { w = "@{w|u}", l = "@{l|u}" }
+
+[[device]]
+symbol = "sg13g2_pr/dantenna.sym"
+library = "SG13_dev"
+cell = "dantenna"
+params = { w = "@{w|u}", l = "@{l|u}" }
+
+[[device]]
+symbol = "sg13g2_pr/dpantenna.sym"
+library = "SG13_dev"
+cell = "dpantenna"
+params = { w = "@{w|u}", l = "@{l|u}" }
+
+[[device]]
+symbol = "sg13g2_pr/pnpMPA.sym"
+library = "SG13_dev"
+cell = "pnpMPA"
+params = { w = "@{w|u}", l = "@{l|u}", m = "@m" }
+
+[[device]]
+symbol = "sg13g2_pr/npn13G2.sym"
+library = "SG13_dev"
+cell = "npn13G2"
+params = { Nx = "@Nx" }

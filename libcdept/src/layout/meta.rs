@@ -12,8 +12,10 @@ use serde::{Deserialize, Serialize};
 
 /// Value of [`Meta::format`].
 pub const FORMAT: &str = "cdept-layout";
-/// Current [`Meta::version`].
-pub const VERSION: u32 = 1;
+/// Current [`Meta::version`]. Version 2 added the link with a schematic
+/// ([`Meta::source`], [`Meta::instances`], docs/LINKING.md); a sidecar without a link is
+/// still written as version 1.
+pub const VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Meta {
@@ -29,6 +31,42 @@ pub struct Meta {
     /// Key: structure name used in this file for a cell of another view.
     #[serde(default)]
     pub references: BTreeMap<String, MetaRef>,
+    /// The schematic this layout is linked with (version 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Source>,
+    /// What each schematic instance was made into at the last sync, by instance name
+    /// (version 2). The layout instance carries the name as a property (docs/LINKING.md).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub instances: BTreeMap<String, Linked>,
+}
+
+/// A schematic view: `library/cell/view`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Source {
+    pub library: String,
+    pub cell: String,
+    pub view: String,
+}
+
+impl Source {
+    pub fn label(&self) -> String {
+        format!("{}/{}/{}", self.library, self.cell, self.view)
+    }
+}
+
+/// One schematic instance as placed in the layout at the last sync.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Linked {
+    /// The symbol, as the schematic refers to it.
+    pub symbol: String,
+    /// `pcell` (a PCell of a KLayout library) or `cell` (a layout view of the project).
+    pub kind: String,
+    /// KLayout library name (PCells) or CDePT library name (cells).
+    pub library: String,
+    pub cell: String,
+    /// PCell parameters as set (PCells only).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -48,13 +86,20 @@ impl Meta {
     pub fn new(library: &str, cell: &str, view: &str, top: &str) -> Meta {
         Meta {
             format: FORMAT.to_string(),
-            version: VERSION,
+            version: 1,
             library: library.to_string(),
             cell: cell.to_string(),
             view: view.to_string(),
             top: top.to_string(),
             references: BTreeMap::new(),
+            source: None,
+            instances: BTreeMap::new(),
         }
+    }
+
+    /// True when the sidecar links the layout with a schematic.
+    pub fn is_linked(&self) -> bool {
+        self.source.is_some() || !self.instances.is_empty()
     }
 
     /// `library/cell/view`.
@@ -131,7 +176,11 @@ impl Meta {
     pub fn write(&self, sidecar: &Path) -> Result<()> {
         self.validate()
             .map_err(|e| eyre!("not writing {}: {e}", sidecar.display()))?;
-        let mut text = serde_json::to_string_pretty(self)?;
+        // The oldest version that can hold it, so files without a link stay readable
+        // by an older CDePT.
+        let mut meta = self.clone();
+        meta.version = if meta.is_linked() { 2 } else { 1 };
+        let mut text = serde_json::to_string_pretty(&meta)?;
         text.push('\n');
         super::write_atomic(sidecar, text.as_bytes())
     }
@@ -218,14 +267,49 @@ mod tests {
         m.format = "other".into();
         assert!(m.validate().unwrap_err().contains("format"));
         let mut m = sample();
-        m.version = 2;
-        assert!(m.validate().unwrap_err().contains("version 2"));
+        m.version = 3;
+        assert!(m.validate().unwrap_err().contains("version 3"));
         let mut m = sample();
         m.cell.clear();
         assert!(m.validate().unwrap_err().contains("'cell' is empty"));
         let mut m = sample();
         m.references.get_mut("inv").unwrap().bbox = Some([2.0, 0.0, 1.0, 1.0]);
         assert!(m.validate().unwrap_err().contains("inv"));
+    }
+
+    #[test]
+    fn a_link_makes_version_2_and_reads_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gds = tmp.path().join("inv.gds");
+        let mut m = sample();
+        m.write_for(&gds).unwrap();
+        assert!(
+            fs::read_to_string(sidecar_path(&gds))
+                .unwrap()
+                .contains("\"version\": 1")
+        );
+        m.source = Some(Source {
+            library: "analog".into(),
+            cell: "buf".into(),
+            view: "schematic".into(),
+        });
+        m.instances.insert(
+            "M1".into(),
+            Linked {
+                symbol: "sg13g2_pr/sg13_lv_nmos.sym".into(),
+                kind: "pcell".into(),
+                library: "SG13_dev".into(),
+                cell: "nmos".into(),
+                params: BTreeMap::from([("w".to_string(), "1u".to_string())]),
+            },
+        );
+        m.write_for(&gds).unwrap();
+        let text = fs::read_to_string(sidecar_path(&gds)).unwrap();
+        assert!(text.contains("\"version\": 2"), "{text}");
+        let back = Meta::read_for(&gds).unwrap().unwrap();
+        assert_eq!(back.version, 2);
+        assert_eq!(back.instances, m.instances);
+        assert_eq!(back.source, m.source);
     }
 
     #[test]

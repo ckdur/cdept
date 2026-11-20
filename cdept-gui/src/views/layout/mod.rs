@@ -9,6 +9,7 @@
 mod checks;
 mod inplace;
 mod keys;
+mod linking;
 mod panels;
 mod pcell;
 mod place;
@@ -30,6 +31,7 @@ use serde_json::{Value, json};
 
 pub use self::inplace::coordinate;
 use self::keys::Shortcut;
+pub use self::properties::Replacement;
 use super::{CloseChoice, EditAction, EditCaps, Picture, View};
 use crate::dock::{DocId, DocRef, Tab};
 use crate::state::{Action, AppCtx, Selection};
@@ -170,6 +172,9 @@ pub struct LayoutView {
     /// Hierarchy levels shown, at most.
     levels: u32,
     place: Option<place::PlacePicker>,
+    /// The instance (`index`, `key` of the properties) that the cell chosen in
+    /// [`place`](Self::place) replaces, when it was opened by "Change…".
+    replace_target: Option<(usize, String)>,
     /// The destination of an export is being asked for.
     export_dialog: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     /// Files to open in tabs of their own (external cells).
@@ -192,6 +197,8 @@ pub struct LayoutView {
     /// The properties dialog and "Place Library Cell…", while open.
     properties: Option<properties::PropertiesDialog>,
     library_picker: Option<pcell::LibraryPicker>,
+    /// The link with the schematic (see `linking`).
+    link: linking::LinkState,
 }
 
 impl LayoutView {
@@ -213,7 +220,7 @@ impl LayoutView {
             editable,
             Arc::new(move || wake.request_repaint()),
         ));
-        Self {
+        let mut view = Self {
             id,
             doc,
             file,
@@ -268,9 +275,13 @@ impl LayoutView {
             edited: Vec::new(),
             locks_sent: None,
             written: Vec::new(),
+            replace_target: None,
             properties: None,
             library_picker: None,
-        }
+            link: linking::LinkState::new(),
+        };
+        view.find_link_source();
+        view
     }
 
     /// The file the document was opened for.
@@ -378,6 +389,7 @@ impl LayoutView {
             .extend(report.files().into_iter().map(Path::to_path_buf));
         refs::update_after_save(&self.project, &report)
             .map_err(|e| format!("saved, but the references were not recorded: {e:#}"))?;
+        self.record_link()?;
         Ok(report.file.display().to_string())
     }
 
@@ -605,6 +617,7 @@ impl LayoutView {
             // Their questions went to the helper that is gone.
             self.properties = None;
             self.library_picker = None;
+            self.link.forget_questions();
             if matches!(self.closing, Some(Closing::Saving(_))) {
                 self.closing = None;
             }
@@ -1179,6 +1192,8 @@ impl View for LayoutView {
         }
         self.poll_checks(ui.ctx());
         self.checks_panel(ui);
+        self.poll_link();
+        self.link_panel(ui, ctx);
         self.drawing(ui);
 
         if let Some(picker) = &mut self.place
@@ -1191,10 +1206,23 @@ impl View for LayoutView {
                 picker,
             ) {
                 place::Picked::Nothing => {}
-                place::Picked::Cancel => self.place = None,
+                place::Picked::Cancel => {
+                    self.place = None;
+                    self.replace_target = None;
+                }
                 place::Picked::Cell(placed) => {
                     self.place = None;
-                    self.place(project, &placed.cell, &placed.file);
+                    if let Some(target) = self.replace_target.take() {
+                        self.replace_cell(
+                            target,
+                            properties::Replacement::View {
+                                cell: placed.cell,
+                                file: placed.file,
+                            },
+                        );
+                    } else {
+                        self.place(project, &placed.cell, &placed.file);
+                    }
                 }
             }
         }
@@ -1288,6 +1316,8 @@ impl View for LayoutView {
                     }
                 });
             });
+            ui.separator();
+            self.link_menu(ui, ctx, editable);
             ui.separator();
             self.checks_menu(ui, ready);
             ui.separator();

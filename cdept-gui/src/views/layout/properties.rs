@@ -9,6 +9,20 @@ use serde_json::{Map, Value, json};
 use super::LayoutView;
 use super::pcell;
 
+/// What an instance places instead ([`LayoutView::replace_cell`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Replacement {
+    Library {
+        library: String,
+        cell: String,
+        values: Map<String, Value>,
+    },
+    View {
+        cell: String,
+        file: std::path::PathBuf,
+    },
+}
+
 /// The dialog while it is open.
 #[derive(Default)]
 pub struct PropertiesDialog {
@@ -27,6 +41,17 @@ pub struct PropertiesDialog {
     /// The selection the form was made for.
     seen: Option<(usize, Vec<String>)>,
     error: Option<String>,
+    /// "Change…" was chosen for the instance shown.
+    change: Option<ChangeCell>,
+}
+
+/// Where the new cell of an instance is chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeCell {
+    /// A cell or PCell of KLayout's libraries ("Place Library Cell…").
+    Library,
+    /// A layout view of the project ("Place Cell…").
+    View,
 }
 
 impl PropertiesDialog {
@@ -66,6 +91,76 @@ impl PropertiesDialog {
 }
 
 impl LayoutView {
+    /// Make instance `target` (`index`, `key` of the properties) place cell `cell` of
+    /// KLayout library `library` (PCell parameters `values`), or the layout view
+    /// `file` of the project. The properties show the outcome.
+    pub fn replace_cell(&mut self, target: (usize, String), with: Replacement) -> u64 {
+        let (index, key) = target;
+        let params = match with {
+            Replacement::Library {
+                library,
+                cell,
+                values,
+            } => json!({"index": index, "key": key, "library": library, "cell": cell,
+                        "values": values}),
+            Replacement::View { cell, file } => {
+                let table = libcdept::layout::refs::resolve(&self.project, &file);
+                self.refs.files.extend(table.files.clone());
+                self.refs.pcells.extend(table.pcells.clone());
+                self.session.set_refs(self.refs.clone());
+                let mut sent = self.refs.clone();
+                sent.root = file;
+                json!({"index": index, "key": key, "refs": sent, "name": cell})
+            }
+        };
+        let id = self.raw_call(method::REPLACE_CELL, params);
+        let dialog = self
+            .properties
+            .get_or_insert_with(PropertiesDialog::default);
+        dialog.asked = Some(id);
+        dialog.close_after = false;
+        id
+    }
+
+    /// The main file of view `library/cell/view` of the project.
+    pub fn project_file(
+        &self,
+        library: &str,
+        cell: &str,
+        view: &str,
+    ) -> Option<std::path::PathBuf> {
+        self.project
+            .library(library)?
+            .cell(cell)?
+            .entry(view)?
+            .main_file
+            .clone()
+    }
+
+    /// Replace the instance the properties show (for the test driver).
+    pub fn replace_shown(&mut self, with: Replacement) -> Result<(), String> {
+        let dialog = self
+            .properties
+            .as_ref()
+            .ok_or("the properties are not open")?;
+        if dialog.asked.is_some() {
+            return Err("the properties are not there yet".into());
+        }
+        let object = dialog.edit.as_ref().ok_or("nothing is selected")?;
+        if !matches!(object.shape, Shape::Instance(_)) {
+            return Err("the object shown is not an instance".into());
+        }
+        let target = (object.index, object.key.clone());
+        self.replace_cell(target, with);
+        Ok(())
+    }
+
+    /// "Change… › Layout View…": the project's layout views; the choice replaces.
+    fn choose_view_to_replace(&mut self, target: (usize, String)) {
+        self.place = Some(super::place::PlacePicker::default());
+        self.replace_target = Some(target);
+    }
+
     /// Open the properties of the selection (Q, a double click, the tool bar).
     pub fn open_properties(&mut self) {
         let mut dialog = self.properties.take().unwrap_or_default();
@@ -194,6 +289,15 @@ impl LayoutView {
         let mut open = true;
         let mut apply = None;
         let window_id = Id::new(("klayout-properties", self.id.0));
+        if let Some(change) = dialog.change.take()
+            && let Some(object) = dialog.edit.as_ref()
+        {
+            let target = (object.index, object.key.clone());
+            match change {
+                ChangeCell::Library => self.open_library_picker_to_replace(target),
+                ChangeCell::View => self.choose_view_to_replace(target),
+            }
+        }
         egui::Window::new("Properties")
             .id(window_id)
             .open(&mut open)
@@ -270,7 +374,7 @@ fn dialog_ui(ui: &mut Ui, id: Id, dialog: &mut PropertiesDialog) -> Option<bool>
         .auto_shrink([false, true])
         .show(ui, |ui| {
             ui.add_enabled_ui(editable, |ui| {
-                object_ui(ui, id, edit, &mut dialog.pcell, &layers);
+                object_ui(ui, id, edit, &mut dialog.pcell, &layers, &mut dialog.change);
             });
         });
     if let Some(error) = &dialog.error {
@@ -334,6 +438,7 @@ fn object_ui(
     object: &mut Object,
     pcell: &mut Map<String, Value>,
     layers: &[String],
+    change: &mut Option<ChangeCell>,
 ) {
     let grid = egui::Grid::new(id.with("grid"))
         .num_columns(2)
@@ -497,6 +602,26 @@ fn object_ui(
                     if let Some(lib) = &inst.library {
                         ui.weak(format!("library {lib}"));
                     }
+                    ui.menu_button("Change…", |ui| {
+                        if ui
+                            .button("Library Cell…")
+                            .on_hover_text("A cell or PCell of KLayout's libraries")
+                            .clicked()
+                        {
+                            *change = Some(ChangeCell::Library);
+                            ui.close();
+                        }
+                        if ui
+                            .button("Layout View…")
+                            .on_hover_text("A layout view of the project")
+                            .clicked()
+                        {
+                            *change = Some(ChangeCell::View);
+                            ui.close();
+                        }
+                    })
+                    .response
+                    .on_hover_text("Place another cell here, keeping position and rotation");
                 });
                 ui.end_row();
                 if let Some(label) = &inst.external {

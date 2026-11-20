@@ -21,11 +21,13 @@ pub enum ViewKind {
     Hdl,
     Abstract,
     Liberty,
+    /// A parametrised cell for KLayout, written in Python (docs/KLAYOUT.md §3.6).
+    Pcell,
     Other,
 }
 
 impl ViewKind {
-    pub const ALL: [ViewKind; 10] = [
+    pub const ALL: [ViewKind; 11] = [
         Self::Schematic,
         Self::Symbol,
         Self::Layout,
@@ -35,6 +37,7 @@ impl ViewKind {
         Self::Hdl,
         Self::Abstract,
         Self::Liberty,
+        Self::Pcell,
         Self::Other,
     ];
 
@@ -50,6 +53,7 @@ impl ViewKind {
             Self::Hdl => "hdl",
             Self::Abstract => "abstract",
             Self::Liberty => "liberty",
+            Self::Pcell => "pcell",
             Self::Other => "other",
         }
     }
@@ -89,6 +93,8 @@ pub enum Format {
     VerilogA,
     Lef,
     Liberty,
+    /// `<cell>.pcell.py`: a KLayout PCell in Python (docs/KLAYOUT.md §3.6).
+    KlayoutPcell,
 }
 
 /// File name suffixes (lower case, with the dot) and their format. Longer suffixes of
@@ -117,6 +123,7 @@ const SUFFIXES: &[(&str, Format)] = &[
     (".va", Format::VerilogA),
     (".lef", Format::Lef),
     (".lib", Format::Liberty),
+    (".pcell.py", Format::KlayoutPcell),
 ];
 
 impl Format {
@@ -151,6 +158,7 @@ impl Format {
             Self::Verilog | Self::SystemVerilog | Self::Vhdl | Self::VerilogA => ViewKind::Hdl,
             Self::Lef => ViewKind::Abstract,
             Self::Liberty => ViewKind::Liberty,
+            Self::KlayoutPcell => ViewKind::Pcell,
         }
     }
 
@@ -170,6 +178,7 @@ impl Format {
             Self::VerilogA => "Verilog-A",
             Self::Lef => "LEF",
             Self::Liberty => "Liberty",
+            Self::KlayoutPcell => "KLayout PCell (Python)",
         }
     }
 
@@ -228,6 +237,11 @@ mod tests {
         );
         assert_eq!(Format::split_name("top.v"), Some(("top", Format::Verilog)));
         assert_eq!(Format::split_name("README.md"), None);
+        assert_eq!(
+            Format::split_name("rpoly.pcell.py"),
+            Some(("rpoly", Format::KlayoutPcell))
+        );
+        assert_eq!(Format::split_name("setup.py"), None);
         // A bare suffix is not a cell.
         assert_eq!(Format::split_name(".sch"), None);
     }

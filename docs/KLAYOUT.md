@@ -178,6 +178,9 @@ OASIS views are read the same way (`libcdept::layout::oasis`: CELLNAME tables, C
 PLACEMENT, CBLOCK); KLayout writes a ghost cell as a CELLNAME without a CELL record.
 Compressed files (`.gds.gz`, `.oas.gz`) are not supported: CDePT writes its own views.
 
+Version 2 adds the link with a schematic (`source`, `instances`; docs/LINKING.md §1); a
+sidecar without a link is still written as version 1.
+
 ### 3.4 Editing in place
 Descending into an instance (`descend`) makes its cell the one edited; edits go to that
 cell's file. The next `save` writes the root as before and, for every external file
@@ -196,6 +199,22 @@ the file is renamed when it carried the old cell name and the new one is free th
 (GDS, or OASIS written back uncompressed and non-strict); the sidecar is re-keyed.
 Read-only libraries are reported, not changed. Deleting a cell or view lists the views
 that will show "cannot be found".
+### 3.6 PCells
+- KLayout libraries (PDK on KLAYOUT_PATH, Basic) and the project's PCell views are
+  placed as library cells; KLayout writes them with geometry plus a context record
+  (`$$$CONTEXT_INFO$$$` in GDS, properties in OASIS) and reads them back live. The
+  Rust readers ignore the context structure. `export` writes plain geometry
+  (`write_context_info = false`).
+- PCell view: `<cell>/pcell/<cell>.pcell.py` defines a `pya.PCellDeclarationHelper`
+  subclass (named by `PCELL = <class>`, else the only one). The PCell is named after
+  the cell, in a KLayout library named after the CDePT library. The reference table
+  carries `pcells: {library: {cell: file}}`; the helper registers them before reading
+  (technology set first, so PDK libraries bound to it link too), and again when a file
+  changes (checked every second; `refresh_pcells {pcells?}`).
+- Shape parameters are JSON objects in µm: `{"point": [x, y]}`, `{"box": [l, b, r, t]}`,
+  `{"polygon": [[x, y], …]}`, `{"path": [[x, y], …], "width": w}`, `{"edge": [p1, p2]}`.
+  Changes are coerced (current values first, then the change, then again); C++ Basic
+  PCells through the port in `basic.py`.
 
 ## 4. Protocol (`libcdept::klayout::protocol`, version 1)
 
@@ -260,9 +279,12 @@ Methods (`call`):
 | `info` | | `{klayout, technology, file, top, cells, dbu}` |
 | `properties` | `{}` | `{objects: [Object], count, layers}`: the selection as the properties dialog shows it (µm) |
 | `set_properties` | `{index, key, object, pcell}` | as `properties`; one undo step; refused when the selection changed or the object is inside another view's cell |
-| `libraries` | `{}` | `[{name, description, technologies, cells: [{name, pcell}]}]`: KLayout's libraries (also those bound to a technology) |
+| `libraries` | `{}` | `[{name, description, technologies, cells: [{name, pcell}]}]`: KLayout's libraries (also those bound to a technology; `project` true for the project's PCell views) |
 | `pcell_form` | `{library, cell}` | `{library, name, params, values}`: the parameter declarations and defaults |
 | `place_library` | `{library, cell, values}` | `{name, pcell}`: instance mode with a library cell or PCell |
+| `replace_cell` | `{index, key, library, cell, values}` or `{index, key, refs, name}` | as `properties`: the instance places another cell, transformation kept; one undo step |
+| `refresh_pcells` | `{pcells?}` | `{changed, libraries}`: PCell files that changed registered again |
+| `link_apply` / `link_instances` / `link_select` / `link_selected` / `link_highlight` | see docs/LINKING.md §5 | linking with the schematic |
 | `markers` | `{shapes: [{kind: polygon\|box\|edge\|text, …}], color?, zoom?}` | `{markers}`; empty clears (DRC/LVS highlights, never part of the layout) |
 | `python` | `{code}` | `repr` of the last expression (tests, power users) |
 
@@ -299,8 +321,9 @@ Unknown method → `ok: false`, error "unknown method …".
    OASIS references, renames that follow, DRC/LVS (§8), KLayout in CI. ✔
 
 ## 7. Known gaps and risks
-- Properties and PCell forms are CDePT's (egui); shape-type PCell parameters (handles)
-  are read-only; an instance's cell cannot be changed from the dialog.
+- Properties and PCell forms are CDePT's (egui). PCell handles are dragged by the
+  helper (select mode), not by KLayout's partial mode. A PCell view renamed breaks the
+  layouts placing it (they name LIB/PCELL).
 - Full-frame transfer on every change; 4K costs 50–85 ms. Damage rectangles or
   tile diffing later if it feels slow.
 - External cells are edited in place after a descent (§3.4); without one they stay

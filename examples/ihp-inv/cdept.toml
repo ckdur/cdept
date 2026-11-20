@@ -1,0 +1,16 @@
+# CDePT example: an inverter and a buffer in IHP SG13G2, to link schematics with
+# layouts (docs/LINKING.md). Needs the PDK: PDK_ROOT pointing at the folder that holds
+# ihp-sg13g2 (or set pdk_root below).
+name = "ihp-inv"
+technology = "ihp-sg13g2"
+# pdk_root = "/opt/ext/OpenPDKs"
+
+[libraries]
+cells = "libs/cells"
+sg13g2_pr = { path = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_pr", read_only = true }
+
+[xschem]
+rc = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/xschemrc"
+
+[klayout]
+tech = "sg13g2"

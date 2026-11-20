@@ -9,7 +9,10 @@ with an X and "<label> cannot be found" on a layer that is never written
 ("missing"). The same happens, recursively, to the ghost cells of external files.
 
 Saving writes the root's own cells only: external and missing cells become ghost
-cells again, cells that came with external files are left out. External cells edited
+cells again, cells that came with external files are left out. Cells of KLayout
+libraries (PDK PCells, the project's PCell views, docs/KLAYOUT.md §3.6) stay library
+cells wherever they are placed: KLayout writes them with their geometry and a note of
+where they come from, and reads them back as live library cells. External cells edited
 in place (descended into) are written back to their own files the same way: each file
 gets its own cells, with the cells of other files as ghosts under the names that file
 uses for them.
@@ -35,6 +38,8 @@ class RefTable:
         self.files = {}
         for name, entry in (table.get("files") or {}).items():
             self.files[os.path.normpath(name)] = entry or {}
+        # The project's PCell views: {CDePT library: {cell: file}} (pcells.py).
+        self.pcells = table.get("pcells") or {}
 
     def entry(self, path):
         return self.files.get(os.path.normpath(path), {})
@@ -54,6 +59,8 @@ class RefTable:
         """Add the files of another table (after `place`)."""
         for name, entry in other.files.items():
             self.files.setdefault(name, entry)
+        for library, cells in other.pcells.items():
+            self.pcells.setdefault(library, {}).update(cells)
 
 
 def _bbox(value):
@@ -147,13 +154,14 @@ class Document:
             self._mark_missing(ci, label, ref.get("bbox"), ref.get("reason") or "not found")
             return ci
         path = os.path.normpath(path)
+        # A file being read (one placing this one): placing it again would be a cycle.
+        if path in stack:
+            self._mark_missing(ci, label, ref.get("bbox"), "it contains itself")
+            return ci
         if path in self.by_file:
             target = self.by_file[path]
             self._redirect(ci, target)
             return target
-        if path in stack:
-            self._mark_missing(ci, label, ref.get("bbox"), "it contains itself")
-            return ci
         try:
             self._import(ci, path, label, stack + [path])
         except Exception as error:  # unreadable file and the like
@@ -187,6 +195,9 @@ class Document:
             if sc.is_ghost_cell():
                 mapping[sci] = self._nested(sc.name, path, stack)
                 self.ghost_names.setdefault(path, {})[mapping[sci]] = sc.name
+            elif sc.is_proxy() and self._library_cell(sc) is not None:
+                # A library cell or PCell: the same library cell here, still live.
+                mapping[sci] = self._library_cell(sc)
             else:
                 new = self.layout.create_cell(self._unique(sc.name))
                 mapping[sci] = new.cell_index()
@@ -213,11 +224,29 @@ class Document:
                     target.insert(array)
         self.foreign[ci]["bbox"] = self._dbbox(ci)
 
+    def _library_cell(self, sc):
+        """The index of the cell here that is library cell `sc` of another layout (a
+        PCell variant with the same parameters), or None when `sc` is not linked to a
+        library that is there (a PCell of a library not registered: copied as is)."""
+        lib = sc.library() if sc.is_library_cell() else None
+        if lib is None:
+            return None
+        try:
+            if sc.is_pcell_variant():
+                decl = sc.pcell_declaration()
+                pid = lib.layout().pcell_id(decl.name())
+                return self.layout.add_pcell_variant(lib, pid, sc.pcell_parameters_by_name())
+            return self.layout.add_lib_cell(lib, sc.library_cell_index())
+        except Exception as error:
+            self.notes.append("%s: %s" % (sc.name, error))
+            return None
+
     def _nested(self, name, path, stack):
         """The target cell for ghost `name` of external file `path`."""
         ref = self.table.ref(path, name)
-        if ref and ref.get("file") and os.path.normpath(ref["file"]) in self.by_file:
-            return self.by_file[os.path.normpath(ref["file"])]
+        target = os.path.normpath(ref["file"]) if ref and ref.get("file") else None
+        if target in self.by_file and target not in stack:
+            return self.by_file[target]
         cell = self.layout.create_cell(self._unique(name))
         return self._fill(cell.cell_index(), path, stack)
 
@@ -305,13 +334,15 @@ class Document:
         for ci, info in self.foreign.items():
             if info["missing"] or ghost_foreign:
                 out.cell(ci).clear()
-        # Keep what the root's own cells reach.
+        # Keep what the root's own cells reach (library cells too: KLayout writes them
+        # with their geometry and their library link).
         own = [ci for ci in range(out.cells()) if out.is_valid_cell_index(ci)
-               and ci not in self.foreign]
+               and ci not in self.foreign and not out.cell(ci).is_proxy()]
         keep = set(own)
         for ci in own:
             keep.update(out.cell(ci).called_cells())
-        drop = [ci for ci in self.foreign if out.is_valid_cell_index(ci) and ci not in keep]
+        drop = [ci for ci in range(out.cells()) if out.is_valid_cell_index(ci)
+                and ci not in keep and (ci in self.foreign or out.cell(ci).is_proxy())]
         if drop:
             out.delete_cells(drop)
         for ci, info in self.foreign.items():
@@ -341,10 +372,12 @@ class Document:
         def own(ci):
             info = self.foreign.get(ci)
             return info is not None and not info["missing"] and info["file"] == path
+        def library_cell(ci):
+            return out.cell(ci).is_proxy()
         # Every cell that is not this file's is emptied first, so that what it places
-        # is not reached from here.
+        # is not reached from here. Library cells stay: they are written as they are.
         for ci in range(out.cells()):
-            if out.is_valid_cell_index(ci) and not own(ci):
+            if out.is_valid_cell_index(ci) and not own(ci) and not library_cell(ci):
                 out.cell(ci).clear()
         keep = {top} | set(out.cell(top).called_cells())
         drop = [ci for ci in range(out.cells())
@@ -354,6 +387,8 @@ class Document:
         for ci in keep:
             if own(ci):
                 names[ci] = self.foreign[ci]["name"]
+                continue
+            if library_cell(ci):
                 continue
             # Another file's cell (or the root's, or a missing one): a reference.
             out.cell(ci).ghost_cell = True
@@ -409,18 +444,26 @@ class Document:
         """Write a self-contained file: every reference filled in, missing ones left as
         ghost cells. Returns {file, missing: [names]}."""
         out, ghosts = self._without(ghost_foreign=False)
-        _write(out, path)
+        # For other tools (DRC, LVS, tape-out): plain geometry, no library links.
+        _write(out, path, context=False)
         return {"file": os.path.normpath(path),
                 "missing": sorted(self.layout.cell(ci).name for ci in ghosts)}
 
 
-def _write(layout, path):
-    """Write through a temporary file so a failure leaves the old file intact."""
+def _write(layout, path, context=True):
+    """Write through a temporary file so a failure leaves the old file intact.
+    `context`: with KLayout's notes on library cells (read back as live PCells)."""
     folder, name = os.path.split(path)
     # Keep the suffix: KLayout picks the format (and compression) from it.
     tmp = os.path.join(folder, ".%s.tmp-%d.%s" % (name.split(".")[0], os.getpid(), name.split(".", 1)[-1]))
     try:
-        layout.write(tmp)
+        if context:
+            layout.write(tmp)
+        else:
+            options = pya.SaveLayoutOptions()
+            options.set_format_from_filename(tmp)
+            options.write_context_info = False
+            layout.write(tmp, options)
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):

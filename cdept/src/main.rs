@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use eyre::{Result, bail, eyre};
 use libcdept::klayout::verify::{self, Check};
 use libcdept::klayout::{Engine as KlayoutEngine, EngineOptions as KlayoutOptions};
+use libcdept::link;
 use libcdept::xschem::symbol::{self, Problem};
 use libcdept::xschem::{Engine, Hierarchy, NetlistFormat};
 use libcdept::{AddLibrary, Format, LibraryLayout, Project};
@@ -258,6 +259,39 @@ enum LayoutCommand {
         netlist: Option<PathBuf>,
         #[command(flatten)]
         check: CheckArgs,
+    },
+    // -- linking with the schematic (docs/LINKING.md) --------------------------------
+    /// Generate or update a cell's layout from its schematic (Layout XL style).
+    ///
+    /// Every device of the schematic becomes a PCell of the PDK's KLayout library (see
+    /// the device map, pdk/<PDK>/devices.toml and `[klayout] devices`), every instance
+    /// of a project cell a reference to that cell's layout. New instances are placed in
+    /// rows next to what the layout has; changed parameters are updated; the link is
+    /// recorded in the layout's sidecar. Creates the layout view if there is none.
+    Link {
+        library: String,
+        cell: String,
+        /// The schematic view, when the cell has several.
+        #[arg(long)]
+        schematic: Option<String>,
+        /// The layout view, when the cell has several.
+        #[arg(long)]
+        view: Option<String>,
+        /// Also delete layout instances whose schematic instance is gone.
+        #[arg(long)]
+        remove: bool,
+        /// Only print what would change.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Compare a cell's layout with its schematic; fails if they are not in sync.
+    CheckSource {
+        library: String,
+        cell: String,
+        #[arg(long)]
+        schematic: Option<String>,
+        #[arg(long)]
+        view: Option<String>,
     },
 }
 
@@ -600,6 +634,41 @@ fn layout_view(
         .ok_or_else(|| eyre!("cell '{cell}' has no GDS or OASIS view '{view}'"))
 }
 
+/// `cdept layout link`: generate or update the layout from the schematic.
+fn layout_link(
+    mut project: Project,
+    library: &str,
+    cell: &str,
+    schematic: Option<&str>,
+    view: Option<&str>,
+    remove: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let (map, sch) = link::prepare(&project, library, cell, schematic)?;
+    if dry_run {
+        let file = layout_view(&project, library, cell, view);
+        match file {
+            Ok(file) => println!("{}", link::check(&sch, &file)?),
+            Err(_) => println!("no layout yet: {} instance(s) to add", sch.wanted.len()),
+        }
+        return Ok(());
+    }
+    let file = link::layout_view(&mut project, library, cell, view, true)?;
+    let mut engine = KlayoutEngine::for_project(&project)?;
+    let options = link::ApplyOptions { remove };
+    let applied = link::generate(&project, &mut engine, &map, &sch, &file, &options)?;
+    engine.shutdown()?;
+    println!("{} → {}", sch.source.label(), file.display());
+    println!("{applied}");
+    for p in &sch.problems {
+        println!("problem {} ({}): {}", p.name, p.symbol, p.reason);
+    }
+    if !applied.failed.is_empty() {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
 fn layout_refs(project: &Project, library: &str, cell: &str, fix: bool) -> Result<()> {
     let findings = if fix {
         libcdept::layout::refs::fix(project, library, cell)?
@@ -925,6 +994,38 @@ fn main() -> Result<()> {
                     engine.render_png(&refs, width, height, &output)?;
                     engine.shutdown()?;
                     println!("{}", output.display());
+                    Ok(())
+                }
+                LayoutCommand::Link {
+                    library,
+                    cell,
+                    schematic,
+                    view,
+                    remove,
+                    dry_run,
+                } => layout_link(
+                    project,
+                    &library,
+                    &cell,
+                    schematic.as_deref(),
+                    view.as_deref(),
+                    remove,
+                    dry_run,
+                ),
+                LayoutCommand::CheckSource {
+                    library,
+                    cell,
+                    schematic,
+                    view,
+                } => {
+                    let (_, sch) = link::prepare(&project, &library, &cell, schematic.as_deref())?;
+                    let file = layout_view(&project, &library, &cell, view.as_deref())?;
+                    let plan = link::check(&sch, &file)?;
+                    println!("{} ↔ {}", sch.source.label(), file.display());
+                    println!("{plan}");
+                    if !plan.in_sync() {
+                        std::process::exit(1);
+                    }
                     Ok(())
                 }
                 LayoutCommand::Drc {

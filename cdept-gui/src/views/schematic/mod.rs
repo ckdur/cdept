@@ -6,6 +6,8 @@
 //! status bar and dialogs with egui widgets ([`mirror`]).
 
 mod clipboard;
+pub mod linking;
+pub use self::linking::LinkRequest;
 mod keys;
 mod mirror;
 mod picker;
@@ -196,6 +198,8 @@ pub struct SchematicView {
     saving_as: Option<u64>,
     /// What xschem knows of the desktop's clipboard.
     clipboard: clipboard::ClipboardSync,
+    /// Cross-probing with layouts, Generate Layout (see `linking`).
+    link: linking::SchematicLink,
 }
 
 impl SchematicView {
@@ -235,6 +239,7 @@ impl SchematicView {
             selection_asked: None,
             saving_as: None,
             clipboard: clipboard::ClipboardSync::default(),
+            link: linking::SchematicLink::default(),
         }
     }
 
@@ -599,7 +604,10 @@ impl SchematicView {
         {
             self.selection_asked = None;
             match answer.and_then(|text| Selected::parse(&text)) {
-                Ok(selected) => self.selection = Some(selected),
+                Ok(selected) => {
+                    self.selection = Some(selected);
+                    self.selection_changed();
+                }
                 Err(error) => tracing::debug!(target: "xschem", "cdept::selection: {error}"),
             }
         }
@@ -1026,11 +1034,11 @@ impl SchematicView {
     }
 
     /// CDePT's own menu for the cell of the document, next to xschem's.
-    fn cell_menu(&self, ui: &mut Ui, ctx: &mut AppCtx) {
+    fn cell_menu(&mut self, ui: &mut Ui, ctx: &mut AppCtx) {
         if self.doc.file.is_some() {
             return; // not a cell of a library
         }
-        let (library, cell) = (&self.doc.library, &self.doc.cell);
+        let (library, cell) = (&self.doc.library.clone(), &self.doc.cell.clone());
         ui.menu_button("Cell", |ui| {
             let has_schematic = ctx
                 .project
@@ -1058,6 +1066,7 @@ impl SchematicView {
                 ctx.selection = Selection::view(library, cell, &self.doc.view);
                 ctx.request(Action::OpenTab(Tab::Libraries));
             }
+            self.link_menu(ui, ctx);
         });
     }
 }

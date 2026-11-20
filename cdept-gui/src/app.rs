@@ -1253,6 +1253,7 @@ impl eframe::App for CdeptApp {
         }
         self.finish_netlists();
         self.views.coordinate_layouts();
+        self.views.coordinate_links(&mut self.ctx);
         // A detached window whose last tab was closed or dragged away disappears.
         let before: Vec<u64> = self.layout.windows.iter().map(|w| w.id).collect();
         self.sync_documents();

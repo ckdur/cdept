@@ -68,6 +68,16 @@ pub mod method {
     /// Instance mode with a library cell: `{library, cell, values}` → `{name, pcell}`.
     pub const PLACE_LIBRARY: &str = "place_library";
     // --- end properties ---
+    // --- PCells (helper: pcells.py, handles.py; docs/KLAYOUT.md §3.6) ---
+    /// Make the selected instance `{index, key}` place another cell, keeping its
+    /// transformation: `{library, cell, values}` (KLayout library) or `{refs, name}`
+    /// (another layout view) → [`super::Properties`] (one undo step).
+    pub const REPLACE_CELL: &str = "replace_cell";
+    /// Register the project's PCell views again where their files changed;
+    /// `{pcells?}` replaces the set ([`crate::layout::RefTable::pcells`]) →
+    /// `{changed, libraries}`.
+    pub const REFRESH_PCELLS: &str = "refresh_pcells";
+    // --- end PCells ---
     // --- DRC and LVS results (helper: markers.py) ---
     /// Highlight shapes over the view, not part of the layout: `{shapes: [{kind:
     /// "polygon"|"box"|"edge"|"text", …}], color, zoom}` (µm, top cell; empty
@@ -502,6 +512,9 @@ pub struct KLibrary {
     #[serde(default)]
     pub technologies: Vec<String>,
     pub cells: Vec<KLibraryCell>,
+    /// A library of the project's PCell views (docs/KLAYOUT.md §3.6).
+    #[serde(default)]
+    pub project: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

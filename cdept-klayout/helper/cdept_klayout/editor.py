@@ -8,6 +8,7 @@ import tempfile
 
 import pya
 
+from . import pcells
 from .document import MARKER_LAYER, Document
 
 # KLayout's ButtonState bits.
@@ -111,6 +112,10 @@ class Editor:
         self.layer_iters = []
         # Box mode by dragging (see _box_drag): the press held back.
         self.drag = None
+        # Handles of PCell shape parameters (handles.py; imported here: it uses this
+        # module).
+        from .handles import Handles
+        self.handles = Handles(self)
 
     # -- opening ---------------------------------------------------------------
 
@@ -124,12 +129,15 @@ class Editor:
         view.set_config("edit-top-level-selection", "true")
         index = view.create_layout(editable)
         cv = view.cellview(index)
+        # Before reading: library cells in the file are linked to their libraries as it
+        # is read, PDK libraries bound to the technology and the project's PCells too.
+        if technology:
+            cv.technology = technology
+        pcells.sync(table.pcells)
         doc = Document(cv.layout(), table).load()
         top = doc.top_cell()
         if top is not None:
             cv.cell = top
-        if technology:
-            cv.technology = technology
         if layer_properties:
             view.load_layer_props(layer_properties, True)
         view.add_missing_layers()
@@ -140,6 +148,7 @@ class Editor:
         view.zoom_fit()
         if self.view is not None:
             self.view._destroy() if hasattr(self.view, "_destroy") else None
+        self.handles.forget()
         self.view = view
         self.doc = doc
         self.sent = {}
@@ -222,7 +231,9 @@ class Editor:
         x, y = float(event.get("x", 0.0)), float(event.get("y", 0.0))
         point = pya.DPoint(x, y)
         try:
-            if self._box_drag(kind, event, point, mods):
+            if self.handles.input(kind, event, point, mods):
+                pass
+            elif self._box_drag(kind, event, point, mods):
                 pass
             elif kind == "move":
                 buttons = 0
@@ -408,6 +419,8 @@ class Editor:
         selection (skipped after plain pointer motion)."""
         if self.view is None:
             return
+        if full:
+            self.handles.refresh()
         events = [self.status_event(), self.modified_event()]
         if full:
             events += [self.layers_event(), self.cells_event(), self.selection_event()]

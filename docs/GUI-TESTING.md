@@ -38,7 +38,9 @@ a scratch copy of the project:
 | `cdept-gui/scripts/layout-smoke.script` | the embedded KLayout: the picture, layers and cells (external cells), modes, notices, drawing, undo/redo, save (sidecar), Place Cell, self-contained export, opening an external cell, closing a changed layout (needs `cdept-klayout/.bin/klayout`, see cdept-klayout/README.md) | into the project: run it on a copy (`run.sh cdept-gui/scripts/layout-smoke.script`) |
 | `cdept-gui/scripts/layout-inplace.script` | edit in place: descend into an external cell (Shift+X), draw, save writes both files, the other tab reloads | into the project: run it on a copy |
 | `cdept-gui/scripts/layout-properties.script` | the properties dialog (box, instance, PCell parameters), Place Library Cell (Basic CIRCLE), box by dragging | into the project: run it on a copy |
+| `cdept-gui/scripts/layout-pcells.script` | PCells: the project's PCell view `logic/rpoly` placed by `logic/rdiv` (its parameters), a shape parameter (Basic CIRCLE's handle), another cell for an instance (Change… › Library Cell / Layout View), placing a project PCell | into the project: run it on a copy |
 | `cdept-gui/scripts/layout-checks.script` | Run DRC / Run LVS, the results panel, highlight and zoom (needs `PDK_ROOT=/opt/ext/OpenPDKs PDK=ihp-sg13g2` or similar; not in the default set) | nothing |
+| `cdept-gui/scripts/layout-link.script` | linking buf's schematic with its layout: Generate takes over the inv instances, the Link panel, cross-probing both ways, undo | into the project: run it on a copy |
 
 
 `$PROJECT` in a script stands for the folder of the project being opened.
@@ -198,9 +200,15 @@ and path tools take **clicks**; a box can also be dragged (press, move, release)
 | `set_property <field> <json>` | Change a field of the properties form (`x`, `bbox.2`, `array.na`, `pcell.<name>`) |
 | `expect_property <field> <json>` | Fail unless a field of the properties form has this value |
 | `place_library <library> <cell> [<json values>]` | Instance mode with a cell or PCell of a KLayout library (PDK, Basic) |
+| `replace_library <library> <cell> [<json values>]` | The instance the properties show places that KLayout library cell or PCell instead (Change… › Library Cell…), keeping its place |
+| `replace_view <library> <cell> <view>` | The same with a layout view of the project (Change… › Layout View…) |
 | `layout_check <drc\|lvs>` | Run DRC or LVS on the open layout (needs the PDK in the environment) |
 | `expect_check <text>` | Wait until the last check is done and fail unless its summary contains the text |
 | `check_show <n>` | Highlight DRC result n (from 1), as a click in the results panel does |
+| `link_generate [remove]` | Generate / Update from Schematic (docs/LINKING.md); `remove` also deletes instances whose schematic instance is gone |
+| `link_select <instance> ...` | Select instances by schematic name, as a click in the Link panel does (the schematic tabs follow) |
+| `expect_link <instance> <status>` | Fail unless the Link panel shows this status (`ok`, `missing`, `parameters`, `other cell`, `twice`) |
+| `expect_probed <instance ...\|none>` | Fail unless these names are bound to the layout's selection, as cross-probing last saw them |
 
 KLayout reports a changed modified flag with the next request it handles, so the
 `expect_*` commands above ask it for a sign of life while they wait.

@@ -33,6 +33,7 @@ fn empty_layout(dir: &Path, name: &str) -> RefTable {
             },
         )]
         .into(),
+        ..Default::default()
     }
 }
 
@@ -222,4 +223,60 @@ fn edit_inv_in_place_from_buf() {
     assert_eq!(meta.label(), "logic/inv/layout");
     let meta = libcdept::layout::Meta::read_for(&buf).unwrap().unwrap();
     assert_eq!(meta.references["inv"].cell, "inv");
+}
+
+/// A PCell view of the project (`logic/rpoly`, docs/KLAYOUT.md §3.6): the layout that
+/// places it (`logic/rdiv`) reads back live PCells of the KLayout library `logic`; a
+/// change to the PCell file rebuilds them; the export has plain geometry only.
+#[test]
+fn project_pcells_are_live() {
+    if !available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/buffer");
+    copy_tree(&example, dir.path());
+    let project = libcdept::Project::load(dir.path()).unwrap();
+    let logic = project.library("logic").unwrap();
+    let rdiv = libcdept::klayout::cell_layout(logic, "rdiv").unwrap();
+    let pcell = logic.cell("rpoly").unwrap().entry("pcell").unwrap();
+    assert_eq!(pcell.kind, libcdept::ViewKind::Pcell);
+    let file = pcell.main_file.clone().unwrap();
+    let refs = libcdept::layout::refs::resolve(&project, &rdiv);
+    assert_eq!(refs.pcells["logic"]["rpoly"], file);
+    assert!(refs.files[&rdiv].refs.is_empty(), "{refs:?}");
+    let mut engine = Engine::for_project(&project).unwrap();
+    engine.open(&refs, true).unwrap();
+    let lengths = "sorted(round(i.pcell_parameters_by_name()['l'], 3) for i in \
+                   layout.cell('rdiv').each_inst() if i.is_pcell() \
+                   and i.cell.library().name() == 'logic')";
+    assert_eq!(engine.python(lengths).unwrap(), "[2.0, 4.0]");
+    let height = "round(layout.cell('rdiv').dbbox().height(), 3)";
+    assert_eq!(engine.python(height).unwrap(), "4.1");
+    // The PCell draws twice as long: both instances follow.
+    let text = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(
+        &file,
+        text.replace("pya.DBox(0, 0, l, w)", "pya.DBox(0, 0, 2 * l, w)"),
+    )
+    .unwrap();
+    let later = std::time::SystemTime::now() + Duration::from_secs(2);
+    std::fs::File::options()
+        .write(true)
+        .open(&file)
+        .unwrap()
+        .set_modified(later)
+        .unwrap();
+    let value = engine.call(method::REFRESH_PCELLS, json!({})).unwrap();
+    assert_eq!(value["changed"], true, "{value}");
+    assert_eq!(engine.python(height).unwrap(), "8.1");
+    let out = dir.path().join("flat.gds");
+    engine
+        .call(method::EXPORT, json!({"out": out.display().to_string()}))
+        .unwrap();
+    let flat = std::fs::read(&out).unwrap();
+    assert!(!flat.windows(18).any(|w| w == b"$$$CONTEXT_INFO$$$"));
+    let summary = libcdept::layout::gds::read_structure(&rdiv).unwrap();
+    assert_eq!(summary.top_cells(), ["rdiv"]);
+    assert!(summary.ghosts().is_empty());
 }

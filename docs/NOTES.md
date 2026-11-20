@@ -4,7 +4,7 @@ What is still to do and what may cause trouble. [ROADMAP.md](ROADMAP.md) is the 
 file is the running list behind it. Update it when an item is done or a new problem shows
 up. Items marked **(verify)** are suspicions, not confirmed facts.
 
-Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built: edit in place, properties, PCells, OASIS, renames, DRC/LVS).
+Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built; PCell views; schematic ↔ layout linking).
 
 ---
 
@@ -180,8 +180,25 @@ Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built: edit in place, pr
       runs the helper tests and the Rust KLayout tests. Not yet seen running on GitHub.
 - [ ] Edit in place: locks are exchanged once per GUI frame; a reload loses zoom and
       selection; a different database unit in an external file is rewritten with the root's.
-- [ ] PCell shape parameters (handles) are shown, not edited; changing the cell an
-      instance places is not offered.
+- [x] PCell shape parameters: edited as coordinates in the form (point, box, polygon,
+      path, edge) and dragged in the picture (select mode: squares on the handles of the
+      selected PCell instance; helper `handles.py`, one undo step). KLayout's partial
+      mode cannot finish a drag without a window, hence our own. Basic's coercion is
+      ported (`basic.py`: CIRCLE, ELLIPSE, DONUT, PIE, ARC): KLayout's Python binding of a
+      C++ PCell's `coerce_parameters` runs the base class's (none).
+- [x] Properties › Cell › Change…: another library cell/PCell or layout view for an
+      instance, transformation kept (`replace_cell`, one undo step).
+- [x] PCell views (2026-11-20): `<cell>/pcell/<cell>.pcell.py` (Format::KlayoutPcell,
+      ViewKind::Pcell, template), registered by the helper as one KLayout library per
+      CDePT library before layouts are read (`RefTable.pcells`, `pcells.py`); files
+      looked at every second, instances rebuilt (not an edit); errors as notices with
+      file:line. Example `logic/rpoly` placed by `logic/rdiv`. Library cells stay live
+      in files written back by edit in place; export has no KLayout context. IHP nmos,
+      rsil, cmim survive save and reopen live.
+- [ ] Renaming a PCell view's cell or library breaks layouts placing it (they name
+      LIB/PCELL); a PCell of a library not registered inside an external file is
+      copied as plain geometry and loses its link if that file is written back.
+- [ ] Basic TEXT's computed (read-only) parameters are not recomputed in the form.
 - [ ] DRC/LVS: no cancel in the GUI; deck variables (-D) only from the CLI; only
       input/topcell/report/schematic/target_netlist are passed (IHP's names).
 - [ ] No library rename in CDePT yet (`layout::follow::library_renamed` is ready for it);
@@ -191,6 +208,25 @@ Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built: edit in place, pr
 - [ ] `install.sh` installs the helper script only, KLayout comes from the system or
       `cdept-klayout/.bin`.
 - [ ] Try it by hand.
+
+### Linking schematics with layouts ([LINKING.md](LINKING.md))
+- [x] Link record (2026-11-20): layout instance ↔ schematic instance by GDS property 61
+      (name), survives GDS/OASIS save; sidecar `cdept-layout` v2 (`source`, `instances`),
+      v1 still written without a link. Rust reads the names (`layout::read_placements`).
+- [x] Device map `cdept-devices` v1 (own TOML): `pdk/<PDK>/devices.toml` shipped (IHP
+      SG13G2: MOS LV/HV, rsil/rppd/rhigh, cmim/rfcmim, taps, antennas, pnpMPA, npn13G2),
+      project's `[klayout] devices` on top; templates `@w`, `@{w|u}` (SPICE → "0.5u").
+- [x] `cdept layout link` (generate/update: add, update parameters, replace, take over
+      unbound instances, `--remove`, pin labels) and `cdept layout check-source` (plan,
+      exit 1 when out of sync); helper `link.py` (`link_apply`, `link_instances`,
+      `link_select`, `link_selected`, `link_highlight`), one undoable step.
+- [x] GUI: Generate / Update from Schematic (layout tab, schematic tab Cell menu), Link
+      panel, Open Schematic / Open Layout, cross-probing both ways (`layout-link.script`).
+      Example `examples/ihp-inv`; tests `libcdept/tests/link.rs`, helper `Link`.
+- [ ] Nets: flylines, net highlighting, connectivity check (LINKING.md §7).
+- [ ] Hierarchical cross-probing; unsaved schematic edits are not seen (read from disk);
+      pins are text labels only; PDK PCells need `[klayout] tech` to read back live;
+      bus instances (`M1[3:0]`) count as one name.
 
 ### Smaller gaps left in what exists
 - [x] Edit project fields (name, description, technology, PDK folder) from the GUI.

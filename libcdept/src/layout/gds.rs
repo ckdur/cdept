@@ -21,6 +21,9 @@ const BGNSTR: u16 = 0x0502;
 const STRNAME: u16 = 0x0606;
 const ENDSTR: u16 = 0x0700;
 const SNAME: u16 = 0x1206;
+/// The structure in which KLayout records where library cells and PCell variants come
+/// from (one SREF per proxy cell, with properties).
+pub const CONTEXT_INFO: &str = "$$$CONTEXT_INFO$$$";
 
 /// What [`read_structure`] finds in a GDS file.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -165,7 +168,11 @@ pub fn parse(bytes: &[u8]) -> Result<GdsSummary> {
                     s.refs.insert(text(data));
                 }
             }
-            ENDSTR => summary.structures.extend(current.take()),
+            // KLayout's context structure (library and PCell links of proxy cells,
+            // docs/KLAYOUT.md §3.6) is not a cell: it would show as a second top.
+            ENDSTR => summary
+                .structures
+                .extend(current.take().filter(|s| s.name != CONTEXT_INFO)),
             ENDLIB => {
                 ended = true;
                 break;
@@ -180,6 +187,60 @@ pub fn parse(bytes: &[u8]) -> Result<GdsSummary> {
         bail!("no ENDLIB record (truncated file?)");
     }
     Ok(summary)
+}
+
+/// One cell placement (`SREF` or `AREF`) and the value of one of its properties.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placement {
+    /// The structure the placement is in.
+    pub structure: String,
+    /// The structure placed.
+    pub cell: String,
+    /// The value of the property asked for, when the placement has it.
+    pub value: Option<String>,
+}
+
+/// Every `SREF` and `AREF` of the stream with the value of its property `attr`
+/// (`PROPATTR` / `PROPVALUE`), in file order.
+pub fn placements(bytes: &[u8], attr: u16) -> Result<Vec<Placement>> {
+    const SREF: u16 = 0x0a00;
+    const AREF: u16 = 0x0b00;
+    const ENDEL: u16 = 0x1100;
+    const PROPATTR: u16 = 0x2b02;
+    const PROPVALUE: u16 = 0x2c06;
+    let mut out = Vec::new();
+    let mut structure = String::new();
+    let mut current: Option<Placement> = None;
+    let mut wanted = false;
+    for record in records(bytes) {
+        let (kind, data) = record?;
+        match kind {
+            STRNAME => structure = text(data),
+            SREF | AREF => {
+                current = Some(Placement {
+                    structure: structure.clone(),
+                    cell: String::new(),
+                    value: None,
+                })
+            }
+            SNAME => {
+                if let Some(p) = &mut current {
+                    p.cell = text(data);
+                }
+            }
+            PROPATTR => wanted = data.len() >= 2 && u16::from_be_bytes([data[0], data[1]]) == attr,
+            PROPVALUE if wanted => {
+                if let Some(p) = &mut current {
+                    p.value = Some(text(data));
+                }
+                wanted = false;
+            }
+            ENDEL => out.extend(current.take()),
+            ENDLIB => break,
+            _ => {}
+        }
+    }
+    Ok(out)
 }
 
 /// Rename structures and the references to them: every `STRNAME` and `SNAME` equal to a
@@ -295,6 +356,46 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn placements_carry_their_property() {
+        let dates = [0u8; 24];
+        let mut out = Vec::new();
+        rec(&mut out, 0x0002, &600i16.to_be_bytes());
+        rec(&mut out, BGNLIB, &dates);
+        rec(&mut out, LIBNAME, &name("LIB"));
+        rec(&mut out, BGNSTR, &dates);
+        rec(&mut out, STRNAME, &name("top"));
+        for (cell, props) in [
+            ("nmos", &[(61u16, "M1")][..]),
+            ("pmos", &[(7, "x"), (61, "M2")][..]),
+            ("inv", &[][..]),
+        ] {
+            rec(&mut out, 0x0A00, &[]); // SREF
+            rec(&mut out, SNAME, &name(cell));
+            rec(&mut out, 0x1003, &[0u8; 8]);
+            for (attr, value) in props {
+                rec(&mut out, 0x2B02, &attr.to_be_bytes());
+                rec(&mut out, 0x2C06, &name(value));
+            }
+            rec(&mut out, 0x1100, &[]);
+        }
+        rec(&mut out, ENDSTR, &[]);
+        rec(&mut out, ENDLIB, &[]);
+        let found = placements(&out, 61).unwrap();
+        let got: Vec<(&str, &str, Option<&str>)> = found
+            .iter()
+            .map(|p| (p.structure.as_str(), p.cell.as_str(), p.value.as_deref()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("top", "nmos", Some("M1")),
+                ("top", "pmos", Some("M2")),
+                ("top", "inv", None)
+            ]
+        );
+    }
+
+    #[test]
     fn reads_structures_refs_and_units() {
         let gds = build(&[
             ("buf", &["inv", "inv", "res"]),
@@ -311,6 +412,21 @@ pub(crate) mod tests {
         assert_eq!(s.ghosts(), ["inv", "res", "x"]);
         assert_eq!(s.top_cells(), ["buf", "local", "odd"]);
         assert!(s.defines("local"));
+    }
+
+    #[test]
+    fn klayout_context_is_not_a_cell() {
+        // As KLayout writes a placed library PCell: the context structure comes first
+        // and places the proxy cell.
+        let s = parse(&build(&[
+            (CONTEXT_INFO, &["CIRCLE"]),
+            ("CIRCLE", &[]),
+            ("top", &["CIRCLE", "ghost"]),
+        ]))
+        .unwrap();
+        assert_eq!(s.top_cells(), ["top"]);
+        assert_eq!(s.ghosts(), ["ghost"]);
+        assert!(!s.defines(CONTEXT_INFO));
     }
 
     #[test]

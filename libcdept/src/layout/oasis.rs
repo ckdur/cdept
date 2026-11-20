@@ -785,6 +785,92 @@ pub fn parse(bytes: &[u8]) -> Result<GdsSummary> {
     Ok(summary)
 }
 
+/// Every `PLACEMENT` with the value of its GDS property `attr` (KLayout writes the
+/// properties of GDS-style integer keys as `S_GDS_PROPERTY` with the values `attr`,
+/// `string`), like [`gds::placements`](super::gds::placements).
+pub fn placements(bytes: &[u8], attr: u64) -> Result<Vec<super::gds::Placement>> {
+    let tables = Tables::read(bytes)?;
+    let mut strings: HashMap<u64, Vec<u8>> = HashMap::new();
+    let mut numbers = Numbers::default();
+    walk(bytes, false, &mut |ev, _| {
+        if let Ev::PropString { string, num } = ev {
+            strings.insert(numbers.take(num), string.to_vec());
+        }
+        Ok(())
+    })?;
+    // Owned copy of property values: (type, number, string).
+    type Owned = Vec<(u64, Option<u64>, Option<Vec<u8>>)>;
+    let mut out: Vec<super::gds::Placement> = Vec::new();
+    let mut structure = String::new();
+    let mut modal: Option<CellRef> = None;
+    let mut after_placement = false;
+    let mut last_name: Option<PropRef> = None;
+    let mut last_values: Owned = Vec::new();
+    let attach = |out: &mut Vec<super::gds::Placement>, name: &Option<PropRef>, values: &Owned| {
+        let is_gds = name
+            .as_ref()
+            .and_then(|n| tables.prop(n))
+            .is_some_and(|n| n == b"S_GDS_PROPERTY");
+        if !is_gds || values.len() < 2 || values[0].1 != Some(attr) {
+            return;
+        }
+        let text = match &values[1] {
+            (10..=12, _, Some(s)) => Some(s.clone()),
+            (13..=15, Some(n), _) => strings.get(n).cloned(),
+            _ => None,
+        };
+        if let (Some(text), Some(p)) = (text, out.last_mut()) {
+            p.value = Some(utf8(&text));
+        }
+    };
+    walk(bytes, false, &mut |ev, _| {
+        match ev {
+            Ev::Cell(r) => {
+                structure = utf8(&tables.cell(&r)?);
+                modal = None;
+                after_placement = false;
+            }
+            Ev::Placement { cell, .. } => {
+                if let Some(c) = cell {
+                    modal = Some(c);
+                }
+                let c = modal
+                    .clone()
+                    .ok_or_else(|| eyre!("PLACEMENT without a cell"))?;
+                out.push(super::gds::Placement {
+                    structure: structure.clone(),
+                    cell: utf8(&tables.cell(&c)?),
+                    value: None,
+                });
+                after_placement = true;
+            }
+            Ev::Property { name, values, .. } => {
+                if name.is_some() {
+                    last_name = name;
+                }
+                if let Some(values) = values {
+                    last_values = values
+                        .iter()
+                        .map(|v| (v.kind, v.uint, v.string.map(<[u8]>::to_vec)))
+                        .collect();
+                }
+                if after_placement {
+                    attach(&mut out, &last_name, &last_values);
+                }
+            }
+            Ev::PropertyRepeat => {
+                if after_placement {
+                    attach(&mut out, &last_name, &last_values);
+                }
+            }
+            Ev::CellName { .. } | Ev::PropName { .. } | Ev::PropString { .. } => {}
+            _ => after_placement = false,
+        }
+        Ok(())
+    })?;
+    Ok(out)
+}
+
 fn put_uint(out: &mut Vec<u8>, mut v: u64) {
     loop {
         let b = (v & 0x7f) as u8;

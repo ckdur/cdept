@@ -1,0 +1,42 @@
+{
+  "format": "cdept-layout",
+  "version": 2,
+  "library": "cells",
+  "cell": "inv",
+  "view": "layout",
+  "top": "inv",
+  "references": {},
+  "source": {
+    "library": "cells",
+    "cell": "inv",
+    "view": "schematic"
+  },
+  "instances": {
+    "M1": {
+      "symbol": "sg13g2_pr/sg13_lv_nmos.sym",
+      "kind": "pcell",
+      "library": "SG13_dev",
+      "cell": "nmos",
+      "params": {
+        "l": "0.13u",
+        "m": "1",
+        "model": "sg13_lv_nmos",
+        "ng": "1",
+        "w": "0.74u"
+      }
+    },
+    "M2": {
+      "symbol": "sg13g2_pr/sg13_lv_pmos.sym",
+      "kind": "pcell",
+      "library": "SG13_dev",
+      "cell": "pmos",
+      "params": {
+        "l": "0.13u",
+        "m": "1",
+        "model": "sg13_lv_pmos",
+        "ng": "1",
+        "w": "1.5u"
+      }
+    }
+  }
+}

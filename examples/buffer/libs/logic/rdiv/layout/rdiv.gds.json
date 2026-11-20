@@ -1,0 +1,9 @@
+{
+  "format": "cdept-layout",
+  "version": 1,
+  "library": "logic",
+  "cell": "rdiv",
+  "view": "layout",
+  "top": "rdiv",
+  "references": {}
+}

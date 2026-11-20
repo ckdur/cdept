@@ -13,6 +13,8 @@ libs/logic/                     library "logic" (cells layout)
   inv/layout/inv.gds            inverter layout (generic layers 1/0, 2/0, 3/0)
   buf/layout/buf.gds            buffer layout: places inv twice as a reference only
   */layout/*.gds.json           sidecars: what each file is and where its references live
+  rpoly/pcell/rpoly.pcell.py    a PCell view: Python for KLayout (a bar with two contacts)
+  rdiv/layout/rdiv.gds          places rpoly twice (live PCells of the KLayout library "logic")
 libs/bench/                     library "bench"
   tb_buf/schematic/tb_buf.sch   testbench: buffer, sources, load, simulation commands
 ```

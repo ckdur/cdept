@@ -12,6 +12,8 @@
 #   share/cdept-klayout/       the KLayout helper (Python, GPL), run by `klayout -zz`;
 #                              KLayout itself is not installed: cdept uses $CDEPT_KLAYOUT
 #                              or `klayout` next to cdept or on PATH
+#   share/cdept/pdk/           device maps of PDKs (schematic symbol -> layout PCell,
+#                              docs/LINKING.md)
 #   share/doc/cdept/           licences
 #
 # --prefix   where it will run from (default /usr/local); the files do not depend on it
@@ -72,6 +74,12 @@ if [ -f cdept-klayout/helper/cdept_klayout/main.py ]; then
     find "$dest/share/cdept-klayout" \( -name __pycache__ -o -name tests \) -prune -exec rm -rf {} +
     [ ! -f cdept-klayout/LICENSE ] ||
         install -m 644 cdept-klayout/LICENSE "$dest/share/doc/cdept/LICENSE.cdept-klayout"
+fi
+
+if [ -d pdk ]; then
+    rm -rf "$dest/share/cdept/pdk"
+    install -d "$dest/share/cdept"
+    cp -r pdk "$dest/share/cdept/pdk"
 fi
 
 echo "installed to $dest"

@@ -1,0 +1,40 @@
+{
+  "format": "cdept-layout",
+  "version": 2,
+  "library": "cells",
+  "cell": "buf",
+  "view": "layout",
+  "top": "buf",
+  "references": {
+    "inv": {
+      "library": "cells",
+      "cell": "inv",
+      "view": "layout",
+      "bbox": [
+        -4.0,
+        0.0,
+        1.43,
+        5.22
+      ]
+    }
+  },
+  "source": {
+    "library": "cells",
+    "cell": "buf",
+    "view": "schematic"
+  },
+  "instances": {
+    "x1": {
+      "symbol": "cells/inv/symbol/inv.sym",
+      "kind": "cell",
+      "library": "cells",
+      "cell": "inv"
+    },
+    "x2": {
+      "symbol": "cells/inv/symbol/inv.sym",
+      "kind": "cell",
+      "library": "cells",
+      "cell": "inv"
+    }
+  }
+}

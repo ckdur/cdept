@@ -17,6 +17,30 @@ use crate::{Cell, Entry, Format, Library, Project, ViewKind};
 pub struct RefTable {
     pub root: PathBuf,
     pub files: BTreeMap<PathBuf, FileRefs>,
+    /// The project's PCell views (docs/KLAYOUT.md §3.6): CDePT library → cell → its
+    /// `<cell>.pcell.py`. The helper registers one KLayout library per CDePT library.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pcells: BTreeMap<String, BTreeMap<String, PathBuf>>,
+}
+
+/// The PCell views of the project's libraries, for [`RefTable::pcells`].
+pub fn pcell_views(project: &Project) -> BTreeMap<String, BTreeMap<String, PathBuf>> {
+    let mut out: BTreeMap<String, BTreeMap<String, PathBuf>> = BTreeMap::new();
+    for lib in &project.libraries {
+        for cell in &lib.cells {
+            let file = cell
+                .entries
+                .iter()
+                .filter(|e| e.format == Some(Format::KlayoutPcell))
+                .find_map(|e| e.main_file.clone());
+            if let Some(file) = file {
+                out.entry(lib.name.clone())
+                    .or_default()
+                    .insert(cell.name.clone(), file);
+            }
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -282,6 +306,7 @@ pub fn resolve(project: &Project, file: &Path) -> RefTable {
     let mut table = RefTable {
         root: file.to_path_buf(),
         files: BTreeMap::new(),
+        pcells: pcell_views(project),
     };
     let mut todo = vec![file.to_path_buf()];
     while let Some(current) = todo.pop() {

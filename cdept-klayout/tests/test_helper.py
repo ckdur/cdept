@@ -852,5 +852,126 @@ class PdkPcells(unittest.TestCase):
         self.assertEqual(found, [("SG13_dev", "1u", True)])
 
 
+class Link(unittest.TestCase):
+    """link.py: generating the top cell from a schematic's instances (docs/LINKING.md)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.folder = tempfile.mkdtemp(prefix="cdk-")
+        cls.helper = Helper(cls.folder)
+        cls.helper.call("python", code="FOLDER = %r\n" % cls.folder + FIXTURES)
+        # A layout with nothing in it yet, for cell "top".
+        cls.helper.call("python", code="ly = pya.Layout(); ly.dbu = 0.001\n"
+                        "ly.create_cell('top'); ly.write(%r)"
+                        % os.path.join(cls.folder, "top.gds"))
+        refs = table(cls.folder, "top.gds")
+        refs["files"][os.path.join(cls.folder, "top.gds")] = {"label": "t/top/layout", "refs": {}}
+        cls.refs = refs
+        cls.helper.call("open", refs=refs)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.helper.close()
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    def items(self, radius=0.5):
+        inv = os.path.join(self.folder, "inv.gds")
+        return [
+            {"name": "C1", "symbol": "c.sym", "kind": "pcell", "library": "Basic",
+             "cell": "CIRCLE", "params": {"actual_radius": radius, "layer": "1/0"}},
+            {"name": "C2", "symbol": "c.sym", "kind": "pcell", "library": "Basic",
+             "cell": "CIRCLE", "params": {"actual_radius": 1.0, "layer": "1/0"}},
+            {"name": "x1", "symbol": "logic/inv/symbol/inv.sym", "kind": "cell",
+             "library": "logic", "cell": "inv", "view": "layout", "file": inv,
+             "refs": {"root": inv, "files": {inv: {"label": "logic/inv/layout", "refs": {}}}}},
+        ]
+
+    def test_1_generate_update_save(self):
+        h = self.helper
+        pins = [{"name": "A", "direction": "in"}, {"name": "Y", "direction": "out"}]
+        done = h.call("link_apply", items=self.items(), pins=pins, pin_layer="8/25",
+                      pin_size=0.1, remove=False)
+        self.assertEqual(sorted(done["added"]), ["C1", "C2", "x1"])
+        self.assertEqual(done["failed"], [])
+        self.assertEqual(done["pins"], ["A", "Y"])
+        found = h.call("link_instances")["instances"]
+        self.assertEqual(set(found), {"C1", "C2", "x1"})
+        self.assertTrue(found["C1"]["pcell"])
+        self.assertEqual(found["C1"]["params"]["actual_radius"], 0.5)
+        self.assertEqual(found["x1"]["label"], "logic/inv/layout")
+        # Nothing overlaps.
+        boxes = [found[n]["bbox"] for n in ("C1", "C2", "x1")]
+        for i, a in enumerate(boxes):
+            for b in boxes[i + 1:]:
+                self.assertTrue(a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1],
+                                (a, b))
+        # Again: nothing to do. A changed parameter: one update. Pins are not doubled.
+        again = h.call("link_apply", items=self.items(), pins=pins, pin_layer="8/25")
+        self.assertEqual(sorted(again["unchanged"]), ["C1", "C2", "x1"])
+        self.assertEqual(again["pins"], [])
+        changed = h.call("link_apply", items=self.items(radius=0.75))
+        self.assertEqual(changed["updated"], ["C1"])
+        self.assertEqual(h.call("link_instances")["instances"]["C1"]["params"]["actual_radius"],
+                         0.75)
+        # Undo takes the update back as one step.
+        h.call("undo")
+        self.assertEqual(h.call("link_instances")["instances"]["C1"]["params"]["actual_radius"],
+                         0.5)
+        # The names survive saving, as GDS and as OASIS.
+        report = h.call("save")
+        self.assertEqual(set(report["references"]), {"inv"})
+        for name in ("top.gds", "top.oas"):
+            out = os.path.join(self.folder, name)
+            if name.endswith(".oas"):
+                h.call("python", code="doc.save(%r)" % out)
+            names = eval(h.call("python", code="ly = pya.Layout(); ly.read(%r)\n"
+                                "sorted(str(i.property(61)) for i in ly.cell('top').each_inst())"
+                                % out))
+            self.assertEqual(names, ["C1", "C2", "x1"], name)
+
+    def test_2_select_replace_remove(self):
+        h = self.helper
+        h.call("link_apply", items=self.items())
+        self.assertEqual(h.call("link_select", names=["C2", "nope"])["found"], ["C2"])
+        self.assertEqual(h.call("link_selected")["names"], ["C2"])
+        self.assertEqual(h.call("link_highlight", names=["C1"])["markers"], 1)
+        # C2 becomes another PCell: replaced in place.
+        items = self.items()
+        items[1] = {"name": "C2", "symbol": "d.sym", "kind": "pcell", "library": "Basic",
+                    "cell": "DONUT", "params": {"layer": "1/0"}}
+        before = h.call("link_instances")["instances"]["C2"]["bbox"]
+        done = h.call("link_apply", items=items)
+        self.assertEqual(done["replaced"], ["C2"])
+        after = h.call("link_instances")["instances"]["C2"]
+        self.assertEqual(after["cell"], "DONUT")
+        self.assertAlmostEqual(before[0] + before[2], after["bbox"][0] + after["bbox"][2], 3)
+        # A copied instance: the name twice. x1 dropped from the schematic.
+        h.call("python", code="top = doc.top_cell()\n"
+               "i = [i for i in top.each_inst() if i.property(61) == 'C1'][0]\n"
+               "top.insert(i.cell_inst).set_property(61, 'C1')")
+        done = h.call("link_apply", items=items[:2])
+        self.assertEqual(done["duplicates"], ["C1"])
+        self.assertEqual(done["extra"], ["x1"])
+        done = h.call("link_apply", items=items[:2], remove=True)
+        self.assertEqual(done["removed"], ["x1"])
+        self.assertNotIn("x1", h.call("link_instances")["instances"])
+
+    def test_3_existing_instances_are_taken_over(self):
+        h = self.helper
+        h.call("open", refs=table(self.folder))  # buf: two inv, one res, none bound
+        inv = os.path.join(self.folder, "inv.gds")
+        item = lambda name: {"name": name, "symbol": "inv.sym", "kind": "cell",
+                             "library": "logic", "cell": "inv", "view": "layout",
+                             "file": inv}
+        done = h.call("link_apply", items=[item("x2"), item("x1"), item("x3")])
+        self.assertEqual(sorted(done["bound"]), ["x1", "x2"])
+        self.assertEqual(done["added"], ["x3"])
+        found = h.call("link_instances")
+        # Left to right: x1 is the inv at x=0, x2 the one at x=5.
+        self.assertEqual(found["instances"]["x1"]["bbox"][0], 0.0)
+        self.assertEqual(found["instances"]["x2"]["bbox"][0], 5.0)
+        self.assertEqual(found["unbound"], 1)  # res
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

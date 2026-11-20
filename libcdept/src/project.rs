@@ -66,6 +66,7 @@ name = ""
 #   layer_properties = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/sg13g2.lyp"
 #   drc = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/drc/ihp-sg13g2.drc"
 #   lvs = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/lvs/sg13g2.lvs"
+#   devices = "devices.toml"   # schematic symbol -> layout PCell (docs/LINKING.md)
 "#;
 
 /// Options for [`Project::add_library`].
@@ -122,6 +123,9 @@ pub struct KlayoutSettings {
     pub drc: Option<PathBuf>,
     /// `lvs`: the LVS deck (`.lvs`, `.lylvs`), like `drc`.
     pub lvs: Option<PathBuf>,
+    /// `devices`: the project's device map for linking schematics with layouts
+    /// (docs/LINKING.md), on top of the PDK's. `None`: the PDK's only.
+    pub devices: Option<PathBuf>,
 }
 
 /// The environment lookup of a project (not part of what makes two projects equal).
@@ -362,7 +366,7 @@ impl Project {
                     .push("[klayout] layer_properties must be a file name".into()),
             }
         }
-        for key in ["drc", "lvs"] {
+        for key in ["drc", "lvs", "devices"] {
             let Some(item) = table.get(key) else {
                 continue;
             };
@@ -389,7 +393,8 @@ impl Project {
             };
             match key {
                 "drc" => self.klayout.drc = deck,
-                _ => self.klayout.lvs = deck,
+                "lvs" => self.klayout.lvs = deck,
+                _ => self.klayout.devices = deck,
             }
         }
     }

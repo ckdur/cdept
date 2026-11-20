@@ -21,7 +21,7 @@ use egui::Ui;
 
 pub use self::document::Document;
 pub use self::hierarchy::HierarchyView;
-pub use self::layout::LayoutView;
+pub use self::layout::{LayoutView, Replacement};
 pub use self::schematic::{
     CloseChoice, NETLIST_FORMATS, Picture, SchematicView, Selected, pretend_clipboard,
 };
@@ -86,6 +86,9 @@ pub struct Views {
     documents: HashMap<DocId, Document>,
     /// Stands in for a document tab that has no view (any more).
     missing: placeholder::Placeholder,
+    /// Layout files to generate from their schematic once their tab is ready
+    /// (docs/LINKING.md §6).
+    generate: Vec<std::path::PathBuf>,
 }
 
 impl Default for Views {
@@ -101,6 +104,7 @@ impl Default for Views {
             console: Default::default(),
             jobs: Placeholder::new("Jobs", "No simulation or verification jobs.", "Phase 4"),
             problems: Placeholder::new("Problems", "No DRC/LVS results.", "Phase 7"),
+            generate: Vec::new(),
             documents: HashMap::new(),
             missing: Placeholder::new("Document", "This document is closed.", "a later step"),
         }
@@ -155,6 +159,56 @@ impl Views {
                 .filter_map(Document::as_layout_mut)
                 .collect(),
         );
+    }
+
+    /// Linking schematics with layouts (docs/LINKING.md §6): Generate requests of
+    /// schematic tabs, and cross-probing (a selection of instances in one tab selects
+    /// the same instances in the tabs linked with it).
+    pub fn coordinate_links(&mut self, ctx: &mut AppCtx) {
+        let mut schematics = Vec::new();
+        let mut layouts = Vec::new();
+        for doc in self.documents.values_mut() {
+            match doc {
+                Document::Schematic(view) => schematics.push(view),
+                Document::Layout(view) => layouts.push(view),
+            }
+        }
+        for view in &mut schematics {
+            if let Some(schematic::LinkRequest::Generate(file)) = view.take_link_request() {
+                self.generate.push(file);
+            }
+        }
+        self.generate.retain(|file| {
+            let Some(view) = layouts.iter_mut().find(|l| l.file() == file.as_path()) else {
+                return true; // its tab is not open yet
+            };
+            if !view.link_ready() {
+                return true;
+            }
+            view.generate_from_schematic(ctx.project.as_ref(), false);
+            false
+        });
+        for layout in &mut layouts {
+            let Some(names) = layout.take_probe_out() else {
+                continue;
+            };
+            let Some(file) = layout.link_schematic().map(std::path::Path::to_path_buf) else {
+                continue;
+            };
+            for view in schematics.iter_mut().filter(|s| s.file() == file) {
+                view.probe_in(&names);
+            }
+        }
+        for view in &mut schematics {
+            let Some(names) = view.take_probe_out() else {
+                continue;
+            };
+            for layout in &mut layouts {
+                if layout.link_schematic() == Some(view.file()) {
+                    layout.probe_in(&names);
+                }
+            }
+        }
     }
 
     /// Close the documents `keep` rejects; their xschem ends with them.

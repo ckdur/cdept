@@ -190,7 +190,9 @@ To do:
   cells and selection are CDePT panels. Layout views reference each other through
   ghost cells and `<file>.json` sidecars; missing cells show as a red X. Edit in
   place, properties and PCell forms, OASIS references, DRC/LVS with the PDK decks. Plan,
-  results and gaps: [KLAYOUT.md](KLAYOUT.md).
+  results and gaps: [KLAYOUT.md](KLAYOUT.md). PCell views in CDePT libraries.
+  Schematic ↔ layout linking (Layout XL style): device map, generate/update, check,
+  cross-probing ([LINKING.md](LINKING.md)).
 - **Magic:** `magic -dnull -noconsole` with Tcl over a pipe for batch (ext, LEF, DRC). For the
   GUI, source a Tcl socket-server script.
 - **ngspice:** in-process via `libngspice` (shared API: `ngSpice_Init`, `ngSpice_Command`,

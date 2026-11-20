@@ -223,6 +223,34 @@ fn find<'a>(attributes: &str, tokens: &'a [Token]) -> Option<&'a Token> {
         .find(|t| &attributes[t.name.clone()] == ATTRIBUTE)
 }
 
+// Used by the schematic reader of `crate::link`.
+
+/// The `name=value` items of an xschem attribute string, values without their quotes
+/// (an item without `=` has an empty value). Later items win in xschem; all are kept
+/// here, in order.
+pub(crate) fn attribute_items(attributes: &str) -> Vec<(String, String)> {
+    tokens(attributes)
+        .iter()
+        .map(|t| {
+            let value = t.value.clone().map(|v| unquote(&attributes[v]));
+            (
+                attributes[t.name.clone()].to_string(),
+                value.unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
+/// The global attributes of the symbol in `text` (its `K` block, else `G`), unescaped.
+pub(crate) fn global_attributes(text: &str) -> Option<String> {
+    Some(unescape_group(&text[attribute_block(text)?]))
+}
+
+/// The text of a `{...}` group without its escapes.
+pub(crate) fn unescape(raw: &str) -> String {
+    unescape_group(raw)
+}
+
 /// The `schematic=` attribute of the symbol in `text`, as written (not resolved).
 pub fn schematic(text: &str) -> Option<String> {
     let attributes = unescape_group(&text[attribute_block(text)?]);

@@ -1,0 +1,55 @@
+# PCells on examples/buffer: logic/rdiv places two instances of the project's PCell
+# view logic/rpoly (rpoly.pcell.py, docs/KLAYOUT.md §3.6). Their parameters, a shape
+# parameter (Basic CIRCLE's handle), another cell for an instance (a library PCell, a
+# layout view), placing a project PCell. Writes into the project: run it on a copy.
+#
+#   cdept-gui/scripts/run.sh cdept-gui/scripts/layout-pcells.script
+#
+# Positions are pixels of the picture (as in layout-smoke.script).
+
+open logic rdiv layout
+wait_frame
+
+# The short bar: a live PCell of the KLayout library "logic".
+mode select
+click 126 450
+expect_selection 1
+properties
+expect_property kind instance
+expect_property cell rpoly
+expect_property library logic
+expect_property pcell.l 2
+set_property pcell.l 3
+properties_apply
+expect_property pcell.l 3
+expect_modified yes
+
+# The same place, another cell: a CIRCLE of KLayout's Basic library ...
+replace_library Basic CIRCLE {"actual_radius": 0.25, "layer": "2/0"}
+expect_property cell CIRCLE
+expect_property library Basic
+expect_property x 0.5
+expect_property angle 90
+# ... whose radius follows its handle (a shape parameter, edited as coordinates).
+expect_property pcell.handle {"point": [-0.25, 0.0]}
+set_property pcell.handle {"point": [-0.4, 0.0]}
+properties_apply
+expect_property pcell.actual_radius 0.4
+
+# ... and a layout view of the project.
+replace_view logic inv layout
+expect_property external "logic/inv/layout"
+expect_property x 0.5
+expect_cell inv external
+screenshot /tmp/cdept-layout-pcells.png
+
+# A PCell of the project from Place Library Cell.
+place_library logic rpoly {"l": 1.5}
+expect_mode instance
+click 600 200
+mode select
+save
+expect_modified no
+close
+expect_documents 0
+quit

@@ -38,17 +38,66 @@ def _point(p):
 
 
 def to_json(value):
-    """A PCell parameter value as JSON."""
+    """A PCell parameter value as JSON. Shapes (guiding shapes) are objects in µm:
+    {"point": [x, y]}, {"box": [l, b, r, t]}, {"polygon": [[x, y], …]},
+    {"path": [[x, y], …], "width": w}, {"edge": [[x, y], [x, y]]}."""
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, (list, tuple)):
         return [to_json(v) for v in value]
-    return str(value)  # LayerInfo ("1/0", "name (1/0)"), DPoint, DBox, …
+    shape = shape_to_json(value)
+    if shape is not None:
+        return shape
+    return str(value)  # LayerInfo ("1/0", "name (1/0)"), …
+
+
+def shape_to_json(value):
+    """A guiding shape value as JSON (see `to_json`), or None for other values."""
+    if isinstance(value, (pya.DPoint, pya.Point)):
+        return {"point": _point(value)}
+    if isinstance(value, (pya.DBox, pya.Box)):
+        return {"box": [_r(value.left), _r(value.bottom), _r(value.right), _r(value.top)]}
+    if isinstance(value, (pya.DPolygon, pya.DSimplePolygon, pya.Polygon, pya.SimplePolygon)):
+        return {"polygon": [_point(p) for p in value.each_point_hull()]}
+    if isinstance(value, (pya.DPath, pya.Path)):
+        return {"path": [_point(p) for p in value.each_point()], "width": _r(value.width)}
+    if isinstance(value, (pya.DEdge, pya.Edge)):
+        return {"edge": [_point(value.p1), _point(value.p2)]}
+    return None
+
+
+def shape_from_json(value, old=None):
+    """The guiding shape of `value` (see `to_json`); `old` when it is not one."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return old
+    if "point" in value:
+        x, y = (float(v) for v in value["point"])
+        return pya.DPoint(x, y)
+    if "box" in value:
+        l, b, r, t = (float(v) for v in value["box"])
+        return pya.DBox(min(l, r), min(b, t), max(l, r), max(b, t))
+    if "polygon" in value:
+        points = _pts(value["polygon"])
+        if len(points) < 3:
+            raise ValueError("a polygon needs at least three points")
+        return pya.DPolygon(points)
+    if "path" in value:
+        points = _pts(value["path"])
+        if not points:
+            raise ValueError("a path needs at least one point")
+        width = float(value.get("width", old.width if isinstance(old, pya.DPath) else 0))
+        return pya.DPath(points, width)
+    if "edge" in value:
+        (x1, y1), (x2, y2) = value["edge"]
+        return pya.DEdge(float(x1), float(y1), float(x2), float(y2))
+    return old
 
 
 def from_json(kind, value, old=None):
-    """A JSON value as the PCell parameter of type `kind` wants it. Shapes and other
-    values CDePT cannot edit keep `old`."""
+    """A JSON value as the PCell parameter of type `kind` wants it. Values CDePT
+    cannot edit (callbacks) keep `old`."""
     if kind == "int":
         return int(round(float(value)))
     if kind == "double":
@@ -67,6 +116,8 @@ def from_json(kind, value, old=None):
         if isinstance(value, pya.LayerInfo):
             return value
         return pya.LayerInfo.from_string(str(value))
+    if kind == "shape":
+        return shape_from_json(value, old)
     return old
 
 
@@ -106,6 +157,30 @@ def convert(decl, values, old):
             raise ValueError("%s has no parameter %s" % (decl.name(), name))
         out[name] = from_json(types[name], value, old.get(name))
     return out
+
+
+def coerce(decl, layout, values):
+    """`values` (by name) as the PCell makes them consistent (its
+    `coerce_parameters`: e.g. CIRCLE's radius follows its handle)."""
+    if type(decl) is getattr(pya, "PCellDeclaration_Native", ()):
+        # A C++ PCell: KLayout's binding runs the base class's coercion (none), so
+        # Basic's own rules are ported (basic.py); other C++ PCells stay as they are.
+        from .basic import coerce as basic
+        return basic(decl.name(), values) or dict(values)
+    names = [p.name for p in decl.get_parameters()]
+    try:
+        out = decl.coerce_parameters(layout, [values.get(n) for n in names])
+    except Exception:
+        return dict(values)
+    return dict(zip(names, out))
+
+
+def changed_parameters(decl, layout, current, changes):
+    """The parameters of an instance after the form's `changes` (JSON, by name): the
+    current ones made consistent first (hidden parameters such as CIRCLE's last radius
+    tell what changed), then the changes, then consistent again."""
+    base = coerce(decl, layout, current)
+    return coerce(decl, layout, convert(decl, changes, base))
 
 
 def _form(library, decl, values):
@@ -154,6 +229,8 @@ def parameter_string(values):
 
 def libraries():
     """KLayout's libraries (not CDePT's): name, description, cells and PCells."""
+    from .pcells import libraries as registered
+    project_libraries = set(registered())
     out = []
     for lib in _all_libraries():
         name = lib.name()
@@ -163,7 +240,8 @@ def libraries():
                   for c in sorted(ly.top_cells(), key=lambda c: c.name)
                   if not c.is_pcell_variant() and not c.is_proxy()]
         out.append({"name": name, "description": lib.description or "",
-                    "technologies": list(lib.technologies()), "cells": cells})
+                    "technologies": list(lib.technologies()), "cells": cells,
+                    "project": name in project_libraries})
     return out
 
 
@@ -222,7 +300,7 @@ def place_library(editor, library, cell, values=None):
     decl = ly.pcell_declaration(cell)
     if decl is not None:
         defaults = {p.name: p.default for p in decl.get_parameters()}
-        params = parameter_string(convert(decl, values, defaults))
+        params = parameter_string(coerce(decl, editor.doc.layout, convert(decl, values, defaults)))
     elif ly.has_cell(cell):
         params = ""
     else:
@@ -325,22 +403,13 @@ def apply(editor, params):
     pcell: {name: value} (changed parameters only)}. One undoable step; the selection
     keeps the object. Returns what `describe` returns now."""
     view = editor.require()
-    doc = editor.doc
-    ly = doc.layout
-    index = int(params.get("index", -1))
-    selection = list(view.each_object_selected())
-    if not 0 <= index < len(selection) or _key(selection[index], ly) != params.get("key"):
-        raise RuntimeError("the selection changed; look at the properties again")
-    sel = selection[index]
-    if not editor.editable:
-        raise RuntimeError("the layout is read-only")
-    if doc.foreign.get(owner(sel)):
-        raise RuntimeError("this object is inside a cell of another view; open that view")
+    ly = editor.doc.layout
+    selection, index, sel = _chosen(editor, params)
     obj = params.get("object") or {}
     # Everything that can be wrong is found before anything changes: KLayout's Manager
     # cannot take back half a transaction.
     if sel.is_cell_inst():
-        change = _instance_change(sel, obj, params.get("pcell") or {})
+        change = _instance_change(ly, sel, obj, params.get("pcell") or {})
     else:
         change = _shape_change(ly, sel, obj)
     manager = editor.manager
@@ -350,6 +419,83 @@ def apply(editor, params):
     finally:
         manager.commit()
     selection[index] = new
+    view.object_selection = selection
+    return describe(editor)
+
+
+def _chosen(editor, params):
+    """(selection, index, object) of the object `params` names ({index, key}), after
+    checking it may be changed."""
+    view = editor.require()
+    doc = editor.doc
+    index = int(params.get("index", -1))
+    selection = list(view.each_object_selected())
+    if not 0 <= index < len(selection) or _key(selection[index], doc.layout) != params.get("key"):
+        raise RuntimeError("the selection changed; look at the properties again")
+    sel = selection[index]
+    if not editor.editable:
+        raise RuntimeError("the layout is read-only")
+    if doc.foreign.get(owner(sel)):
+        raise RuntimeError("this object is inside a cell of another view; open that view")
+    return selection, index, sel
+
+
+def _instance_path(sel, inst):
+    """The selection path of `sel` with its last element made `inst` (after a change
+    that may have given the instance another cell)."""
+    new = pya.ObjectInstPath()
+    new.cv_index = sel.cv_index
+    new.top = sel.top
+    for element in list(sel.path)[:-1]:
+        new.append_path(element)
+    new.append_path(pya.InstElement(inst))
+    return new
+
+
+def replace_cell(editor, params):
+    """Make the selected instance place another cell, keeping its transformation:
+    `params` = {index, key} and either {library, cell, values} (a cell or PCell of a
+    KLayout library) or {target} (a cell index here, e.g. another view just loaded).
+    One undoable step. Returns what `describe` returns now."""
+    view = editor.require()
+    ly = editor.doc.layout
+    selection, index, sel = _chosen(editor, params)
+    if not sel.is_cell_inst():
+        raise ValueError("only an instance can place another cell")
+    target = params.get("target")
+    if target is not None:
+        target = int(target)
+        if not ly.is_valid_cell_index(target):
+            raise ValueError("there is no such cell")
+
+        def make():
+            return target
+    else:
+        lib = _library(params["library"])
+        name = params["cell"]
+        decl = lib.layout().pcell_declaration(name)
+        if decl is not None:
+            defaults = {p.name: p.default for p in decl.get_parameters()}
+            values = coerce(decl, ly, convert(decl, params.get("values"), defaults))
+            pid = lib.layout().pcell_id(name)
+
+            def make():
+                return ly.add_pcell_variant(lib, pid, values)
+        elif lib.layout().has_cell(name):
+            lci = lib.layout().cell(name).cell_index()
+
+            def make():
+                return ly.add_lib_cell(lib, lci)
+        else:
+            raise ValueError("%s has no cell %s" % (lib.name(), name))
+    inst = sel.inst()
+    manager = editor.manager
+    manager.transaction("Replace cell")
+    try:
+        inst.cell_index = make()
+    finally:
+        manager.commit()
+    selection[index] = _instance_path(sel, inst)
     view.object_selection = selection
     return describe(editor)
 
@@ -424,7 +570,7 @@ def _shape_change(ly, sel, obj):
     return change
 
 
-def _instance_change(sel, obj, pcell):
+def _instance_change(ly, sel, obj, pcell):
     """A function that changes an instance and returns its new selection path."""
     inst = sel.inst()
     mag = float(obj.get("mag", 1.0))
@@ -445,18 +591,13 @@ def _instance_change(sel, obj, pcell):
     if pcell:
         if not inst.is_pcell():
             raise ValueError("%s is not a PCell" % inst.cell.name)
-        values = convert(inst.pcell_declaration(), pcell, inst.pcell_parameters_by_name())
+        values = changed_parameters(inst.pcell_declaration(), ly, inst.pcell_parameters_by_name(),
+                                    pcell)
 
     def change():
         if str(inst.dcell_inst) != str(cell_inst):
             inst.dcell_inst = cell_inst
         if values is not None:
             inst.change_pcell_parameters(values)
-        new = pya.ObjectInstPath()
-        new.cv_index = sel.cv_index
-        new.top = sel.top
-        for element in list(sel.path)[:-1]:
-            new.append_path(element)
-        new.append_path(pya.InstElement(inst))
-        return new
+        return _instance_path(sel, inst)
     return change

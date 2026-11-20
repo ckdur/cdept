@@ -133,11 +133,132 @@ fn field(ui: &mut Ui, id: Id, param: &PcellParam, value: &mut Value, layers: &[S
             changed
         }
         ParamType::Layer => layer_field(ui, id, value, layers),
-        ParamType::Shape | ParamType::Callback | ParamType::None => {
+        ParamType::Shape => shape_field(ui, value),
+        ParamType::Callback | ParamType::None => {
             ui.weak(text_of(value));
             false
         }
     }
+}
+
+/// One coordinate in µm.
+fn micron(ui: &mut Ui, v: &mut f64) -> bool {
+    ui.add(
+        egui::DragValue::new(v)
+            .speed(0.01)
+            .max_decimals(6)
+            .suffix(" µm"),
+    )
+    .changed()
+}
+
+/// `[x, y]` (JSON) as two fields; false when it is not a point.
+fn point_field(ui: &mut Ui, point: &mut Value) -> bool {
+    let (Some(mut x), Some(mut y)) = (
+        point.get(0).and_then(Value::as_f64),
+        point.get(1).and_then(Value::as_f64),
+    ) else {
+        return false;
+    };
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        changed |= micron(ui, &mut x);
+        changed |= micron(ui, &mut y);
+    });
+    if changed {
+        *point = json!([x, y]);
+    }
+    changed
+}
+
+/// A list of points (polygon or path) with buttons to add and remove points.
+fn points_field(ui: &mut Ui, points: &mut Value, min: usize) -> bool {
+    let Some(list) = points.as_array_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    let mut remove = None;
+    ui.vertical(|ui| {
+        for (n, p) in list.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                ui.weak(format!("{}", n + 1));
+                changed |= point_field(ui, p);
+                if ui.small_button("−").on_hover_text("Remove").clicked() {
+                    remove = Some(n);
+                }
+            });
+        }
+        if ui.small_button("Add point").clicked()
+            && let Some(last) = list.last().cloned()
+        {
+            let x = last.get(0).and_then(Value::as_f64).unwrap_or(0.0) + 1.0;
+            let y = last.get(1).and_then(Value::as_f64).unwrap_or(0.0);
+            list.push(json!([x, y]));
+            changed = true;
+        }
+    });
+    if let Some(n) = remove.filter(|_| list.len() > min) {
+        list.remove(n);
+        changed = true;
+    }
+    changed
+}
+
+/// A guiding shape (`{"point": [x, y]}`, `{"box": [l, b, r, t]}`, `{"polygon": [..]}`,
+/// `{"path": [..], "width": w}`, `{"edge": [p1, p2]}`), edited as coordinates in µm.
+/// Handles can also be dragged in the picture (select mode).
+fn shape_field(ui: &mut Ui, value: &mut Value) -> bool {
+    let Some(shape) = value.as_object_mut() else {
+        ui.weak(text_of(value));
+        return false;
+    };
+    let mut changed = false;
+    if let Some(point) = shape.get_mut("point") {
+        changed |= point_field(ui, point);
+    } else if let Some(Value::Array(b)) = shape.get_mut("box") {
+        let mut v: Vec<f64> = b.iter().map(|x| x.as_f64().unwrap_or(0.0)).collect();
+        if v.len() == 4 {
+            ui.vertical(|ui| {
+                for (label, at) in [("left, bottom", 0), ("right, top", 2)] {
+                    ui.horizontal(|ui| {
+                        ui.weak(label);
+                        changed |= micron(ui, &mut v[at]);
+                        changed |= micron(ui, &mut v[at + 1]);
+                    });
+                }
+            });
+            if changed {
+                *b = v.into_iter().map(|x| json!(x)).collect();
+            }
+        }
+    } else if let Some(points) = shape.get_mut("polygon") {
+        changed |= points_field(ui, points, 3);
+    } else if shape.contains_key("path") {
+        ui.vertical(|ui| {
+            if let Some(w) = shape.get_mut("width") {
+                let mut width = w.as_f64().unwrap_or(0.0);
+                ui.horizontal(|ui| {
+                    ui.weak("width");
+                    if micron(ui, &mut width) {
+                        *w = json!(width.max(0.0));
+                        changed = true;
+                    }
+                });
+            }
+            if let Some(points) = shape.get_mut("path") {
+                changed |= points_field(ui, points, 1);
+            }
+        });
+    } else if let Some(Value::Array(edge)) = shape.get_mut("edge") {
+        ui.vertical(|ui| {
+            for p in edge.iter_mut() {
+                changed |= point_field(ui, p);
+            }
+        });
+    } else {
+        ui.weak(Value::Object(shape.clone()).to_string());
+    }
+    changed
 }
 
 /// A layer: one of the layout's, or typed (`1/0`, `name (1/0)`).
@@ -195,6 +316,9 @@ pub struct LibraryPicker {
     form: Option<PcellForm>,
     values: Map<String, Value>,
     error: Option<String>,
+    /// The instance (`index`, `key`) the chosen cell replaces ("Change…" in the
+    /// properties), instead of placing a new one.
+    replace: Option<(usize, String)>,
 }
 
 impl LibraryPicker {
@@ -214,11 +338,22 @@ impl LibraryPicker {
 impl LayoutView {
     /// Open "Place Library Cell…".
     pub fn open_library_picker(&mut self) {
+        // PCell views made since the layout was opened are there too.
+        let pcells = libcdept::layout::refs::pcell_views(&self.project);
+        self.quiet(method::REFRESH_PCELLS, json!({"pcells": pcells}));
         let asked = self.raw_call(method::LIBRARIES, json!({}));
         self.library_picker = Some(LibraryPicker {
             asked: Some(asked),
             ..LibraryPicker::default()
         });
+    }
+
+    /// The same, but the chosen cell replaces instance `target` (`index`, `key`).
+    pub fn open_library_picker_to_replace(&mut self, target: (usize, String)) {
+        self.open_library_picker();
+        if let Some(picker) = &mut self.library_picker {
+            picker.replace = Some(target);
+        }
     }
 
     /// Instance mode with a cell or PCell of a KLayout library; `values` are PCell
@@ -284,7 +419,12 @@ impl LayoutView {
         let mut ask_form = None;
         let mut place = None;
         let window_id = Id::new(("klayout-library-picker", self.id.0));
-        egui::Window::new("Place Library Cell")
+        let title = if picker.replace.is_some() {
+            "Replace with Library Cell"
+        } else {
+            "Place Library Cell"
+        };
+        egui::Window::new(title)
             .id(window_id)
             .open(&mut open)
             .collapsible(false)
@@ -308,7 +448,12 @@ impl LayoutView {
                                 ui.set_min_width(140.0);
                                 for lib in &picker.libraries {
                                     let on = picker.library.as_ref() == Some(&lib.name);
-                                    let r = ui.selectable_label(on, &lib.name);
+                                    let label = if lib.project {
+                                        format!("{} (project)", lib.name)
+                                    } else {
+                                        lib.name.clone()
+                                    };
+                                    let r = ui.selectable_label(on, label);
                                     let r = if lib.description.is_empty() {
                                         r
                                     } else {
@@ -384,7 +529,12 @@ impl LayoutView {
                 ui.horizontal(|ui| {
                     let chosen = picker.chosen_cell();
                     let ready = chosen.is_some_and(|(_, c)| !c.pcell || picker.form.is_some());
-                    if ui.add_enabled(ready, egui::Button::new("Place")).clicked()
+                    let verb = if picker.replace.is_some() {
+                        "Replace"
+                    } else {
+                        "Place"
+                    };
+                    if ui.add_enabled(ready, egui::Button::new(verb)).clicked()
                         && let Some((lib, cell)) = chosen
                     {
                         let values = if cell.pcell {
@@ -406,7 +556,18 @@ impl LayoutView {
             ));
         }
         if let Some((library, cell, values)) = place {
-            self.place_library(&library, &cell, values);
+            if let Some(target) = picker.replace.take() {
+                self.replace_cell(
+                    target,
+                    super::properties::Replacement::Library {
+                        library,
+                        cell,
+                        values,
+                    },
+                );
+            } else {
+                self.place_library(&library, &cell, values);
+            }
             keep = false;
         }
         if open && keep {
