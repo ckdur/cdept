@@ -208,6 +208,27 @@ impl Views {
                     layout.probe_in(&names);
                 }
             }
+        } // Nets, both ways.
+        for layout in &mut layouts {
+            let Some(names) = layout.take_net_probe_out() else {
+                continue;
+            };
+            let Some(file) = layout.link_schematic().map(std::path::Path::to_path_buf) else {
+                continue;
+            };
+            for view in schematics.iter_mut().filter(|s| s.file() == file) {
+                view.probe_nets_in(&names);
+            }
+        }
+        for view in &mut schematics {
+            let Some(names) = view.take_net_probe_out() else {
+                continue;
+            };
+            for layout in &mut layouts {
+                if layout.link_schematic() == Some(view.file()) {
+                    layout.probe_nets_in(&names);
+                }
+            }
         }
     }
 

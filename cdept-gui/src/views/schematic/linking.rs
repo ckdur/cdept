@@ -25,6 +25,10 @@ pub struct SchematicLink {
     /// Names selected here, for the layout tabs.
     pub probe_out: Option<Vec<String>>,
     pub request: Option<LinkRequest>,
+    /// Nets last exchanged with the layout side (selected here, or highlighted for it).
+    pub nets_probed: Vec<String>,
+    /// Nets selected here, for the layout tabs.
+    pub nets_out: Option<Vec<String>>,
 }
 
 impl SchematicView {
@@ -50,6 +54,39 @@ impl SchematicView {
             self.link.probed = names.clone();
             self.link.probe_out = Some(names);
         }
+        let nets: Vec<String> = self
+            .selection
+            .as_ref()
+            .map(|s| s.nets.clone())
+            .unwrap_or_default();
+        if !nets.is_empty() && nets != self.link.nets_probed {
+            self.link.nets_probed = nets.clone();
+            self.link.nets_out = Some(nets);
+        }
+    }
+
+    /// Nets selected here since the last call, for the layout tabs.
+    pub fn take_net_probe_out(&mut self) -> Option<Vec<String>> {
+        self.link.nets_out.take()
+    }
+
+    /// Highlight the nets `names` with xschem's net highlight, as asked by a layout tab
+    /// (an empty list clears).
+    pub fn probe_nets_in(&mut self, names: &[String]) {
+        if names == self.link.nets_probed {
+            return;
+        }
+        self.link.nets_probed = names.to_vec();
+        let mut script = String::from("xschem unhilight_all\n");
+        for name in names.iter().filter(|n| !n.contains('/')) {
+            script.push_str(&format!("xschem hilight_netname {}\n", tcl::quote(name)));
+        }
+        self.session.tcl(&script);
+    }
+
+    /// The nets last exchanged with the layout side.
+    pub fn nets_probed(&self) -> &[String] {
+        &self.link.nets_probed
     }
 
     /// Names selected here since the last call, for the layout tabs.

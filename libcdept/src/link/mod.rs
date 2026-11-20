@@ -3,6 +3,7 @@
 //! - [`schematic`]: the instances of an xschem schematic and the defaults of their
 //!   symbols;
 //! - [`devices`]: the device map, symbol → PCell of a KLayout library;
+//! - [`nets`]: the schematic's nets against the layout's (opens, shorts, flylines);
 //! - here: what each schematic instance should become ([`Schematic`]), what the layout
 //!   has ([`LayoutState`]), the difference ([`Plan`]), the request for the helper's
 //!   `link_apply` and the record in the layout's sidecar.
@@ -13,6 +14,7 @@
 //! was made into at the last sync (`instances`).
 
 pub mod devices;
+pub mod nets;
 pub mod schematic;
 
 use std::collections::{BTreeMap, BTreeSet};

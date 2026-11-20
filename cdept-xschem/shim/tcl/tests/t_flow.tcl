@@ -100,7 +100,7 @@ check_eq open-entry-follows-selection $::entry_shows buf.sch
 check_eq open-loaded [xschem get schname] $example/libs/logic/buf/schematic/buf.sch
 set w [join [updates window]]
 check open-asked-to-save {[string first {"title":"Ask Save","modal":true} $w] >= 0}
-check open-dialog-lists {[regexp {"path":"\.load\.l\.paneright\.f\.list","class":"Listbox","items":\["\.","\.\.","buf","inv"\]} $w]}
+check open-dialog-lists {[regexp {"path":"\.load\.l\.paneright\.f\.list","class":"Listbox","items":\["\.","\.\.","buf","inv","rdiv","rpoly"\]} $w]}
 check_eq open-title [lindex [updates title] end] {{"kind":"title","text":"xschem - logic/buf/schematic/buf.sch"}}
 set cdept::native_file_dialogs 1
 

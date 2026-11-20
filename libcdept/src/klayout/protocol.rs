@@ -195,6 +195,10 @@ pub enum Event {
         /// External files with unsaved changes made in place (written by the next save).
         #[serde(default)]
         edited: Vec<std::path::PathBuf>,
+        /// Changes seen so far (edits, undo, redo); only ever grows while the helper
+        /// runs. What was made from the layout at another revision is out of date.
+        #[serde(default)]
+        revision: u64,
     },
     /// An error or message from an editing step, e.g. "Please select a layer first".
     Notice { level: NoticeLevel, text: String },

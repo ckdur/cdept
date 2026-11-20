@@ -415,10 +415,10 @@ check colour-unknown {[catch {cdept::colour nosuchcolour}]}
 check_eq colour-winfo-rgb [winfo rgb . {Deep Pink}] {65535 5140 37779}
 
 # --- the selection, for the Inspector --------------------------------------------------
-check_eq selection-empty [cdept::selection] {count 0 instances {} wires 0 texts 0}
+check_eq selection-empty [cdept::selection] {count 0 instances {} wires 0 texts 0 nets {}}
 xschem select instance x1
 check_eq selection-instance [cdept::selection] \
-  {count 1 instances {{x1 logic/buf/symbol/buf.sym name=x1}} wires 0 texts 0}
+  {count 1 instances {{x1 logic/buf/symbol/buf.sym name=x1}} wires 0 texts 0 nets {}}
 xschem select instance C1
 set s [cdept::selection]
 check_eq selection-two [dict get $s count] 2
@@ -427,6 +427,9 @@ check selection-attributes {[string first value=20f [dict get $s instances]] >= 
 xschem select_all
 set s [cdept::selection]
 check selection-wires {[dict get $s wires] == 2}
+# The nets of the selected wires, labels and pins (cross-probing nets with a layout).
+check selection-nets {[llength [dict get $s nets]] > 0}
+check selection-nets-wires {[llength [lsearch -all -inline [dict get $s nets] {}]] == 0}
 check selection-count {[dict get $s count] > 10}
 xschem unselect_all
 

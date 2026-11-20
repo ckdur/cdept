@@ -448,18 +448,35 @@ proc cdept::close {} {
 #              the symbol as the schematic refers to it, the attribute string
 #   wires      number of selected wires
 #   texts      number of selected texts
+#   nets       the nets of the selected wires, labels and pins (for cross-probing nets
+#              with a layout, docs/LINKING.md §8)
 proc cdept::selection {} {
   set instances {}
+  set nets {}
   foreach name [xschem selected_set] {
     lappend instances [list $name [xschem getprop instance $name cell::name] \
                          [xschem getprop instance $name]]
+    # A label or a pin names its net.
+    set type [xschem getprop instance $name cell::type]
+    if {$type in {label ipin opin iopin}} {
+      set lab [xschem getprop instance $name lab]
+      if {$lab ne "" && $lab ni $nets} {lappend nets $lab}
+    }
   }
   set texts 0
   foreach line [split [xschem selected_set text] \n] {
     if {[string trim $line] ne ""} {incr texts}
   }
+  set wires [xschem selected_wire]
+  if {[llength $wires]} {
+    # Wires know their net once the netlist structures are made.
+    catch {xschem instance_nodemap}
+    foreach lab [xschem selected_wire] {
+      if {$lab ne "" && $lab ni $nets} {lappend nets $lab}
+    }
+  }
   list count [xschem get lastsel] instances $instances \
-       wires [llength [xschem selected_wire]] texts $texts
+       wires [llength $wires] texts $texts nets $nets
 }
 
 # ---------------------------------------------------------------------------------

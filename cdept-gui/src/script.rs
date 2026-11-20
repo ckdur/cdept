@@ -79,6 +79,8 @@ enum Command {
     HierarchyOpen(String),
     ExpectPreview,
     ExpectSelected(Option<String>),
+    /// The nets the active schematic last exchanged with a layout (cross-probing).
+    ExpectSchematicNets(Vec<String>),
     Netlist(String, String, NetlistFormat),
     ExpectView(Selection),
     CloseProject,
@@ -156,6 +158,22 @@ enum LayoutCommand {
     ExpectLink(String, String),
     /// The names bound to the layout's selection, as cross-probing last saw them.
     ExpectProbed(Vec<String>),
+    // --- nets (docs/LINKING.md §8) ---
+    /// Update Connectivity.
+    NetsUpdate,
+    /// The nets are compared and the summary contains the text.
+    ExpectNets(String),
+    /// Show a schematic net, as a click in the Nets panel does.
+    NetsShow(String),
+    /// Probe the net at a frame pixel (`None`: the middle of the picture), as a click in
+    /// probe mode does.
+    NetsProbe(Option<(f64, f64)>),
+    /// The schematic nets last probed or shown in the layout.
+    ExpectNetProbed(Vec<String>),
+    /// Flylines on or off.
+    Flylines(bool),
+    /// The helper drew this many flylines.
+    ExpectFlylines(usize),
     // --- end linking ---
 }
 
@@ -178,6 +196,7 @@ impl Command {
                 | Command::HierarchyOpen(_)
                 | Command::ExpectPreview
                 | Command::ExpectSelected(_)
+                | Command::ExpectSchematicNets(_)
                 | Command::ExpectView(_)
                 | Command::LeaveAnswer(_)
                 | Command::ExpectProject(_)
@@ -200,7 +219,10 @@ impl Command {
                         | LayoutCommand::ExpectInPlace(_)
                         | LayoutCommand::ExpectCheck(_)
                         | LayoutCommand::ExpectLink(..)
-                        | LayoutCommand::ExpectProbed(_),
+                        | LayoutCommand::ExpectProbed(_)
+                        | LayoutCommand::ExpectNets(_)
+                        | LayoutCommand::ExpectNetProbed(_)
+                        | LayoutCommand::ExpectFlylines(_),
                 )
         )
     }
@@ -688,6 +710,36 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
             ["none"] => Vec::new(),
             names => names.iter().map(|a| a.to_string()).collect(),
         })),
+        // --- nets ---
+        "nets_update" => Command::Layout(LayoutCommand::NetsUpdate),
+        "expect_nets" => Command::Layout(LayoutCommand::ExpectNets(text()?)),
+        "nets_show" => Command::Layout(LayoutCommand::NetsShow(text()?)),
+        "nets_probe" => match args.as_slice() {
+            ["center"] => Command::Layout(LayoutCommand::NetsProbe(None)),
+            [x, y] => Command::Layout(LayoutCommand::NetsProbe(Some((
+                x.parse()
+                    .map_err(|_| "usage: nets_probe <x> <y> | center")?,
+                y.parse()
+                    .map_err(|_| "usage: nets_probe <x> <y> | center")?,
+            )))),
+            _ => return Err("usage: nets_probe <x> <y> | center".into()),
+        },
+        "expect_net_probed" => {
+            Command::Layout(LayoutCommand::ExpectNetProbed(match args.as_slice() {
+                ["none"] => Vec::new(),
+                names => names.iter().map(|a| a.to_string()).collect(),
+            }))
+        }
+        "flylines" => match args.as_slice() {
+            ["on"] => Command::Layout(LayoutCommand::Flylines(true)),
+            ["off"] => Command::Layout(LayoutCommand::Flylines(false)),
+            _ => return Err("usage: flylines <on|off>".into()),
+        },
+        "expect_flylines" => Command::Layout(LayoutCommand::ExpectFlylines(whole(0)? as usize)),
+        "expect_schematic_nets" => Command::ExpectSchematicNets(match args.as_slice() {
+            ["none"] => Vec::new(),
+            names => names.iter().map(|a| a.to_string()).collect(),
+        }),
         other => return Err(format!("unknown command '{other}'")),
     };
     Ok(Some(command))
@@ -1156,6 +1208,41 @@ impl Script {
                     ));
                 }
             }
+            LayoutCommand::NetsUpdate => view.update_connectivity(),
+            LayoutCommand::ExpectNets(text) => {
+                let status = view.nets_status();
+                if status == "running" || !status.contains(&text) {
+                    return Err(format!("the nets: '{status}', expected '{text}'"));
+                }
+            }
+            LayoutCommand::NetsShow(name) => view.show_net(&name)?,
+            LayoutCommand::NetsProbe(at) => {
+                let (x, y) = match at {
+                    Some(at) => at,
+                    None => {
+                        let [w, h] = view.frame_size().ok_or("the layout has no picture yet")?;
+                        (f64::from(w / 2), f64::from(h / 2))
+                    }
+                };
+                view.probe_net_at(x, y);
+            }
+            LayoutCommand::ExpectNetProbed(wanted) => {
+                if view.nets_probed() != wanted.as_slice() {
+                    return Err(format!(
+                        "the nets probed in the layout are {:?}, expected {wanted:?}",
+                        view.nets_probed()
+                    ));
+                }
+            }
+            LayoutCommand::Flylines(on) => view.set_flylines(on),
+            LayoutCommand::ExpectFlylines(n) => {
+                if view.flylines_drawn() != n {
+                    return Err(format!(
+                        "{} flylines are drawn, expected {n}",
+                        view.flylines_drawn()
+                    ));
+                }
+            }
             LayoutCommand::ExpectCheck(text) => {
                 let status = view.check_status();
                 if status.starts_with("running") || !status.contains(&text) {
@@ -1320,6 +1407,8 @@ impl Script {
             Command::TclSend(script) => {
                 let view = app.script_schematic().ok_or("no schematic is open")?;
                 view.tcl(&script);
+                // The script may have changed the selection.
+                view.reread_selection();
             }
             Command::TclExpect(expected, script) => {
                 app.script_schematic().ok_or("no schematic is open")?;
@@ -1434,6 +1523,16 @@ impl Script {
             Command::ExpectPreview => {
                 if !app.script_preview() {
                     return Err("the Inspector shows no picture of the selected view".into());
+                }
+            }
+            Command::ExpectSchematicNets(wanted) => {
+                let view = app.script_schematic().ok_or("no schematic is open")?;
+                if view.nets_probed() != wanted.as_slice() {
+                    return Err(format!(
+                        "the schematic's nets exchanged with the layout are {:?}, expected \
+                         {wanted:?}",
+                        view.nets_probed()
+                    ));
                 }
             }
             Command::ExpectSelected(wanted) => {

@@ -760,6 +760,11 @@ pub fn stream_top(file: &Path, expected: &str) -> String {
 /// `$XDG_CACHE_HOME/cdept/verify/<project>/<library>/<cell>/<check>` (or under
 /// `~/.cache`), created.
 pub fn work_dir(project: &Project, library: &str, cell: &str, check: Check) -> Result<PathBuf> {
+    work_dir_named(project, library, cell, check.name())
+}
+
+/// [`work_dir`] for a job other than DRC and LVS (`nets`).
+pub fn work_dir_named(project: &Project, library: &str, cell: &str, job: &str) -> Result<PathBuf> {
     let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
     let cache = var("XDG_CACHE_HOME")
         .map(PathBuf::from)
@@ -788,7 +793,7 @@ pub fn work_dir(project: &Project, library: &str, cell: &str, check: Check) -> R
         .join(clean(&project.name))
         .join(clean(library))
         .join(clean(cell))
-        .join(check.name());
+        .join(clean(job));
     std::fs::create_dir_all(&dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     Ok(dir)
 }
@@ -915,30 +920,9 @@ pub fn run_lvs(
     dir: &Path,
     defines: &[(String, String)],
 ) -> Result<LvsRun> {
-    let report = dir.join(format!("{}.lvsdb", stream.top));
-    let extracted = dir.join(format!("{}_extracted.cir", stream.top));
     let summary_file = dir.join("summary.json");
-    let log = dir.join("lvs.log");
-    for stale in [&report, &extracted, &summary_file] {
-        remove_stale(stale)?;
-    }
-    let mut vars = vec![
-        ("input".to_string(), path_text(&absolute(&stream.file)?)),
-        ("topcell".to_string(), stream.top.clone()),
-        ("report".to_string(), path_text(&report)),
-        ("schematic".to_string(), path_text(&absolute(schematic)?)),
-        ("target_netlist".to_string(), path_text(&extracted)),
-    ];
-    vars.extend(defines.iter().cloned());
-    run_batch(project, deck, &vars, dir, &log)?;
-    if !report.is_file() {
-        bail!(
-            "the LVS deck wrote no database {} (does it take input, topcell, report and \
-             schematic?); see {}",
-            report.display(),
-            log.display()
-        );
-    }
+    remove_stale(&summary_file)?;
+    let (report, extracted, log) = lvs_deck(project, deck, stream, schematic, dir, defines)?;
     let helper = setup::find_helper_dir()
         .ok_or_else(|| eyre!("the cdept-klayout helper scripts are not installed"))?;
     let script = helper.join(LVSDB_SCRIPT);
@@ -964,6 +948,53 @@ pub fn run_lvs(
         schematic: schematic.to_path_buf(),
         summary,
     })
+}
+
+/// Run the LVS deck and give its database, without reading it: for the net
+/// comparison (`link::nets`), which needs the layout's side of it.
+pub fn run_lvs_database(
+    project: &Project,
+    deck: &Path,
+    stream: &Stream,
+    schematic: &Path,
+    dir: &Path,
+) -> Result<PathBuf> {
+    lvs_deck(project, deck, stream, schematic, dir, &[]).map(|(report, _, _)| report)
+}
+
+/// The deck run of [`run_lvs`]: (database, extracted netlist, log).
+fn lvs_deck(
+    project: &Project,
+    deck: &Path,
+    stream: &Stream,
+    schematic: &Path,
+    dir: &Path,
+    defines: &[(String, String)],
+) -> Result<(PathBuf, PathBuf, PathBuf)> {
+    let report = dir.join(format!("{}.lvsdb", stream.top));
+    let extracted = dir.join(format!("{}_extracted.cir", stream.top));
+    let log = dir.join("lvs.log");
+    for stale in [&report, &extracted] {
+        remove_stale(stale)?;
+    }
+    let mut vars = vec![
+        ("input".to_string(), path_text(&absolute(&stream.file)?)),
+        ("topcell".to_string(), stream.top.clone()),
+        ("report".to_string(), path_text(&report)),
+        ("schematic".to_string(), path_text(&absolute(schematic)?)),
+        ("target_netlist".to_string(), path_text(&extracted)),
+    ];
+    vars.extend(defines.iter().cloned());
+    run_batch(project, deck, &vars, dir, &log)?;
+    if !report.is_file() {
+        bail!(
+            "the LVS deck wrote no database {} (does it take input, topcell, report and \
+             schematic?); see {}",
+            report.display(),
+            log.display()
+        );
+    }
+    Ok((report, extracted, log))
 }
 
 /// The schematic file of `library/cell`: the view `view`, else the first xschem
@@ -1071,7 +1102,8 @@ fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn absolute(path: &Path) -> Result<PathBuf> {
+/// `path`, made absolute against the current folder.
+pub fn absolute(path: &Path) -> Result<PathBuf> {
     if path.is_absolute() {
         return Ok(path.to_path_buf());
     }

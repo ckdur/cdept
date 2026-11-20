@@ -102,6 +102,9 @@ class Editor:
         # (None once a new change was made after undoing past it).
         self.depth = 0
         self.saved_depth = 0
+        # Changes seen in all (edits, undo, redo; never goes back): what CDePT compares
+        # to know whether something made from the layout is out of date.
+        self.revision = 0
         # Editing in place: the file each undo step changed (steps[i] is step i + 1),
         # and the external files changed since the last save (at most: undone changes
         # stay in). The root file is not in `unsaved`: it is always written.
@@ -473,6 +476,7 @@ class Editor:
         if path is not None and path != self.doc.root:
             self.unsaved.add(path)
         self.depth += 1
+        self.revision += 1
 
     def undone(self, step):
         """After undo (step -1) or redo (+1)."""
@@ -482,6 +486,7 @@ class Editor:
             if path is not None and path != self.doc.root:
                 self.unsaved.add(path)
         self.depth += step
+        self.revision += 1
         self._changed()
 
     def forget_changes(self):
@@ -504,7 +509,7 @@ class Editor:
     def modified_event(self):
         return {"kind": "modified", "dirty": self.is_dirty(),
                 "can_undo": self.manager.has_undo(), "can_redo": self.can_redo(),
-                "edited": self.edited_files()}
+                "edited": self.edited_files(), "revision": self.revision}
 
     def layers(self):
         """The flattened layer list: [(iterator, node, depth)]."""

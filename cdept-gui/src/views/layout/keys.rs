@@ -71,6 +71,8 @@ pub enum Shortcut {
     AscendAll,
     /// Q: the properties of the selection (KLayout's key).
     Properties,
+    /// N: probe nets with the mouse, on and off (docs/LINKING.md §8).
+    ProbeNets,
 }
 
 pub fn shortcut(key: Key, m: Modifiers) -> Option<Shortcut> {
@@ -88,6 +90,7 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Shortcut> {
         (Key::Minus, true) => Shortcut::ZoomOut,
         (Key::F2, false) => Shortcut::ZoomFit,
         (Key::Q, false) if !m.shift && !m.alt => Shortcut::Properties,
+        (Key::N, false) if !m.shift && !m.alt => Shortcut::ProbeNets,
         (Key::Delete, false) => Shortcut::Delete,
         _ => return None,
     })
@@ -145,6 +148,7 @@ mod tests {
             shortcut(Key::Q, Modifiers::NONE),
             Some(Shortcut::Properties)
         );
+        assert_eq!(shortcut(Key::N, Modifiers::NONE), Some(Shortcut::ProbeNets));
         assert_eq!(shortcut(Key::Escape, Modifiers::NONE), None);
         assert_eq!(shortcut(Key::Z, Modifiers::NONE), None);
     }

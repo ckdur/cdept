@@ -9,7 +9,9 @@ see it in the other).
 Status (2026-11-20): first round built and tested: device map, schematic reader, plan,
 generate/update (`cdept layout link`, Generate / Update in the GUI), check
 (`cdept layout check-source`), Link panel, cross-probing between schematic and layout
-tabs. Not yet: nets (flylines, net highlighting, connectivity checks), see §7.
+tabs. Second round (nets, §8): connectivity from the PDK's LVS deck against xschem's,
+opens and shorts, flylines, net highlighting and probing, cross-probing of nets
+(`cdept layout check-nets`, Layout › Update Connectivity, the Nets panel).
 
 ## 1. The link
 
@@ -178,11 +180,10 @@ Helper methods (docs/KLAYOUT.md §4 conventions; `link.py`):
 
 ## 7. Not yet
 
-- **Nets.** No connectivity yet: flylines (rats nest) between pins of bound
-  instances, net highlighting across schematic and layout, net-aware placement, and a
-  connectivity check short of LVS. The netlist is cheap to get (xschem's), the layout
-  side needs the PDK's connectivity (KLayout's `LayoutToNetlist` with the LVS deck's
-  layer stack).
+- **Nets**, further: net-aware placement; flylines that follow edits live (today they
+  are as old as the last Update Connectivity); a connectivity check without a PDK
+  LVS deck (e.g. from the technology's `connectivity` section and KLayout's net
+  tracer); unsaved schematic edits (nets are read from the schematic as saved).
 - Hierarchical cross-probing (instance paths below the top cell).
 - Generating from a schematic with unsaved changes (it is read from disk).
 - Pins become text labels only; no pin shapes, no placement next to the device.
@@ -191,3 +192,115 @@ Helper methods (docs/KLAYOUT.md §4 conventions; `link.py`):
 - Examples: `examples/ihp-inv` (inv: two IHP PCells; buf: two references to inv), and
   `examples/buffer` buf (links its existing inv instances). `examples/buffer` inv uses
   xschem's generic devices: nothing to map.
+
+## 8. Nets
+
+The schematic's connectivity against the layout's, short of LVS: which schematic net
+is open in the layout (in pieces), which layout net shorts schematic nets, where the
+pieces are (flylines), and the nets highlighted across both editors. Rust owns the
+comparison (`libcdept::link::nets`); KLayout extracts, the helper draws.
+
+**The schematic side.** xschem's own connectivity: `xschem instance_nodemap` gives,
+for each instance, symbol pin → net, as the netlister sees wires and labels (one
+engine, the schematic as saved). Instances of project cells are followed into their
+schematics (the cell's schematic view), and everything is flattened: every device
+terminal of the hierarchy (`x1/M1` pin `G`) on one flat net. A flat net is named by
+its name nearest the top (`#net1` when xschem names it). This is the netlister's view
+without parsing a netlist: instance names, pin names and nets come out as xschem has
+them, and the device map (§3) already tells devices from cells.
+
+**The layout side.** The layout is written as a self-contained stream (unsaved edits
+included, as for DRC) and extracted with the **PDK's LVS deck** in a KLayout of its own
+(`klayout -b`; the deck needs a schematic netlist, xschem's LVS netlist of the cell is
+given and its comparison is not used). The helper script `connectivity.py`
+(`cdept_klayout/l2n.py`) reads the LVS database and the stream and writes JSON:
+
+- `nets`: every net, flattened into the top cell by walking the hierarchy (a net of a
+  placed cell that leaves it through a pin is the parent's net; one that does not is
+  a net of its own); `name` is KLayout's (from labels), `""` without one;
+- `devices`: class, box, and per terminal its net and the middle of its shapes;
+- `instances`: the instances bound to schematic instances (GDS property 61, §1), with
+  their paths through bound cells (`x1/M1`) and boxes in top-cell coordinates;
+- `labels`: the texts of the **top cell** with the net each one is on. A label inside
+  a placed cell names a net of the top circuit too, so net names alone cannot tell
+  a pin label from an inner one.
+
+No device geometry is in CDePT's files: KLayout's extraction with the PDK's rules
+decides what a device is.
+
+**Matching.** A device belongs to the bound leaf instance (a PCell or library cell)
+whose box holds it (the smallest one). Symbol pins go to device terminals by name (any
+case: `D G S B` of a MOS), else in order (IHP: rsil `P M` → `rsil_1 rsil_2`, cmim
+`c0 c1` → `mim_top mim_btm`), else as the device map's optional
+`terminals = { pin = "terminal" }` says. A MOS's `S`/`D` and a resistor's two ends may
+be swapped: each such device takes the orientation that agrees with the nets its
+other terminals and the other devices already put on the layout nets.
+
+**The comparison** (`nets::compare`), per schematic net, the layout nets its terminals
+are on (*pieces*):
+
+| | |
+|---|---|
+| ok | one piece, and no other schematic net on it |
+| open | several pieces; **flylines** join them: a minimum spanning tree (Prim) over the pieces, each edge between their nearest terminals |
+| short | a layout net with terminals of several schematic nets (listed once more under shorts) |
+| not placed | its terminals belong to devices that are not in the layout |
+
+and also: terminals on no net (*unconnected*), schematic devices with no layout
+device (*not in the layout*), layout devices that belong to no bound instance (a note:
+taps, fill), and each schematic pin: `ok` when a label of its name in the top cell is
+on a wire of its net, else *no label in the layout*, *the label is on no wire*, or
+*the label is on the layout net of …*. A pin label joins its net's pieces too.
+
+**Running it.** `cdept layout check-nets <lib> <cell> [--schematic V] [--view V]
+[--json] [--dir D]` prints the findings (`net VDD: open, 2 pieces: {M2.D} on #4,
+{M2.B} on #5`) and exits 1 unless clean; work files in
+`~/.cache/cdept/verify/<project>/<lib>/<cell>/nets/`. About 4 s for the example
+inverter (mostly the deck).
+
+**In the layout tab.** Layout › Update Connectivity (also the Nets panel's Update)
+runs the same on the layout as it is now, in the background. Then:
+
+- the helper loads the LVS database (`nets_load`) and draws the **flylines**
+  (`nets_flylines`, magenta, Layout › Flylines);
+- the **Nets panel** lists the nets (problems first), shorts, unconnected terminals,
+  pins and notes; a click highlights the net's shapes (`nets_highlight`) and zooms
+  there;
+- **Probe Nets** (Layout menu, the panel, key `N`): a left click in the picture asks the
+  helper for the net under it (`nets_probe`, the topmost layer's) and highlights it;
+- **cross-probing** (with the Link panel's switch): a net shown or probed in the layout
+  is highlighted in the schematic tabs (`xschem hilight_netname`); a wire, label or
+  pin selected in a schematic highlights its net in the layout (the selection reports
+  `nets`: `cdept::selection` in cdept-xschem/shim/tcl/cdept.tcl);
+- what was extracted is as old as the layout was then: the helper counts changes
+  (`revision` of the `modified` event) and the panel says "out of date" after an
+  edit; "Update Connectivity after Saving" extracts again after each save.
+
+Helper methods (`nets.py`):
+
+| method | params | value |
+|--------|--------|-------|
+| `nets_load` | `{lvsdb, top?}` | `{nets, top}`: the database of the last extraction |
+| `nets_highlight` | `{nets: [id], color?, zoom?}` | `{markers}`; empty clears |
+| `nets_flylines` | `{lines: [[x1, y1, x2, y2]], color?}` | `{markers}`; empty clears |
+| `nets_probe` | `{point: [x, y]}` (µm) or `{pixel: [x, y]}` | `{net, name, point}`; `net` null: nothing there |
+| `nets_clear` | `{}` | |
+
+Markers are not part of the layout and never saved.
+
+**Example.** `examples/ihp-inv`: the inverter is wired at A and Y
+(`scripts/wire-inv.py`: GatPoly between the gates with a contact to a Metal1 pad, a
+Metal1 wire between the drains, the labels A and Y on them), not at VDD and VSS: two
+nets ok, two open (each MOS's source against its bulk), VDD and VSS labels on no
+wire. buf places it twice: the net between the two inverters is open from one cell to
+the other. Tests: `libcdept/tests/nets.rs` (also a deliberate short, A to Y),
+`cdept-klayout/tests/test_nets.py` (a deck of its own on generic layers, no PDK),
+`cdept-gui/scripts/layout-nets.script`.
+
+**Limits.** The layout's nets need the PDK's LVS deck (any PDK whose deck takes
+`input`, `topcell`, `report`, `schematic`, as IHP's does). The deck's own options
+apply (IHP simplifies the netlist: parallel devices may be combined, which the
+matching by place tolerates). Bulk terminals of MOS devices sit in the channel's
+middle, so a MOS's source–bulk flyline is short and inside the device. Bus instances
+(`M1[3:0]`) are one name (§7).
+

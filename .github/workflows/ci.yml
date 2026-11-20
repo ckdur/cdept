@@ -79,10 +79,10 @@ jobs:
         run: cdept-klayout/tests/run.sh
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # DRC/LVS (tests/verify.rs) and the IHP linking test skip themselves: there is no
-      # PDK on the runner.
+      # DRC/LVS (tests/verify.rs), the IHP linking test and the nets tests skip themselves:
+      # there is no PDK on the runner.
       - name: Rust tests that start KLayout
-        run: cargo test -p libcdept --test klayout --test verify --test link --test oasis
+        run: cargo test -p libcdept --test klayout --test verify --test link --test oasis --test nets
 
   msrv:
     runs-on: ubuntu-24.04

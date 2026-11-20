@@ -4,7 +4,7 @@ What is still to do and what may cause trouble. [ROADMAP.md](ROADMAP.md) is the 
 file is the running list behind it. Update it when an item is done or a new problem shows
 up. Items marked **(verify)** are suspicions, not confirmed facts.
 
-Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built; PCell views; schematic ↔ layout linking).
+Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built; PCell views; schematic ↔ layout linking with nets).
 
 ---
 
@@ -223,7 +223,26 @@ Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built; PCell views; sche
 - [x] GUI: Generate / Update from Schematic (layout tab, schematic tab Cell menu), Link
       panel, Open Schematic / Open Layout, cross-probing both ways (`layout-link.script`).
       Example `examples/ihp-inv`; tests `libcdept/tests/link.rs`, helper `Link`.
-- [ ] Nets: flylines, net highlighting, connectivity check (LINKING.md §7).
+- [x] Nets (2026-11-20, LINKING.md §8): schematic nets from xschem
+      (`instance_nodemap`, hierarchy flattened through project cells), layout nets from
+      the PDK's LVS deck (`klayout -b`) read by the helper script `connectivity.py`
+      (`l2n.py`: nets flattened by walking the hierarchy, devices with terminal
+      places, bound instances, top-cell labels); devices matched to bound instances by
+      place, pins to terminals by name/order/`terminals` (S/D swappable); comparison
+      in Rust (`link::nets`): ok/open/short/not placed, flylines (MST over the pieces),
+      unconnected terminals, pin labels. `cdept layout check-nets [--json]`. GUI:
+      Update Connectivity (background, unsaved edits included, "out of date" by the
+      helper's `revision`), Nets panel, flylines, Probe Nets (N), cross-probing of
+      nets with schematic tabs (`cdept::selection` reports `nets`, `hilight_netname`).
+      Example inverter wired at A/Y (`examples/ihp-inv/scripts/wire-inv.py`). Tests:
+      `libcdept/tests/nets.rs`, helper `test_nets.py` (generic deck, no PDK),
+      `layout-nets.script` (`CDEPT_EXAMPLE=ihp-inv`).
+- [ ] Nets: needs the PDK's LVS deck (no deck-less check yet); flylines are as old as
+      the last extraction (not live while editing); MOS bulk terminals sit in the
+      channel, so source–bulk flylines are short and inside the device; the IHP deck
+      combines parallel devices; schematic nets are read as saved.
+- [ ] Opening examples/ihp-inv's inverter schematic shows it modified (`*`) right away;
+      seen while testing nets, not caused by them, not looked into.
 - [ ] Hierarchical cross-probing; unsaved schematic edits are not seen (read from disk);
       pins are text labels only; PDK PCells need `[klayout] tech` to read back live;
       bus instances (`M1[3:0]`) count as one name.

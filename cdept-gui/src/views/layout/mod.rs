@@ -10,6 +10,7 @@ mod checks;
 mod inplace;
 mod keys;
 mod linking;
+mod nets;
 mod panels;
 mod pcell;
 mod place;
@@ -163,6 +164,8 @@ pub struct LayoutView {
     dirty: bool,
     can_undo: bool,
     can_redo: bool,
+    /// The helper's count of changes (see `Event::Modified`).
+    revision: u64,
     notice: Option<(NoticeLevel, String, Instant)>,
     notices: Vec<(NoticeLevel, String)>,
 
@@ -199,6 +202,8 @@ pub struct LayoutView {
     library_picker: Option<pcell::LibraryPicker>,
     /// The link with the schematic (see `linking`).
     link: linking::LinkState,
+    /// Nets against the schematic's: flylines, probing (see `nets`).
+    nets: nets::NetsState,
 }
 
 impl LayoutView {
@@ -250,6 +255,7 @@ impl LayoutView {
             dirty: false,
             can_undo: false,
             can_redo: false,
+            revision: 0,
             notice: None,
             notices: Vec::new(),
             side: true,
@@ -279,6 +285,7 @@ impl LayoutView {
             properties: None,
             library_picker: None,
             link: linking::LinkState::new(),
+            nets: nets::NetsState::default(),
         };
         view.find_link_source();
         view
@@ -347,6 +354,7 @@ impl LayoutView {
 
     /// Take in the answers of the helper.
     fn pump(&mut self) {
+        let mut saved = false;
         for reply in self.session.take_replies() {
             let Some(pending) = self.pending.remove(&reply.id) else {
                 self.replies.push(reply);
@@ -366,6 +374,7 @@ impl LayoutView {
             match (&result, &pending) {
                 (Err(error), _) => self.notify(NoticeLevel::Error, error.clone()),
                 (Ok(_), Pending::Save) => {
+                    saved = true;
                     self.notify(NoticeLevel::Info, "Saved".into());
                     // The helper reports the modified flag with the next thing it is
                     // asked, not on its own: ask something.
@@ -379,6 +388,9 @@ impl LayoutView {
         }
         let excess = self.replies.len().saturating_sub(KEPT_REPLIES);
         self.replies.drain(..excess);
+        if saved {
+            self.nets_after_save();
+        }
     }
 
     /// The answer to `save`: the references the file holds go to its sidecar.
@@ -583,7 +595,9 @@ impl LayoutView {
                 can_undo,
                 can_redo,
                 edited,
+                revision,
             } => {
+                self.revision = revision;
                 self.dirty = dirty;
                 self.edited = edited;
                 self.can_undo = can_undo;
@@ -618,6 +632,7 @@ impl LayoutView {
             self.properties = None;
             self.library_picker = None;
             self.link.forget_questions();
+            self.nets.forget_questions();
             if matches!(self.closing, Some(Closing::Saving(_))) {
                 self.closing = None;
             }
@@ -725,6 +740,7 @@ impl LayoutView {
             }
             Shortcut::Ascend => self.ascend(false),
             Shortcut::Properties => self.open_properties(),
+            Shortcut::ProbeNets => self.nets.probing = !self.nets.probing,
             Shortcut::AscendAll => self.ascend(true),
         }
     }
@@ -779,6 +795,14 @@ impl LayoutView {
                     };
                     let (x, y) = to_frame(*pos);
                     let modifiers = keys::modifiers(*modifiers);
+                    // Probing nets: a left click asks for the net under it, KLayout
+                    // does not see it.
+                    if self.nets.probing && button == Button::Left {
+                        if *pressed && over {
+                            self.probe_net_at(x, y);
+                        }
+                        continue;
+                    }
                     if *pressed && over {
                         let again = self.last_press.is_some_and(|(when, at, was)| {
                             was == button
@@ -1042,6 +1066,10 @@ impl LayoutView {
                 ui.weak("read-only");
             }
             self.in_place_status(ui);
+            if self.nets.probing {
+                ui.separator();
+                ui.colored_label(Color32::from_rgb(255, 64, 255), "probing nets (N)");
+            }
             if let Some(version) = self.session.klayout_version() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.weak(version);
@@ -1194,6 +1222,8 @@ impl View for LayoutView {
         self.checks_panel(ui);
         self.poll_link();
         self.link_panel(ui, ctx);
+        self.poll_nets(ui.ctx());
+        self.nets_panel(ui);
         self.drawing(ui);
 
         if let Some(picker) = &mut self.place
@@ -1318,6 +1348,7 @@ impl View for LayoutView {
             });
             ui.separator();
             self.link_menu(ui, ctx, editable);
+            self.nets_menu(ui, ready);
             ui.separator();
             self.checks_menu(ui, ready);
             ui.separator();

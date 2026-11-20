@@ -244,8 +244,10 @@ Helper → CDePT:
     at most 200 items.
   - `status {x, y, mode, message}`: pointer position in µm (throttled), current mode,
     KLayout's one-line hint if any.
-  - `modified {dirty, can_undo, can_redo, edited}`: `edited` = external files with
-    unsaved in-place changes.
+  - `modified {dirty, can_undo, can_redo, edited, revision}`: `edited` = external files
+    with unsaved in-place changes; `revision` = changes seen so far (edits, undo,
+    redo), only growing while the helper runs (what was made from the layout at
+    another revision, e.g. the nets, is out of date).
   - `notice {level, text}`: errors from editing (e.g. "Please select a layer first").
 
 Input (`input`): `{kind, x, y, button, buttons, modifiers, delta, horizontal, key,
@@ -285,6 +287,7 @@ Methods (`call`):
 | `replace_cell` | `{index, key, library, cell, values}` or `{index, key, refs, name}` | as `properties`: the instance places another cell, transformation kept; one undo step |
 | `refresh_pcells` | `{pcells?}` | `{changed, libraries}`: PCell files that changed registered again |
 | `link_apply` / `link_instances` / `link_select` / `link_selected` / `link_highlight` | see docs/LINKING.md §5 | linking with the schematic |
+| `nets_load` / `nets_highlight` / `nets_flylines` / `nets_probe` / `nets_clear` | see docs/LINKING.md §8 | nets: the LVS database of the last extraction, highlights, flylines, probing |
 | `markers` | `{shapes: [{kind: polygon\|box\|edge\|text, …}], color?, zoom?}` | `{markers}`; empty clears (DRC/LVS highlights, never part of the layout) |
 | `python` | `{code}` | `repr` of the last expression (tests, power users) |
 

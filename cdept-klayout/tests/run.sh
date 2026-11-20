@@ -17,5 +17,5 @@ if [ -z "$CDEPT_TEST_KLAYOUT" ] && [ -z "$CDEPT_TEST_DOCKER" ] && [ ! -x "$here/
     fi
 fi
 cd "$here"
-if [ $# -eq 0 ]; then set -- test_helper test_verify test_pcells; else set -- $(for t in "$@"; do case $t in *.*) echo "$t" ;; *) echo "test_helper.$t" ;; esac; done); fi
+if [ $# -eq 0 ]; then set -- test_helper test_verify test_pcells test_nets; else set -- $(for t in "$@"; do case $t in *.*) echo "$t" ;; *) echo "test_helper.$t" ;; esac; done); fi
 exec python3 -m unittest -v "$@" 2>&1

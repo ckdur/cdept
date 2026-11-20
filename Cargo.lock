@@ -341,6 +341,7 @@ dependencies = [
  "clap",
  "eyre",
  "libcdept",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
 ]

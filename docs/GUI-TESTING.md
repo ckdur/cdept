@@ -27,7 +27,8 @@ XDG_DATA_HOME=$(mktemp -d) target/debug/cdept -p examples/buffer gui --script my
 
 Scripts check the embedded xschem and KLayout on `examples/buffer`, and
 `cdept-gui/scripts/run.sh` runs them with scratch settings, a scratch home folder and
-a scratch copy of the project:
+a scratch copy of the project (examples/buffer; `CDEPT_EXAMPLE=<name>` takes another
+folder of examples/):
 
 | Script | Checks | Writes |
 |---|---|---|
@@ -40,6 +41,7 @@ a scratch copy of the project:
 | `cdept-gui/scripts/layout-properties.script` | the properties dialog (box, instance, PCell parameters), Place Library Cell (Basic CIRCLE), box by dragging | into the project: run it on a copy |
 | `cdept-gui/scripts/layout-pcells.script` | PCells: the project's PCell view `logic/rpoly` placed by `logic/rdiv` (its parameters), a shape parameter (Basic CIRCLE's handle), another cell for an instance (Change… › Library Cell / Layout View), placing a project PCell | into the project: run it on a copy |
 | `cdept-gui/scripts/layout-checks.script` | Run DRC / Run LVS, the results panel, highlight and zoom (needs `PDK_ROOT=/opt/ext/OpenPDKs PDK=ihp-sg13g2` or similar; not in the default set) | nothing |
+| `cdept-gui/scripts/layout-nets.script` | nets on examples/ihp-inv: Update Connectivity, flylines, a net shown in the layout and highlighted in the schematic, a wire selected in the schematic highlighted in the layout, probing, out of date after an edit, a short (needs the PDK: `PDK_ROOT=/opt/ext/OpenPDKs CDEPT_EXAMPLE=ihp-inv run.sh cdept-gui/scripts/layout-nets.script`) | into the project: run it on a copy |
 | `cdept-gui/scripts/layout-link.script` | linking buf's schematic with its layout: Generate takes over the inv instances, the Link panel, cross-probing both ways, undo | into the project: run it on a copy |
 
 
@@ -108,7 +110,7 @@ with spaces that is not the last one is written in braces: `{Instance name}`.
 |---|---|
 | `tcl <script>` | Evaluate Tcl in xschem and log the result |
 | `tcl_expect <result> <script>` | Fail unless the result is exactly `<result>` (use braces: `{{x1}}` is the Tcl list `{x1}`) |
-| `tcl_send <script>` | Evaluate without waiting for the result (for scripts that block, or end xschem) |
+| `tcl_send <script>` | Evaluate without waiting for the result (for scripts that block, or end xschem); the selection is read again afterwards |
 | `menus` | Log every entry of xschem's menu bar as `Menu / Entry` |
 | `menu <label> / <label> …` | Choose a menu entry by its labels (trailing dots can be left out) |
 | `dialog_click <button text>` | Press a button of the topmost dialog |
@@ -202,6 +204,13 @@ and path tools take **clicks**; a box can also be dragged (press, move, release)
 | `place_library <library> <cell> [<json values>]` | Instance mode with a cell or PCell of a KLayout library (PDK, Basic) |
 | `replace_library <library> <cell> [<json values>]` | The instance the properties show places that KLayout library cell or PCell instead (Change… › Library Cell…), keeping its place |
 | `replace_view <library> <cell> <view>` | The same with a layout view of the project (Change… › Layout View…) |
+| `nets_update` | Update Connectivity: extract the layout and compare its nets with the schematic's (needs the PDK) |
+| `expect_nets <text>` | Wait until the nets are compared and fail unless the summary (`2 ok, 2 open, 0 shorted`, `, clean`, ` (out of date)`) contains the text |
+| `nets_show <net>` | Highlight a schematic net in the layout, as a click in the Nets panel does |
+| `nets_probe <x> <y>` / `nets_probe center` | Probe the net at a frame pixel (or the middle of the picture), as a click in probe mode does |
+| `expect_net_probed <nets…\|none>` | Fail unless these schematic nets were last probed or shown in the layout |
+| `flylines <on\|off>` / `expect_flylines <n>` | Show or hide the flylines; fail unless the helper drew n |
+| `expect_schematic_nets <nets…\|none>` | Fail unless the active schematic last exchanged these nets with a layout (cross-probing) |
 | `layout_check <drc\|lvs>` | Run DRC or LVS on the open layout (needs the PDK in the environment) |
 | `expect_check <text>` | Wait until the last check is done and fail unless its summary contains the text |
 | `check_show <n>` | Highlight DRC result n (from 1), as a click in the results panel does |

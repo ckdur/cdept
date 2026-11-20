@@ -293,6 +293,27 @@ enum LayoutCommand {
         #[arg(long)]
         view: Option<String>,
     },
+    /// Compare the nets of a cell's layout with its schematic's: opens, shorts,
+    /// unconnected terminals, pins without a label (docs/LINKING.md §8).
+    ///
+    /// The layout's nets are extracted with the PDK's LVS deck; the schematic's come
+    /// from xschem, through the hierarchy. Layout instances are matched to schematic
+    /// instances by the link (`cdept layout link`). Fails if the nets do not agree.
+    CheckNets {
+        library: String,
+        cell: String,
+        #[arg(long)]
+        schematic: Option<String>,
+        #[arg(long)]
+        view: Option<String>,
+        /// Print the whole comparison as JSON.
+        #[arg(long)]
+        json: bool,
+        /// Folder for the stream, the database and KLayout's output. Defaults to
+        /// ~/.cache/cdept/verify/<project>/<library>/<cell>/nets.
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
 }
 
 /// What `layout drc` and `layout lvs` share.
@@ -321,6 +342,50 @@ fn parse_define(text: &str) -> Result<(String, String), String> {
 }
 
 /// Run DRC or LVS on `library/cell` from the command line.
+/// `cdept layout check-nets`.
+fn layout_check_nets(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    schematic: Option<&str>,
+    view: Option<&str>,
+    json: bool,
+    dir: Option<PathBuf>,
+) -> Result<()> {
+    let (source, schematic) = link::schematic_view(project, library, cell, schematic)?;
+    let file = layout_view(project, library, cell, view)?;
+    let dir = match dir {
+        Some(dir) => {
+            std::fs::create_dir_all(&dir)?;
+            dir
+        }
+        None => verify::work_dir_named(project, library, cell, "nets")?,
+    };
+    let stream = verify::export_stream(project, &file, &dir.join(format!("{cell}.gds")))?;
+    if !stream.missing.is_empty() {
+        tracing::warn!(
+            "cells not found, checked as empty: {} (see `cdept layout refs`)",
+            stream.missing.join(", ")
+        );
+    }
+    let run = link::nets::run(project, source.clone(), &schematic, &stream, &dir)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&run.report)?);
+    } else {
+        println!("{} ↔ {}", source.label(), file.display());
+        for line in link::nets::report_lines(&run.report, &run.connectivity) {
+            println!("{line}");
+        }
+        let (ok, open, short) = run.report.counts();
+        println!("nets: {ok} ok, {open} open, {short} shorted");
+        println!("database {}", run.lvsdb.display());
+    }
+    if !run.report.clean() {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
 fn layout_check(
     project: &Project,
     library: &str,
@@ -1028,6 +1093,22 @@ fn main() -> Result<()> {
                     }
                     Ok(())
                 }
+                LayoutCommand::CheckNets {
+                    library,
+                    cell,
+                    schematic,
+                    view,
+                    json,
+                    dir,
+                } => layout_check_nets(
+                    &project,
+                    &library,
+                    &cell,
+                    schematic.as_deref(),
+                    view.as_deref(),
+                    json,
+                    dir,
+                ),
                 LayoutCommand::Drc {
                     library,
                     cell,

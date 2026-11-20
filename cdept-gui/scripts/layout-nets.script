@@ -1,0 +1,62 @@
+# Nets of a layout against its schematic (docs/LINKING.md §8) on examples/ihp-inv: the
+# inverter's layout is wired at A and Y, not at VDD and VSS. Update Connectivity
+# extracts it with the IHP LVS deck; flylines show the open nets; nets follow between
+# the schematic and the layout (cross-probing); an edit makes the result out of date;
+# a wire from A to Y is a short. Needs the PDK and KLayout (cdept-klayout/build.sh):
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_EXAMPLE=ihp-inv \
+#       cdept-gui/scripts/run.sh cdept-gui/scripts/layout-nets.script
+
+open cells inv schematic
+wait_frame
+open cells inv layout
+wait_frame
+expect_documents 2
+
+nets_update
+expect_nets 2 ok, 2 open, 0 shorted
+expect_notice Nets: 2 ok, 2 open
+# VDD and VSS: one flyline each.
+expect_flylines 2
+screenshot /tmp/cdept-nets-1-flylines.png
+
+# Layout -> schematic: VDD shown in the layout is highlighted in the schematic.
+nets_show VDD
+expect_net_probed VDD
+wait_frame
+screenshot /tmp/cdept-nets-2-show-vdd.png
+open cells inv schematic
+expect_schematic_nets VDD
+tcl_expect 1 expr {[string first VDD [xschem list_hilights]] >= 0}
+screenshot /tmp/cdept-nets-3-schematic-vdd.png
+
+# Schematic -> layout: a wire of net A selected in the schematic.
+tcl_send xschem unselect_all; xschem select wire 0
+expect_schematic_nets A
+open cells inv layout
+expect_net_probed A
+
+# Probing: the middle of the picture is on the Y wire.
+layout_call zoom {"what": "box", "box": [0.75, 2.8, 1.15, 3.2]}
+wait_frame
+nets_probe center
+expect_net_probed Y
+expect_notice schematic Y
+open cells inv schematic
+expect_schematic_nets Y
+open cells inv layout
+
+# An edit: the result is out of date. A Metal1 wire from A's pad to the Y wire.
+flylines off
+expect_flylines 0
+layout_call python {"code": "view.transaction('short')\nly = doc.layout\nly.top_cell().shapes(ly.layer(8, 0)).insert(pya.DBox(-0.3, 2.12, 0.95, 2.28))\nview.commit()"}
+expect_modified yes
+expect_nets (out of date)
+nets_update
+expect_nets 0 ok, 2 open, 2 shorted
+layout_call zoom {"what": "fit"}
+flylines on
+expect_flylines 2
+screenshot /tmp/cdept-nets-4-short.png
+layout_edit undo
+quit

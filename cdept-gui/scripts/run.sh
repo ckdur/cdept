@@ -1,5 +1,6 @@
 #!/bin/sh
-# Run the GUI test scripts on examples/buffer (see docs/GUI-TESTING.md).
+# Run the GUI test scripts on examples/buffer, or on examples/$CDEPT_EXAMPLE (see
+# docs/GUI-TESTING.md).
 #
 #   cdept-gui/scripts/run.sh [script ...]     default: the buffer scripts
 #
@@ -14,7 +15,7 @@ cdept=${CDEPT:-$root/target/debug/cdept}
 status=0
 for script in "$@"; do
   scratch=$(mktemp -d)
-  cp -r "$root/examples/buffer" "$scratch/project"
+  cp -r "$root/examples/${CDEPT_EXAMPLE:-buffer}" "$scratch/project"
   mkdir "$scratch/home" "$scratch/data"
   # A script that hangs must not hang the run.
   if HOME="$scratch/home" XDG_DATA_HOME="$scratch/data" \

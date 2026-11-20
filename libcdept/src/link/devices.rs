@@ -15,7 +15,13 @@
 //! library = "SG13_dev"                    # a KLayout library ...
 //! cell = "nmos"                           # ... and its PCell
 //! params = { w = "@{w|u}", l = "@{l|u}", ng = "@ng", m = "@m" }
+//! terminals = { D = "D", G = "G", S = "S", B = "B" }   # optional, see below
 //! ```
+//!
+//! `terminals` (optional) names, for each pin of the symbol, the terminal of the device
+//! KLayout's extraction makes of the PCell (used by the net comparison, docs/LINKING.md
+//! §8). Without it a pin goes to the terminal of the same name (any case), else the
+//! pins go to the terminals in order.
 //!
 //! A parameter template replaces `@name` with the instance's attribute `name` (else
 //! the symbol's default from `template=`), and `@{name|u}` with that value read as a
@@ -48,6 +54,8 @@ pub struct Device {
     pub cell: String,
     /// PCell parameter → template.
     pub params: BTreeMap<String, String>,
+    /// Symbol pin → terminal of the extracted device (empty: by name, else in order).
+    pub terminals: BTreeMap<String, String>,
 }
 
 impl Device {
@@ -164,11 +172,30 @@ impl DeviceMap {
                     params.insert(key, value.to_string());
                 }
             }
+            let mut terminals = BTreeMap::new();
+            if let Some(item) = table.get("terminals") {
+                let inline = item
+                    .as_inline_table()
+                    .map(|t| t.iter().map(|(k, v)| (k.to_string(), v.as_str())).collect());
+                let plain = item
+                    .as_table()
+                    .map(|t| t.iter().map(|(k, v)| (k.to_string(), v.as_str())).collect());
+                let pairs: Vec<(String, Option<&str>)> = inline
+                    .or(plain)
+                    .ok_or_else(|| eyre!("device {}: 'terminals' must be a table", n + 1))?;
+                for (key, value) in pairs {
+                    let value = value.ok_or_else(|| {
+                        eyre!("device {}: terminal of pin '{key}' must be a text", n + 1)
+                    })?;
+                    terminals.insert(key, value.to_string());
+                }
+            }
             let device = Device {
                 symbol: text("symbol")?,
                 library: text("library")?,
                 cell: text("cell")?,
                 params,
+                terminals,
             };
             self.devices.retain(|d| d.symbol != device.symbol);
             self.devices.push(device);

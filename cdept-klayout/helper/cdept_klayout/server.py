@@ -19,6 +19,7 @@ from . import link
 from . import pcells
 from .editor import Editor, _message
 from .markers import Markers
+from .nets import Nets
 
 PROTOCOL_VERSION = 1
 # How long one wait for requests lasts; KLayout's own events are processed between.
@@ -103,6 +104,7 @@ class Server:
         self.last_status = 0.0
         self.guard = ModalGuard(self.editor.notice)
         self.markers = Markers()
+        self.nets = Nets()
         self.last_pcell_check = time.monotonic()
 
     def send(self, message):
@@ -477,6 +479,27 @@ class Server:
         shapes = [{"kind": "box", "box": b} for b in boxes]
         return self.markers.set(self._view(), {"shapes": shapes, "color": p.get("color"),
                                                "zoom": bool(p.get("zoom"))})
+
+    # -- nets (nets.py, docs/LINKING.md §8) -------------------------------------------
+
+    def m_nets_load(self, p):
+        """Load the LVS database of the last extraction: {lvsdb, top?}."""
+        return self.nets.load(p)
+
+    def m_nets_highlight(self, p):
+        """Draw the shapes of nets: {nets: [id], color?, zoom?}; empty clears."""
+        return self.nets.show(self._view(), p)
+
+    def m_nets_flylines(self, p):
+        """Draw flylines: {lines: [[x1, y1, x2, y2]], color?}; empty clears."""
+        return self.nets.lines(self._view(), p)
+
+    def m_nets_probe(self, p):
+        """The net at {point: [x, y]} (µm) or {pixel: [x, y]}: {net, name, point}."""
+        return self.nets.probe(self.editor, p)
+
+    def m_nets_clear(self, p):
+        self.nets.clear()
 
     def m_config(self, p):
         self._view().set_config(p["name"], str(p.get("value", "")))

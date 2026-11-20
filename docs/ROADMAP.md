@@ -192,7 +192,7 @@ To do:
   place, properties and PCell forms, OASIS references, DRC/LVS with the PDK decks. Plan,
   results and gaps: [KLAYOUT.md](KLAYOUT.md). PCell views in CDePT libraries.
   Schematic ↔ layout linking (Layout XL style): device map, generate/update, check,
-  cross-probing ([LINKING.md](LINKING.md)).
+  cross-probing, nets (opens, shorts, flylines, net probing) ([LINKING.md](LINKING.md)).
 - **Magic:** `magic -dnull -noconsole` with Tcl over a pipe for batch (ext, LEF, DRC). For the
   GUI, source a Tcl socket-server script.
 - **ngspice:** in-process via `libngspice` (shared API: `ngSpice_Init`, `ngSpice_Command`,
@@ -266,6 +266,9 @@ To do:
   pins and flylines (rat's nest) in KLayout.
 - Consistency check: instance/parameter diff between schematic and layout (pre-LVS
   "connectivity check").
+- Built for KLayout with the PDK's decks (2026-11-20): cross-probing of instances and
+  nets, generate/update from the schematic, flylines, `check-source` and `check-nets`
+  ([LINKING.md](LINKING.md)); Magic generators not yet.
 - **Milestone:** generate a layout skeleton of a 5T-OTA from its schematic, then cross-probe
   a net.
 

@@ -85,6 +85,8 @@ pub struct Selected {
     pub instances: Vec<SelectedInstance>,
     pub wires: u32,
     pub texts: u32,
+    /// Nets of the selected wires, labels and pins.
+    pub nets: Vec<String>,
 }
 
 impl Selected {
@@ -101,6 +103,7 @@ impl Selected {
                 "count" => selected.count = number(value)?,
                 "wires" => selected.wires = number(value)?,
                 "texts" => selected.texts = number(value)?,
+                "nets" => selected.nets = tcl::parse_list(value)?,
                 "instances" => {
                     for instance in tcl::parse_list(value)? {
                         let mut fields = tcl::parse_list(&instance)?.into_iter();
@@ -454,6 +457,11 @@ impl SchematicView {
     /// Evaluate Tcl in xschem; the answer is fetched with [`take_reply`](Self::take_reply).
     pub fn tcl(&self, script: &str) -> u64 {
         self.session.tcl(script)
+    }
+
+    /// Read the selection again (after a script changed it behind the mouse's back).
+    pub fn reread_selection(&mut self) {
+        self.selection_stale = true;
     }
 
     pub fn take_reply(&mut self, id: u64) -> Option<Result<String, String>> {
