@@ -46,8 +46,9 @@ opens and shorts, flylines, net highlighting and probing, cross-probing of nets
 
   `source` is the schematic view; `instances` what each schematic instance was made
   into at the last sync (`kind` `pcell`: a PCell of a KLayout library with its
-  parameters; `cell`: the layout view of a project cell). Rust types:
-  `layout::{Source, Linked}`.
+  parameters; `cell`: the layout view of a project cell). An optional `parallel`
+  lists groups of devices in parallel (§8.3). Rust types:
+  `layout::{Source, Linked, Parallel}`.
 
 ## 2. Reading the schematic (`libcdept::link::schematic`)
 
@@ -298,9 +299,99 @@ the other. Tests: `libcdept/tests/nets.rs` (also a deliberate short, A to Y),
 `cdept-gui/scripts/layout-nets.script`.
 
 **Limits.** The layout's nets need the PDK's LVS deck (any PDK whose deck takes
-`input`, `topcell`, `report`, `schematic`, as IHP's does). The deck's own options
-apply (IHP simplifies the netlist: parallel devices may be combined, which the
-matching by place tolerates). Bulk terminals of MOS devices sit in the channel's
-middle, so a MOS's source–bulk flyline is short and inside the device. Bus instances
-(`M1[3:0]`) are one name (§7).
+`input`, `topcell`, `report`, `schematic`, as IHP's does); a PDK without one has no
+net check ("this PDK has no KLayout LVS deck: net checking is not available"), and
+there is no fallback: CDePT does not guess a PDK's devices. Bulk terminals of MOS
+devices sit in the channel's middle, so a MOS's source–bulk flyline is short and
+inside the device. Bus instances (`M1[3:0]`) are one name (§7).
+
+### 8.1 Live flylines
+
+Wiring changes far more often than devices. After an extraction the helper
+(`cdept_klayout/live.py`) keeps the devices as extracted and traces the **wiring**
+between their terminals on the live layout after each change, with KLayout's net
+tracer (`pya.NetTracer`) and the technology's net tracer connectivity (the
+`<connectivity>` of the PDK's `.lyt`: IHP lists GatPoly/Diff–Cont–Metal1, the vias and
+metals):
+
+- *seeds*: every device terminal and every top-cell label of the extraction, each a
+  point and the first conductor layer with a shape there (a label's own layer number
+  first);
+- *calibration*, right after the extraction: seeds traced into one net must have been
+  on one extracted net. A seed that disagrees with most of its net is kept as
+  extracted instead: a MOS bulk (its terminal sits in the channel, so it traces as the
+  gate) whose connection goes through the well, which the net tracer does not know;
+- after each change, once the layout has been quiet for `delay_ms` (300 ms), the
+  seeds are traced again (a seed on a shape of a net traced already joins it without a
+  trace of its own). Devices of a top-level instance move with it; devices of deleted
+  instances drop out (their schematic devices are "not in the layout"); instances
+  placed since are listed and count after the next Update. A label that was on no
+  shape is tried again (a wire may be under it now);
+- the result is a `nets_live` event: per device its terminals' nets and places now,
+  the nets (names from the extraction), moved/added/gone instances. CDePT patches the
+  extraction with it (`Connectivity::with_live`) and compares again with the same
+  schematic: flylines, opens and shorts follow the edit at once. Highlights and
+  probing use the traced shapes.
+
+Measured (IHP SG13G2, 1600×1000 view): the inverter 3 ms per update, buf 5–8 ms, 100
+devices (50 inverters) 120–135 ms, set-up 285 ms once. The helper stops live updates
+when one takes longer than 250 ms (`limit_ms`; a notice says so) and the flylines then
+change with Update Connectivity only, as before. A technology without net tracer
+connectivity has no live flylines either (the Nets panel says why).
+
+Helper method: `nets_live {connectivity?, rules?, on?, delay_ms?, limit_ms?, update?}`
+(set up from the extraction's JSON; `rules` = `{connections, symbols}` instead of the
+technology's; `update`: trace now and answer the result).
+
+### 8.2 How flylines look
+
+`FlylineStyle` (`libcdept::link::nets`): colour, width (px), line (solid, dashed,
+dotted, dash-dotted: KLayout's line styles), opacity (percent; markers have no alpha,
+so the colour is blended with the background), the colours of a net shown and of a
+shown net that is shorted, live on/off and the delay. The user's are part of the GUI
+settings (Nets panel › Style…, Layout › Flyline Style…); a project may set any of
+them in cdept.toml, on top:
+
+```toml
+[klayout.flylines]
+color = "#00c0ff"
+width = 3
+line = "dashed"
+opacity = 80
+live = true
+```
+
+`nets_flylines` takes `color`, `width`, `style`, `opacity` (kept for later calls);
+`nets_highlight` takes `color`.
+
+### 8.3 Devices in parallel
+
+An array of transistors drawn as several schematic instances with the same nets would
+get one flyline per member. A **parallel group** is found in the flattened schematic:
+the same symbol and the same nets on every pin (a MOS's S and D either way round, the
+two pins of a two-pin device either way). Groups are recorded in the layout's sidecar
+with the link (version 2):
+
+```json
+"parallel": [
+  { "members": ["M1a", "M1b", "M1c"], "joined": true },
+  { "members": ["x1/M3", "x2/M3"], "joined": false, "manual": true }
+]
+```
+
+`joined` (default true) is the user's choice; `manual` marks a group the user made.
+For a joined group: the pieces of a net that hold only members of the group count as
+one (one flyline to the nearest member), and a layout device lying over a member
+without one of its own stands for it (the IHP deck combines parallel devices into
+one). Found again at each comparison: a group no longer found goes unless it is the
+user's. Edited with the Nets panel's checkboxes or `cdept layout parallel <lib>
+<cell> [--off I] [--on I] [--group A,B,…] [--ungroup I]`. `m=`/`ng` multiples are one
+instance and need no group.
+
+### 8.4 The schematic as saved
+
+The comparison reads the schematic from its file. Update Connectivity in the GUI
+first saves an open schematic of the link that has unsaved changes (through its
+xschem session, waiting for the answer), then extracts; a cancelled save means no
+update. `cdept layout check-nets` reads the files as they are.
 

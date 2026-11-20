@@ -124,6 +124,7 @@ class Server:
                     break
             self.process_events()
             self.pcells_tick()
+            self.live_tick()
             self.editor.render()
             now = time.monotonic()
             if full or (messages and now - self.last_status >= STATUS_INTERVAL):
@@ -500,6 +501,25 @@ class Server:
 
     def m_nets_clear(self, p):
         self.nets.clear()
+
+    def m_nets_live(self, p):
+        """Live connectivity (live.py): {connectivity?: the extraction's JSON (set up and
+        calibrate now), rules?, on?, delay_ms?} → its state. With `update`, trace now
+        and answer the result."""
+        status = self.nets.live.configure(self.editor, p)
+        if p.get("update") and self.nets.live.seeds and self.nets.live.conn is not None:
+            return self.nets.live.update(self.editor)
+        return status
+
+    def live_tick(self):
+        """Trace the terminals again when the layout has changed and is quiet."""
+        live = self.nets.live
+        try:
+            if live.due(self.editor):
+                self.send({"type": "event", "event": live.update(self.editor)})
+        except Exception as error:
+            live.on = False
+            self.editor.notice("warning", "Live flylines stopped: %s" % _message(error))
 
     def m_config(self, p):
         self._view().set_config(p["name"], str(p.get("value", "")))

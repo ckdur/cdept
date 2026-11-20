@@ -16,7 +16,9 @@ use egui::{CollapsingHeader, Color32, RichText, ScrollArea, Ui};
 use libcdept::klayout::protocol::{NoticeLevel, method};
 use libcdept::klayout::verify;
 use libcdept::layout::Source;
-use libcdept::link::nets::{self, NetRun, NetStatus};
+use libcdept::link::nets::{
+    self, Connectivity, FlylineStyle, LineStyle, LiveNets, NetReport, NetRun, NetStatus,
+};
 use serde_json::{Value, json};
 
 use super::LayoutView;
@@ -43,6 +45,13 @@ enum Job {
     },
 }
 
+/// The connectivity traced on the layout after edits (helper `live.py`), compared again.
+pub(super) struct Live {
+    pub nets: LiveNets,
+    pub connectivity: Connectivity,
+    pub report: NetReport,
+}
+
 /// The nets of one layout tab.
 pub(super) struct NetsState {
     /// The Nets panel is shown.
@@ -63,12 +72,35 @@ pub(super) struct NetsState {
     pub shown: Option<String>,
     probe_asked: Option<u64>,
     flylines_asked: Option<u64>,
+    live_asked: Option<u64>,
     /// Flylines the helper drew, as it last said.
     pub drawn: usize,
     /// Schematic net names for the schematic tabs (taken by `coordinate_links`).
     pub probe_out: Option<Vec<String>>,
     /// The schematic nets last exchanged with the schematic tabs.
     pub probed: Vec<String>,
+    /// The last extraction's terminals traced again after edits.
+    live: Option<Live>,
+    /// The helper epoch live tracing was set up in.
+    live_set: Option<u64>,
+    /// Why live tracing is not there or stopped (a sentence), else empty.
+    pub live_note: String,
+    /// How flylines look: the user's settings with the project's on top.
+    pub style: FlylineStyle,
+    /// The user's settings as edited in the style window (written back to the
+    /// settings by `LayoutView::ui`).
+    pub user_style: FlylineStyle,
+    /// `user_style` was changed here: to be written to the settings.
+    pub user_dirty: bool,
+    /// The style the helper got last.
+    sent_style: Option<FlylineStyle>,
+    /// The style window is open.
+    pub style_open: bool,
+    /// Update Connectivity was asked for: waiting for the schematic to be saved first
+    /// (`coordinate_links` saves it, then starts).
+    pub requested: bool,
+    /// The save of the schematic asked for: its file and the request.
+    pub save_wait: Option<(PathBuf, u64)>,
 }
 
 impl Default for NetsState {
@@ -85,20 +117,59 @@ impl Default for NetsState {
             shown: None,
             probe_asked: None,
             flylines_asked: None,
+            live_asked: None,
             drawn: 0,
             probe_out: None,
             probed: Vec::new(),
+            live: None,
+            live_set: None,
+            live_note: String::new(),
+            style: FlylineStyle::default(),
+            user_style: FlylineStyle::default(),
+            user_dirty: false,
+            sent_style: None,
+            style_open: false,
+            requested: false,
+            save_wait: None,
         }
     }
 }
 
 impl NetsState {
     pub fn running(&self) -> bool {
-        self.job.is_some()
+        self.job.is_some() || self.requested
     }
 
     fn run(&self) -> Option<&NetRun> {
         self.last.as_ref().and_then(|r| r.as_ref().ok())
+    }
+
+    /// The comparison to show: with the live connectivity when there is one.
+    fn report(&self) -> Option<&NetReport> {
+        match &self.live {
+            Some(live) => Some(&live.report),
+            None => self.run().map(|r| &r.report),
+        }
+    }
+
+    /// The layout connectivity the report is of.
+    fn connectivity(&self) -> Option<&Connectivity> {
+        match &self.live {
+            Some(live) => Some(&live.connectivity),
+            None => self.run().map(|r| &r.connectivity),
+        }
+    }
+
+    /// Compare again: the parallel groups changed, or new live connectivity came.
+    fn recompare(&mut self) {
+        let Some(Ok(run)) = &mut self.last else {
+            return;
+        };
+        let joined = nets::joined_groups(&run.parallel);
+        run.report = nets::compare(&run.flat, &run.connectivity, &run.map, &joined);
+        if let Some(live) = &mut self.live {
+            live.report = nets::compare(&run.flat, &live.connectivity, &run.map, &joined);
+        }
     }
 
     /// A new helper: questions to the old one get no answer, and it has no database.
@@ -106,6 +177,8 @@ impl NetsState {
         self.probe_asked = None;
         self.flylines_asked = None;
         self.loaded = None;
+        self.live_set = None;
+        self.sent_style = None;
         if matches!(self.job, Some(Job::Export { .. })) {
             self.job = None;
         }
@@ -119,6 +192,16 @@ enum Act {
     Update,
     Flylines(bool),
     Close,
+    /// Join a parallel group (its index) or not.
+    Parallel(usize, bool),
+}
+
+/// An egui colour button for a `#rrggbb` setting.
+fn color_field(ui: &mut Ui, text: &mut String) {
+    let mut rgb = nets::parse_color(text).unwrap_or([255, 0, 255]);
+    if ui.color_edit_button_srgb(&mut rgb).changed() {
+        *text = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+    }
 }
 
 fn status_color(status: NetStatus) -> Color32 {
@@ -131,16 +214,57 @@ fn status_color(status: NetStatus) -> Color32 {
 
 impl LayoutView {
     /// Update Connectivity: extract the layout as it is now and compare its nets with
-    /// the schematic's.
+    /// the schematic's, as saved. When the schematic is open with unsaved changes it is
+    /// saved first (`coordinate_links` sees to it, then calls
+    /// [`start_connectivity`](Self::start_connectivity)).
     pub fn update_connectivity(&mut self) {
         if self.nets.running() {
             return;
         }
         self.nets.open = true;
+        self.nets.requested = true;
+        self.nets.save_wait = None;
+    }
+
+    /// Update Connectivity asked for, waiting for the schematic's save.
+    pub fn connectivity_requested(&self) -> bool {
+        self.nets.requested
+    }
+
+    /// The save of the schematic asked for before the extraction, if any.
+    pub fn connectivity_save_request(&self) -> Option<u64> {
+        self.nets.save_wait.as_ref().map(|(_, id)| *id)
+    }
+
+    /// The schematic `file` is being saved (request `id`) before the extraction.
+    pub fn connectivity_saving(&mut self, file: PathBuf, id: u64) {
+        self.notify(
+            NoticeLevel::Info,
+            "Saving the schematic first: the nets are compared with it as saved".into(),
+        );
+        self.nets.save_wait = Some((file, id));
+    }
+
+    /// Start the extraction asked for (the schematic is saved).
+    pub fn start_connectivity(&mut self) {
+        self.nets.requested = false;
+        self.nets.save_wait = None;
+        if self.nets.job.is_some() {
+            return;
+        }
         match self.prepare_nets() {
             Ok(job) => self.nets.job = Some(job),
             Err(error) => self.nets.last = Some(Err(error)),
         }
+    }
+
+    /// The schematic could not be saved: no extraction.
+    pub fn connectivity_not_started(&mut self, why: &str) {
+        self.nets.requested = false;
+        self.nets.save_wait = None;
+        let text = format!("The schematic was not saved ({why}): connectivity not updated");
+        self.notify(NoticeLevel::Warning, text.clone());
+        self.nets.last = Some(Err(text));
     }
 
     fn prepare_nets(&mut self) -> Result<Job, String> {
@@ -148,11 +272,11 @@ impl LayoutView {
             return Err("this layout has no schematic to compare with".into());
         };
         if verify::find_deck(&self.project, verify::Check::Lvs).is_none() {
-            return Err(
-                "No LVS deck to extract the layout's nets with: set [klayout] lvs in \
-                 cdept.toml (none was found in the PDK's libs.tech/klayout)."
-                    .into(),
-            );
+            let mut text = nets::NO_DECK.to_string();
+            if let Some(first) = text.get_mut(0..1) {
+                first.make_ascii_uppercase();
+            }
+            return Err(format!("{text}."));
         }
         let (library, cell) = if self.doc.cell.is_empty() {
             ("files".to_string(), verify::fallback_top(&self.file))
@@ -173,11 +297,76 @@ impl LayoutView {
         })
     }
 
-    /// The layout changed since the connectivity was extracted.
+    /// The layout changed since the connectivity was extracted, and live tracing has
+    /// not caught up (or cannot: it is off, or instances were added).
     pub fn nets_stale(&self) -> bool {
-        self.nets
+        let changed = self
+            .nets
             .made_at
-            .is_some_and(|at| at != (self.epoch, self.revision))
+            .is_some_and(|at| at != (self.epoch, self.revision));
+        changed && !self.nets_live_current()
+    }
+
+    /// Live tracing covers the layout as it is now (and nothing was added since the
+    /// extraction).
+    pub fn nets_live_current(&self) -> bool {
+        self.nets.live.as_ref().is_some_and(|l| {
+            l.nets.revision == self.revision
+                && l.nets.added.is_empty()
+                && self.nets.live_set == Some(self.epoch)
+        })
+    }
+
+    /// The live connectivity from the helper: compare again, draw the new flylines.
+    pub(super) fn live_nets(&mut self, live: LiveNets) {
+        if !live.stopped.is_empty() {
+            self.nets.live_note = live.stopped.clone();
+            self.notify(NoticeLevel::Warning, format!("Nets: {}", live.stopped));
+        }
+        let Some(run) = self.nets.run() else {
+            return;
+        };
+        let connectivity = run.connectivity.with_live(&live);
+        let joined = nets::joined_groups(&run.parallel);
+        let report = nets::compare(&run.flat, &connectivity, &run.map, &joined);
+        self.nets.live = Some(Live {
+            nets: live,
+            connectivity,
+            report,
+        });
+        if self.ready() && self.nets.loaded == Some(self.epoch) {
+            self.send_flylines();
+            if let Some(name) = self.nets.shown.clone() {
+                self.highlight_net(&name, false);
+            }
+        }
+    }
+
+    /// Take the user's flyline settings (and the project's on top); a change is drawn.
+    pub(super) fn take_style(&mut self, user: &FlylineStyle) {
+        self.nets.user_style = user.clone();
+        let style = user.with(&self.project.klayout.flylines);
+        if style != self.nets.style {
+            let live_changed =
+                style.live != self.nets.style.live || style.delay_ms != self.nets.style.delay_ms;
+            self.nets.style = style;
+            if live_changed && self.ready() && self.nets.live_set == Some(self.epoch) {
+                self.quiet(
+                    "nets_live",
+                    json!({"on": self.nets.style.live, "delay_ms": self.nets.style.delay_ms}),
+                );
+            }
+        }
+        if self.nets.sent_style.as_ref() != Some(&self.nets.style)
+            && self.ready()
+            && self.nets.loaded == Some(self.epoch)
+            && self.nets.flylines_asked.is_none()
+        {
+            self.send_flylines();
+            if let Some(name) = self.nets.shown.clone() {
+                self.highlight_net(&name, false);
+            }
+        }
     }
 
     /// Move a running extraction on, (re)load the database into the helper; every frame.
@@ -216,12 +405,14 @@ impl LayoutView {
                         .unwrap_or_else(|| verify::fallback_top(&self.file));
                     let stream = verify::stream_of(&out, &value, &top);
                     let project = self.project.clone();
+                    let recorded = nets::recorded_parallel(&self.file);
                     let (sender, result) = mpsc::channel();
                     let wake = ctx.clone();
                     std::thread::Builder::new()
                         .name("cdept-nets".into())
                         .spawn(move || {
-                            let outcome = nets::run(&project, source, &schematic, &stream, &dir);
+                            let outcome =
+                                nets::run(&project, source, &schematic, &stream, &dir, &recorded);
                             let _ = sender.send(outcome.map_err(|e| format!("{e:#}")));
                             wake.request_repaint();
                         })
@@ -259,6 +450,9 @@ impl LayoutView {
                     self.nets.last = Some(outcome);
                     self.nets.made_at = Some(at);
                     self.nets.loaded = None;
+                    self.nets.live = None;
+                    self.nets.live_set = None;
+                    self.nets.live_note.clear();
                 }
                 Err(TryRecvError::Empty) => {
                     self.nets.job = Some(Job::Run {
@@ -280,12 +474,53 @@ impl LayoutView {
         {
             let lvsdb = run.lvsdb.clone();
             let top = run.connectivity.top.clone();
+            let json_file = run.json.clone();
             self.nets.loaded = Some(self.epoch);
             self.quiet("nets_load", json!({"lvsdb": lvsdb, "top": top}));
+            // Live tracing from the terminals of this extraction (when the layout is
+            // still the one extracted; a new helper has lost the edits anyway).
+            if self
+                .nets
+                .made_at
+                .is_some_and(|(_, revision)| revision == self.revision)
+                || self
+                    .nets
+                    .made_at
+                    .is_some_and(|(epoch, _)| epoch != self.epoch)
+            {
+                self.nets.live_set = Some(self.epoch);
+                self.nets.live = None;
+                self.nets.live_asked = Some(self.raw_call(
+                    "nets_live",
+                    json!({
+                        "connectivity": json_file,
+                        "on": self.nets.style.live,
+                        "delay_ms": self.nets.style.delay_ms,
+                    }),
+                ));
+            }
             self.send_flylines();
             if let Some(name) = self.nets.shown.clone() {
                 self.highlight_net(&name, false);
             }
+        }
+        if let Some(id) = self.nets.live_asked
+            && let Some(answer) = self.take_reply(id)
+        {
+            self.nets.live_asked = None;
+            let value = answer
+                .ok()
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                .unwrap_or(Value::Null);
+            self.nets.live_note = if value["available"].as_bool() == Some(true) {
+                String::new()
+            } else {
+                value["reason"]
+                    .as_str()
+                    .filter(|r| !r.is_empty())
+                    .unwrap_or("live flylines are not available")
+                    .to_string()
+            };
         }
         if let Some(id) = self.nets.flylines_asked
             && let Some(answer) = self.take_reply(id)
@@ -310,16 +545,26 @@ impl LayoutView {
     }
 
     fn send_flylines(&mut self) {
-        let lines: Vec<[f64; 4]> = match (self.nets.flylines, self.nets.run()) {
-            (true, Some(run)) => run
-                .report
+        let lines: Vec<[f64; 4]> = match (self.nets.flylines, self.nets.report()) {
+            (true, Some(report)) => report
                 .flylines()
                 .iter()
                 .map(|l| [l.from[0], l.from[1], l.to[0], l.to[1]])
                 .collect(),
             _ => Vec::new(),
         };
-        self.nets.flylines_asked = Some(self.raw_call("nets_flylines", json!({ "lines": lines })));
+        let style = self.nets.style.clone();
+        self.nets.flylines_asked = Some(self.raw_call(
+            "nets_flylines",
+            json!({
+                "lines": lines,
+                "color": style.color,
+                "width": style.width,
+                "style": style.line.name(),
+                "opacity": f64::from(style.opacity) / 100.0,
+            }),
+        ));
+        self.nets.sent_style = Some(style);
     }
 
     /// Show or hide the flylines.
@@ -333,11 +578,11 @@ impl LayoutView {
     /// Highlight the layout nets of the schematic net `name` (as a click in the panel
     /// does) and tell the schematic tabs. An error when there is no such net.
     pub fn show_net(&mut self, name: &str) -> Result<(), String> {
-        let run = self
+        let report = self
             .nets
-            .run()
+            .report()
             .ok_or("there is no connectivity yet (Update Connectivity)")?;
-        if run.report.net(name).is_none() {
+        if report.net(name).is_none() {
             return Err(format!(
                 "the schematic has no net {name} with terminals in the layout"
             ));
@@ -351,14 +596,21 @@ impl LayoutView {
     }
 
     fn highlight_net(&mut self, name: &str, zoom: bool) {
-        let ids = self
-            .nets
-            .run()
-            .and_then(|run| run.report.net(name))
-            .map(|n| n.layout_nets())
-            .unwrap_or_default();
+        let net = self.nets.report().and_then(|report| report.net(name));
+        let ids = net.map(|n| n.layout_nets()).unwrap_or_default();
+        let shorted =
+            net.is_some_and(|n| matches!(n.status, NetStatus::Short | NetStatus::OpenShort));
+        let color = if shorted {
+            self.nets.style.short.clone()
+        } else {
+            self.nets.style.highlight.clone()
+        };
+        let live = self.nets.live.is_some();
         self.nets.shown = Some(name.to_string());
-        self.quiet("nets_highlight", json!({"nets": ids, "zoom": zoom}));
+        self.quiet(
+            "nets_highlight",
+            json!({"nets": ids, "zoom": zoom, "color": color, "live": live}),
+        );
     }
 
     fn clear_highlight(&mut self) {
@@ -372,10 +624,10 @@ impl LayoutView {
             return;
         }
         self.nets.probed = names.to_vec();
-        let known: Vec<String> = match self.nets.run() {
-            Some(run) => names
+        let known: Vec<String> = match self.nets.report() {
+            Some(report) => names
                 .iter()
-                .filter(|n| run.report.net(n).is_some())
+                .filter(|n| report.net(n).is_some())
                 .cloned()
                 .collect(),
             None => return,
@@ -395,29 +647,42 @@ impl LayoutView {
             );
             return;
         }
-        self.nets.probe_asked = Some(self.raw_call("nets_probe", json!({"pixel": [x, y]})));
+        let live = self.nets.live.is_some();
+        self.nets.probe_asked =
+            Some(self.raw_call("nets_probe", json!({"pixel": [x, y], "live": live})));
     }
 
     /// The answer to `nets_probe`: highlight the layout net, tell the schematic tabs.
     fn probed(&mut self, value: &Value) {
         let Some(id) = value["net"].as_u64().map(|n| n as usize) else {
-            self.clear_highlight();
             self.nets.probed.clear();
-            self.notify(NoticeLevel::Info, "No net there".into());
+            if value["unbound"].as_bool() == Some(true) {
+                // The helper shows it: a net no terminal of the extraction is on.
+                self.nets.shown = Some("(a net of no terminal)".into());
+                self.notify(NoticeLevel::Info, "A net with no device terminal".into());
+            } else {
+                self.clear_highlight();
+                self.notify(NoticeLevel::Info, "No net there".into());
+            }
             return;
         };
-        let (label, names) = match self.nets.run() {
-            Some(run) => (
-                run.connectivity.net_label(id),
-                run.report
+        let (label, names) = match (self.nets.connectivity(), self.nets.report()) {
+            (Some(connectivity), Some(report)) => (
+                connectivity.net_label(id),
+                report
                     .nets_on(id)
                     .iter()
                     .map(|n| n.name.clone())
                     .collect::<Vec<_>>(),
             ),
-            None => (format!("#{id}"), Vec::new()),
+            _ => (format!("#{id}"), Vec::new()),
         };
-        self.quiet("nets_highlight", json!({"nets": [id], "zoom": false}));
+        let live = self.nets.live.is_some();
+        let color = self.nets.style.highlight.clone();
+        self.quiet(
+            "nets_highlight",
+            json!({"nets": [id], "zoom": false, "live": live, "color": color}),
+        );
         let text = if names.is_empty() {
             format!("Layout net {label}: no schematic net")
         } else {
@@ -433,6 +698,9 @@ impl LayoutView {
 
     /// For the test driver and the status line: one line about the nets.
     pub fn nets_status(&self) -> String {
+        if self.nets.save_wait.is_some() {
+            return "saving the schematic".into();
+        }
         if self.nets.running() {
             return "running".into();
         }
@@ -440,13 +708,16 @@ impl LayoutView {
             None => "none".into(),
             Some(Err(e)) => format!("failed: {e}"),
             Some(Ok(run)) => {
-                let (ok, open, short) = run.report.counts();
+                let report = self.nets.report().unwrap_or(&run.report);
+                let (ok, open, short) = report.counts();
                 let mut text = format!("{ok} ok, {open} open, {short} shorted");
-                if run.report.clean() {
+                if report.clean() {
                     text.push_str(", clean");
                 }
                 if self.nets_stale() {
                     text.push_str(" (out of date)");
+                } else if self.nets.live.is_some() {
+                    text.push_str(" (live)");
                 }
                 text
             }
@@ -500,6 +771,10 @@ impl LayoutView {
             &mut self.nets.after_save,
             "Update Connectivity after Saving",
         );
+        if ui.button("Flyline Style…").clicked() {
+            self.nets.style_open = true;
+            ui.close();
+        }
     }
 
     /// The Nets panel at the bottom of the tab, when it is open.
@@ -522,8 +797,148 @@ impl LayoutView {
                 Act::Update => self.update_connectivity(),
                 Act::Flylines(on) => self.set_flylines(on),
                 Act::Close => self.nets.open = false,
+                Act::Parallel(index, joined) => self.join_parallel(index, joined),
             }
         }
+        self.style_window(ui.ctx());
+    }
+
+    /// Join the parallel group `index` (one flyline, one layout device for all) or not;
+    /// recorded in the sidecar.
+    pub fn join_parallel(&mut self, index: usize, joined: bool) {
+        let groups = match &mut self.nets.last {
+            Some(Ok(run)) => match run.parallel.get_mut(index) {
+                Some(group) => {
+                    group.joined = joined;
+                    run.parallel.clone()
+                }
+                None => return,
+            },
+            _ => return,
+        };
+        self.nets.recompare();
+        if let Err(error) = nets::record_parallel(&self.file, &groups) {
+            self.notify(
+                NoticeLevel::Warning,
+                format!("Parallel devices not recorded: {error:#}"),
+            );
+        }
+        if self.ready() && self.nets.loaded == Some(self.epoch) {
+            self.send_flylines();
+        }
+    }
+
+    /// The parallel groups of the last comparison: members and whether joined.
+    pub fn parallel_groups(&self) -> Vec<(Vec<String>, bool)> {
+        self.nets
+            .run()
+            .map(|run| {
+                run.parallel
+                    .iter()
+                    .map(|g| (g.members.clone(), g.joined))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The window to change how flylines look (the user's settings).
+    fn style_window(&mut self, ctx: &egui::Context) {
+        if !self.nets.style_open {
+            return;
+        }
+        let mut open = true;
+        let mut style = self.nets.user_style.clone();
+        egui::Window::new("Flyline Style")
+            .id(egui::Id::new(("klayout-flyline-style", self.id)))
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                egui::Grid::new(("klayout-flyline-style-grid", self.id))
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Colour");
+                        color_field(ui, &mut style.color);
+                        ui.end_row();
+                        ui.label("Width");
+                        ui.add(egui::Slider::new(&mut style.width, 1..=8).suffix(" px"));
+                        ui.end_row();
+                        ui.label("Line");
+                        egui::ComboBox::from_id_salt(("klayout-flyline-line", self.id))
+                            .selected_text(style.line.name())
+                            .show_ui(ui, |ui| {
+                                for line in LineStyle::ALL {
+                                    ui.selectable_value(&mut style.line, line, line.name());
+                                }
+                            });
+                        ui.end_row();
+                        ui.label("Opacity");
+                        ui.add(egui::Slider::new(&mut style.opacity, 10..=100).suffix(" %"));
+                        ui.end_row();
+                        ui.label("Net shown");
+                        color_field(ui, &mut style.highlight);
+                        ui.end_row();
+                        ui.label("Shorted net");
+                        color_field(ui, &mut style.short);
+                        ui.end_row();
+                        ui.label("Follow edits");
+                        ui.checkbox(&mut style.live, "").on_hover_text(
+                            "Trace the wiring again after each change (devices as \
+                                 extracted); off: flylines change with Update Connectivity",
+                        );
+                        ui.end_row();
+                        ui.label("After a change");
+                        ui.add(
+                            egui::Slider::new(&mut style.delay_ms, 50..=2000)
+                                .suffix(" ms")
+                                .logarithmic(true),
+                        );
+                        ui.end_row();
+                    });
+                if !self.project.klayout.flylines.is_empty() {
+                    ui.weak("The project's [klayout.flylines] in cdept.toml takes precedence.");
+                }
+                if ui.button("Defaults").clicked() {
+                    style = FlylineStyle::default();
+                }
+            });
+        self.nets.style_open = open;
+        if style != self.nets.user_style {
+            self.nets.user_style = style;
+            self.nets.user_dirty = true;
+        }
+    }
+
+    /// Change the user's flyline style (as the style window does), for scripts.
+    pub fn set_flyline_style(&mut self, key: &str, value: &str) -> Result<(), String> {
+        let style = &mut self.nets.user_style;
+        let bad = || format!("{key}: {value} is not understood");
+        match key {
+            "color" | "highlight" | "short" => {
+                if nets::parse_color(value).is_none() {
+                    return Err(bad());
+                }
+                let v = value.to_string();
+                match key {
+                    "color" => style.color = v,
+                    "highlight" => style.highlight = v,
+                    _ => style.short = v,
+                }
+            }
+            "width" => style.width = value.parse().map_err(|_| bad())?,
+            "opacity" => style.opacity = value.parse().map_err(|_| bad())?,
+            "delay_ms" => style.delay_ms = value.parse().map_err(|_| bad())?,
+            "line" => style.line = LineStyle::parse(value).ok_or_else(bad)?,
+            "live" => style.live = matches!(value, "on" | "yes" | "true" | "1"),
+            _ => return Err(format!("no flyline setting {key}")),
+        }
+        self.nets.user_dirty = true;
+        Ok(())
+    }
+
+    /// The style the helper drew the flylines with last.
+    pub fn flyline_style_sent(&self) -> Option<&FlylineStyle> {
+        self.nets.sent_style.as_ref()
     }
 
     fn nets_contents(&mut self, ui: &mut Ui, acts: &mut Vec<Act>) {
@@ -549,6 +964,13 @@ impl LayoutView {
             if ui.checkbox(&mut flylines, "Flylines").changed() {
                 acts.push(Act::Flylines(flylines));
             }
+            if ui
+                .button("Style…")
+                .on_hover_text("How flylines look, and whether they follow the edits")
+                .clicked()
+            {
+                self.nets.style_open = true;
+            }
             ui.checkbox(&mut self.nets.probing, "Probe")
                 .on_hover_text("A click in the picture shows the net under it (N)");
             ui.checkbox(&mut self.link.cross_probe, "Cross-probe");
@@ -565,11 +987,32 @@ impl LayoutView {
                 }
             });
         });
-        if self.nets_stale() {
+        if let Some(live) = &self.nets.live
+            && !live.nets.added.is_empty()
+        {
+            ui.colored_label(
+                WARN,
+                format!(
+                    "Placed since the extraction: {}. Their devices count after Update.",
+                    live.nets.added.join(", ")
+                ),
+            );
+        } else if self.nets_stale() {
             ui.colored_label(
                 WARN,
                 "The layout changed since the extraction: press Update to see it.",
             );
+        } else if let Some(live) = &self.nets.live
+            && self.nets_live_current()
+        {
+            ui.weak(format!(
+                "Flylines follow the edits (traced in {:.0} ms; {} terminals kept as \
+                 extracted).",
+                live.nets.ms, live.nets.untraced
+            ));
+        }
+        if !self.nets.live_note.is_empty() && self.nets.style.live {
+            ui.weak(&self.nets.live_note);
         }
         ui.separator();
         let Some(last) = &self.nets.last else {
@@ -589,7 +1032,9 @@ impl LayoutView {
             }
             Ok(run) => run,
         };
-        let report = &run.report;
+        let report = self.nets.report().unwrap_or(&run.report);
+        let connectivity = self.nets.connectivity().unwrap_or(&run.connectivity);
+        let _ = connectivity;
         let (ok, open, short) = report.counts();
         let summary = format!("{ok} ok, {open} open, {short} shorted");
         if report.clean() {
@@ -666,6 +1111,30 @@ impl LayoutView {
                             .collect(),
                     ),
                 ];
+                if !run.parallel.is_empty() {
+                    CollapsingHeader::new(format!("Parallel devices ({})", run.parallel.len()))
+                        .id_salt(("klayout-nets-parallel", id))
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            for (index, group) in run.parallel.iter().enumerate() {
+                                let mut joined = group.joined;
+                                let mut text = group.members.join(" ");
+                                if group.manual {
+                                    text.push_str(" (yours)");
+                                }
+                                if ui
+                                    .checkbox(&mut joined, text)
+                                    .on_hover_text(
+                                        "Joined: one flyline for the group, and one layout \
+                                         device may stand for all of them",
+                                    )
+                                    .changed()
+                                {
+                                    acts.push(Act::Parallel(index, joined));
+                                }
+                            }
+                        });
+                }
                 for (title, items) in lists {
                     if items.is_empty() {
                         continue;

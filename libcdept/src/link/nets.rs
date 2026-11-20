@@ -23,7 +23,7 @@ use eyre::{Context, Result, bail, eyre};
 use serde::{Deserialize, Serialize};
 
 use super::{DeviceMap, Schematic, Target, read_schematic, schematic_view};
-use crate::layout::Source;
+use crate::layout::{Parallel, Source};
 use crate::xschem::tcl;
 use crate::{Project, xschem};
 
@@ -453,6 +453,358 @@ impl Connectivity {
     }
 }
 
+// -- live connectivity ------------------------------------------------------------
+
+/// The layout's connectivity as the editor traces it after edits, without a new
+/// extraction (helper `live.py`, docs/LINKING.md §8): every device of the last
+/// extraction that is still there, with its terminals on the nets traced now, and
+/// where it is now (an instance moved since moves its devices along).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct LiveNets {
+    /// The helper's revision of the layout traced.
+    pub revision: u64,
+    /// Time the tracing took, ms.
+    #[serde(default)]
+    pub ms: f64,
+    /// The nets now (ids are new; names from the extraction).
+    pub nets: Vec<LayoutNet>,
+    pub devices: Vec<LiveDevice>,
+    /// Bound instances of the top cell moved since the extraction: name → the change,
+    /// `[m11, m12, m21, m22, dx, dy]` (µm).
+    #[serde(default)]
+    pub moved: BTreeMap<String, [f64; 6]>,
+    /// Per label of the extraction: its net now.
+    #[serde(default)]
+    pub labels: Vec<Option<usize>>,
+    /// Bound instances of the top cell that are new since the extraction (their
+    /// devices wait for the next Update Connectivity).
+    #[serde(default)]
+    pub added: Vec<String>,
+    /// Bound instances of the extraction that are gone.
+    #[serde(default)]
+    pub gone: Vec<String>,
+    /// Terminals whose connection could not be traced on the layout (e.g. a MOS bulk
+    /// through the well): kept as extracted.
+    #[serde(default)]
+    pub untraced: usize,
+    /// Why the helper turned live updates off (too slow), else empty.
+    #[serde(default)]
+    pub stopped: String,
+}
+
+/// A device of the extraction as it is now.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveDevice {
+    /// Index into [`Connectivity::devices`] of the extraction.
+    pub index: usize,
+    pub bbox: Option<[f64; 4]>,
+    /// Per terminal of the extracted device: its net and point now.
+    pub terminals: Vec<LiveTerminal>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveTerminal {
+    pub net: Option<usize>,
+    pub point: Option<[f64; 2]>,
+}
+
+fn transform_point(m: &[f64; 6], p: [f64; 2]) -> [f64; 2] {
+    [
+        m[0] * p[0] + m[1] * p[1] + m[4],
+        m[2] * p[0] + m[3] * p[1] + m[5],
+    ]
+}
+
+fn transform_box(m: &[f64; 6], b: [f64; 4]) -> [f64; 4] {
+    let corners =
+        [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]].map(|c| transform_point(m, c));
+    let xs = corners.map(|c| c[0]);
+    let ys = corners.map(|c| c[1]);
+    [
+        xs.iter().copied().fold(f64::INFINITY, f64::min),
+        ys.iter().copied().fold(f64::INFINITY, f64::min),
+        xs.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        ys.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+    ]
+}
+
+impl Connectivity {
+    /// This extraction as the editor traced it now: devices with their nets and places
+    /// from `live`; bound instances moved or gone; labels on their nets now.
+    pub fn with_live(&self, live: &LiveNets) -> Connectivity {
+        let devices = live
+            .devices
+            .iter()
+            .filter_map(|d| {
+                let base = self.devices.get(d.index)?;
+                let terminals = base
+                    .terminals
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| {
+                        let now = d.terminals.get(i);
+                        LayoutTerminal {
+                            name: t.name.clone(),
+                            net: now.and_then(|n| n.net),
+                            point: now.and_then(|n| n.point).or(t.point),
+                        }
+                    })
+                    .collect();
+                Some(LayoutDevice {
+                    name: base.name.clone(),
+                    class: base.class.clone(),
+                    bbox: d.bbox.or(base.bbox),
+                    terminals,
+                })
+            })
+            .collect();
+        let top_name = |path: &str| path.split('/').next().unwrap_or(path).to_string();
+        let instances = self
+            .instances
+            .iter()
+            .filter(|i| !live.gone.contains(&top_name(&i.path)))
+            .map(|i| {
+                let mut i = i.clone();
+                if let Some(m) = live.moved.get(&top_name(&i.path)) {
+                    i.bbox = i.bbox.map(|b| transform_box(m, b));
+                }
+                i
+            })
+            .collect();
+        let labels = self
+            .labels
+            .iter()
+            .enumerate()
+            .map(|(k, l)| Label {
+                text: l.text.clone(),
+                point: l.point,
+                net: live.labels.get(k).copied().unwrap_or(l.net),
+            })
+            .collect();
+        Connectivity {
+            top: self.top.clone(),
+            nets: live.nets.clone(),
+            devices,
+            instances,
+            labels,
+        }
+    }
+}
+
+// -- how flylines look ------------------------------------------------------------
+
+/// A line style for flylines (KLayout's built-in ones).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LineStyle {
+    #[default]
+    Solid,
+    Dashed,
+    Dotted,
+    DashDotted,
+}
+
+impl LineStyle {
+    pub const ALL: [LineStyle; 4] = [
+        LineStyle::Solid,
+        LineStyle::Dashed,
+        LineStyle::Dotted,
+        LineStyle::DashDotted,
+    ];
+
+    /// The name the helper takes (`nets_flylines` `style`).
+    pub fn name(self) -> &'static str {
+        match self {
+            LineStyle::Solid => "solid",
+            LineStyle::Dashed => "dashed",
+            LineStyle::Dotted => "dotted",
+            LineStyle::DashDotted => "dash-dotted",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<LineStyle> {
+        LineStyle::ALL.into_iter().find(|s| s.name() == text)
+    }
+}
+
+/// How flylines and net highlights are drawn, and whether flylines follow the edits.
+/// The user's (GUI settings), with the project's `[klayout.flylines]` on top
+/// ([`FlylineOverride`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FlylineStyle {
+    /// `#rrggbb`.
+    pub color: String,
+    /// Pixels.
+    pub width: u32,
+    pub line: LineStyle,
+    /// Percent; below 100 the colour is blended with the background.
+    pub opacity: u8,
+    /// Colour of a net shown (highlighted).
+    pub highlight: String,
+    /// Colour of a shown net that is shorted with another.
+    pub short: String,
+    /// Flylines follow the edits (traced again on the layout after each change).
+    pub live: bool,
+    /// Quiet time after the last change before tracing, ms.
+    pub delay_ms: u32,
+}
+
+impl Default for FlylineStyle {
+    fn default() -> Self {
+        FlylineStyle {
+            color: "#ff40ff".into(),
+            width: 2,
+            line: LineStyle::Solid,
+            opacity: 100,
+            highlight: "#ffd400".into(),
+            short: "#ff3030".into(),
+            live: true,
+            delay_ms: 300,
+        }
+    }
+}
+
+/// The project's choices for flylines (`[klayout.flylines]` in cdept.toml); what is not
+/// given is the user's.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FlylineOverride {
+    pub color: Option<String>,
+    pub width: Option<u32>,
+    pub line: Option<LineStyle>,
+    pub opacity: Option<u8>,
+    pub highlight: Option<String>,
+    pub short: Option<String>,
+    pub live: Option<bool>,
+    pub delay_ms: Option<u32>,
+}
+
+impl FlylineOverride {
+    pub fn is_empty(&self) -> bool {
+        *self == FlylineOverride::default()
+    }
+}
+
+impl FlylineStyle {
+    /// This style with the project's choices on top.
+    pub fn with(&self, project: &FlylineOverride) -> FlylineStyle {
+        FlylineStyle {
+            color: project.color.clone().unwrap_or_else(|| self.color.clone()),
+            width: project.width.unwrap_or(self.width),
+            line: project.line.unwrap_or(self.line),
+            opacity: project.opacity.unwrap_or(self.opacity).min(100),
+            highlight: project
+                .highlight
+                .clone()
+                .unwrap_or_else(|| self.highlight.clone()),
+            short: project.short.clone().unwrap_or_else(|| self.short.clone()),
+            live: project.live.unwrap_or(self.live),
+            delay_ms: project.delay_ms.unwrap_or(self.delay_ms),
+        }
+    }
+}
+
+/// `#rrggbb` (or `rrggbb`) as bytes.
+pub fn parse_color(text: &str) -> Option<[u8; 3]> {
+    let hex = text.trim().trim_start_matches('#');
+    if hex.len() != 6 {
+        return None;
+    }
+    let v = u32::from_str_radix(hex, 16).ok()?;
+    Some([(v >> 16) as u8, (v >> 8) as u8, v as u8])
+}
+
+// -- parallel devices -------------------------------------------------------------
+
+/// Groups of schematic devices in parallel: the same symbol and the same nets on
+/// every pin (a MOS's S and D, and the two pins of a two-pin device, either way
+/// round). Each group sorted, two members at least; groups sorted.
+pub fn parallel_groups(flat: &FlatSchematic) -> Vec<Vec<String>> {
+    let mut pins: BTreeMap<&str, Vec<(&str, usize)>> = BTreeMap::new();
+    for t in &flat.terminals {
+        pins.entry(t.path.as_str())
+            .or_default()
+            .push((t.pin.as_str(), t.net));
+    }
+    /// The symbol and its pins' nets, swappable pins as one sorted pair (`~`).
+    type Key = (String, Vec<(String, Vec<usize>)>);
+    let mut by_key: BTreeMap<Key, Vec<String>> = BTreeMap::new();
+    for (path, list) in pins {
+        let symbol = flat.devices.get(path).cloned().unwrap_or_default();
+        let find = |n: &str| list.iter().position(|(p, _)| p.eq_ignore_ascii_case(n));
+        let mut key: Vec<(String, Vec<usize>)> = Vec::new();
+        let mut used = vec![false; list.len()];
+        let pair = match (find("S"), find("D")) {
+            (Some(a), Some(b)) => Some((a, b)),
+            _ if list.len() == 2 => Some((0, 1)),
+            _ => None,
+        };
+        if let Some((a, b)) = pair {
+            let mut nets = vec![list[a].1, list[b].1];
+            nets.sort_unstable();
+            key.push(("~".into(), nets));
+            used[a] = true;
+            used[b] = true;
+        }
+        for (i, (pin, net)) in list.iter().enumerate() {
+            if !used[i] {
+                key.push((pin.to_ascii_uppercase(), vec![*net]));
+            }
+        }
+        key.sort();
+        by_key
+            .entry((symbol, key))
+            .or_default()
+            .push(path.to_string());
+    }
+    let mut out: Vec<Vec<String>> = by_key
+        .into_values()
+        .filter(|g| g.len() > 1)
+        .map(|mut g| {
+            g.sort();
+            g
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// The parallel groups to use: those found in the schematic, each with the user's
+/// choice when the sidecar recorded the same group, plus the user's own groups.
+pub fn merge_parallel(detected: &[Vec<String>], recorded: &[Parallel]) -> Vec<Parallel> {
+    let mut out: Vec<Parallel> = detected
+        .iter()
+        .map(|members| Parallel {
+            members: members.clone(),
+            joined: recorded
+                .iter()
+                .find(|r| &r.members == members)
+                .is_none_or(|r| r.joined),
+            manual: false,
+        })
+        .collect();
+    for r in recorded.iter().filter(|r| r.manual) {
+        if !out.iter().any(|o| o.members == r.members) {
+            out.push(r.clone());
+        }
+    }
+    out
+}
+
+/// The members of the groups that are joined.
+pub fn joined_groups(groups: &[Parallel]) -> Vec<Vec<String>> {
+    groups
+        .iter()
+        .filter(|g| g.joined)
+        .map(|g| g.members.clone())
+        .collect()
+}
+
+fn overlaps(a: [f64; 4], b: [f64; 4]) -> bool {
+    a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+}
+
 fn center(b: [f64; 4]) -> [f64; 2] {
     [(b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0]
 }
@@ -682,12 +1034,57 @@ fn pin_terminals(
 }
 
 /// Compare the flattened schematic with the layout's connectivity.
-pub fn compare(flat: &FlatSchematic, layout: &Connectivity, map: &DeviceMap) -> NetReport {
+///
+/// `parallel`: groups of devices in parallel (instance paths, [`joined_groups`]): the
+/// pieces of a net that are only members of one group count as one piece (one
+/// flyline to the group), and a layout device that stands for several members (the
+/// extraction combined them) belongs to each of them.
+pub fn compare(
+    flat: &FlatSchematic,
+    layout: &Connectivity,
+    map: &DeviceMap,
+    parallel: &[Vec<String>],
+) -> NetReport {
     let mut report = NetReport {
         problems: flat.problems.clone(),
         ..NetReport::default()
     };
-    let (owned, extra) = layout.assign();
+    let (mut owned, mut extra) = layout.assign();
+    // A member of a parallel group without a device of its own shares the one lying
+    // over it that the extraction made for the group (combined devices).
+    for group in parallel {
+        for member in group {
+            if owned.contains_key(member.as_str()) {
+                continue;
+            }
+            let Some(own_box) = layout
+                .instances
+                .iter()
+                .find(|i| &i.path == member)
+                .and_then(|i| i.bbox)
+            else {
+                continue;
+            };
+            let mut found: Vec<usize> = Vec::new();
+            for (index, device) in layout.devices.iter().enumerate() {
+                let Some(b) = device.bbox else { continue };
+                if !overlaps(b, own_box) {
+                    continue;
+                }
+                let of_group = extra.contains(&index)
+                    || group.iter().any(|m| {
+                        m != member && owned.get(m.as_str()).is_some_and(|d| d.contains(&index))
+                    });
+                if of_group {
+                    found.push(index);
+                }
+            }
+            if !found.is_empty() {
+                extra.retain(|i| !found.contains(i));
+                owned.insert(member.clone(), found);
+            }
+        }
+    }
     for index in extra {
         let d = &layout.devices[index];
         report.extra_devices.push(format!("{} {}", d.class, d.name));
@@ -939,7 +1336,9 @@ pub fn compare(flat: &FlatSchematic, layout: &Connectivity, map: &DeviceMap) -> 
                 }
             }
         }
-        let open = pieces.len() > 1;
+        // Pieces that are only members of one parallel group count as one.
+        let merged = merge_parallel_pieces(&pieces, parallel);
+        let open = merged.len() > 1;
         let status = match (open, !shorted.is_empty()) {
             (false, false) => NetStatus::Ok,
             (true, false) => NetStatus::Open,
@@ -947,7 +1346,7 @@ pub fn compare(flat: &FlatSchematic, layout: &Connectivity, map: &DeviceMap) -> 
             (true, true) => NetStatus::OpenShort,
         };
         let flylines = if open {
-            spanning_tree(&pieces, layout)
+            spanning_tree(&merged, layout)
         } else {
             Vec::new()
         };
@@ -970,6 +1369,45 @@ pub fn compare(flat: &FlatSchematic, layout: &Connectivity, map: &DeviceMap) -> 
         }
     }
     report
+}
+
+/// The pieces with those that hold only members of one parallel group made into one:
+/// the group gets one flyline (to its nearest member), not one per member.
+fn merge_parallel_pieces(pieces: &[Piece], parallel: &[Vec<String>]) -> Vec<Piece> {
+    let group_of = |piece: &Piece| -> Option<usize> {
+        if !piece.pins.is_empty() || piece.terminals.is_empty() {
+            return None;
+        }
+        let first = parallel
+            .iter()
+            .position(|g| g.contains(&piece.terminals[0].path))?;
+        piece
+            .terminals
+            .iter()
+            .all(|t| parallel[first].contains(&t.path))
+            .then_some(first)
+    };
+    let mut out: Vec<Piece> = Vec::new();
+    let mut slot: BTreeMap<usize, usize> = BTreeMap::new();
+    for piece in pieces {
+        match group_of(piece) {
+            Some(g) => match slot.get(&g) {
+                Some(&at) => {
+                    let into = &mut out[at];
+                    into.terminals.extend(piece.terminals.iter().cloned());
+                    if into.net != piece.net {
+                        into.net = None;
+                    }
+                }
+                None => {
+                    slot.insert(g, out.len());
+                    out.push(piece.clone());
+                }
+            },
+            None => out.push(piece.clone()),
+        }
+    }
+    out
 }
 
 /// The points of a piece flylines may start at: its terminals, else the middle of
@@ -1040,11 +1478,20 @@ pub fn spanning_tree(pieces: &[Piece], layout: &Connectivity) -> Vec<Flyline> {
 pub struct NetRun {
     pub report: NetReport,
     pub connectivity: Connectivity,
+    /// The schematic as compared (for comparing again with live connectivity).
+    pub flat: FlatSchematic,
+    pub map: DeviceMap,
+    /// The parallel groups used: found in the schematic, with the sidecar's choices.
+    pub parallel: Vec<Parallel>,
     /// The LVS database the layout's nets come from (the editor draws them from it).
     pub lvsdb: PathBuf,
     pub json: PathBuf,
     pub log: PathBuf,
 }
+
+/// Why there is no net check: the PDK gives no KLayout LVS deck.
+pub const NO_DECK: &str = "this PDK has no KLayout LVS deck: net checking is not available \
+     (a deck of your own can be set with [klayout] lvs in cdept.toml)";
 
 /// The helper's script that describes an LVS database.
 pub const CONNECTIVITY_SCRIPT: &str = "cdept_klayout/connectivity.py";
@@ -1057,14 +1504,10 @@ pub fn run(
     file: &Path,
     stream: &crate::klayout::verify::Stream,
     dir: &Path,
+    recorded: &[Parallel],
 ) -> Result<NetRun> {
     use crate::klayout::{setup, verify};
-    let deck = verify::find_deck(project, verify::Check::Lvs).ok_or_else(|| {
-        eyre!(
-            "no LVS deck to extract the layout's nets with: set [klayout] lvs in \
-             cdept.toml (none was found in the PDK's libs.tech/klayout)"
-        )
-    })?;
+    let deck = verify::find_deck(project, verify::Check::Lvs).ok_or_else(|| eyre!("{NO_DECK}"))?;
     let map = DeviceMap::for_project(project)?;
     let netlist = dir.join(format!("{}.spice", stream.top));
     verify::schematic_netlist(project, file, &netlist)?;
@@ -1088,23 +1531,56 @@ pub fn run(
     ];
     verify::run_batch(project, &helper.join(CONNECTIVITY_SCRIPT), &vars, dir, &log)?;
     let connectivity = Connectivity::read(&json)?;
+    let flat = read_flat(project, &map, source, file)?;
+    let parallel = merge_parallel(&parallel_groups(&flat), recorded);
+    let report = compare(&flat, &connectivity, &map, &joined_groups(&parallel));
+    Ok(NetRun {
+        report,
+        connectivity,
+        flat,
+        map,
+        parallel,
+        lvsdb: lvs,
+        json,
+        log,
+    })
+}
+
+/// The schematic `source`/`file` and below, flattened (xschem reads them as saved).
+pub fn read_flat(
+    project: &Project,
+    map: &DeviceMap,
+    source: Source,
+    file: &Path,
+) -> Result<FlatSchematic> {
     let engine = xschem::Engine::for_project(project)?;
     let mut sheets = ProjectSheets {
         project,
-        map: &map,
+        map,
         engine,
     };
     let top = sheets.read(source, file);
     let flat = top.map(|top| flatten(top, &mut sheets));
     let _ = sheets.engine.shutdown();
-    let report = compare(&flat?, &connectivity, &map);
-    Ok(NetRun {
-        report,
-        connectivity,
-        lvsdb: lvs,
-        json,
-        log,
-    })
+    flat
+}
+
+/// The parallel groups recorded in the sidecar of the layout `file` (none without one).
+pub fn recorded_parallel(file: &Path) -> Vec<Parallel> {
+    crate::layout::Meta::read_for(file)
+        .ok()
+        .flatten()
+        .map(|m| m.parallel)
+        .unwrap_or_default()
+}
+
+/// Write the parallel groups into the sidecar of the layout `file`: what
+/// [`merge_parallel`] made, so the user's choices stay. The sidecar must exist.
+pub fn record_parallel(file: &Path, groups: &[Parallel]) -> Result<()> {
+    let mut meta = crate::layout::Meta::read_for(file)?
+        .ok_or_else(|| eyre!("{} has no sidecar to record the groups in", file.display()))?;
+    meta.parallel = groups.to_vec();
+    meta.write_for(file)
 }
 
 /// The report as text, one finding per line.
@@ -1385,7 +1861,7 @@ mod tests {
                 ("VSS", Some(3)),
             ]),
         };
-        let report = compare(&flat_inv(), &layout, &DeviceMap::default());
+        let report = compare(&flat_inv(), &layout, &DeviceMap::default(), &[]);
         assert!(report.clean(), "{:#?}", report_lines(&report, &layout));
         assert_eq!(report.counts(), (4, 0, 0));
     }
@@ -1404,7 +1880,7 @@ mod tests {
             instances: vec![bound("M1", 0.0, 0.0), bound("M2", 0.0, 4.0)],
             labels: labels(&[("A", None)]),
         };
-        let report = compare(&flat_inv(), &layout, &DeviceMap::default());
+        let report = compare(&flat_inv(), &layout, &DeviceMap::default(), &[]);
         assert!(!report.clean());
         let a = report.net("A").unwrap();
         assert_eq!(a.status, NetStatus::Open);
@@ -1418,7 +1894,7 @@ mod tests {
         let mut shorted = layout.clone();
         // M1's drain (Y) and source (VSS) on one net.
         shorted.devices[0].terminals[2].net = Some(0);
-        let report = compare(&flat_inv(), &shorted, &DeviceMap::default());
+        let report = compare(&flat_inv(), &shorted, &DeviceMap::default(), &[]);
         assert_eq!(report.shorts.len(), 1, "{:#?}", report.shorts);
         let mut names = report.shorts[0].schematic_nets.clone();
         names.sort();
@@ -1441,7 +1917,7 @@ mod tests {
             instances: vec![bound("M1", 0.0, 0.0)],
             labels: Vec::new(),
         };
-        let report = compare(&flat_inv(), &layout, &DeviceMap::default());
+        let report = compare(&flat_inv(), &layout, &DeviceMap::default(), &[]);
         assert_eq!(report.unplaced, vec!["M2"]);
         assert_eq!(report.extra_devices, vec!["ntap1 $"]);
         assert!(!report.clean());
@@ -1510,5 +1986,237 @@ mod tests {
         let total: f64 = lines.iter().map(|l| distance(l.from, l.to)).sum();
         // 10→11 (1), 0→(0,5) (5), 11→20 (9).
         assert!((total - 15.0).abs() < 1e-9, "{lines:?}");
+    }
+
+    /// Two nmos in parallel (M1a, M1b; M1b with S and D the other way round), an
+    /// nmos M3 with another gate, a pmos M2. Nets: 0 A, 1 Y, 2 VSS, 3 B, 4 VDD.
+    fn flat_parallel() -> FlatSchematic {
+        let names = ["A", "Y", "VSS", "B", "VDD"];
+        let mut flat = FlatSchematic {
+            nets: names
+                .iter()
+                .map(|n| FlatNet {
+                    name: (*n).into(),
+                    names: vec![(*n).into()],
+                })
+                .collect(),
+            ..FlatSchematic::default()
+        };
+        let mut device = |path: &str, symbol: &str, pins: [(&str, usize); 4]| {
+            flat.devices.insert(path.into(), symbol.into());
+            for (pin, net) in pins {
+                flat.terminals.push(SchTerminal {
+                    path: path.into(),
+                    pin: pin.into(),
+                    net,
+                    symbol: symbol.into(),
+                });
+            }
+        };
+        device("M1a", "nmos.sym", [("D", 1), ("G", 0), ("S", 2), ("B", 2)]);
+        device("M1b", "nmos.sym", [("D", 2), ("G", 0), ("S", 1), ("B", 2)]);
+        device("M3", "nmos.sym", [("D", 1), ("G", 3), ("S", 2), ("B", 2)]);
+        device("M2", "pmos.sym", [("D", 1), ("G", 0), ("S", 4), ("B", 4)]);
+        flat
+    }
+
+    #[test]
+    fn devices_in_parallel_are_grouped() {
+        let flat = flat_parallel();
+        assert_eq!(
+            parallel_groups(&flat),
+            vec![vec!["M1a".to_string(), "M1b".into()]]
+        );
+        let recorded = vec![
+            Parallel {
+                members: vec!["M1a".into(), "M1b".into()],
+                joined: false,
+                manual: false,
+            },
+            Parallel {
+                members: vec!["M2".into(), "M3".into()],
+                joined: true,
+                manual: true,
+            },
+            Parallel {
+                members: vec!["old1".into(), "old2".into()],
+                joined: true,
+                manual: false,
+            },
+        ];
+        let merged = merge_parallel(&parallel_groups(&flat), &recorded);
+        // The user's choice stays, the user's own group stays, a group no longer
+        // found goes.
+        assert_eq!(merged.len(), 2);
+        assert!(!merged[0].joined);
+        assert!(merged[1].manual);
+        assert_eq!(
+            joined_groups(&merged),
+            vec![vec!["M2".to_string(), "M3".into()]]
+        );
+    }
+
+    #[test]
+    fn a_parallel_group_gets_one_flyline() {
+        // Y: M1a's drain on layout net 1, M1b's on 5, M3's and M2's on 6: three pieces.
+        let mut a = mos("nmos", [2, 0, 1, 2], 0.0, 0.0);
+        a.terminals[0].net = Some(2);
+        let b = mos("nmos", [5, 0, 2, 2], 2.0, 0.0);
+        let m3 = mos("nmos", [2, 3, 6, 2], 4.0, 0.0);
+        let m2 = mos("pmos", [4, 0, 6, 4], 4.0, 4.0);
+        let layout = Connectivity {
+            top: "t".into(),
+            nets: nets(&["A", "", "VSS", "B", "VDD", "", ""]),
+            devices: vec![a, b, m3, m2],
+            instances: vec![
+                bound("M1a", 0.0, 0.0),
+                bound("M1b", 2.0, 0.0),
+                bound("M3", 4.0, 0.0),
+                bound("M2", 4.0, 4.0),
+            ],
+            labels: Vec::new(),
+        };
+        let flat = flat_parallel();
+        let alone = compare(&flat, &layout, &DeviceMap::default(), &[]);
+        let y = alone.net("Y").unwrap();
+        assert_eq!((y.pieces.len(), y.flylines.len()), (3, 2));
+        let groups = parallel_groups(&flat);
+        let joined = compare(&flat, &layout, &DeviceMap::default(), &groups);
+        let y = joined.net("Y").unwrap();
+        // The pieces are still all there (to show them); one flyline to the group.
+        assert_eq!((y.pieces.len(), y.flylines.len()), (3, 1));
+        assert_eq!(y.status, NetStatus::Open);
+    }
+
+    #[test]
+    fn one_layout_device_may_stand_for_a_parallel_group() {
+        // The extraction combined M1a and M1b into one device lying over both.
+        let mut combined = mos("nmos", [2, 0, 1, 2], 1.0, 0.0);
+        combined.bbox = Some([-0.4, -0.4, 2.4, 0.4]);
+        let m3 = mos("nmos", [2, 3, 1, 2], 4.0, 0.0);
+        let m2 = mos("pmos", [4, 0, 1, 4], 4.0, 4.0);
+        let layout = Connectivity {
+            top: "t".into(),
+            nets: nets(&["A", "Y", "VSS", "B", "VDD"]),
+            devices: vec![combined, m3, m2],
+            instances: vec![
+                bound("M1a", 0.0, 0.0),
+                bound("M1b", 2.0, 0.0),
+                bound("M3", 4.0, 0.0),
+                bound("M2", 4.0, 4.0),
+            ],
+            labels: Vec::new(),
+        };
+        let flat = flat_parallel();
+        let alone = compare(&flat, &layout, &DeviceMap::default(), &[]);
+        assert!(!alone.unplaced.is_empty() || !alone.extra_devices.is_empty());
+        let joined = compare(
+            &flat,
+            &layout,
+            &DeviceMap::default(),
+            &parallel_groups(&flat),
+        );
+        assert!(joined.unplaced.is_empty(), "{:?}", joined.unplaced);
+        assert!(
+            joined.extra_devices.is_empty(),
+            "{:?}",
+            joined.extra_devices
+        );
+        assert_eq!(joined.net("Y").unwrap().status, NetStatus::Ok);
+    }
+
+    #[test]
+    fn live_connectivity_replaces_nets_and_places() {
+        let layout = Connectivity {
+            top: "inv".into(),
+            nets: nets(&["A", "Y", "VDD", "VSS"]),
+            devices: vec![
+                mos("sg13_lv_nmos", [1, 0, 3, 3], 0.0, 0.0),
+                mos("sg13_lv_pmos", [1, 0, 2, 2], 0.0, 4.0),
+            ],
+            instances: vec![bound("M1", 0.0, 0.0), bound("M2", 0.0, 4.0)],
+            labels: labels(&[("A", Some(0)), ("Y", Some(1))]),
+        };
+        let t = |net: usize, x: f64, y: f64| LiveTerminal {
+            net: Some(net),
+            point: Some([x, y]),
+        };
+        // M2 moved 10 µm right, its device with it; A and Y joined (one net 0).
+        let live = LiveNets {
+            revision: 7,
+            nets: nets(&["A", "VDD", "VSS"]),
+            devices: vec![
+                LiveDevice {
+                    index: 0,
+                    bbox: None,
+                    terminals: vec![
+                        t(0, -0.2, 0.0),
+                        t(0, 0.0, 0.0),
+                        t(2, 0.2, 0.0),
+                        t(2, 0.0, 0.0),
+                    ],
+                },
+                LiveDevice {
+                    index: 1,
+                    bbox: Some([9.6, 3.6, 10.4, 4.4]),
+                    terminals: vec![
+                        t(0, 9.8, 4.0),
+                        t(0, 10.0, 4.0),
+                        t(1, 10.2, 4.0),
+                        t(1, 10.0, 4.0),
+                    ],
+                },
+            ],
+            moved: BTreeMap::from([("M2".to_string(), [1.0, 0.0, 0.0, 1.0, 10.0, 0.0])]),
+            labels: vec![Some(0), Some(0)],
+            ..LiveNets::default()
+        };
+        let now = layout.with_live(&live);
+        assert_eq!(now.nets.len(), 3);
+        assert_eq!(now.instances[1].bbox, Some([9.5, 3.5, 10.5, 4.5]));
+        assert_eq!(now.devices[1].terminals[1].point, Some([10.0, 4.0]));
+        assert_eq!(now.labels[1].net, Some(0));
+        let report = compare(&flat_inv(), &now, &DeviceMap::default(), &[]);
+        assert!(
+            report
+                .net("A")
+                .unwrap()
+                .shorted_with
+                .contains(&"Y".to_string())
+        );
+        // An instance gone: its devices are not there, its schematic devices unplaced.
+        let gone = LiveNets {
+            devices: vec![live.devices[0].clone()],
+            gone: vec!["M2".into()],
+            ..live
+        };
+        let now = layout.with_live(&gone);
+        assert_eq!(now.devices.len(), 1);
+        assert_eq!(now.instances.len(), 1);
+        let report = compare(&flat_inv(), &now, &DeviceMap::default(), &[]);
+        assert_eq!(report.unplaced, vec!["M2"]);
+    }
+
+    #[test]
+    fn flyline_style_with_the_projects_choices() {
+        let user = FlylineStyle {
+            width: 4,
+            ..FlylineStyle::default()
+        };
+        let project = FlylineOverride {
+            color: Some("#00ff00".into()),
+            line: Some(LineStyle::Dotted),
+            ..FlylineOverride::default()
+        };
+        let style = user.with(&project);
+        assert_eq!(
+            (style.color.as_str(), style.width, style.line),
+            ("#00ff00", 4, LineStyle::Dotted)
+        );
+        assert_eq!(parse_color("#ff8000"), Some([255, 128, 0]));
+        assert_eq!(parse_color("nope"), None);
+        assert_eq!(LineStyle::parse("dash-dotted"), Some(LineStyle::DashDotted));
+        let text = serde_json::to_string(&style).unwrap();
+        assert!(text.contains("\"line\":\"dotted\""), "{text}");
     }
 }

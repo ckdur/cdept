@@ -174,6 +174,15 @@ enum LayoutCommand {
     Flylines(bool),
     /// The helper drew this many flylines.
     ExpectFlylines(usize),
+    /// Change a flyline setting (as the Flyline Style window does): key, value.
+    FlylineStyle(String, String),
+    /// The helper drew the flylines with this setting: key, value.
+    ExpectFlylineStyle(String, String),
+    /// Join a parallel group (index from 1) or not.
+    Parallel(usize, bool),
+    /// The comparison found these parallel groups (members joined by commas, `!`
+    /// after a group that is not joined), or `none`.
+    ExpectParallel(Vec<String>),
     // --- end linking ---
 }
 
@@ -222,7 +231,9 @@ impl Command {
                         | LayoutCommand::ExpectProbed(_)
                         | LayoutCommand::ExpectNets(_)
                         | LayoutCommand::ExpectNetProbed(_)
-                        | LayoutCommand::ExpectFlylines(_),
+                        | LayoutCommand::ExpectFlylines(_)
+                        | LayoutCommand::ExpectFlylineStyle(..)
+                        | LayoutCommand::ExpectParallel(_),
                 )
         )
     }
@@ -736,6 +747,33 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
             _ => return Err("usage: flylines <on|off>".into()),
         },
         "expect_flylines" => Command::Layout(LayoutCommand::ExpectFlylines(whole(0)? as usize)),
+        "flyline_style" => match args.as_slice() {
+            [key, value] => Command::Layout(LayoutCommand::FlylineStyle(
+                key.to_string(),
+                value.to_string(),
+            )),
+            _ => return Err("usage: flyline_style <key> <value>".into()),
+        },
+        "expect_flyline_style" => match args.as_slice() {
+            [key, value] => Command::Layout(LayoutCommand::ExpectFlylineStyle(
+                key.to_string(),
+                value.to_string(),
+            )),
+            _ => return Err("usage: expect_flyline_style <key> <value>".into()),
+        },
+        "parallel" => match args.as_slice() {
+            [n, on @ ("on" | "off")] => Command::Layout(LayoutCommand::Parallel(
+                n.parse().map_err(|_| "usage: parallel <n> <on|off>")?,
+                *on == "on",
+            )),
+            _ => return Err("usage: parallel <n> <on|off>".into()),
+        },
+        "expect_parallel" => {
+            Command::Layout(LayoutCommand::ExpectParallel(match args.as_slice() {
+                ["none"] => Vec::new(),
+                groups => groups.iter().map(|a| a.to_string()).collect(),
+            }))
+        }
         "expect_schematic_nets" => Command::ExpectSchematicNets(match args.as_slice() {
             ["none"] => Vec::new(),
             names => names.iter().map(|a| a.to_string()).collect(),
@@ -1240,6 +1278,46 @@ impl Script {
                     return Err(format!(
                         "{} flylines are drawn, expected {n}",
                         view.flylines_drawn()
+                    ));
+                }
+            }
+            LayoutCommand::FlylineStyle(key, value) => view.set_flyline_style(&key, &value)?,
+            LayoutCommand::ExpectFlylineStyle(key, value) => {
+                let sent = view
+                    .flyline_style_sent()
+                    .ok_or("no flylines were drawn yet")?;
+                let have = match key.as_str() {
+                    "color" => sent.color.clone(),
+                    "highlight" => sent.highlight.clone(),
+                    "short" => sent.short.clone(),
+                    "width" => sent.width.to_string(),
+                    "opacity" => sent.opacity.to_string(),
+                    "delay_ms" => sent.delay_ms.to_string(),
+                    "line" => sent.line.name().to_string(),
+                    "live" => (if sent.live { "on" } else { "off" }).to_string(),
+                    other => return Err(format!("no flyline setting {other}")),
+                };
+                if have != value {
+                    return Err(format!("the flylines' {key} is {have}, expected {value}"));
+                }
+            }
+            LayoutCommand::Parallel(n, on) => {
+                if n == 0 || n > view.parallel_groups().len() {
+                    return Err(format!("there is no parallel group {n}"));
+                }
+                view.join_parallel(n - 1, on);
+            }
+            LayoutCommand::ExpectParallel(wanted) => {
+                let have: Vec<String> = view
+                    .parallel_groups()
+                    .iter()
+                    .map(|(members, joined)| {
+                        format!("{}{}", members.join(","), if *joined { "" } else { "!" })
+                    })
+                    .collect();
+                if have != wanted {
+                    return Err(format!(
+                        "the parallel groups are {have:?}, expected {wanted:?}"
                     ));
                 }
             }

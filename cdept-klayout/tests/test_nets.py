@@ -161,6 +161,83 @@ class Nets(unittest.TestCase):
         finally:
             h.close()
 
+    def test_4_live(self):
+        """Live connectivity: the terminals traced again on the layout as it is now."""
+        h = Helper(tempfile.mkdtemp(dir=self.folder), display=True)
+        rules = {"symbols": {"SD": "1/0-2/0"},
+                 "connections": [["2/0", "3/0", "4/0"], ["SD", "3/0", "4/0"]]}
+        try:
+            h.send({"type": "resize", "width": self.W, "height": self.H})
+            h.call("open", refs={"root": self.gds, "files": {self.gds: {
+                "label": "t/top/layout", "refs": {}}}})
+            h.call("nets_load", lvsdb=self.lvsdb, top="top")
+            status = h.call("nets_live", connectivity=self.json, rules=rules, on=False)
+            self.assertTrue(status["available"], status)
+            self.assertEqual(status["seeds"], 3 + 2)
+            # S, D and G (and the label IN) trace; the label OUT is on nothing.
+            self.assertEqual(status["traced"], 4, status)
+            first = h.call("nets_live", update=True)
+            terms = {t["name"]: first["devices"][0]["terminals"][i]["net"]
+                     for i, t in enumerate(self.data["devices"][0]["terminals"])}
+            labels = {l["text"]: first["labels"][i] for i, l in enumerate(self.data["labels"])}
+            self.assertEqual(labels["IN"], terms["G"])
+            self.assertIsNone(labels["OUT"])
+            self.assertEqual(len({terms["S"], terms["D"], terms["G"]}), 3)
+            self.assertEqual(first["nets"][terms["G"]]["name"], "IN")
+            # A Metal1 bridge from the source's wire to the gate's: one net now.
+            h.call("python", code="layout.cell('top').shapes(layout.layer(4, 0))"
+                                  ".insert(pya.Box(300, 1400, 450, 1500))")
+            bridged = h.call("nets_live", update=True)
+            nets = [t["net"] for t in bridged["devices"][0]["terminals"]]
+            names = [t["name"] for t in self.data["devices"][0]["terminals"]]
+            now = dict(zip(names, nets))
+            self.assertEqual(now["S"], now["G"])
+            self.assertNotEqual(now["D"], now["G"])
+            self.assertLess(bridged["ms"], 200)
+            # The bound instance moved: its terminals move along; the bridge no longer
+            # reaches the source's contact... the wire is the top cell's, so S stays.
+            h.call("python", code="i = list(layout.cell('top').each_inst())[0]\n"
+                                  "i.transform(pya.Trans(pya.Vector(0, 10000)))")
+            moved = h.call("nets_live", update=True)
+            self.assertIn("M1", moved["moved"])
+            self.assertAlmostEqual(moved["moved"]["M1"][5], 10.0)
+            g = names.index("G")
+            before = self.data["devices"][0]["terminals"][g]["point"]
+            after = moved["devices"][0]["terminals"][g]["point"]
+            self.assertAlmostEqual(after[1] - before[1], 10.0)
+            # Debounced updates after a change (the editor's revision).
+            h.call("nets_live", on=True, delay_ms=100)
+            h.call("python", code="server.editor.revision += 1")
+            event = h.wait(lambda m: m.get("type") == "event"
+                           and m["event"].get("kind") == "nets_live", timeout=10)
+            self.assertIsNotNone(event)
+            # Live ids highlight the traced shapes.
+            shown = h.call("nets_highlight", nets=[now["G"]], live=True)
+            self.assertGreaterEqual(shown["markers"], 0)
+        finally:
+            h.close()
+
+    def test_5_flyline_style(self):
+        h = Helper(tempfile.mkdtemp(dir=self.folder), display=True)
+        try:
+            h.send({"type": "resize", "width": self.W, "height": self.H})
+            h.call("open", refs={"root": self.gds, "files": {self.gds: {
+                "label": "t/top/layout", "refs": {}}}})
+            h.call("config", name="background-color", value="#000000")
+            drawn = h.call("nets_flylines", lines=[[0, 0, 1, 1]], color="#ff0000", width=3,
+                           style="dashed", opacity=0.5)
+            self.assertEqual((drawn["markers"], drawn["width"], drawn["line_style"]), (1, 3, 2))
+            self.assertEqual(drawn["color"], "#800000")
+            # The style stays for the next lines.
+            again = h.call("nets_flylines", lines=[[0, 0, 2, 2]])
+            self.assertEqual((again["width"], again["line_style"], again["color"]),
+                             (3, 2, "#800000"))
+            styled = eval(h.call("python", code="[(m.line_style, m.line_width) for m in "
+                                 "server.nets.flylines.markers]"))
+            self.assertEqual(styled, [(2, 3)])
+        finally:
+            h.close()
+
     def test_3_needs_a_load(self):
         folder = tempfile.mkdtemp(prefix="cdk-")
         h = Helper(folder)

@@ -78,7 +78,7 @@ fn check(project: &Project, cell: &str, work: &Path) -> link::nets::NetRun {
     let dir = work.join(cell);
     std::fs::create_dir_all(&dir).unwrap();
     let stream = verify::export_stream(project, &file, &dir.join(format!("{cell}.gds"))).unwrap();
-    link::nets::run(project, source, &schematic, &stream, &dir).unwrap()
+    link::nets::run(project, source, &schematic, &stream, &dir, &[]).unwrap()
 }
 
 /// The example's inverter is wired at A and Y, not at VDD and VSS: two nets ok, two
@@ -169,4 +169,38 @@ fn the_buffer_is_open_between_its_cells() {
     assert!(left < 5.5 && right > 7.4, "{line:?}");
     assert_eq!(report.net("A").map(|n| n.status), Some(NetStatus::Ok));
     assert!(report.unplaced.is_empty(), "{:?}", report.unplaced);
+}
+
+/// A second nmos in parallel with M1 (S and D the other way round) is found as a
+/// parallel group from xschem's own connectivity, and recorded in the sidecar.
+#[test]
+fn parallel_devices_are_found_in_the_schematic() {
+    let Some(root) = pdk_root() else {
+        return;
+    };
+    let (dir, project) = example(&root);
+    let sch = dir.path().join("libs/cells/inv/schematic/inv.sch");
+    let mut text = std::fs::read_to_string(&sch).unwrap();
+    text.push_str(
+        "C {lab_pin.sym} 100 20 0 0 {name=l5 sig_type=std_logic lab=VSS}\n\
+         C {lab_pin.sym} 100 80 0 0 {name=l6 sig_type=std_logic lab=Y}\n\
+         C {lab_pin.sym} 60 50 0 0 {name=l7 sig_type=std_logic lab=A}\n\
+         C {lab_pin.sym} 100 50 2 0 {name=l8 sig_type=std_logic lab=VSS}\n\
+         C {sg13g2_pr/sg13_lv_nmos.sym} 80 50 0 0 {name=M3\nl=0.13u\nw=0.74u\nng=1\nm=1\n\
+         model=sg13_lv_nmos\nspiceprefix=X\n}\n",
+    );
+    std::fs::write(&sch, text).unwrap();
+    let (source, file) = link::schematic_view(&project, "cells", "inv", None).unwrap();
+    let map = link::DeviceMap::for_project(&project).unwrap();
+    let flat = link::nets::read_flat(&project, &map, source, &file).unwrap();
+    let groups = link::nets::parallel_groups(&flat);
+    assert_eq!(
+        groups,
+        vec![vec!["M1".to_string(), "M3".into()]],
+        "{flat:#?}"
+    );
+    let layout = libcdept::klayout::cell_layout(project.library("cells").unwrap(), "inv").unwrap();
+    let merged = link::nets::merge_parallel(&groups, &link::nets::recorded_parallel(&layout));
+    link::nets::record_parallel(&layout, &merged).unwrap();
+    assert_eq!(link::nets::recorded_parallel(&layout), merged);
 }

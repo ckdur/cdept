@@ -202,6 +202,9 @@ pub enum Event {
     },
     /// An error or message from an editing step, e.g. "Please select a layer first".
     Notice { level: NoticeLevel, text: String },
+    /// The terminals of the last extraction traced again on the layout as it is now
+    /// (helper `live.py`, docs/LINKING.md §8).
+    NetsLive(crate::link::nets::LiveNets),
 }
 
 /// The external cell being edited in place ([`Event::Cells`]).
@@ -585,6 +588,27 @@ mod tests {
                 event: Event::Notice { .. }
             }
         ));
+    }
+
+    #[test]
+    fn live_nets_as_the_helper_sends_them() {
+        let text = r#"{"type": "event", "event": {"kind": "nets_live", "revision": 4,
+            "ms": 2.5, "nets": [{"id": 0, "name": "A", "bbox": [0, 0, 1, 1]}],
+            "devices": [{"index": 0, "bbox": null,
+                         "terminals": [{"net": 0, "point": [0.1, 0.2]}, {"net": null, "point": null}]}],
+            "moved": {"x1": [1, 0, 0, 1, 3, 0]}, "labels": [0, null], "added": ["x9"],
+            "gone": [], "untraced": 2, "stopped": ""}}"#;
+        let Message::Event {
+            event: Event::NetsLive(live),
+        } = serde_json::from_str(text).unwrap()
+        else {
+            panic!("not a nets_live event");
+        };
+        assert_eq!(live.revision, 4);
+        assert_eq!(live.devices[0].terminals[1].net, None);
+        assert_eq!(live.moved["x1"][4], 3.0);
+        assert_eq!(live.labels, vec![Some(0), None]);
+        assert_eq!(live.added, vec!["x9"]);
     }
 
     #[test]

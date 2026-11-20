@@ -67,6 +67,13 @@ name = ""
 #   drc = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/drc/ihp-sg13g2.drc"
 #   lvs = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/lvs/sg13g2.lvs"
 #   devices = "devices.toml"   # schematic symbol -> layout PCell (docs/LINKING.md)
+# How flylines look in this project (on top of each user's own settings):
+#   [klayout.flylines]
+#   color = '#ff40ff'   # also highlight, short
+#   width = 2
+#   line = "dashed"     # solid, dashed, dotted, dash-dotted
+#   opacity = 80        # percent
+#   live = true         # follow the edits
 "#;
 
 /// Options for [`Project::add_library`].
@@ -126,6 +133,9 @@ pub struct KlayoutSettings {
     /// `devices`: the project's device map for linking schematics with layouts
     /// (docs/LINKING.md), on top of the PDK's. `None`: the PDK's only.
     pub devices: Option<PathBuf>,
+    /// `[klayout.flylines]`: how flylines look in this project (on top of the user's
+    /// settings), docs/LINKING.md §8.
+    pub flylines: crate::link::nets::FlylineOverride,
 }
 
 /// The environment lookup of a project (not part of what makes two projects equal).
@@ -305,10 +315,75 @@ impl Project {
 
     /// `[klayout]`: `path` (one folder or a list), `tech`, `layer_properties`. Folders
     /// and files that cannot be found are left out, with a warning.
+    /// `[klayout.flylines]`: color, width, line, opacity, highlight, short, live,
+    /// delay_ms. A value of the wrong kind is left out, with a warning.
+    fn load_flylines(&mut self, item: &toml_edit::Item) {
+        use crate::link::nets::{LineStyle, parse_color};
+        let Some(table) = item.as_table_like() else {
+            self.warnings
+                .push("[klayout] flylines must be a table".into());
+            return;
+        };
+        let mut warnings = Vec::new();
+        let mut warn = |key: &str, what: &str| {
+            warnings.push(format!("[klayout.flylines] {key} must be {what}"));
+        };
+        let mut out = crate::link::nets::FlylineOverride::default();
+        for (key, value) in table.iter() {
+            let text = value.as_str();
+            let number = value.as_integer();
+            match key {
+                "color" | "highlight" | "short" => {
+                    match text.filter(|t| parse_color(t).is_some()) {
+                        Some(t) => {
+                            let t = Some(t.to_string());
+                            match key {
+                                "color" => out.color = t,
+                                "highlight" => out.highlight = t,
+                                _ => out.short = t,
+                            }
+                        }
+                        None => warn(key, "a colour \"#rrggbb\""),
+                    }
+                }
+                "width" => match number.filter(|n| (1..=16).contains(n)) {
+                    Some(n) => out.width = Some(n as u32),
+                    None => warn(key, "a number of pixels from 1 to 16"),
+                },
+                "opacity" => match number.filter(|n| (0..=100).contains(n)) {
+                    Some(n) => out.opacity = Some(n as u8),
+                    None => warn(key, "a percentage from 0 to 100"),
+                },
+                "delay_ms" => match number.filter(|n| (0..=10_000).contains(n)) {
+                    Some(n) => out.delay_ms = Some(n as u32),
+                    None => warn(key, "a number of milliseconds"),
+                },
+                "line" => match text.and_then(LineStyle::parse) {
+                    Some(l) => out.line = Some(l),
+                    None => warn(key, "solid, dashed, dotted or dash-dotted"),
+                },
+                "live" => match value.as_bool() {
+                    Some(b) => out.live = Some(b),
+                    None => warn(key, "true or false"),
+                },
+                other => warn(
+                    other,
+                    "one of color, width, line, opacity, highlight, short, \
+                     live, delay_ms (not known)",
+                ),
+            }
+        }
+        self.warnings.extend(warnings);
+        self.klayout.flylines = out;
+    }
+
     fn load_klayout(&mut self, doc: &DocumentMut) {
         let Some(table) = doc.get("klayout") else {
             return;
         };
+        if let Some(fly) = table.get("flylines") {
+            self.load_flylines(fly);
+        }
         if let Some(item) = table.get("path") {
             let names: Vec<&str> = match (item.as_str(), item.as_array()) {
                 (Some(name), _) => vec![name],
@@ -1070,6 +1145,27 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
             "{:?}",
             project.warnings
         );
+    }
+
+    #[test]
+    fn flylines_of_the_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join(PROJECT_FILE),
+            "name = \"p\"\n[klayout.flylines]\ncolor = \"#00ff00\"\nwidth = 3\nline = \"dotted\"\n\
+             opacity = 150\nlive = false\nshade = 1\n",
+        )
+        .unwrap();
+        let project = Project::load(tmp.path()).unwrap();
+        let fly = &project.klayout.flylines;
+        assert_eq!(fly.color.as_deref(), Some("#00ff00"));
+        assert_eq!(fly.width, Some(3));
+        assert_eq!(fly.line, Some(crate::link::nets::LineStyle::Dotted));
+        assert_eq!(fly.live, Some(false));
+        assert_eq!(fly.opacity, None);
+        let warned = |what: &str| project.warnings.iter().any(|w| w.contains(what));
+        assert!(warned("opacity"), "{:?}", project.warnings);
+        assert!(warned("shade"), "{:?}", project.warnings);
     }
 
     #[test]

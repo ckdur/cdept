@@ -41,7 +41,7 @@ folder of examples/):
 | `cdept-gui/scripts/layout-properties.script` | the properties dialog (box, instance, PCell parameters), Place Library Cell (Basic CIRCLE), box by dragging | into the project: run it on a copy |
 | `cdept-gui/scripts/layout-pcells.script` | PCells: the project's PCell view `logic/rpoly` placed by `logic/rdiv` (its parameters), a shape parameter (Basic CIRCLE's handle), another cell for an instance (Change… › Library Cell / Layout View), placing a project PCell | into the project: run it on a copy |
 | `cdept-gui/scripts/layout-checks.script` | Run DRC / Run LVS, the results panel, highlight and zoom (needs `PDK_ROOT=/opt/ext/OpenPDKs PDK=ihp-sg13g2` or similar; not in the default set) | nothing |
-| `cdept-gui/scripts/layout-nets.script` | nets on examples/ihp-inv: Update Connectivity, flylines, a net shown in the layout and highlighted in the schematic, a wire selected in the schematic highlighted in the layout, probing, out of date after an edit, a short (needs the PDK: `PDK_ROOT=/opt/ext/OpenPDKs CDEPT_EXAMPLE=ihp-inv run.sh cdept-gui/scripts/layout-nets.script`) | into the project: run it on a copy |
+| `cdept-gui/scripts/layout-nets.script` | nets on examples/ihp-inv: Update Connectivity, flylines, a net shown in the layout and highlighted in the schematic, a wire selected in the schematic highlighted in the layout, probing, the flyline style, a short traced live, out of date after an edit with live flylines off, the schematic saved before Update Connectivity (needs the PDK: `PDK_ROOT=/opt/ext/OpenPDKs CDEPT_EXAMPLE=ihp-inv run.sh cdept-gui/scripts/layout-nets.script`) | into the project: run it on a copy |
 | `cdept-gui/scripts/layout-link.script` | linking buf's schematic with its layout: Generate takes over the inv instances, the Link panel, cross-probing both ways, undo | into the project: run it on a copy |
 
 
@@ -205,11 +205,15 @@ and path tools take **clicks**; a box can also be dragged (press, move, release)
 | `replace_library <library> <cell> [<json values>]` | The instance the properties show places that KLayout library cell or PCell instead (Change… › Library Cell…), keeping its place |
 | `replace_view <library> <cell> <view>` | The same with a layout view of the project (Change… › Layout View…) |
 | `nets_update` | Update Connectivity: extract the layout and compare its nets with the schematic's (needs the PDK) |
-| `expect_nets <text>` | Wait until the nets are compared and fail unless the summary (`2 ok, 2 open, 0 shorted`, `, clean`, ` (out of date)`) contains the text |
+| `expect_nets <text>` | Wait until the nets are compared and fail unless the summary (`2 ok, 2 open, 0 shorted`, `, clean`, ` (out of date)`, ` (live)`) contains the text; while the schematic is saved first it is `saving the schematic` |
 | `nets_show <net>` | Highlight a schematic net in the layout, as a click in the Nets panel does |
 | `nets_probe <x> <y>` / `nets_probe center` | Probe the net at a frame pixel (or the middle of the picture), as a click in probe mode does |
 | `expect_net_probed <nets…\|none>` | Fail unless these schematic nets were last probed or shown in the layout |
 | `flylines <on\|off>` / `expect_flylines <n>` | Show or hide the flylines; fail unless the helper drew n |
+| `flyline_style <key> <value>` | Change the user's flyline setting as the Style window does: `color`, `highlight`, `short` (`#rrggbb`), `width`, `opacity` (percent), `line` (`solid`, `dashed`, `dotted`, `dash-dotted`), `live` (`on`/`off`), `delay_ms` |
+| `expect_flyline_style <key> <value>` | Fail unless the helper drew the flylines with this setting |
+| `parallel <n> <on\|off>` | Join the n-th parallel group (from 1) or not, as its checkbox in the Nets panel does |
+| `expect_parallel <groups…\|none>` | Fail unless the comparison found these parallel groups: members joined by commas, `!` after a group that is not joined |
 | `expect_schematic_nets <nets…\|none>` | Fail unless the active schematic last exchanged these nets with a layout (cross-probing) |
 | `layout_check <drc\|lvs>` | Run DRC or LVS on the open layout (needs the PDK in the environment) |
 | `expect_check <text>` | Wait until the last check is done and fail unless its summary contains the text |

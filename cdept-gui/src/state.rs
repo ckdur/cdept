@@ -23,6 +23,9 @@ use crate::views::Selected;
 pub struct Settings {
     pub recent_projects: Vec<PathBuf>,
     pub console_level: ConsoleLevel,
+    /// How flylines and net highlights look in layout tabs (a project's
+    /// `[klayout.flylines]` goes on top).
+    pub flylines: libcdept::link::nets::FlylineStyle,
 }
 
 impl Default for Settings {
@@ -30,6 +33,7 @@ impl Default for Settings {
         Self {
             recent_projects: Vec::new(),
             console_level: ConsoleLevel::Info,
+            flylines: libcdept::link::nets::FlylineStyle::default(),
         }
     }
 }

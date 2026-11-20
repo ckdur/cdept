@@ -604,6 +604,7 @@ impl LayoutView {
                 self.can_redo = can_redo;
             }
             KEvent::Notice { level, text } => self.notify(level, text),
+            KEvent::NetsLive(live) => self.live_nets(live),
         }
     }
 
@@ -1222,6 +1223,10 @@ impl View for LayoutView {
         self.checks_panel(ui);
         self.poll_link();
         self.link_panel(ui, ctx);
+        if std::mem::take(&mut self.nets.user_dirty) {
+            ctx.settings.flylines = self.nets.user_style.clone();
+        }
+        self.take_style(&ctx.settings.flylines);
         self.poll_nets(ui.ctx());
         self.nets_panel(ui);
         self.drawing(ui);

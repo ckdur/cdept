@@ -237,12 +237,39 @@ Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built; PCell views; sche
       Example inverter wired at A/Y (`examples/ihp-inv/scripts/wire-inv.py`). Tests:
       `libcdept/tests/nets.rs`, helper `test_nets.py` (generic deck, no PDK),
       `layout-nets.script` (`CDEPT_EXAMPLE=ihp-inv`).
-- [ ] Nets: needs the PDK's LVS deck (no deck-less check yet); flylines are as old as
-      the last extraction (not live while editing); MOS bulk terminals sit in the
-      channel, so source–bulk flylines are short and inside the device; the IHP deck
-      combines parallel devices; schematic nets are read as saved.
-- [ ] Opening examples/ihp-inv's inverter schematic shows it modified (`*`) right away;
-      seen while testing nets, not caused by them, not looked into.
+- [x] Nets, round 2 (2026-11-20, LINKING.md §8.1–8.4):
+      - live flylines: after an extraction the helper traces the wiring between its
+        terminals again after each change (`live.py`, `pya.NetTracer` with the
+        technology's net tracer connectivity from the `.lyt`), debounced (300 ms),
+        devices as extracted (moved with their instance; deleted instances drop out;
+        added ones wait for Update); CDePT compares again
+        (`Connectivity::with_live`). Measured: IHP inv 3 ms, buf 5–8 ms, 100 devices
+        120–135 ms (setup once 285 ms). An update over 250 ms turns live off with a
+        notice (manual Update stays);
+      - flyline style: colour, width, line (solid/dashed/dotted/dash-dotted),
+        opacity (blended with the background), colours of a shown and of a shorted
+        net, live on/off and delay; the user's GUI settings (Nets › Style…, Layout ›
+        Flyline Style…), `[klayout.flylines]` in cdept.toml on top;
+      - parallel devices: groups found in the schematic (same symbol, same nets,
+        S/D either way), recorded in the sidecar (`parallel`, joined on/off, own
+        groups); a joined group gets one flyline per net, and one layout device the
+        extraction combined stands for all its members. `cdept layout parallel`
+        (`--off/--on/--group/--ungroup`), Nets panel checkboxes;
+      - Update Connectivity saves an open schematic with unsaved changes first (the
+        comparison reads it as saved); no LVS deck: "this PDK has no KLayout LVS deck:
+        net checking is not available";
+      - the ihp-inv inverter schematic showed `*` on open: xschem splits a wire at a
+        T-junction on load (A and Y joined the gate and drain wires in their middle);
+        the example now has the wires split.
+      Tests: nets unit tests (parallel, live, style), `parallel_devices_are_found_in_the_schematic`,
+      helper `test_nets.py` live and style, `layout-nets.script` (style, live short,
+      live off, save before update).
+- [ ] Nets: live tracing keeps connections the net tracer cannot see (a MOS bulk
+      through its well, labels on no wire at the extraction until a wire is under
+      them) as extracted; instances added since the extraction count after Update;
+      `m=`/`ng` multiples are one instance (nothing to group); bus instances
+      (`M1[3:0]`) are one name; parallel groups are recorded by the panel and
+      `cdept layout parallel`, not by `cdept layout link`.
 - [ ] Hierarchical cross-probing; unsaved schematic edits are not seen (read from disk);
       pins are text labels only; PDK PCells need `[klayout] tech` to read back live;
       bus instances (`M1[3:0]`) count as one name.

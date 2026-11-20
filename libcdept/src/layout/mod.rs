@@ -16,7 +16,7 @@ pub mod meta;
 pub mod oasis;
 pub mod refs;
 
-pub use meta::{Linked, Meta, MetaRef, Source};
+pub use meta::{Linked, Meta, MetaRef, Parallel, Source};
 pub use refs::{FileRefs, Ref, RefTable};
 
 /// Write `bytes` to `path` through a temporary file in the same folder, then rename.

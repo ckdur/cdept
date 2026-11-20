@@ -230,6 +230,40 @@ impl Views {
                 }
             }
         }
+        // Update Connectivity compares with the schematic as saved: an open schematic
+        // with unsaved changes is saved first.
+        for layout in &mut layouts {
+            if !layout.connectivity_requested() {
+                continue;
+            }
+            let Some(file) = layout.link_schematic().map(std::path::Path::to_path_buf) else {
+                layout.start_connectivity();
+                continue;
+            };
+            if let Some(request) = layout.connectivity_save_request() {
+                let Some(view) = schematics.iter_mut().find(|s| s.file() == file) else {
+                    layout.start_connectivity(); // closed meanwhile (xschem asked)
+                    continue;
+                };
+                if let Some(answer) = view.take_reply(request) {
+                    match schematic::SchematicView::saved(answer) {
+                        Ok(()) => layout.start_connectivity(),
+                        Err(error) => layout.connectivity_not_started(&error),
+                    }
+                }
+                continue;
+            }
+            match schematics
+                .iter_mut()
+                .find(|s| s.file() == file && s.is_modified())
+            {
+                Some(view) => {
+                    let request = view.save();
+                    layout.connectivity_saving(file, request);
+                }
+                None => layout.start_connectivity(),
+            }
+        }
     }
 
     /// Close the documents `keep` rejects; their xschem ends with them.

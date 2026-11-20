@@ -314,6 +314,32 @@ enum LayoutCommand {
         #[arg(long)]
         dir: Option<PathBuf>,
     },
+    /// Devices in parallel (an array of transistors): list the groups found in the
+    /// schematic, and record them in the layout's sidecar with your choices.
+    ///
+    /// A joined group gets one flyline per open net, and one layout device may stand
+    /// for all its members (an extraction that combines them). Without options the
+    /// groups are listed and recorded.
+    Parallel {
+        library: String,
+        cell: String,
+        #[arg(long)]
+        schematic: Option<String>,
+        #[arg(long)]
+        view: Option<String>,
+        /// Do not join the group holding this instance (repeat for more).
+        #[arg(long, value_name = "INSTANCE")]
+        off: Vec<String>,
+        /// Join the group holding this instance again.
+        #[arg(long, value_name = "INSTANCE")]
+        on: Vec<String>,
+        /// Make a group of your own: instance paths separated by commas.
+        #[arg(long, value_name = "A,B,…")]
+        group: Vec<String>,
+        /// Remove a group of your own (any of its instances).
+        #[arg(long, value_name = "INSTANCE")]
+        ungroup: Vec<String>,
+    },
 }
 
 /// What `layout drc` and `layout lvs` share.
@@ -368,7 +394,15 @@ fn layout_check_nets(
             stream.missing.join(", ")
         );
     }
-    let run = link::nets::run(project, source.clone(), &schematic, &stream, &dir)?;
+    let recorded = link::nets::recorded_parallel(&file);
+    let run = link::nets::run(
+        project,
+        source.clone(),
+        &schematic,
+        &stream,
+        &dir,
+        &recorded,
+    )?;
     if json {
         println!("{}", serde_json::to_string_pretty(&run.report)?);
     } else {
@@ -378,11 +412,111 @@ fn layout_check_nets(
         }
         let (ok, open, short) = run.report.counts();
         println!("nets: {ok} ok, {open} open, {short} shorted");
+        for group in &run.parallel {
+            println!(
+                "parallel: {}{}",
+                group.members.join(" "),
+                if group.joined { "" } else { " (not joined)" }
+            );
+        }
         println!("database {}", run.lvsdb.display());
     }
     if !run.report.clean() {
         std::process::exit(1);
     }
+    Ok(())
+}
+
+/// What `cdept layout parallel` changes.
+struct ParallelEdit {
+    off: Vec<String>,
+    on: Vec<String>,
+    group: Vec<String>,
+    ungroup: Vec<String>,
+}
+
+/// `cdept layout parallel`.
+fn layout_parallel(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    schematic: Option<&str>,
+    view: Option<&str>,
+    edit: &ParallelEdit,
+) -> Result<()> {
+    use libcdept::layout::Parallel;
+    let (source, schematic) = link::schematic_view(project, library, cell, schematic)?;
+    let file = layout_view(project, library, cell, view)?;
+    let map = link::DeviceMap::for_project(project)?;
+    let flat = link::nets::read_flat(project, &map, source, &schematic)?;
+    let mut groups = link::nets::merge_parallel(
+        &link::nets::parallel_groups(&flat),
+        &link::nets::recorded_parallel(&file),
+    );
+    let holding = |groups: &[Parallel], name: &str| {
+        groups
+            .iter()
+            .position(|g| g.members.iter().any(|m| m == name))
+    };
+    for (names, joined) in [(&edit.off, false), (&edit.on, true)] {
+        for name in names {
+            let at = holding(&groups, name)
+                .ok_or_else(|| eyre!("{name} is in no group of devices in parallel"))?;
+            groups[at].joined = joined;
+        }
+    }
+    for list in &edit.group {
+        let mut members: Vec<String> = list
+            .split(',')
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .map(String::from)
+            .collect();
+        members.sort();
+        members.dedup();
+        if members.len() < 2 {
+            return Err(eyre!("a group needs two instances at least: {list}"));
+        }
+        for m in &members {
+            if !flat.devices.contains_key(m) {
+                return Err(eyre!("the schematic has no device {m}"));
+            }
+        }
+        groups.retain(|g| !g.members.iter().any(|m| members.contains(m)));
+        groups.push(Parallel {
+            members,
+            joined: true,
+            manual: true,
+        });
+    }
+    for name in &edit.ungroup {
+        let at = holding(&groups, name).ok_or_else(|| eyre!("{name} is in no group"))?;
+        if !groups[at].manual {
+            return Err(eyre!(
+                "{name} is in a group found in the schematic; use --off to stop joining it"
+            ));
+        }
+        groups.remove(at);
+    }
+    for g in &groups {
+        let mut flags = Vec::new();
+        if !g.joined {
+            flags.push("not joined");
+        }
+        if g.manual {
+            flags.push("yours");
+        }
+        let flags = if flags.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", flags.join(", "))
+        };
+        println!("{}{flags}", g.members.join(" "));
+    }
+    if groups.is_empty() {
+        println!("no devices in parallel");
+    }
+    link::nets::record_parallel(&file, &groups)?;
     Ok(())
 }
 
@@ -1108,6 +1242,28 @@ fn main() -> Result<()> {
                     view.as_deref(),
                     json,
                     dir,
+                ),
+                LayoutCommand::Parallel {
+                    library,
+                    cell,
+                    schematic,
+                    view,
+                    off,
+                    on,
+                    group,
+                    ungroup,
+                } => layout_parallel(
+                    &project,
+                    &library,
+                    &cell,
+                    schematic.as_deref(),
+                    view.as_deref(),
+                    &ParallelEdit {
+                        off,
+                        on,
+                        group,
+                        ungroup,
+                    },
                 ),
                 LayoutCommand::Drc {
                     library,

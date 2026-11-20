@@ -16,7 +16,7 @@ so agree on the net ids.
    "devices": [{"name", "class", "bbox",
                 "terminals": [{"name", "net", "point"}]}],
    "instances": [{"path", "cell", "bbox", "leaf"}],
-   "labels": [{"text", "point", "net"}]}
+   "labels": [{"text", "point", "layer", "net"}]}
 `instances` are the instances bound to schematic instances (GDS property 61), with
 their paths through bound cells (`x1/M1`), from the stream the database was made from.
 `labels` are the texts of the top cell itself (not of the cells it places) with the
@@ -178,7 +178,9 @@ class Connectivity:
                 if key in seen:
                     continue
                 seen.add(key)
+                info = ly.get_info(index)
                 out.append({"text": text, "point": [round(p.x, 6), round(p.y, 6)],
+                            "layer": "%d/%d" % (info.layer, info.datatype),
                             "net": self._named_at(text, (p.x, p.y))})
         return out
 

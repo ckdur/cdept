@@ -38,6 +38,29 @@ pub struct Meta {
     /// (version 2). The layout instance carries the name as a property (docs/LINKING.md).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub instances: BTreeMap<String, Linked>,
+    /// Groups of schematic devices that are in parallel (an array of transistors):
+    /// their open pieces are drawn with one flyline, and one layout device may stand
+    /// for all of them (version 2; docs/LINKING.md §8).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parallel: Vec<Parallel>,
+}
+
+/// A group of schematic devices in parallel: same device, same nets on every terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Parallel {
+    /// Instance paths through the hierarchy (`M1`, `x1/M3`), sorted.
+    pub members: Vec<String>,
+    /// Treated as one (one flyline, one layout device may stand for all); the user
+    /// may turn a group off.
+    #[serde(default = "yes")]
+    pub joined: bool,
+    /// Made by the user, not found in the schematic: kept when no longer detected.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub manual: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// A schematic view: `library/cell/view`.
@@ -94,12 +117,13 @@ impl Meta {
             references: BTreeMap::new(),
             source: None,
             instances: BTreeMap::new(),
+            parallel: Vec::new(),
         }
     }
 
     /// True when the sidecar links the layout with a schematic.
     pub fn is_linked(&self) -> bool {
-        self.source.is_some() || !self.instances.is_empty()
+        self.source.is_some() || !self.instances.is_empty() || !self.parallel.is_empty()
     }
 
     /// `library/cell/view`.
@@ -236,6 +260,37 @@ mod tests {
             sidecar_path(Path::new("/a/inv.gds")),
             Path::new("/a/inv.gds.json")
         );
+    }
+
+    #[test]
+    fn parallel_groups_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gds = tmp.path().join("inv.gds");
+        let mut m = Meta::new("a", "inv", "layout", "inv");
+        m.parallel = vec![
+            Parallel {
+                members: vec!["M1".into(), "M2".into()],
+                joined: false,
+                manual: false,
+            },
+            Parallel {
+                members: vec!["x1/M3".into(), "x2/M3".into()],
+                joined: true,
+                manual: true,
+            },
+        ];
+        m.write_for(&gds).unwrap();
+        let text = fs::read_to_string(sidecar_path(&gds)).unwrap();
+        // Groups are part of the link: version 2.
+        assert!(text.contains("\"version\": 2"), "{text}");
+        assert!(text.contains("\"joined\": false"), "{text}");
+        m.version = 2;
+        assert_eq!(Meta::read_for(&gds).unwrap(), Some(m));
+        // `joined` defaults to true, `manual` to false.
+        let text = r#"{"format":"cdept-layout","version":2,"library":"a","cell":"c",
+            "view":"layout","top":"c","parallel":[{"members":["M1","M2"]}]}"#;
+        let m: Meta = serde_json::from_str(text).unwrap();
+        assert!(m.parallel[0].joined && !m.parallel[0].manual);
     }
 
     #[test]

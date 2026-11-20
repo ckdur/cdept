@@ -1,8 +1,10 @@
 # Nets of a layout against its schematic (docs/LINKING.md §8) on examples/ihp-inv: the
 # inverter's layout is wired at A and Y, not at VDD and VSS. Update Connectivity
 # extracts it with the IHP LVS deck; flylines show the open nets; nets follow between
-# the schematic and the layout (cross-probing); an edit makes the result out of date;
-# a wire from A to Y is a short. Needs the PDK and KLayout (cdept-klayout/build.sh):
+# the schematic and the layout (cross-probing); the flylines' style is the user's; an
+# edit is traced at once (live flylines): a wire from A to Y is a short; with live
+# flylines off an edit makes the result out of date; a schematic with unsaved changes
+# is saved before Update Connectivity. Needs the PDK and KLayout (cdept-klayout/build.sh):
 #
 #   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_EXAMPLE=ihp-inv \
 #       cdept-gui/scripts/run.sh cdept-gui/scripts/layout-nets.script
@@ -18,7 +20,18 @@ expect_nets 2 ok, 2 open, 0 shorted
 expect_notice Nets: 2 ok, 2 open
 # VDD and VSS: one flyline each.
 expect_flylines 2
+expect_flyline_style line solid
 screenshot /tmp/cdept-nets-1-flylines.png
+
+# The flylines' style (the user's settings, Nets panel › Style…).
+flyline_style color #00c0ff
+flyline_style line dashed
+flyline_style width 3
+expect_flyline_style line dashed
+expect_flyline_style color #00c0ff
+expect_flyline_style width 3
+expect_flylines 2
+screenshot /tmp/cdept-nets-1b-style.png
 
 # Layout -> schematic: VDD shown in the layout is highlighted in the schematic.
 nets_show VDD
@@ -46,17 +59,34 @@ open cells inv schematic
 expect_schematic_nets Y
 open cells inv layout
 
-# An edit: the result is out of date. A Metal1 wire from A's pad to the Y wire.
+# An edit is traced at once (live flylines): a Metal1 wire from A's pad to the Y wire
+# is a short, before any Update.
 flylines off
 expect_flylines 0
 layout_call python {"code": "view.transaction('short')\nly = doc.layout\nly.top_cell().shapes(ly.layer(8, 0)).insert(pya.DBox(-0.3, 2.12, 0.95, 2.28))\nview.commit()"}
 expect_modified yes
-expect_nets (out of date)
+expect_nets 0 ok, 2 open, 2 shorted (live)
 nets_update
 expect_nets 0 ok, 2 open, 2 shorted
 layout_call zoom {"what": "fit"}
 flylines on
 expect_flylines 2
 screenshot /tmp/cdept-nets-4-short.png
+
+# Live flylines off: an edit makes the result out of date.
+flyline_style live off
+expect_flyline_style live off
 layout_edit undo
+expect_nets (out of date)
+
+# The schematic has unsaved changes: Update Connectivity saves it first.
+open cells inv schematic
+tcl_send xschem setprop instance M1 w 0.8u
+tcl_expect 1 xschem get modified
+open cells inv layout
+nets_update
+expect_notice Saving the schematic first
+expect_nets 2 ok, 2 open, 0 shorted
+open cells inv schematic
+tcl_expect 0 xschem get modified
 quit
