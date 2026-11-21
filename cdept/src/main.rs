@@ -293,6 +293,20 @@ enum LayoutCommand {
         #[arg(long)]
         view: Option<String>,
     },
+    /// List the pins of a cell's layout and check them (docs/LINKING.md §9): against
+    /// the schematic's pins (when the cell has a schematic), their labels, and the
+    /// layout file (pins on the technology's pin layers). Fails on a finding.
+    Pins {
+        library: String,
+        cell: String,
+        #[arg(long)]
+        schematic: Option<String>,
+        #[arg(long)]
+        view: Option<String>,
+        /// Print the pins and the findings as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Compare the nets of a cell's layout with its schematic's: opens, shorts,
     /// unconnected terminals, pins without a label (docs/LINKING.md §8).
     ///
@@ -367,6 +381,57 @@ fn parse_define(text: &str) -> Result<(String, String), String> {
     }
 }
 
+/// `cdept layout pins`.
+fn layout_pins(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    schematic: Option<&str>,
+    view: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let file = layout_view(project, library, cell, view)?;
+    let meta = libcdept::layout::Meta::read_for(&file)?;
+    let map = link::DeviceMap::for_project(project)?;
+    let rules = map.pins.rules();
+    // The schematic's pins, when the cell has a schematic.
+    let sch = match link::schematic_view(project, library, cell, schematic) {
+        Ok((source, sch_file)) => Some(link::read_schematic(project, &map, source, &sch_file)?),
+        Err(e) if schematic.is_some() => return Err(e),
+        Err(_) => None,
+    };
+    let wanted: Option<Vec<link::pins::Wanted<'_>>> = sch.as_ref().map(|s| {
+        s.pins
+            .iter()
+            .map(|p| link::pins::Wanted {
+                name: &p.name,
+                direction: &p.direction,
+            })
+            .collect()
+    });
+    let checks = link::pins::check_file(&file, meta.as_ref(), wanted.as_deref(), Some(&rules))?;
+    if json {
+        let pins = meta.as_ref().map(|m| m.pins.clone()).unwrap_or_default();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({"pins": pins, "checks": checks}))?
+        );
+    } else {
+        match &sch {
+            Some(s) => println!("{} ↔ {}", s.source.label(), file.display()),
+            None => println!("{} (no schematic)", file.display()),
+        }
+        if rules.layers.is_empty() {
+            println!("note: this technology describes no pin layers: pins are CDePT's only");
+        }
+        println!("{}", link::pins::Report(&checks));
+    }
+    if checks.iter().any(|c| !c.is_ok()) {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
 /// Run DRC or LVS on `library/cell` from the command line.
 /// `cdept layout check-nets`.
 fn layout_check_nets(
@@ -395,6 +460,9 @@ fn layout_check_nets(
         );
     }
     let recorded = link::nets::recorded_parallel(&file);
+    let pins = libcdept::layout::Meta::read_for(&file)?
+        .map(|m| m.pins)
+        .unwrap_or_default();
     let run = link::nets::run(
         project,
         source.clone(),
@@ -402,6 +470,7 @@ fn layout_check_nets(
         &stream,
         &dir,
         &recorded,
+        &pins,
     )?;
     if json {
         println!("{}", serde_json::to_string_pretty(&run.report)?);
@@ -1227,6 +1296,20 @@ fn main() -> Result<()> {
                     }
                     Ok(())
                 }
+                LayoutCommand::Pins {
+                    library,
+                    cell,
+                    schematic,
+                    view,
+                    json,
+                } => layout_pins(
+                    &project,
+                    &library,
+                    &cell,
+                    schematic.as_deref(),
+                    view.as_deref(),
+                    json,
+                ),
                 LayoutCommand::CheckNets {
                     library,
                     cell,

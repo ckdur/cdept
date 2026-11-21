@@ -144,6 +144,42 @@ impl NetsState {
         self.last.as_ref().and_then(|r| r.as_ref().ok())
     }
 
+    /// A schematic net named by any of its names (`A`, or `x1/IN` inside x1: a net
+    /// path from the top schematic, docs/LINKING.md §9): its name in the comparison.
+    fn net_named(&self, key: &str) -> Option<String> {
+        if self.report().is_some_and(|r| r.net(key).is_some()) {
+            return Some(key.to_string());
+        }
+        let run = self.run()?;
+        run.flat
+            .nets
+            .iter()
+            .find(|n| n.names.iter().any(|k| k == key))
+            .map(|n| n.name.clone())
+    }
+
+    /// Every name of these schematic nets, through the hierarchy (`A`, `x1/IN`): what
+    /// a schematic tab picks those of the level it shows from.
+    fn aliases(&self, names: &[String]) -> Vec<String> {
+        let Some(run) = self.run() else {
+            return names.to_vec();
+        };
+        let mut out = Vec::new();
+        for name in names {
+            match run.flat.nets.iter().find(|n| &n.name == name) {
+                Some(net) => {
+                    for k in std::iter::once(&net.name).chain(&net.names) {
+                        if !out.contains(k) {
+                            out.push(k.clone());
+                        }
+                    }
+                }
+                None => out.push(name.clone()),
+            }
+        }
+        out
+    }
+
     /// The comparison to show: with the live connectivity when there is one.
     fn report(&self) -> Option<&NetReport> {
         match &self.live {
@@ -406,13 +442,17 @@ impl LayoutView {
                     let stream = verify::stream_of(&out, &value, &top);
                     let project = self.project.clone();
                     let recorded = nets::recorded_parallel(&self.file);
+                    // The pins as the editor has them now (docs/LINKING.md §9).
+                    let pins: std::collections::BTreeMap<String, libcdept::layout::Pin> =
+                        serde_json::from_value(value["pins"].clone()).unwrap_or_default();
                     let (sender, result) = mpsc::channel();
                     let wake = ctx.clone();
                     std::thread::Builder::new()
                         .name("cdept-nets".into())
                         .spawn(move || {
-                            let outcome =
-                                nets::run(&project, source, &schematic, &stream, &dir, &recorded);
+                            let outcome = nets::run(
+                                &project, source, &schematic, &stream, &dir, &recorded, &pins,
+                            );
                             let _ = sender.send(outcome.map_err(|e| format!("{e:#}")));
                             wake.request_repaint();
                         })
@@ -590,7 +630,7 @@ impl LayoutView {
         self.highlight_net(name, true);
         self.nets.probed = vec![name.to_string()];
         if self.link.cross_probe {
-            self.nets.probe_out = Some(vec![name.to_string()]);
+            self.nets.probe_out = Some(self.nets.aliases(&[name.to_string()]));
         }
         Ok(())
     }
@@ -624,14 +664,14 @@ impl LayoutView {
             return;
         }
         self.nets.probed = names.to_vec();
-        let known: Vec<String> = match self.nets.report() {
-            Some(report) => names
-                .iter()
-                .filter(|n| report.net(n).is_some())
-                .cloned()
-                .collect(),
-            None => return,
-        };
+        if self.nets.report().is_none() {
+            return;
+        }
+        // Names of any level of the hierarchy (`x1/IN`) are the nets they are part of.
+        let known: Vec<String> = names
+            .iter()
+            .filter_map(|n| self.nets.net_named(n))
+            .collect();
         match known.first() {
             Some(name) => self.highlight_net(&name.clone(), false),
             None => self.clear_highlight(),
@@ -692,7 +732,7 @@ impl LayoutView {
         self.nets.shown = Some(names.first().cloned().unwrap_or(label));
         self.nets.probed = names.clone();
         if self.link.cross_probe {
-            self.nets.probe_out = Some(names);
+            self.nets.probe_out = Some(self.nets.aliases(&names));
         }
     }
 
@@ -727,6 +767,17 @@ impl LayoutView {
     /// Schematic nets selected here since the last call, for the schematic tabs.
     pub fn take_net_probe_out(&mut self) -> Option<Vec<String>> {
         self.nets.probe_out.take()
+    }
+
+    /// What the net check says about pin `name` (`ok`, "the pin is on no wire", …), when
+    /// there is a check.
+    pub(super) fn net_pin_status(&self, name: &str) -> Option<String> {
+        let report = self.nets.report()?;
+        report
+            .pins
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.status.clone())
     }
 
     /// The schematic nets last probed or shown here.
@@ -881,6 +932,10 @@ impl LayoutView {
                         ui.label("Shorted net");
                         color_field(ui, &mut style.short);
                         ui.end_row();
+                        ui.label("Pins")
+                            .on_hover_text("Pins CDePT draws: those without a pin layer");
+                        color_field(ui, &mut style.pin);
+                        ui.end_row();
                         ui.label("Follow edits");
                         ui.checkbox(&mut style.live, "").on_hover_text(
                             "Trace the wiring again after each change (devices as \
@@ -914,7 +969,7 @@ impl LayoutView {
         let style = &mut self.nets.user_style;
         let bad = || format!("{key}: {value} is not understood");
         match key {
-            "color" | "highlight" | "short" => {
+            "color" | "highlight" | "short" | "pin" => {
                 if nets::parse_color(value).is_none() {
                     return Err(bad());
                 }
@@ -922,6 +977,7 @@ impl LayoutView {
                 match key {
                     "color" => style.color = v,
                     "highlight" => style.highlight = v,
+                    "pin" => style.pin = v,
                     _ => style.short = v,
                 }
             }

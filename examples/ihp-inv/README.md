@@ -9,12 +9,15 @@ cdept.toml                      technology ihp-sg13g2, [klayout] tech = "sg13g2"
 libs/cells/inv/schematic/       inverter: sg13_lv_pmos + sg13_lv_nmos, pins A Y VDD VSS
 libs/cells/inv/symbol/          its symbol
 libs/cells/inv/layout/inv.gds   generated from the schematic: two SG13_dev PCells (pmos,
-                                nmos) bound to M2 and M1, pin labels on Metal1.text;
-                                then wired at A and Y (scripts/wire-inv.py), not at
-                                VDD and VSS
+                                nmos) bound to M2 and M1, four pins (Metal1.pin shapes
+                                with their names on Metal1.text); then wired at A and
+                                Y (scripts/wire-inv.py, the pins A and Y on those
+                                wires), not at VDD and VSS
 libs/cells/buf/schematic/       buffer: two instances of inv
-libs/cells/buf/layout/buf.gds   generated: two references to inv's layout (x1, x2)
-*/layout/*.gds.json             sidecars: references and the link (source, instances)
+libs/cells/buf/layout/buf.gds   generated: two references to inv's layout (x1, x2), four
+                                pins
+*/layout/*.gds.json             sidecars: references, the link (source, instances) and
+                                the pins (docs/LINKING.md §9)
 ```
 
 The layouts are what `cdept layout link` makes; the inverter is then wired a little
@@ -30,9 +33,11 @@ cdept layout check-source cells inv      # in sync?
 # change w=0.74u of M1 in libs/cells/inv/schematic/inv.sch, then
 cdept layout check-source cells inv      # update M1: w 0.74u → 1u
 cdept layout link cells inv              # the PCell follows
+cdept layout pins cells inv              # the four pins, placed
 cdept layout check-nets cells inv        # A, Y ok; VDD, VSS open (flylines in the GUI)
 cdept layout check-nets cells buf        # the net between the two inverters is open
 cdept layout lvs cells inv               # runs; does not match until it is wired
-cdept gui                                # Layout › Link Panel, Update Connectivity,
-                                         # Nets panel, Probe Nets (N), cross-probing
+cdept gui                                # Layout › Link Panel, Pins Panel, Update
+                                         # Connectivity, Nets panel, Probe Nets (N),
+                                         # cross-probing (also inside x1 of buf)
 ```

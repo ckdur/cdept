@@ -11,7 +11,9 @@ generate/update (`cdept layout link`, Generate / Update in the GUI), check
 (`cdept layout check-source`), Link panel, cross-probing between schematic and layout
 tabs. Second round (nets, §8): connectivity from the PDK's LVS deck against xschem's,
 opens and shorts, flylines, net highlighting and probing, cross-probing of nets
-(`cdept layout check-nets`, Layout › Update Connectivity, the Nets panel).
+(`cdept layout check-nets`, Layout › Update Connectivity, the Nets panel); live
+flylines, their style, parallel groups. Third round: pins as CDePT objects in the
+sidecar (§9) and cross-probing through the hierarchy (§10).
 
 ## 1. The link
 
@@ -23,8 +25,8 @@ opens and shorts, flylines, net highlighting and probing, cross-probing of nets
   a copied instance carries the same name, which is reported as a duplicate). Rust
   reads them without KLayout (`layout::read_placements`, GDS and OASIS).
 - **The sidecar** `<layout file>.json` (`cdept-layout`) gets version **2** when a link
-  is recorded; files without a link are still written as version 1, and version 1 is
-  read as before:
+  is recorded, **3** when it has pins (§9); files without either are still written as
+  version 1, and older versions are read as before:
 
   ```json
   {
@@ -47,8 +49,8 @@ opens and shorts, flylines, net highlighting and probing, cross-probing of nets
   `source` is the schematic view; `instances` what each schematic instance was made
   into at the last sync (`kind` `pcell`: a PCell of a KLayout library with its
   parameters; `cell`: the layout view of a project cell). An optional `parallel`
-  lists groups of devices in parallel (§8.3). Rust types:
-  `layout::{Source, Linked, Parallel}`.
+  lists groups of devices in parallel (§8.3), an optional `pins` the layout's pins
+  (§9). Rust types: `layout::{Source, Linked, Parallel, Pin, PinShape}`.
 
 ## 2. Reading the schematic (`libcdept::link::schematic`)
 
@@ -59,8 +61,8 @@ up like xschem does: the parents of the project's libraries, the PDK's
 has a `format=`/`lvs_format=` (a netlist line), and the defaults of `template=`.
 
 Each instance is one of:
-- a **pin** (`type=ipin|opin|iopin`, or a symbol named so): its `lab` becomes a pin
-  label (§3);
+- a **pin** (`type=ipin|opin|iopin`, or a symbol named so): its `lab` is a pin of the
+  layout (§9), on the net of that name;
 - a **device** with an entry in the device map (§3): a PCell with parameters;
 - an instance of a **project cell** (its symbol file is in a library of the project): a
   reference to that cell's layout view (`layout`, else the first GDS/OASIS view), as
@@ -80,9 +82,13 @@ Our own TOML, `format = "cdept-devices"`, version 1:
 format = "cdept-devices"
 version = 1
 
-[pins]               # optional: labels for the schematic's pins
-layer = "8/25"       # layer/datatype of the text (IHP: Metal1.text)
-size = 0.1           # µm
+[pins]               # optional: how pins are made (§9)
+generate = "8/0"     # the conductor generated pins go on (IHP: Metal1)
+box = 0.5            # size of a generated pin, µm
+size = 0.1           # text size of pin labels, µm
+layers = [           # per conductor: its pin layer and its label layer
+  { drawing = "8/0", pin = "8/2", label = "8/25" },
+]
 
 [[device]]
 symbol = "sg13g2_pr/sg13_lv_nmos.sym"   # as the schematic refers to it
@@ -120,6 +126,7 @@ properties of the top cell) and the sidecar's record give:
 | extra | a layout instance bound to a name the schematic does not have |
 | twice | a name bound to several layout instances (a copy) |
 | problem | a schematic instance that cannot be made into layout (§2) |
+| add pin, extra pin, pin direction | the schematic's pins against the sidecar's (§9) |
 | note | layout instances bound to nothing (allowed: guard rings, fill, …) |
 
 `cdept layout check-source <lib> <cell> [--schematic V] [--view V]` prints it and exits 1
@@ -144,19 +151,23 @@ layout modified; the CLI saves):
   of device, wrapped at 60 µm;
 - bound to a name the schematic does not have: left in place and reported, deleted with
   `--remove` ("Remove Extra" in the panel);
-- pin labels (`[pins] layer`) for pins that have no text of that name on that layer
-  yet, in a column left of the cell.
+- pins (§9) for the schematic's pins the cell has none for: a text of the pin's name
+  from before pins were objects is taken over (a square of `[pins] box` around it),
+  else a square on the `generate` conductor, in a column left of the cell. A device
+  map of before (`[pins] layer` only) still gets labels.
 
-After the save the sidecar records `source` and `instances` (§1).
+The schematic is read as saved: in the GUI an open schematic with unsaved changes is
+saved first (as for Update Connectivity, §8.4). After the save the sidecar records
+`source` and `instances` (§1) and the pins (§9).
 
 Helper methods (docs/KLAYOUT.md §4 conventions; `link.py`):
 
 | method | params | value |
 |--------|--------|-------|
-| `link_apply` | `{items: [{name, symbol, kind: pcell, library, cell, params} \| {name, symbol, kind: cell, library, cell, view, file, refs}], pins: [{name, direction}], pin_layer, pin_size, remove}` | `{added, bound, updated, replaced, unchanged, removed, extra, duplicates, pins, failed: [{name, error}]}` |
+| `link_apply` | `{items: [{name, symbol, kind: pcell, library, cell, params} \| {name, symbol, kind: cell, library, cell, view, file, refs}], pins: [{name, direction, net}], pin_layer?, remove}` | `{added, bound, updated, replaced, unchanged, removed, extra, duplicates, pins, failed: [{name, error}]}` |
 | `link_instances` | `{}` | `{instances: {name: {cell, library, pcell, params, bbox, count, file?, label?}}, unbound}` |
-| `link_select` | `{names, zoom?}` | `{found}`: selects those instances of the top cell |
-| `link_selected` | `{}` | `{names}`: names bound to the selected instances |
+| `link_select` | `{names, zoom?}` | `{found}`: selects the instances of these instance paths (`M1`, `x1/M1`, §10) |
+| `link_selected` | `{}` | `{names}`: instance paths bound to the selection (§10) |
 | `link_highlight` | `{names, color?, zoom?}` | `{markers}`: markers around them (empty: clear) |
 
 (Method names use `_`, not `.`: the helper dispatches on Python identifiers.)
@@ -174,25 +185,27 @@ Helper methods (docs/KLAYOUT.md §4 conventions; `link.py`):
 - **Cross-probing** (on by default, per layout tab): instances selected in a layout tab
   are selected in the open tabs of its schematic (`xschem select instance`), and the
   reverse. The names last exchanged are remembered so a selection does not bounce.
-  Top level only: no hierarchy paths yet.
+  Through the hierarchy too (§10).
 - Script commands for tests: `link_generate [remove]`, `link_select <names…>`,
   `expect_link <instance> <status>`, `expect_probed <names…|none>`
   (docs/GUI-TESTING.md); `cdept-gui/scripts/layout-link.script`.
 
 ## 7. Not yet
 
-- **Nets**, further: net-aware placement; flylines that follow edits live (today they
-  are as old as the last Update Connectivity); a connectivity check without a PDK
-  LVS deck (e.g. from the technology's `connectivity` section and KLayout's net
-  tracer); unsaved schematic edits (nets are read from the schematic as saved).
-- Hierarchical cross-probing (instance paths below the top cell).
-- Generating from a schematic with unsaved changes (it is read from disk).
-- Pins become text labels only; no pin shapes, no placement next to the device.
+- **Nets**, further: net-aware placement. A PDK without a KLayout LVS deck has no net
+  check: CDePT does not guess a PDK's devices (decided 2026-11-20, no fallback).
 - `check-source` compares with the record, not with the PCells' actual parameters.
 - Bus instances (`M1[3:0]`) are treated as one instance with that name.
-- Examples: `examples/ihp-inv` (inv: two IHP PCells; buf: two references to inv), and
-  `examples/buffer` buf (links its existing inv instances). `examples/buffer` inv uses
-  xschem's generic devices: nothing to map.
+- Pins (§9): a pin's shape on a layer that is neither a pin layer nor CDePT's (tagged
+  by other means) is read but not made; OASIS files' pin shapes are not read by Rust
+  (`cdept layout pins` says nothing about the stream then); a pin is not moved with
+  the wire it sits on.
+- Cross-probing (§10): xschem selects only in the schematic it shows (a device inside
+  x1 is x1 at the top); a layout tab edited in place (descended) maps its selection
+  from its top cell.
+- Examples: `examples/ihp-inv` (inv: two IHP PCells, four pins; buf: two references to
+  inv, four pins), and `examples/buffer` buf (links its existing inv instances).
+  `examples/buffer` inv uses xschem's generic devices: nothing to map.
 
 ## 8. Nets
 
@@ -251,7 +264,9 @@ and also: terminals on no net (*unconnected*), schematic devices with no layout
 device (*not in the layout*), layout devices that belong to no bound instance (a note:
 taps, fill), and each schematic pin: `ok` when a label of its name in the top cell is
 on a wire of its net, else *no label in the layout*, *the label is on no wire*, or
-*the label is on the layout net of …*. A pin label joins its net's pieces too.
+*the label is on the layout net of …*. A pin label joins its net's pieces too. A
+layout with pins in its sidecar (§9) is checked with those instead (*no pin in the
+layout*, *the pin is on no wire*, *the pin is on the layout net of …*).
 
 **Running it.** `cdept layout check-nets <lib> <cell> [--schematic V] [--view V]
 [--json] [--dir D]` prints the findings (`net VDD: open, 2 pieces: {M2.D} on #4,
@@ -394,4 +409,98 @@ The comparison reads the schematic from its file. Update Connectivity in the GUI
 first saves an open schematic of the link that has unsaved changes (through its
 xschem session, waiting for the answer), then extracts; a cancelled save means no
 update. `cdept layout check-nets` reads the files as they are.
+
+## 9. Pins
+
+A pin is a **CDePT object**: the layout's sidecar lists it, whatever the technology
+has for pins (many have no pin layers at all). Sidecar version 3:
+
+```json
+"pins": {
+  "A": { "direction": "input", "net": "A",
+         "shapes": [ { "layer": "8/0", "box": [-0.55, 1.95, -0.05, 2.45] } ],
+         "label": [-0.3, 2.2] }
+}
+```
+
+`direction` is `input`, `output` or `inout` (xschem's ipin, opin, iopin), `net` the
+schematic net, `shapes` boxes or polygons (`"polygon": [[x, y], …]`) in µm **on the
+conductor they connect to** (the drawing layer), `label` where the name goes (the
+middle of the first shape when absent).
+
+**In the stream** a pin is what the technology wants (`[pins]` of the device map, §3;
+IHP: every metal with its `.pin` (datatype 2) and `.text` (datatype 25) layer, the
+text being what IHP's LVS deck names nets with):
+
+- conductor with a pin layer: the shape on the pin layer, the name as a text on the
+  label layer, both carrying the GDS property **62** = the pin's name;
+- conductor without one: the shape is CDePT's only (`CDEPT_PINS`, an in-memory layer
+  of the editor that is never written, like the "cannot be found" markers), drawn over
+  the layout in the pin colour (Nets panel › Style…, `pin` in `[klayout.flylines]`);
+  the name goes on the label layer if there is one;
+- no rules at all: every pin is CDePT's only.
+
+**In the editor** (helper `pins.py`) a pin is everything in the cell carrying property
+62: its shapes move, stretch, delete, copy and undo like any other, and the save's
+report carries the pins back to the sidecar (`SaveReport.pins`,
+`refs::update_after_save`). On open, the sidecar's pins the stream does not hold (the
+CDePT-only ones) are made again; the stream wins for the others. External files' pins
+come with their cells; edit in place writes them back to their own sidecars.
+
+- **Pins panel** (Layout › Pins Panel): every pin with its direction (changeable), its
+  conductors, its status, and Rename, Delete, Label to Pin; the schematic's pins not
+  placed yet. **New pin**: a name (the schematic's unplaced pins are offered) and a
+  direction, then **Draw** (the next box drawn on the current layer becomes the pin:
+  on the pin layer, or CDePT's) or **From Selection** (the selected shapes: a shape on
+  a pin layer is tagged, one on a conductor copied as the pin).
+- Statuses: `placed`, `not placed`, `not in the schematic`, `twice` (a copied pin),
+  `label off the pin`, `other direction`, and the net check's (§8): `the pin is on no
+  wire`, `the pin is on the layout net of …`.
+- **Generate** makes the schematic's pins (§5); **check-source** lists pins to add,
+  extra pins and other directions (only when the device map can make pins, or the
+  layout has some).
+- **The net check** takes the sidecar's pins (the editor's, in the GUI): the extraction
+  is given each pin's point and conductor (`connectivity.py -rd pins=`); a pin is on a
+  net when its conductor has a shape at the point (a net of the pin's name first, else
+  the smallest there, never the substrate). Live flylines trace from pins where they
+  are now.
+- **LVS** sees the pins of a technology with label layers: they are texts on the
+  metals in the exported stream (checked with IHP: the extracted inverter's subcircuit
+  has the pins A and Y).
+- `cdept layout pins <lib> <cell> [--schematic V] [--view V] [--json]`: the pins with
+  their findings against the schematic, their labels and the stream (a pin whose
+  conductor has a pin layer must have a shape there: GDS, property 62); exit 1 on a
+  finding.
+
+Helper methods (`pins.py`):
+
+| method | params | value |
+|--------|--------|-------|
+| `pins_list` | `{}` | `{pins: {name: {direction, net, shapes, label, count, overlay, label_on}}, rules, generate}` |
+| `pins_add` | `{name, direction?, net?, layer, box \| polygon, label?}` or `{name, …, from_selection: true}` | as `pins_list`; one undo step |
+| `pins_update` | `{name, direction?, net?, shapes?, label?: [x, y] \| "middle"}` | as `pins_list` |
+| `pins_rename` / `pins_remove` | `{name, new}` / `{name}` | as `pins_list` |
+| `pins_select` | `{names, zoom?}` | `{found}` |
+| `pins_tool` | `{name, direction?, net?, on?}` | `{armed, layer}`: Draw Pin on the current layer |
+| `pins_style` | `{color, visible?}` | how CDePT's pins look |
+
+## 10. Cross-probing through the hierarchy
+
+Names exchanged between tabs are **instance paths**: `M1` in the cell, `x1/M1` the
+device M1 inside the instance x1, as layout instances are bound on every level
+(property 61 in each layout view). A layout tab's paths start at its top cell; a
+schematic tab's at its own schematic, wherever xschem is (`cdept::selection` reports
+`path`, xschem's `.x1.`, and the schematic shown).
+
+- A layout linked with the schematic of the tab maps one to one: `x1/M1` selected in
+  buf's layout selects x1 in buf's schematic at the top, and M1 once xschem has
+  descended into x1; M1 selected there selects `x1/M1` in buf's layout.
+- A layout linked with the schematic xschem shows after descending (inv's own layout,
+  while buf's schematic shows the inside of x1) maps below that instance: M1 there is
+  `x1/M1` for the tab. Every layout of the schematic follows (a selection is passed on).
+- Devices inside placed cells of other views are selected for showing only: the
+  selection stays until the next press or key, edits stay refused.
+- Nets: a schematic tab sends net paths (`x1/A`); the layout takes the flattened net
+  that has that name (§8: every name a net has, through the hierarchy). The layout
+  sends every name of the net, and the schematic highlights those of the level shown.
 

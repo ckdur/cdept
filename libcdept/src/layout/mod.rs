@@ -16,7 +16,7 @@ pub mod meta;
 pub mod oasis;
 pub mod refs;
 
-pub use meta::{Linked, Meta, MetaRef, Parallel, Source};
+pub use meta::{Linked, Meta, MetaRef, Parallel, Pin, PinShape, Source};
 pub use refs::{FileRefs, Ref, RefTable};
 
 /// Write `bytes` to `path` through a temporary file in the same folder, then rename.
@@ -78,7 +78,7 @@ pub fn is_readable(file: &std::path::Path) -> bool {
     })
 }
 
-fn is_oasis(file: &std::path::Path) -> bool {
+pub(crate) fn is_oasis(file: &std::path::Path) -> bool {
     file.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("oas") || e.eq_ignore_ascii_case("oasis"))

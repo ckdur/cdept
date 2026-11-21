@@ -4,7 +4,7 @@ What is still to do and what may cause trouble. [ROADMAP.md](ROADMAP.md) is the 
 file is the running list behind it. Update it when an item is done or a new problem shows
 up. Items marked **(verify)** are suspicions, not confirmed facts.
 
-Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built; PCell views; schematic ↔ layout linking with nets).
+Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built; PCell views; schematic ↔ layout linking with nets, pins as objects, hierarchical cross-probing).
 
 ---
 
@@ -217,7 +217,7 @@ Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built; PCell views; sche
       SG13G2: MOS LV/HV, rsil/rppd/rhigh, cmim/rfcmim, taps, antennas, pnpMPA, npn13G2),
       project's `[klayout] devices` on top; templates `@w`, `@{w|u}` (SPICE → "0.5u").
 - [x] `cdept layout link` (generate/update: add, update parameters, replace, take over
-      unbound instances, `--remove`, pin labels) and `cdept layout check-source` (plan,
+      unbound instances, `--remove`, pins) and `cdept layout check-source` (plan,
       exit 1 when out of sync); helper `link.py` (`link_apply`, `link_instances`,
       `link_select`, `link_selected`, `link_highlight`), one undoable step.
 - [x] GUI: Generate / Update from Schematic (layout tab, schematic tab Cell menu), Link
@@ -270,9 +270,35 @@ Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built; PCell views; sche
       `m=`/`ng` multiples are one instance (nothing to group); bus instances
       (`M1[3:0]`) are one name; parallel groups are recorded by the panel and
       `cdept layout parallel`, not by `cdept layout link`.
-- [ ] Hierarchical cross-probing; unsaved schematic edits are not seen (read from disk);
-      pins are text labels only; PDK PCells need `[klayout] tech` to read back live;
-      bus instances (`M1[3:0]`) count as one name.
+- [x] Pins as CDePT objects (2026-11-20, LINKING.md §9): the sidecar lists them
+      (version 3: name → direction, net, shapes on conductors, label); the device map's
+      `[pins]` says what the stream holds (`generate`, `box`, `size`, `layers` =
+      conductor → pin layer, label layer; IHP: every metal with datatype 2 and 25).
+      Without a pin layer a pin is CDePT's only (in-memory layer `CDEPT_PINS`, drawn in
+      the pin colour, never written). In the editor a pin is every shape carrying GDS
+      property 62 = its name (helper `pins.py`): moves, undo, copy like any shape; the
+      save report carries the pins to the sidecar. Pins panel (Layout › Pins Panel:
+      direction, rename, delete, label to pin, statuses), Draw Pin, Pin from Selection;
+      Generate makes the schematic's pins (old labels taken over); check-source lists
+      pin differences; the net check and live flylines use the pins (pin point on its
+      conductor, never the substrate net); IHP LVS sees them (labels on the metals).
+      `cdept layout pins [--json]`. Example `examples/ihp-inv` migrated (inv, buf: four
+      pins each). Tests: `link::pins`, plan and nets unit tests, helper `test_pins.py`,
+      `pins_are_in_the_sidecar_the_stream_and_the_checks` (IHP), `layout-pins.script`.
+- [x] Cross-probing through the hierarchy (LINKING.md §10): instance paths (`x1/M1`)
+      both ways; `cdept::selection` reports xschem's `path` and the schematic shown; a
+      layout linked with the schematic shown inside x1 maps below it; every linked
+      layout follows; devices inside other views' cells are selected for showing until
+      the next press or key; nets by every name they have (`x1/A`). Generate saves an
+      open, modified schematic first.
+- [ ] Pins: a pin is not moved with the wire under it; OASIS pin shapes are not read by
+      Rust (`cdept layout pins` checks the stream for GDS only); with CDePT's pin layer
+      in the layer list, a click on overlapping shapes may pick another layer's than
+      before (seen in `layout-properties.script` with a pin added; not looked into).
+- [ ] Cross-probing: xschem selects only in the schematic it shows (x1 at the top for
+      `x1/M1`); a layout tab descended (edit in place) maps from its top cell. PDK
+      PCells need `[klayout] tech` to read back live; bus instances (`M1[3:0]`) count
+      as one name.
 
 ### Smaller gaps left in what exists
 - [x] Edit project fields (name, description, technology, PDK folder) from the GUI.

@@ -450,6 +450,8 @@ proc cdept::close {} {
 #   texts      number of selected texts
 #   nets       the nets of the selected wires, labels and pins (for cross-probing nets
 #              with a layout, docs/LINKING.md §8)
+#   path       where in the hierarchy the window is: "." at the top, ".x1." inside x1
+#   schematic  the schematic shown there (its file)
 proc cdept::selection {} {
   set instances {}
   set nets {}
@@ -475,8 +477,12 @@ proc cdept::selection {} {
       if {$lab ne "" && $lab ni $nets} {lappend nets $lab}
     }
   }
+  set path .
+  catch {set path [xschem get sch_path]}
+  set schematic {}
+  catch {set schematic [file normalize [xschem get schname]]}
   list count [xschem get lastsel] instances $instances \
-       wires [llength $wires] texts $texts nets $nets
+       wires [llength $wires] texts $texts nets $nets path $path schematic $schematic
 }
 
 # ---------------------------------------------------------------------------------

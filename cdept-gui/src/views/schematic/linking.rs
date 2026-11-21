@@ -29,6 +29,12 @@ pub struct SchematicLink {
     pub nets_probed: Vec<String>,
     /// Nets selected here, for the layout tabs.
     pub nets_out: Option<Vec<String>>,
+    /// What selecting a layout tab's names here made the selection (it is not sent
+    /// back: it may be shallower than what was asked for).
+    pub echo: Option<Vec<String>>,
+    /// xschem's window title last seen (another schematic shown: read the selection,
+    /// and so where in the hierarchy, again).
+    pub title_seen: Option<String>,
 }
 
 impl SchematicView {
@@ -43,21 +49,46 @@ impl SchematicView {
         })
     }
 
-    /// A new selection was read from xschem: tell the layout side if it changed.
+    /// Where xschem is in the hierarchy, as an instance path prefix: `` at the top,
+    /// `x1/` inside instance x1 (docs/LINKING.md §9).
+    pub fn hierarchy_prefix(&self) -> String {
+        self.selection
+            .as_ref()
+            .map(|s| s.prefix())
+            .unwrap_or_default()
+    }
+
+    /// The schematic xschem shows (another one than the tab's after a descent).
+    pub fn shown_schematic(&self) -> Option<&std::path::Path> {
+        self.selection.as_ref().and_then(|s| s.schematic.as_deref())
+    }
+
+    /// A new selection was read from xschem: tell the layout side if it changed. Names
+    /// go out as instance paths from the tab's own schematic (`x1/M1` when xschem is
+    /// inside x1).
     pub(super) fn selection_changed(&mut self) {
+        let prefix = self.hierarchy_prefix();
         let names: Vec<String> = self
             .selection
             .as_ref()
-            .map(|s| s.instances.iter().map(|i| i.name.clone()).collect())
+            .map(|s| {
+                s.instances
+                    .iter()
+                    .map(|i| format!("{prefix}{}", i.name))
+                    .collect()
+            })
             .unwrap_or_default();
-        if names != self.link.probed {
+        if self.link.echo.as_ref() == Some(&names) {
+            self.link.echo = None;
+        } else if names != self.link.probed {
+            self.link.echo = None;
             self.link.probed = names.clone();
             self.link.probe_out = Some(names);
         }
         let nets: Vec<String> = self
             .selection
             .as_ref()
-            .map(|s| s.nets.clone())
+            .map(|s| s.nets.iter().map(|n| format!("{prefix}{n}")).collect())
             .unwrap_or_default();
         if !nets.is_empty() && nets != self.link.nets_probed {
             self.link.nets_probed = nets.clone();
@@ -71,14 +102,21 @@ impl SchematicView {
     }
 
     /// Highlight the nets `names` with xschem's net highlight, as asked by a layout tab
-    /// (an empty list clears).
+    /// (an empty list clears). Names are net paths from the tab's own schematic (every
+    /// name a net has: `A`, `x1/IN`); those of the schematic xschem shows now are
+    /// highlighted.
     pub fn probe_nets_in(&mut self, names: &[String]) {
         if names == self.link.nets_probed {
             return;
         }
         self.link.nets_probed = names.to_vec();
+        let prefix = self.hierarchy_prefix();
         let mut script = String::from("xschem unhilight_all\n");
-        for name in names.iter().filter(|n| !n.contains('/')) {
+        for name in names
+            .iter()
+            .filter_map(|n| n.strip_prefix(prefix.as_str()))
+            .filter(|n| !n.contains('/'))
+        {
             script.push_str(&format!("xschem hilight_netname {}\n", tcl::quote(name)));
         }
         self.session.tcl(&script);
@@ -98,14 +136,29 @@ impl SchematicView {
         self.link.request.take()
     }
 
-    /// Select the instances `names` in xschem, as asked by a layout tab.
+    /// Select the instances `names` in xschem, as asked by a layout tab. Names are
+    /// instance paths from the tab's own schematic; the instance of the schematic shown
+    /// now on each path is selected (`x1/M1` selects x1 at the top, M1 inside x1).
     pub fn probe_in(&mut self, names: &[String]) {
         if names == self.link.probed {
             return;
         }
         self.link.probed = names.to_vec();
+        let prefix = self.hierarchy_prefix();
+        let mut here: Vec<&str> = names
+            .iter()
+            .filter_map(|n| n.strip_prefix(prefix.as_str()))
+            .filter_map(|n| n.split('/').next())
+            .filter(|n| !n.is_empty())
+            .collect();
+        here.sort_unstable();
+        here.dedup();
+        self.link.echo = Some(here.iter().map(|n| format!("{prefix}{n}")).collect());
+        // The other layouts linked with this schematic follow too (the one that asked
+        // has these names already and ignores them).
+        self.link.probe_out = Some(names.to_vec());
         let mut script = String::from("xschem unselect_all 1\n");
-        for name in names {
+        for name in here {
             script.push_str(&format!("xschem select instance {}\n", tcl::quote(name)));
         }
         self.session.tcl(&script);

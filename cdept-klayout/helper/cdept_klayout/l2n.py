@@ -16,12 +16,15 @@ so agree on the net ids.
    "devices": [{"name", "class", "bbox",
                 "terminals": [{"name", "net", "point"}]}],
    "instances": [{"path", "cell", "bbox", "leaf"}],
-   "labels": [{"text", "point", "layer", "net"}]}
+   "labels": [{"text", "point", "layer", "net", "pin"?}]}
 `instances` are the instances bound to schematic instances (GDS property 61), with
 their paths through bound cells (`x1/M1`), from the stream the database was made from.
 `labels` are the texts of the top cell itself (not of the cells it places) with the
 net each one names (null: on no shape of a net of that name). Net names alone do not
-tell: a label inside a placed cell names a net of the top circuit too.
+tell: a label inside a placed cell names a net of the top circuit too. The pins CDePT
+gives (`describe(stream, pins)`, docs/LINKING.md §9: [{name, point, layer}], the point
+of a pin's label on its conductor) come as labels too, with "pin": the pin's name and
+the net under the point (a net of the pin's name first, where several are there).
 """
 
 import pya
@@ -151,7 +154,7 @@ class Connectivity:
 
     # -- description ------------------------------------------------------------
 
-    def describe(self, stream=None):
+    def describe(self, stream=None, pins=None):
         nets = [{"id": i, "name": _name(net), "bbox": _box_um(box, self.dbu)}
                 for i, (net, box) in enumerate(zip(self.nets, self.boxes()))]
         devices = [self._device(d, trans, ids) for d, trans, ids in self.devices]
@@ -159,7 +162,42 @@ class Connectivity:
         if stream:
             out["instances"] = bound_instances(stream, self.circuit.name)
             out["labels"] = self.labels(stream)
+        if pins:
+            ly = pya.Layout()
+            ly.read(stream)
+            cell = ly.cell(self.circuit.name)
+            for pin in pins:
+                point = [float(v) for v in pin["point"]]
+                out.setdefault("labels", []).append({
+                    "text": pin["name"], "point": [round(point[0], 6), round(point[1], 6)],
+                    "layer": pin.get("layer") or "",
+                    "net": self.pin_net(pin["name"], point, ly, cell, pin.get("layer")),
+                    "pin": pin["name"]})
         return out
+
+    def pin_net(self, name, point, ly, cell, layer):
+        """The net under a pin's point: none when its conductor (`layer`, "8/0") has no
+        shape there; else one named like the pin, else the smallest net there (not the
+        substrate, which is under everything)."""
+        p = pya.Point(int(round(point[0] / self.dbu)), int(round(point[1] / self.dbu)))
+        probe = pya.Box(p.x - 1, p.y - 1, p.x + 1, p.y + 1)
+        if cell is not None and layer:
+            li = ly.find_layer(pya.LayerInfo.from_string(str(layer)))
+            if li is None or cell.begin_shapes_rec_touching(li, probe).at_end():
+                return None
+        region = pya.Region(probe)
+        found = []
+        for index, box in enumerate(self.boxes()):
+            if box.empty() or not box.enlarged(1, 1).contains(p):
+                continue
+            for _, shapes in self.shapes(index):
+                if not shapes.interacting(region).is_empty():
+                    found.append((box.area(), index))
+                    break
+        if not found:
+            return None
+        named = [f for f in found if _name(self.nets[f[1]]) == name]
+        return min(named or found)[1]
 
     def labels(self, stream):
         """The texts of the top cell of `stream`, each with the net it names."""

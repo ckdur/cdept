@@ -333,13 +333,14 @@ impl Project {
             let text = value.as_str();
             let number = value.as_integer();
             match key {
-                "color" | "highlight" | "short" => {
+                "color" | "highlight" | "short" | "pin" => {
                     match text.filter(|t| parse_color(t).is_some()) {
                         Some(t) => {
                             let t = Some(t.to_string());
                             match key {
                                 "color" => out.color = t,
                                 "highlight" => out.highlight = t,
+                                "pin" => out.pin = t,
                                 _ => out.short = t,
                             }
                         }

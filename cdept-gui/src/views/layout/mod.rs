@@ -13,6 +13,7 @@ mod linking;
 mod nets;
 mod panels;
 mod pcell;
+mod pins;
 mod place;
 mod properties;
 
@@ -204,6 +205,8 @@ pub struct LayoutView {
     link: linking::LinkState,
     /// Nets against the schematic's: flylines, probing (see `nets`).
     nets: nets::NetsState,
+    /// The pins (`pins`, docs/LINKING.md §9).
+    pins: pins::PinsState,
 }
 
 impl LayoutView {
@@ -286,6 +289,7 @@ impl LayoutView {
             library_picker: None,
             link: linking::LinkState::new(),
             nets: nets::NetsState::default(),
+            pins: pins::PinsState::default(),
         };
         view.find_link_source();
         view
@@ -634,6 +638,7 @@ impl LayoutView {
             self.library_picker = None;
             self.link.forget_questions();
             self.nets.forget_questions();
+            self.pins.forget_questions();
             if matches!(self.closing, Some(Closing::Saving(_))) {
                 self.closing = None;
             }
@@ -1229,6 +1234,9 @@ impl View for LayoutView {
         self.take_style(&ctx.settings.flylines);
         self.poll_nets(ui.ctx());
         self.nets_panel(ui);
+        self.poll_pins();
+        let editable = self.editable;
+        self.pins_panel(ui, editable);
         self.drawing(ui);
 
         if let Some(picker) = &mut self.place
@@ -1354,6 +1362,7 @@ impl View for LayoutView {
             ui.separator();
             self.link_menu(ui, ctx, editable);
             self.nets_menu(ui, ready);
+            self.pins_menu(ui);
             ui.separator();
             self.checks_menu(ui, ready);
             ui.separator();

@@ -68,6 +68,11 @@ pub(super) struct LinkState {
     pub probe_out: Option<Vec<String>>,
     /// The names last exchanged with the schematic, to not send them back.
     pub probed: Vec<String>,
+    /// Generate / Update asked for (`Some(remove)`): `coordinate_links` saves an open,
+    /// modified schematic first, then starts it.
+    pub generate_wanted: Option<bool>,
+    /// The save of the schematic asked for before generating: its file and request.
+    pub generate_save: Option<(PathBuf, u64)>,
 }
 
 impl LinkState {
@@ -187,6 +192,48 @@ impl LayoutView {
     }
 
     /// Generate / Update from Schematic: make the layout match the schematic as saved.
+    /// Ask for Generate / Update from Schematic: the schematic is compared as saved, so
+    /// an open schematic with unsaved changes is saved first (`coordinate_links`).
+    pub fn request_generate(&mut self, remove: bool) {
+        self.link.generate_wanted = Some(remove);
+    }
+
+    /// Generate / Update asked for and not started (`Some(remove)`).
+    pub fn generate_wanted(&self) -> Option<bool> {
+        self.link.generate_wanted
+    }
+
+    /// The save of the schematic asked for before generating, if any.
+    pub fn generate_save_request(&self) -> Option<u64> {
+        self.link.generate_save.as_ref().map(|(_, id)| *id)
+    }
+
+    /// The schematic `file` is being saved (request `id`) before generating.
+    pub fn generate_saving(&mut self, file: PathBuf, id: u64) {
+        self.notify(
+            libcdept::klayout::protocol::NoticeLevel::Info,
+            "Saving the schematic first: the layout is generated from it as saved".into(),
+        );
+        self.link.generate_save = Some((file, id));
+    }
+
+    /// Start the Generate asked for (the schematic is saved).
+    pub fn start_generate(&mut self, project: Option<&libcdept::Project>) {
+        let remove = self.link.generate_wanted.take().unwrap_or(false);
+        self.link.generate_save = None;
+        self.generate_from_schematic(project, remove);
+    }
+
+    /// The schematic could not be saved: nothing generated.
+    pub fn generate_not_started(&mut self, why: &str) {
+        self.link.generate_wanted = None;
+        self.link.generate_save = None;
+        self.notify(
+            libcdept::klayout::protocol::NoticeLevel::Warning,
+            format!("The schematic was not saved ({why}): nothing generated"),
+        );
+    }
+
     pub fn generate_from_schematic(&mut self, project: Option<&libcdept::Project>, remove: bool) {
         if self.link.applying.is_some() {
             return;
@@ -320,7 +367,7 @@ impl LayoutView {
             )
             .clicked()
         {
-            self.generate_from_schematic(ctx.project.as_ref(), false);
+            self.request_generate(false);
             ui.close();
         }
         if ui
@@ -467,7 +514,7 @@ impl LayoutView {
             });
         for act in acts {
             match act {
-                Act::Generate(remove) => self.generate_from_schematic(ctx.project.as_ref(), remove),
+                Act::Generate(remove) => self.request_generate(remove),
                 Act::Refresh => self.refresh_link(ctx.project.as_ref()),
                 Act::Select(name) => self.link_select(&[name]),
                 Act::OpenSchematic => {
@@ -488,6 +535,20 @@ impl LayoutView {
         self.link.probe_out = Some(names.to_vec());
     }
 
+    /// The schematic is there to read and was not read yet.
+    pub(super) fn link_unread(&self) -> bool {
+        self.link.source.is_some() && self.link.schematic.is_none() && self.link.error.is_none()
+    }
+
+    /// The pins of the schematic as last read (docs/LINKING.md §9).
+    pub(super) fn link_schematic_pins(&self) -> Vec<link::Pin> {
+        self.link
+            .schematic
+            .as_ref()
+            .map(|s| s.pins.clone())
+            .unwrap_or_default()
+    }
+
     /// For the test driver: the status of a schematic instance in the Link panel.
     pub fn link_status(&self, name: &str) -> Option<&'static str> {
         let schematic = self.link.schematic.as_ref()?;
@@ -497,7 +558,9 @@ impl LayoutView {
 
     /// For the test driver: a Generate or an `link_instances` question is under way.
     pub fn link_busy(&self) -> bool {
-        self.link.applying.is_some() || self.link.instances_asked.is_some()
+        self.link.applying.is_some()
+            || self.link.instances_asked.is_some()
+            || self.link.generate_wanted.is_some()
     }
 
     /// The helper runs and can be asked to generate.

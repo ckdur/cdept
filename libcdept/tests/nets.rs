@@ -78,7 +78,11 @@ fn check(project: &Project, cell: &str, work: &Path) -> link::nets::NetRun {
     let dir = work.join(cell);
     std::fs::create_dir_all(&dir).unwrap();
     let stream = verify::export_stream(project, &file, &dir.join(format!("{cell}.gds"))).unwrap();
-    link::nets::run(project, source, &schematic, &stream, &dir, &[]).unwrap()
+    let pins = libcdept::layout::Meta::read_for(&file)
+        .unwrap()
+        .map(|m| m.pins)
+        .unwrap_or_default();
+    link::nets::run(project, source, &schematic, &stream, &dir, &[], &pins).unwrap()
 }
 
 /// The example's inverter is wired at A and Y, not at VDD and VSS: two nets ok, two
@@ -203,4 +207,102 @@ fn parallel_devices_are_found_in_the_schematic() {
     let merged = link::nets::merge_parallel(&groups, &link::nets::recorded_parallel(&layout));
     link::nets::record_parallel(&layout, &merged).unwrap();
     assert_eq!(link::nets::recorded_parallel(&layout), merged);
+}
+
+/// The example's pins (docs/LINKING.md §9): in the sidecar, on IHP's pin layers in the
+/// stream; the net check takes them (A and Y on their wires, VDD and VSS on none); a
+/// pin moved onto the VSS wire is found there; IHP's LVS sees the pins' labels.
+#[test]
+fn pins_are_in_the_sidecar_the_stream_and_the_checks() {
+    let Some(root) = pdk_root() else {
+        return;
+    };
+    let (dir, project) = example(&root);
+    let file = dir.path().join("libs/cells/inv/layout/inv.gds");
+    let meta = libcdept::layout::Meta::read_for(&file).unwrap().unwrap();
+    assert_eq!(
+        meta.pins.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["A", "VDD", "VSS", "Y"]
+    );
+    assert_eq!(meta.pins["A"].direction, "input");
+    let map = link::DeviceMap::for_project(&project).unwrap();
+    let rules = map.pins.rules();
+    let (source, sch_file) = link::schematic_view(&project, "cells", "inv", None).unwrap();
+    let sch = link::read_schematic(&project, &map, source, &sch_file).unwrap();
+    let wanted: Vec<link::pins::Wanted<'_>> = sch
+        .pins
+        .iter()
+        .map(|p| link::pins::Wanted {
+            name: &p.name,
+            direction: &p.direction,
+        })
+        .collect();
+    let checks = link::pins::check_file(&file, Some(&meta), Some(&wanted), Some(&rules)).unwrap();
+    assert!(checks.iter().all(|c| c.is_ok()), "{checks:#?}");
+    let tagged = link::pins::tagged_in_stream(&file, "inv", &rules)
+        .unwrap()
+        .unwrap();
+    assert_eq!(tagged.len(), 4);
+
+    let work = tempfile::tempdir().unwrap();
+    let run = check(&project, "inv", work.path());
+    let status: std::collections::BTreeMap<&str, &str> = run
+        .report
+        .pins
+        .iter()
+        .map(|p| (p.name.as_str(), p.status.as_str()))
+        .collect();
+    assert_eq!(status["A"], "ok", "{status:?}");
+    assert_eq!(status["Y"], "ok");
+    assert_eq!(status["VSS"], "the pin is on no wire");
+
+    // VSS moved onto M1's source (the Metal1 of the nmos' S terminal): on its net now.
+    let source = run
+        .connectivity
+        .devices
+        .iter()
+        .find(|d| d.class.contains("nmos"))
+        .and_then(|d| d.terminals.iter().find(|t| t.name == "S"))
+        .and_then(|t| t.point)
+        .expect("the nmos has a source");
+    let mut moved = meta.clone();
+    let pin = moved.pins.get_mut("VSS").unwrap();
+    let (x, y) = (source[0], source[1]);
+    pin.shapes[0].r#box = Some([x - 0.05, y - 0.05, x + 0.05, y + 0.05]);
+    pin.label = Some([x, y]);
+    moved.write_for(&file).unwrap();
+    let stream_dir = work.path().join("moved");
+    std::fs::create_dir_all(&stream_dir).unwrap();
+    let stream = verify::export_stream(&project, &file, &stream_dir.join("inv.gds")).unwrap();
+    let (source_view, schematic) = link::schematic_view(&project, "cells", "inv", None).unwrap();
+    let run = link::nets::run(
+        &project,
+        source_view,
+        &schematic,
+        &stream,
+        &stream_dir,
+        &[],
+        &moved.pins,
+    )
+    .unwrap();
+    let vss = run.report.pins.iter().find(|p| p.name == "VSS").unwrap();
+    assert_eq!(vss.status, "ok", "{:#?}", run.report.pins);
+
+    // LVS: the extracted inverter has the pins A and Y (the labels on their wires).
+    let deck = verify::find_deck(&project, verify::Check::Lvs).unwrap();
+    let lvs_dir = work.path().join("lvs");
+    std::fs::create_dir_all(&lvs_dir).unwrap();
+    let stream = verify::export_stream(&project, &file, &lvs_dir.join("inv.gds")).unwrap();
+    let netlist = lvs_dir.join("inv.spice");
+    verify::schematic_netlist(&project, &schematic, &netlist).unwrap();
+    let lvs = verify::run_lvs(&project, &deck, &stream, &netlist, &lvs_dir, &[]).unwrap();
+    let extracted = std::fs::read_to_string(&lvs.extracted).unwrap();
+    let subckt = extracted
+        .lines()
+        .find(|l| l.to_ascii_lowercase().starts_with(".subckt inv"))
+        .unwrap_or_default()
+        .to_string();
+    for pin in ["A", "Y"] {
+        assert!(subckt.split_whitespace().any(|w| w == pin), "{subckt}");
+    }
 }

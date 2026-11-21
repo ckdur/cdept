@@ -4,7 +4,9 @@
 `cdept_klayout.l2n`, which describes the JSON.
 
   klayout -b -r connectivity.py -rd lvsdb=<file.lvsdb> -rd input=<stream> \
-          -rd top=<cell> -rd out=<file.json>
+          -rd top=<cell> -rd out=<file.json> [-rd pins=<pins.json>]
+
+`pins`: the layout's pins, [{name, point, layer}] (docs/LINKING.md §9).
 """
 
 import json
@@ -22,8 +24,12 @@ def main():
     if not (lvsdb and stream and top and out):
         raise ValueError("usage: klayout -b -r connectivity.py -rd lvsdb=<file> "
                          "-rd input=<stream> -rd top=<cell> -rd out=<file.json>")
+    pins = None
+    if g.get("pins"):
+        with open(g["pins"]) as f:
+            pins = json.load(f)
     with open(out, "w") as f:
-        json.dump(l2n.Connectivity(lvsdb, top).describe(stream), f, indent=1)
+        json.dump(l2n.Connectivity(lvsdb, top).describe(stream, pins), f, indent=1)
 
 
 main()

@@ -1,0 +1,91 @@
+# Pins (docs/LINKING.md §9) and cross-probing through the hierarchy on examples/ihp-inv:
+# the inverter's pins are CDePT objects in its sidecar, on IHP's pin and text layers in
+# the stream. The Pins panel lists them; a pin is removed, undone, added on Metal1,
+# renamed; the net check takes them. buf places the inverter twice: a device inside
+# x1 selected in buf's layout is x1 in buf's schematic, and inside x1 once xschem has
+# descended; inv's own layout follows the schematic shown inside x1. Needs the PDK and
+# KLayout (cdept-klayout/build.sh):
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_EXAMPLE=ihp-inv \
+#       cdept-gui/scripts/run.sh cdept-gui/scripts/layout-pins.script
+
+open cells inv schematic
+wait_frame
+open cells inv layout
+wait_frame
+pins_panel on
+expect_pin A placed
+expect_pin Y placed
+expect_pin VDD placed
+expect_pin VSS placed
+wait_frame
+screenshot /tmp/cdept-pins-1-panel.png
+
+# Removed, then back with undo.
+pin_remove VDD
+expect_pin VDD not placed
+expect_modified yes
+layout_edit undo
+expect_pin VDD placed
+
+# A pin of the layout only, on Metal1, renamed, then deleted.
+pin_add EXTRA inout 8/0 -3 0 -2.5 0.5
+expect_pin EXTRA not in the schematic
+pin_rename EXTRA EXTRA2
+expect_pin EXTRA absent
+expect_pin EXTRA2 not in the schematic
+pin_show EXTRA2
+expect_selection 2
+screenshot /tmp/cdept-pins-2-extra.png
+pin_remove EXTRA2
+expect_pin EXTRA2 absent
+
+# The net check takes the pins: A and Y on their wires, VDD and VSS on none.
+nets_update
+expect_nets 2 ok, 2 open
+expect_pin A placed
+expect_pin VDD the pin is on no wire
+save
+expect_modified no
+close_tab
+
+# The hierarchy: buf's layout places inv as x1 and x2.
+open cells buf schematic
+wait_frame
+open cells inv layout
+wait_frame
+open cells buf layout
+wait_frame
+nets_update
+expect_nets open
+link_select x1/M1
+expect_probed x1/M1
+open cells buf schematic
+expect_selected x1
+screenshot /tmp/cdept-pins-3-x1-from-device.png
+# Inside x1 in xschem: M1 there is x1/M1 in buf's layout.
+tcl_send xschem unselect_all; xschem select instance x1; xschem descend
+wait 1
+tcl_expect 1 expr {[xschem get sch_path] eq ".x1."}
+click_instance M2
+expect_selected M2
+open cells buf layout
+expect_probed x1/M2
+screenshot /tmp/cdept-pins-4-device-in-x1.png
+# inv's own layout follows the schematic shown inside x1, both ways.
+open cells inv layout
+expect_probed M2
+link_select M1
+open cells buf schematic
+expect_selected M1
+open cells buf layout
+expect_probed x1/M1
+# A wire of inv's net A inside x1 is net x1/A: buf's A.
+open cells buf schematic
+tcl_send xschem unselect_all; xschem select wire 0
+expect_schematic_nets x1/A
+open cells buf layout
+expect_net_probed x1/A
+wait_frame
+screenshot /tmp/cdept-pins-5-net-in-x1.png
+quit

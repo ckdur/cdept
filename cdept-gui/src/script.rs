@@ -183,6 +183,21 @@ enum LayoutCommand {
     /// The comparison found these parallel groups (members joined by commas, `!`
     /// after a group that is not joined), or `none`.
     ExpectParallel(Vec<String>),
+    // --- pins (docs/LINKING.md §9) ---
+    /// Add a pin with a box on a conductor: name, direction, layer, box (µm).
+    PinAdd(String, String, String, [f64; 4]),
+    /// Add a pin from the selected shapes: name, direction.
+    PinFromSelection(String, String),
+    /// Draw Pin: the next box drawn on the current layer becomes the pin.
+    PinDraw(String, String),
+    PinRemove(String),
+    PinRename(String, String),
+    /// Select and show a pin, as a click in the Pins panel does.
+    PinShow(String),
+    /// The Pins panel shows this status for a pin (`absent`: no such pin).
+    ExpectPin(String, String),
+    /// The Pins panel on or off.
+    PinsPanel(bool),
     // --- end linking ---
 }
 
@@ -233,7 +248,8 @@ impl Command {
                         | LayoutCommand::ExpectNetProbed(_)
                         | LayoutCommand::ExpectFlylines(_)
                         | LayoutCommand::ExpectFlylineStyle(..)
-                        | LayoutCommand::ExpectParallel(_),
+                        | LayoutCommand::ExpectParallel(_)
+                        | LayoutCommand::ExpectPin(..),
                 )
         )
     }
@@ -721,6 +737,55 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
             ["none"] => Vec::new(),
             names => names.iter().map(|a| a.to_string()).collect(),
         })),
+        // --- pins ---
+        "pin_add" => match args.as_slice() {
+            [name, direction, layer, l, b, r, t] => {
+                let n = |v: &str| {
+                    v.parse::<f64>()
+                        .map_err(|_| format!("pin_add: {v} is not a number"))
+                };
+                Command::Layout(LayoutCommand::PinAdd(
+                    name.to_string(),
+                    direction.to_string(),
+                    layer.to_string(),
+                    [n(l)?, n(b)?, n(r)?, n(t)?],
+                ))
+            }
+            _ => return Err("usage: pin_add <name> <direction> <layer> <l> <b> <r> <t>".into()),
+        },
+        "pin_from_selection" => match args.as_slice() {
+            [name, direction] => Command::Layout(LayoutCommand::PinFromSelection(
+                name.to_string(),
+                direction.to_string(),
+            )),
+            _ => return Err("usage: pin_from_selection <name> <direction>".into()),
+        },
+        "pin_draw" => match args.as_slice() {
+            [name, direction] => Command::Layout(LayoutCommand::PinDraw(
+                name.to_string(),
+                direction.to_string(),
+            )),
+            _ => return Err("usage: pin_draw <name> <direction>".into()),
+        },
+        "pin_remove" => Command::Layout(LayoutCommand::PinRemove(text()?)),
+        "pin_rename" => match args.as_slice() {
+            [name, new] => {
+                Command::Layout(LayoutCommand::PinRename(name.to_string(), new.to_string()))
+            }
+            _ => return Err("usage: pin_rename <name> <new name>".into()),
+        },
+        "pin_show" => Command::Layout(LayoutCommand::PinShow(text()?)),
+        "expect_pin" => match args.split_first() {
+            Some((name, status)) if !status.is_empty() => {
+                Command::Layout(LayoutCommand::ExpectPin(name.to_string(), status.join(" ")))
+            }
+            _ => return Err("usage: expect_pin <name> <status>".into()),
+        },
+        "pins_panel" => match args.as_slice() {
+            ["on"] => Command::Layout(LayoutCommand::PinsPanel(true)),
+            ["off"] => Command::Layout(LayoutCommand::PinsPanel(false)),
+            _ => return Err("usage: pins_panel <on|off>".into()),
+        },
         // --- nets ---
         "nets_update" => Command::Layout(LayoutCommand::NetsUpdate),
         "expect_nets" => Command::Layout(LayoutCommand::ExpectNets(text()?)),
@@ -1227,7 +1292,7 @@ impl Script {
                 libcdept::klayout::verify::Check::Drc
             }),
             LayoutCommand::CheckShow(n) => view.show_check_item(n)?,
-            LayoutCommand::LinkGenerate(remove) => view.generate_from_schematic(None, remove),
+            LayoutCommand::LinkGenerate(remove) => view.request_generate(remove),
             LayoutCommand::LinkSelect(names) => view.link_select(&names),
             LayoutCommand::ExpectLink(name, wanted) => {
                 let found = view.link_status(&name);
@@ -1246,6 +1311,25 @@ impl Script {
                     ));
                 }
             }
+            LayoutCommand::PinAdd(name, direction, layer, b) => {
+                view.pin_add(&name, &direction, &layer, b)
+            }
+            LayoutCommand::PinFromSelection(name, direction) => {
+                view.pin_from_selection(&name, &direction)
+            }
+            LayoutCommand::PinDraw(name, direction) => view.pin_draw(&name, &direction),
+            LayoutCommand::PinRemove(name) => view.pin_remove(&name),
+            LayoutCommand::PinRename(name, new) => view.pin_rename(&name, &new),
+            LayoutCommand::PinShow(name) => view.pin_show(&name),
+            LayoutCommand::ExpectPin(name, wanted) => {
+                let found = view.pin_status(&name);
+                if view.pins_busy() || found != wanted {
+                    return Err(format!(
+                        "the Pins panel says {name} is {found}, expected {wanted}"
+                    ));
+                }
+            }
+            LayoutCommand::PinsPanel(on) => view.show_pins_panel(on),
             LayoutCommand::NetsUpdate => view.update_connectivity(),
             LayoutCommand::ExpectNets(text) => {
                 let status = view.nets_status();

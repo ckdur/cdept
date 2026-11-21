@@ -6,9 +6,13 @@
 //! format = "cdept-devices"
 //! version = 1
 //!
-//! [pins]                 # optional: labels for ipin/opin/iopin
-//! layer = "8/25"         # layer/datatype of the text
-//! size = 0.1             # text size in µm
+//! [pins]                 # optional: how pins are drawn (docs/LINKING.md §9)
+//! generate = "8/0"       # the conductor generated pins go on
+//! box = 0.5              # size of a generated pin, µm
+//! size = 0.1             # text size of pin labels, µm
+//! layers = [             # per conductor: its pin layer and its label layer
+//!   { drawing = "8/0", pin = "8/2", label = "8/25" },
+//! ]
 //!
 //! [[device]]
 //! symbol = "sg13g2_pr/sg13_lv_nmos.sym"   # as the schematic refers to it
@@ -36,6 +40,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use eyre::{Context, Result, eyre};
+use serde::{Deserialize, Serialize};
 use toml_edit::{DocumentMut, Item};
 
 use crate::Project;
@@ -70,13 +75,110 @@ impl Device {
     }
 }
 
-/// How pins become labels in the layout.
+/// How pins are drawn in the layout (docs/LINKING.md §9). A pin is a CDePT object (the
+/// layout's sidecar holds it); these say what a technology wants of it in the stream.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Pins {
-    /// `layer/datatype` of the label text; `None`: pins are not drawn.
+    /// Version 1 maps: `layer/datatype` of the label text for every conductor (no pin
+    /// layers). [`layers`](Self::layers) replaces it.
     pub layer: Option<String>,
     /// Text size in µm.
     pub size: Option<f64>,
+    /// The conductor (`layer/datatype`) generated pins are put on.
+    pub generate: Option<String>,
+    /// Size of a generated pin in µm.
+    pub r#box: Option<f64>,
+    /// Per conductor: its pin layer and its label layer.
+    pub layers: Vec<PinLayer>,
+}
+
+/// What a pin on one conductor (`drawing`) is made of in the stream.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct PinLayer {
+    /// The conductor, `layer/datatype` (`*`: every conductor).
+    pub drawing: String,
+    /// Where the pin's shape goes (IHP: `8/2` Metal1.pin); `None`: the technology has
+    /// no pin layer for it, the shape is CDePT's only (drawn over the layout).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
+    /// Where its name goes as a text (IHP: `8/25` Metal1.text, what the LVS deck reads).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// `[pins] layers`: an array of inline tables or `[[pins.layers]]` tables.
+fn pin_layers(item: &Item) -> Result<Vec<PinLayer>> {
+    let entry = |get: &dyn Fn(&str) -> Option<String>| -> Result<PinLayer> {
+        let drawing = get("drawing")
+            .filter(|d| !d.is_empty())
+            .ok_or_else(|| eyre!("pins.layers: an entry has no drawing layer"))?;
+        Ok(PinLayer {
+            drawing,
+            pin: get("pin"),
+            label: get("label"),
+        })
+    };
+    if let Some(array) = item.as_array() {
+        return array
+            .iter()
+            .map(|value| {
+                let table = value.as_inline_table().ok_or_else(|| {
+                    eyre!("pins.layers: entries are {{ drawing = …, pin = …, label = … }}")
+                })?;
+                entry(&|key| table.get(key).and_then(|v| v.as_str()).map(str::to_string))
+            })
+            .collect();
+    }
+    if let Some(tables) = item.as_array_of_tables() {
+        return tables
+            .iter()
+            .map(|table| entry(&|key| table.get(key).and_then(Item::as_str).map(str::to_string)))
+            .collect();
+    }
+    Err(eyre!("pins.layers must be a list"))
+}
+
+/// [`Pins`] as the helper takes them (`RefTable::pin_rules`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct PinRules {
+    pub size: f64,
+    pub r#box: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generate: Option<String>,
+    #[serde(default)]
+    pub layers: Vec<PinLayer>,
+}
+
+impl Pins {
+    /// The rules for the helper: a version 1 map's `layer` is a label layer for every
+    /// conductor.
+    pub fn rules(&self) -> PinRules {
+        let mut layers = self.layers.clone();
+        if layers.is_empty()
+            && let Some(label) = &self.layer
+        {
+            layers.push(PinLayer {
+                drawing: "*".into(),
+                pin: None,
+                label: Some(label.clone()),
+            });
+        }
+        PinRules {
+            size: self.size.unwrap_or(0.1),
+            r#box: self.r#box.unwrap_or(0.5),
+            generate: self.generate.clone(),
+            layers,
+        }
+    }
+
+    /// The rule for pins on the conductor `drawing`.
+    pub fn layer_for(&self, drawing: &str) -> Option<PinLayer> {
+        self.rules()
+            .layers
+            .into_iter()
+            .find(|l| l.drawing == drawing)
+            .or_else(|| self.rules().layers.into_iter().find(|l| l.drawing == "*"))
+    }
 }
 
 /// The device maps that apply to a project, the project's last.
@@ -131,13 +233,24 @@ impl DeviceMap {
             None => return Err(eyre!("no version")),
         }
         if let Some(pins) = doc.get("pins") {
+            let number = |item: &Item| {
+                item.as_float()
+                    .or_else(|| item.as_integer().map(|i| i as f64))
+            };
             if let Some(layer) = pins.get("layer").and_then(Item::as_str) {
                 self.pins.layer = Some(layer.to_string());
             }
             if let Some(size) = pins.get("size") {
-                self.pins.size = size
-                    .as_float()
-                    .or_else(|| size.as_integer().map(|i| i as f64));
+                self.pins.size = number(size);
+            }
+            if let Some(b) = pins.get("box") {
+                self.pins.r#box = number(b);
+            }
+            if let Some(layer) = pins.get("generate").and_then(Item::as_str) {
+                self.pins.generate = Some(layer.to_string());
+            }
+            if let Some(layers) = pins.get("layers") {
+                self.pins.layers = pin_layers(layers)?;
             }
         }
         let Some(list) = doc.get("device") else {
@@ -408,6 +521,52 @@ symbol = "res.sym"
 library = "Basic"
 cell = "X"
 "#;
+
+    #[test]
+    fn pin_rules() {
+        let mut map = DeviceMap::default();
+        map.add_text(MAP).unwrap();
+        // A version 1 map: labels on 8/25 for every conductor.
+        let rules = map.pins.rules();
+        assert_eq!(rules.layers.len(), 1);
+        assert_eq!(rules.layers[0].drawing, "*");
+        assert_eq!(
+            map.pins.layer_for("10/0").unwrap().label.as_deref(),
+            Some("8/25")
+        );
+        map.add_text(
+            r#"
+format = "cdept-devices"
+version = 1
+[pins]
+generate = "8/0"
+box = 0.4
+layers = [ { drawing = "8/0", pin = "8/2", label = "8/25" }, { drawing = "5/0" } ]
+"#,
+        )
+        .unwrap();
+        let rules = map.pins.rules();
+        assert_eq!(rules.generate.as_deref(), Some("8/0"));
+        assert_eq!(rules.r#box, 0.4);
+        assert_eq!(rules.size, 0.1);
+        let m1 = map.pins.layer_for("8/0").unwrap();
+        assert_eq!(
+            (m1.pin.as_deref(), m1.label.as_deref()),
+            (Some("8/2"), Some("8/25"))
+        );
+        let poly = map.pins.layer_for("5/0").unwrap();
+        assert_eq!((poly.pin, poly.label), (None, None));
+        assert!(map.pins.layer_for("30/0").is_none());
+        let json = serde_json::to_value(&rules).unwrap();
+        assert_eq!(json["layers"][1], serde_json::json!({"drawing": "5/0"}));
+        let mut bad = DeviceMap::default();
+        assert!(
+            bad.add_text(
+                "format = \"cdept-devices\"\nversion = 1\n[pins]\nlayers = [ { pin = \"8/2\" } ]\n"
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn maps_are_read_and_merged() {

@@ -87,6 +87,28 @@ pub struct Selected {
     pub texts: u32,
     /// Nets of the selected wires, labels and pins.
     pub nets: Vec<String>,
+    /// Where xschem is in the hierarchy: `.` at the top, `.x1.` inside instance x1.
+    pub path: String,
+    /// The schematic shown there.
+    pub schematic: Option<std::path::PathBuf>,
+}
+
+impl Selected {
+    /// The hierarchy path as an instance path prefix: `` at the top, `x1/` inside x1,
+    /// `x1/x2/` deeper (docs/LINKING.md §9).
+    pub fn prefix(&self) -> String {
+        hierarchy_prefix(&self.path)
+    }
+}
+
+/// xschem's `sch_path` (`.x1.x2.`) as an instance path prefix (`x1/x2/`).
+pub fn hierarchy_prefix(path: &str) -> String {
+    let parts: Vec<&str> = path.split('.').filter(|p| !p.is_empty()).collect();
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("{}/", parts.join("/"))
+    }
 }
 
 impl Selected {
@@ -104,6 +126,10 @@ impl Selected {
                 "wires" => selected.wires = number(value)?,
                 "texts" => selected.texts = number(value)?,
                 "nets" => selected.nets = tcl::parse_list(value)?,
+                "path" => selected.path = value.clone(),
+                "schematic" if !value.is_empty() => {
+                    selected.schematic = Some(std::path::PathBuf::from(value))
+                }
                 "instances" => {
                     for instance in tcl::parse_list(value)? {
                         let mut fields = tcl::parse_list(&instance)?.into_iter();
@@ -619,6 +645,13 @@ impl SchematicView {
                 Err(error) => tracing::debug!(target: "xschem", "cdept::selection: {error}"),
             }
         }
+        // Another schematic shown (descended, gone up): where in the hierarchy changes
+        // (cross-probing with layouts, docs/LINKING.md §9).
+        let title = self.mirror.title().map(str::to_string);
+        if title != self.link.title_seen {
+            self.link.title_seen = title;
+            self.selection_stale = true;
+        }
         // One question at a time; what happened meanwhile is asked about afterwards.
         if self.selection_stale
             && self.selection_asked.is_none()
@@ -1133,5 +1166,19 @@ mod tests {
         assert_eq!(nothing, Selected::default());
         assert!(Selected::parse("count many").is_err());
         assert!(Selected::parse("count").is_err());
+
+        // Where in the hierarchy (docs/LINKING.md §9).
+        let inside = Selected::parse(
+            "count 0 instances {} wires 0 texts 0 nets {} path .x1. \
+                                      schematic /p/cells/inv/schematic/inv.sch",
+        )
+        .unwrap();
+        assert_eq!(inside.prefix(), "x1/");
+        assert_eq!(
+            inside.schematic.as_deref(),
+            Some(std::path::Path::new("/p/cells/inv/schematic/inv.sch"))
+        );
+        assert_eq!(hierarchy_prefix("."), "");
+        assert_eq!(hierarchy_prefix(".x1.x2."), "x1/x2/");
     }
 }

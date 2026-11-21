@@ -13,9 +13,10 @@ use serde::{Deserialize, Serialize};
 /// Value of [`Meta::format`].
 pub const FORMAT: &str = "cdept-layout";
 /// Current [`Meta::version`]. Version 2 added the link with a schematic
-/// ([`Meta::source`], [`Meta::instances`], docs/LINKING.md); a sidecar without a link is
-/// still written as version 1.
-pub const VERSION: u32 = 2;
+/// ([`Meta::source`], [`Meta::instances`], docs/LINKING.md); version 3 the pins
+/// ([`Meta::pins`], docs/LINKING.md §9). A sidecar is written with the oldest version
+/// that holds what it has: without a link it is still version 1.
+pub const VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Meta {
@@ -43,6 +44,90 @@ pub struct Meta {
     /// for all of them (version 2; docs/LINKING.md §8).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parallel: Vec<Parallel>,
+    /// The pins of the layout, by name (version 3; docs/LINKING.md §9). The sidecar is
+    /// what says that something is a pin: a technology without pin layers has its pins
+    /// only here (the editor draws them over the layout).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pins: BTreeMap<String, Pin>,
+}
+
+/// A pin of a layout: where a net of the cell may be connected from outside.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Pin {
+    /// `input`, `output` or `inout` (xschem's ipin, opin, iopin).
+    #[serde(default = "inout")]
+    pub direction: String,
+    /// The schematic net it belongs to, when known (the pin's name otherwise).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net: Option<String>,
+    /// Its shapes, on the conductor (drawing) layers they connect to.
+    #[serde(default)]
+    pub shapes: Vec<PinShape>,
+    /// Where its name is written, in µm (the middle of the first shape when absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<[f64; 2]>,
+}
+
+fn inout() -> String {
+    "inout".to_string()
+}
+
+/// One shape of a pin: a box or a polygon in µm on a drawing layer.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct PinShape {
+    /// `layer/datatype` of the conductor, e.g. `8/0` (IHP Metal1.drawing).
+    pub layer: String,
+    /// `[left, bottom, right, top]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#box: Option<[f64; 4]>,
+    /// Points of a polygon (when not a box).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polygon: Option<Vec<[f64; 2]>>,
+}
+
+impl PinShape {
+    /// The bounding box of the shape.
+    pub fn bbox(&self) -> Option<[f64; 4]> {
+        if let Some(b) = self.r#box {
+            return Some(b);
+        }
+        let points = self.polygon.as_ref().filter(|p| !p.is_empty())?;
+        let mut b = [
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        for p in points {
+            b = [
+                b[0].min(p[0]),
+                b[1].min(p[1]),
+                b[2].max(p[0]),
+                b[3].max(p[1]),
+            ];
+        }
+        Some(b)
+    }
+}
+
+impl Pin {
+    /// Where its name goes: the label, else the middle of the first shape.
+    pub fn label_point(&self) -> Option<[f64; 2]> {
+        self.label.or_else(|| {
+            let b = self.shapes.iter().find_map(PinShape::bbox)?;
+            Some([(b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0])
+        })
+    }
+
+    /// The label lies on one of its shapes (on the edge counts).
+    pub fn label_on_shape(&self) -> bool {
+        let Some(p) = self.label_point() else {
+            return false;
+        };
+        self.shapes.iter().filter_map(PinShape::bbox).any(|b| {
+            p[0] >= b[0] - 1e-9 && p[0] <= b[2] + 1e-9 && p[1] >= b[1] - 1e-9 && p[1] <= b[3] + 1e-9
+        })
+    }
 }
 
 /// A group of schematic devices in parallel: same device, same nets on every terminal.
@@ -118,6 +203,7 @@ impl Meta {
             source: None,
             instances: BTreeMap::new(),
             parallel: Vec::new(),
+            pins: BTreeMap::new(),
         }
     }
 
@@ -173,6 +259,37 @@ impl Meta {
                 ));
             }
         }
+        for (name, pin) in &self.pins {
+            if name.is_empty() {
+                return Err("a pin has an empty name".to_string());
+            }
+            if !matches!(pin.direction.as_str(), "input" | "output" | "inout") {
+                return Err(format!(
+                    "pin '{name}': direction '{}' is not input, output or inout",
+                    pin.direction
+                ));
+            }
+            for shape in &pin.shapes {
+                if shape.layer.is_empty() {
+                    return Err(format!("pin '{name}': a shape has no layer"));
+                }
+                match (shape.r#box, &shape.polygon) {
+                    (Some(b), None) => {
+                        if b.iter().any(|v| !v.is_finite()) || b[0] > b[2] || b[1] > b[3] {
+                            return Err(format!(
+                                "pin '{name}': box is not [left, bottom, right, top]"
+                            ));
+                        }
+                    }
+                    (None, Some(p)) if p.len() >= 3 => {}
+                    _ => {
+                        return Err(format!(
+                            "pin '{name}': a shape needs a box or a polygon of 3 points or more"
+                        ));
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -203,7 +320,13 @@ impl Meta {
         // The oldest version that can hold it, so files without a link stay readable
         // by an older CDePT.
         let mut meta = self.clone();
-        meta.version = if meta.is_linked() { 2 } else { 1 };
+        meta.version = if !meta.pins.is_empty() {
+            3
+        } else if meta.is_linked() {
+            2
+        } else {
+            1
+        };
         let mut text = serde_json::to_string_pretty(&meta)?;
         text.push('\n');
         super::write_atomic(sidecar, text.as_bytes())
@@ -322,8 +445,8 @@ mod tests {
         m.format = "other".into();
         assert!(m.validate().unwrap_err().contains("format"));
         let mut m = sample();
-        m.version = 3;
-        assert!(m.validate().unwrap_err().contains("version 3"));
+        m.version = 4;
+        assert!(m.validate().unwrap_err().contains("version 4"));
         let mut m = sample();
         m.cell.clear();
         assert!(m.validate().unwrap_err().contains("'cell' is empty"));
@@ -385,5 +508,53 @@ mod tests {
                 .to_string()
                 .contains("format")
         );
+    }
+
+    #[test]
+    fn pins_round_trip_as_version_3() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gds = tmp.path().join("inv.gds");
+        let mut m = Meta::new("cells", "inv", "layout", "inv");
+        m.pins.insert(
+            "A".into(),
+            Pin {
+                direction: "input".into(),
+                net: Some("A".into()),
+                shapes: vec![PinShape {
+                    layer: "8/0".into(),
+                    r#box: Some([0.0, 0.0, 0.5, 0.5]),
+                    polygon: None,
+                }],
+                label: Some([0.25, 0.25]),
+            },
+        );
+        m.pins.insert(
+            "Y".into(),
+            Pin {
+                direction: "output".into(),
+                net: None,
+                shapes: vec![PinShape {
+                    layer: "10/0".into(),
+                    r#box: None,
+                    polygon: Some(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]),
+                }],
+                label: None,
+            },
+        );
+        m.write_for(&gds).unwrap();
+        let text = fs::read_to_string(sidecar_path(&gds)).unwrap();
+        assert!(text.contains("\"version\": 3"), "{text}");
+        assert!(text.contains("\"box\""), "{text}");
+        let back = Meta::read_for(&gds).unwrap().unwrap();
+        assert_eq!(back.pins, m.pins);
+        assert_eq!(back.pins["Y"].label_point(), Some([0.5, 0.5]));
+        assert!(back.pins["A"].label_on_shape());
+        // A version 2 file without pins reads as before; a bad pin is refused.
+        let mut bad = m.clone();
+        bad.pins.get_mut("A").unwrap().direction = "sideways".into();
+        assert!(bad.validate().unwrap_err().contains("sideways"));
+        let mut bad = m.clone();
+        bad.pins.get_mut("A").unwrap().shapes[0].r#box = None;
+        assert!(bad.validate().unwrap_err().contains("box or a polygon"));
     }
 }

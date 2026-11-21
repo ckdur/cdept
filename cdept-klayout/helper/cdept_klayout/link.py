@@ -15,6 +15,7 @@ import os
 
 import pya
 
+from . import pins as pin_objects
 from . import properties
 
 NAME_PROPERTY = 61
@@ -170,7 +171,9 @@ def apply(editor, params):
     """Make the top cell match the schematic. params:
       items: [{name, symbol, kind: "pcell", library, cell, params} |
               {name, symbol, kind: "cell", library, cell, view, file, refs}]
-      pins: [{name, direction}], pin_layer: "8/25" or null, pin_size: µm,
+      pins: [{name, direction, net?}]: the schematic's pins, made pin objects
+        (pins.py) with the technology's rules where the cell has none; pin_layer
+        ("8/25"): labels only, for a device map without pin rules;
       remove: delete instances bound to names not in items.
     Instances of the right cell that are bound to nothing are taken over ("bound")
     before new ones are placed. One undoable step. Returns what was added, bound,
@@ -252,61 +255,61 @@ def apply(editor, params):
                 report["removed"].append(name)
             else:
                 report["extra"].append(name)
-        report["pins"] = _pins(ly, top, params)
+        report["pins"] = pin_objects.generate(doc, top, params.get("pins") or [],
+                                              legacy_layer=params.get("pin_layer"))
     finally:
         manager.commit()
     return report
 
 
-def _pins(ly, top, params):
-    """Labels for the schematic's pins that the top cell does not have yet, in a column
-    left of the cell."""
-    layer = params.get("pin_layer")
-    pins = params.get("pins") or []
-    if not layer or not pins:
-        return []
-    info = pya.LayerInfo.from_string(str(layer))
-    li = ly.layer(info)
-    have = {s.text_string for s in top.shapes(li).each() if s.is_text()}
-    size = float(params.get("pin_size") or 0.1)
-    box = top.dbbox()
-    x = (0.0 if box.empty() else box.left) - 2 * GAP
-    y = 0.0 if box.empty() else box.top
-    added = []
-    for pin in pins:
-        name = pin.get("name") or ""
-        if not name or name in have:
-            continue
-        text = pya.DText(name, pya.DTrans(pya.DVector(x, y)))
-        text.size = size
-        top.shapes(li).insert(text)
-        have.add(name)
-        added.append(name)
-        y -= max(4 * size, 1.0)
-    return added
-
-
 # -- selection ---------------------------------------------------------------------
 
 
+def _find(top, path):
+    """The instances along an instance path through bound instances (`x1/M1`: the
+    instance bound to x1 in the top cell, then the one bound to M1 in its cell), with
+    the transformation into the top cell; None when one is not there."""
+    cell, insts, trans = top, [], pya.DCplxTrans()
+    for part in path.split("/"):
+        inst = next((i for i in cell.each_inst() if _name(i) == part), None)
+        if inst is None:
+            return None
+        insts.append(inst)
+        trans = trans * inst.dcplx_trans
+        cell = inst.cell
+    return insts, trans
+
+
+def _path_box(insts):
+    trans = pya.DCplxTrans()
+    for inst in insts[:-1]:
+        trans = trans * inst.dcplx_trans
+    return insts[-1].dbbox().transformed(trans)
+
+
 def select(editor, names, zoom=False):
-    """Select the instances of the top cell bound to `names` (others are unselected).
-    Returns the names found."""
+    """Select the instances bound to `names` (others are unselected). A name is an
+    instance path through bound instances (`M1`, `x1/M1`: the device inside the
+    placed x1). Returns the names found."""
     doc, top = _top(editor)
     view = editor.require()
-    wanted = set(names or [])
     paths, found, box = [], [], pya.DBox()
-    for inst in top.each_inst():
-        name = _name(inst)
-        if name not in wanted:
+    for name in names or []:
+        hit = _find(top, name)
+        if hit is None:
             continue
+        insts, _ = hit
         path = pya.ObjectInstPath()
         path.top = top.cell_index()
-        path.append_path(pya.InstElement.new(inst))
+        for inst in insts:
+            path.append_path(pya.InstElement.new(inst))
         paths.append(path)
         found.append(name)
-        box += inst.dbbox()
+        box += _path_box(insts)
     view.object_selection = paths
+    # Devices inside placed cells of other views are shown, not for editing: kept
+    # until the next press or key (editor.drop_probe_selection).
+    editor.probe_selection = bool(editor.foreign_selection())
     if zoom and not box.empty():
         margin = max(1.0, 0.25 * max(box.width(), box.height()))
         view.zoom_box(box.enlarged(margin, margin))
@@ -314,25 +317,30 @@ def select(editor, names, zoom=False):
 
 
 def selected(editor):
-    """Names bound to the selected instances of the top cell."""
+    """Instance paths (`x1/M1`) bound to what is selected: a selected instance, or the
+    instances a selected shape is inside, as deep as they are bound."""
     doc, top = _top(editor)
     view = editor.require()
     names = set()
     for sel in view.each_object_selected():
-        if not sel.is_cell_inst():
-            continue
-        path = list(sel.each_inst())
-        if not path:
-            continue
-        inst = path[0].inst()
-        name = _name(inst)
-        if name is not None:
-            names.add(name)
+        parts = []
+        for element in sel.each_inst():
+            name = _name(element.inst())
+            if name is None:
+                break
+            parts.append(name)
+        if parts:
+            names.add("/".join(parts))
     return {"names": sorted(names)}
 
 
 def boxes(editor, names):
-    """Bounding boxes (µm) of the instances of the top cell bound to `names`."""
+    """Bounding boxes (µm, top cell) of the instances bound to `names` (instance
+    paths, as `select` takes them)."""
     doc, top = _top(editor)
-    wanted = set(names or [])
-    return [_box(inst.dbbox()) for inst in top.each_inst() if _name(inst) in wanted]
+    out = []
+    for name in names or []:
+        hit = _find(top, name)
+        if hit is not None:
+            out.append(_box(_path_box(hit[0])))
+    return out

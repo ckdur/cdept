@@ -22,6 +22,8 @@ import os
 
 import pya
 
+from .pins import Pins
+
 # Layer of the "cannot be found" markers. It has no GDS number, lives only in memory
 # and is removed before anything is written.
 MARKER_LAYER = "CDEPT_MISSING"
@@ -40,6 +42,8 @@ class RefTable:
             self.files[os.path.normpath(name)] = entry or {}
         # The project's PCell views: {CDePT library: {cell: file}} (pcells.py).
         self.pcells = table.get("pcells") or {}
+        # How pins are drawn in this technology (pins.py); None: no rules.
+        self.pin_rules = table.get("pin_rules")
 
     def entry(self, path):
         return self.files.get(os.path.normpath(path), {})
@@ -51,6 +55,10 @@ class RefTable:
         """True when CDePT says the file must not be written (read-only library)."""
         return bool(self.entry(path).get("read_only"))
 
+    def pins(self, path):
+        """The pins the sidecar of file `path` lists: {name: record}."""
+        return self.entry(path).get("pins") or {}
+
     def ref(self, path, name):
         """The table's entry for ghost `name` of file `path`, or None."""
         return (self.entry(path).get("refs") or {}).get(name)
@@ -61,6 +69,8 @@ class RefTable:
             self.files.setdefault(name, entry)
         for library, cells in other.pcells.items():
             self.pcells.setdefault(library, {}).update(cells)
+        if self.pin_rules is None:
+            self.pin_rules = other.pin_rules
 
 
 def _bbox(value):
@@ -97,6 +107,8 @@ class Document:
         self._layers = {}
         self.marker = None
         self.notes = []
+        # Pins (pins.py, docs/LINKING.md §9).
+        self.pins = Pins(self, table.pin_rules)
 
     # -- loading ---------------------------------------------------------------
 
@@ -105,7 +117,18 @@ class Document:
         self.layout.read(self.root)
         for ci in [c.cell_index() for c in self.layout.each_cell() if c.is_ghost_cell()]:
             self._fill(ci, self.root, [self.root])
+        self.realize_pins()
         return self
+
+    def realize_pins(self):
+        """The pins of the sidecars (root and external files) that the stream does not
+        hold (no pin layer in this technology, or never saved), made in the cells."""
+        top = self.top_cell()
+        if top is not None:
+            self.pins.realize(top.cell_index(), self.root, self.table.pins(self.root))
+        for ci, info in sorted(self.foreign.items()):
+            if info["top"] and not info["missing"] and info.get("file"):
+                self.pins.realize(ci, info["file"], self.table.pins(info["file"]))
 
     def top_cell(self):
         """The root's own top cell (the first one when there are several)."""
@@ -351,6 +374,8 @@ class Document:
                 ghosts[ci] = info
         if self.marker is not None:
             out.delete_layer(self.marker)
+        if self.pins.overlay_index() is not None:
+            out.delete_layer(self.pins.overlay_index())
         return out, ghosts
 
     def save(self, path=None, also=()):
@@ -403,6 +428,8 @@ class Document:
             out.rename_cell(ci, name)
         if self.marker is not None:
             out.delete_layer(self.marker)
+        if self.pins.overlay_index() is not None:
+            out.delete_layer(self.pins.overlay_index())
         dbu = self.dbu_of.get(path)
         if dbu is not None and abs(dbu - out.dbu) > 1e-12:
             self.notes.append("%s was written with database unit %g (it had %g)"
@@ -420,7 +447,8 @@ class Document:
                 "bbox": info["bbox"] if info["missing"] else (self._dbbox(ci) or info["bbox"]),
             }
         self.foreign[top]["bbox"] = self._dbbox(top)
-        return {"file": path, "top": self.foreign[top]["name"], "references": references}
+        return {"file": path, "top": self.foreign[top]["name"], "references": references,
+                "pins": self.pins.records(top, path)}
 
     def _save_root(self, path=None):
         path = os.path.normpath(path or self.root)
@@ -438,7 +466,10 @@ class Document:
                 "bbox": info["bbox"] if info["missing"] else (self._dbbox(ci) or info["bbox"]),
             }
         top = self.top_cell()
-        return {"file": path, "top": top.name if top else "", "references": references}
+        report = {"file": path, "top": top.name if top else "", "references": references}
+        if top is not None:
+            report["pins"] = self.pins.records(top.cell_index(), self.root)
+        return report
 
     def export(self, path):
         """Write a self-contained file: every reference filled in, missing ones left as
@@ -446,8 +477,11 @@ class Document:
         out, ghosts = self._without(ghost_foreign=False)
         # For other tools (DRC, LVS, tape-out): plain geometry, no library links.
         _write(out, path, context=False)
+        top = self.top_cell()
         return {"file": os.path.normpath(path),
-                "missing": sorted(self.layout.cell(ci).name for ci in ghosts)}
+                "missing": sorted(self.layout.cell(ci).name for ci in ghosts),
+                # The pins as they are now (the net check, docs/LINKING.md §9).
+                "pins": self.pins.records(top.cell_index(), self.root) if top else {}}
 
 
 def _write(layout, path, context=True):

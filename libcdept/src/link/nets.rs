@@ -382,6 +382,10 @@ pub struct Label {
     pub point: [f64; 2],
     /// `None`: on no shape of a net of that name.
     pub net: Option<usize>,
+    /// The label of a pin of the layout's sidecar (docs/LINKING.md §9): the pin's
+    /// name, its point on the pin's conductor, the net under it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
 }
 
 /// What `connectivity.py` says about the layout.
@@ -579,6 +583,7 @@ impl Connectivity {
                 text: l.text.clone(),
                 point: l.point,
                 net: live.labels.get(k).copied().unwrap_or(l.net),
+                pin: l.pin.clone(),
             })
             .collect();
         Connectivity {
@@ -648,6 +653,9 @@ pub struct FlylineStyle {
     pub live: bool,
     /// Quiet time after the last change before tracing, ms.
     pub delay_ms: u32,
+    /// Colour of pins drawn by CDePT over the layout (those the technology has no pin
+    /// layer for, docs/LINKING.md §9).
+    pub pin: String,
 }
 
 impl Default for FlylineStyle {
@@ -661,6 +669,7 @@ impl Default for FlylineStyle {
             short: "#ff3030".into(),
             live: true,
             delay_ms: 300,
+            pin: "#ff8000".into(),
         }
     }
 }
@@ -678,6 +687,7 @@ pub struct FlylineOverride {
     pub short: Option<String>,
     pub live: Option<bool>,
     pub delay_ms: Option<u32>,
+    pub pin: Option<String>,
 }
 
 impl FlylineOverride {
@@ -701,6 +711,7 @@ impl FlylineStyle {
             short: project.short.clone().unwrap_or_else(|| self.short.clone()),
             live: project.live.unwrap_or(self.live),
             delay_ms: project.delay_ms.unwrap_or(self.delay_ms),
+            pin: project.pin.clone().unwrap_or_else(|| self.pin.clone()),
         }
     }
 }
@@ -1243,22 +1254,43 @@ pub fn compare(
             }
         }
     }
-    // Pins: the layout net the pin's label (a text of the top cell) is on.
+    // Pins: the layout net the pin's label is on. The layout's pins (its sidecar,
+    // docs/LINKING.md §9) when it has any, else the texts of the top cell.
     let mut pin_nets: BTreeMap<usize, Vec<(String, usize)>> = BTreeMap::new();
+    let has_pins = layout.labels.iter().any(|l| l.pin.is_some());
     for port in &flat.ports {
         let labels: Vec<&Label> = layout
             .labels
             .iter()
-            .filter(|l| l.text == port.name)
+            .filter(|l| {
+                if has_pins {
+                    l.pin.as_deref() == Some(port.name.as_str())
+                } else {
+                    l.text == port.name
+                }
+            })
             .collect();
         let found = labels.iter().find_map(|l| l.net);
+        let (none, nowire, other) = if has_pins {
+            (
+                "no pin in the layout",
+                "the pin is on no wire",
+                "the pin is on the layout net of",
+            )
+        } else {
+            (
+                "no label in the layout",
+                "the label is on no wire",
+                "the label is on the layout net of",
+            )
+        };
         let status = match found {
-            None if labels.is_empty() => "no label in the layout".to_string(),
-            None => "the label is on no wire".to_string(),
+            None if labels.is_empty() => none.to_string(),
+            None => nowire.to_string(),
             Some(id) => match on_net.get(&id) {
                 Some(s) if !s.contains(&port.net) => {
                     let names: Vec<String> = s.iter().map(|s| flat.nets[*s].name.clone()).collect();
-                    format!("the label is on the layout net of {}", names.join(", "))
+                    format!("{other} {}", names.join(", "))
                 }
                 _ => "ok".to_string(),
             },
@@ -1505,6 +1537,7 @@ pub fn run(
     stream: &crate::klayout::verify::Stream,
     dir: &Path,
     recorded: &[Parallel],
+    pins: &BTreeMap<String, crate::layout::Pin>,
 ) -> Result<NetRun> {
     use crate::klayout::{setup, verify};
     let deck = verify::find_deck(project, verify::Check::Lvs).ok_or_else(|| eyre!("{NO_DECK}"))?;
@@ -1520,7 +1553,7 @@ pub fn run(
         std::fs::remove_file(&json)
             .wrap_err_with(|| format!("cannot remove {}", json.display()))?;
     }
-    let vars = [
+    let mut vars = vec![
         ("lvsdb".to_string(), lvs.display().to_string()),
         (
             "input".to_string(),
@@ -1529,6 +1562,24 @@ pub fn run(
         ("top".to_string(), stream.top.clone()),
         ("out".to_string(), json.display().to_string()),
     ];
+    if !pins.is_empty() {
+        let list: Vec<serde_json::Value> = pins
+            .iter()
+            .filter_map(|(name, pin)| {
+                let point = pin.label_point()?;
+                let layer = pin
+                    .shapes
+                    .first()
+                    .map(|s| s.layer.clone())
+                    .unwrap_or_default();
+                Some(serde_json::json!({"name": name, "point": point, "layer": layer}))
+            })
+            .collect();
+        let file = dir.join("pins.json");
+        std::fs::write(&file, serde_json::to_string_pretty(&list)?)
+            .wrap_err_with(|| format!("cannot write {}", file.display()))?;
+        vars.push(("pins".to_string(), file.display().to_string()));
+    }
     verify::run_batch(project, &helper.join(CONNECTIVITY_SCRIPT), &vars, dir, &log)?;
     let connectivity = Connectivity::read(&json)?;
     let flat = read_flat(project, &map, source, file)?;
@@ -1703,6 +1754,7 @@ mod tests {
                     .collect(),
                 problems: Vec::new(),
                 skipped: Vec::new(),
+                pins_placeable: false,
             },
             nodemap: parse_nodemap(map).unwrap(),
         }
@@ -1833,6 +1885,7 @@ mod tests {
                 text: (*text).into(),
                 point: [0.0, 0.0],
                 net: *net,
+                pin: None,
             })
             .collect()
     }
@@ -1864,6 +1917,48 @@ mod tests {
         let report = compare(&flat_inv(), &layout, &DeviceMap::default(), &[]);
         assert!(report.clean(), "{:#?}", report_lines(&report, &layout));
         assert_eq!(report.counts(), (4, 0, 0));
+    }
+
+    #[test]
+    fn pins_of_the_sidecar_name_the_nets() {
+        // The layout's pins (docs/LINKING.md §9): a pin wins over a plain text of its
+        // name; A on its net, Y on A's net, VDD on no wire, VSS not placed.
+        let mut list = labels(&[
+            ("A", Some(0)),
+            ("Y", Some(1)),
+            ("VDD", Some(2)),
+            ("VSS", Some(3)),
+        ]);
+        let pin = |name: &str, net: Option<usize>| Label {
+            text: name.into(),
+            point: [0.0, 0.0],
+            net,
+            pin: Some(name.into()),
+        };
+        list.extend([pin("A", Some(0)), pin("Y", Some(0)), pin("VDD", None)]);
+        let layout = Connectivity {
+            top: "inv".into(),
+            nets: nets(&["A", "Y", "VDD", "VSS"]),
+            devices: vec![
+                mos("sg13_lv_nmos", [1, 0, 3, 3], 0.0, 0.0),
+                mos("sg13_lv_pmos", [1, 0, 2, 2], 0.0, 4.0),
+            ],
+            instances: vec![bound("M1", 0.0, 0.0), bound("M2", 0.0, 4.0)],
+            labels: list,
+        };
+        let report = compare(&flat_inv(), &layout, &DeviceMap::default(), &[]);
+        let status: BTreeMap<&str, &str> = report
+            .pins
+            .iter()
+            .map(|p| (p.name.as_str(), p.status.as_str()))
+            .collect();
+        assert_eq!(status["A"], "ok");
+        assert!(
+            status["Y"].starts_with("the pin is on the layout net of A"),
+            "{status:?}"
+        );
+        assert_eq!(status["VDD"], "the pin is on no wire");
+        assert_eq!(status["VSS"], "no pin in the layout");
     }
 
     #[test]

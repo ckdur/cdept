@@ -21,6 +21,21 @@ pub struct RefTable {
     /// `<cell>.pcell.py`. The helper registers one KLayout library per CDePT library.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub pcells: BTreeMap<String, BTreeMap<String, PathBuf>>,
+    /// How pins are drawn in this technology (the device map's `[pins]`,
+    /// docs/LINKING.md §9); `None`: no rules, pins are CDePT's only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_rules: Option<crate::link::PinRules>,
+}
+
+/// The pin rules of the project's device maps, for [`RefTable::pin_rules`].
+pub fn pin_rules(project: &Project) -> Option<crate::link::PinRules> {
+    match crate::link::DeviceMap::for_project(project) {
+        Ok(map) => Some(map.pins.rules()),
+        Err(e) => {
+            tracing::warn!("pins: {e:#}");
+            None
+        }
+    }
 }
 
 /// The PCell views of the project's libraries, for [`RefTable::pcells`].
@@ -53,6 +68,9 @@ pub struct FileRefs {
     pub read_only: bool,
     /// Key: ghost structure name in this file.
     pub refs: BTreeMap<String, Ref>,
+    /// The file's pins as its sidecar has them (docs/LINKING.md §9).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pins: BTreeMap<String, super::Pin>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -81,6 +99,10 @@ pub struct SaveReport {
     /// its own references (docs/KLAYOUT.md §3.4).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub also: Vec<SaveReport>,
+    /// The file's pins as the editor has them (docs/LINKING.md §9); `None`: not known
+    /// (the sidecar keeps its own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pins: Option<BTreeMap<String, super::Pin>>,
 }
 
 impl SaveReport {
@@ -307,6 +329,7 @@ pub fn resolve(project: &Project, file: &Path) -> RefTable {
         root: file.to_path_buf(),
         files: BTreeMap::new(),
         pcells: pcell_views(project),
+        pin_rules: pin_rules(project),
     };
     let mut todo = vec![file.to_path_buf()];
     while let Some(current) = todo.pop() {
@@ -318,6 +341,7 @@ pub fn resolve(project: &Project, file: &Path) -> RefTable {
             label: file_label(project, &current, meta.as_ref()),
             read_only: locate(project, &current).is_some_and(|(lib, _, _)| lib.read_only),
             refs: BTreeMap::new(),
+            pins: meta.as_ref().map(|m| m.pins.clone()).unwrap_or_default(),
         };
         for name in ghosts_of(&current) {
             let r = resolve_name(project, meta.as_ref(), &name);
@@ -387,6 +411,9 @@ fn update_one_after_save(project: &Project, report: &SaveReport) -> Result<()> {
         };
         r.bbox = saved.bbox.or(previous.and_then(|p| p.bbox));
         meta.references.insert(name.clone(), r);
+    }
+    if let Some(pins) = &report.pins {
+        meta.pins = pins.clone();
     }
     meta.write_for(file)
 }

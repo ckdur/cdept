@@ -99,7 +99,7 @@ class Seed:
     """Where a trace starts: a device terminal or a pin label of the extraction."""
 
     __slots__ = ("device", "terminal", "label", "point", "layer", "net", "owner",
-                 "traceable", "number", "elayer")
+                 "traceable", "number", "elayer", "pin")
 
     def __init__(self, point, net, device=None, terminal=None, label=None, number=None):
         self.device = device
@@ -112,6 +112,7 @@ class Seed:
         self.traceable = False
         self.number = number        # layer number of a label ("8/25" → 8)
         self.elayer = None          # the tracer's layer of the shape at the point
+        self.pin = None             # a pin's label: the pin's name (it moves with it)
 
 
 class Trace:
@@ -228,8 +229,9 @@ class Live:
             m = LAYER_SPEC.match(str(label.get("layer") or ""))
             if m:
                 number = int(m.group(1))
-            self.seeds.append(Seed(tuple(label["point"]), label.get("net"), label=i,
-                                   number=number))
+            seed = Seed(tuple(label["point"]), label.get("net"), label=i, number=number)
+            seed.pin = label.get("pin")
+            self.seeds.append(seed)
         top = self._top(editor)
         self.owners = {}
         instances = self._instances(top)
@@ -271,6 +273,22 @@ class Live:
         self.revision = None
         self.seen = None
         self.timing["setup_ms"] = round((time.monotonic() - started) * 1000, 2)
+
+    @staticmethod
+    def _pins_now(editor, top):
+        """Pin name -> where its label is now (the middle of its first shape)."""
+        pins = getattr(editor.doc, "pins", None)
+        if pins is None or top is None:
+            return None
+        out = {}
+        for name, p in pins.collect(top.cell_index()).items():
+            point = p["label"]
+            if point is None and p["shapes"]:
+                from .pins import _middle
+                point = _middle(p["shapes"])
+            if point is not None:
+                out[name] = point
+        return out
 
     @staticmethod
     def _top(editor):
@@ -409,6 +427,19 @@ class Live:
                 return (q.x, q.y)
             return seed.point
 
+        # Pins (pins.py) are where they are now: moved, the trace starts there.
+        pins_now = self._pins_now(editor, top)
+        for seed in self.seeds:
+            if seed.pin is None or pins_now is None:
+                continue
+            point = pins_now.get(seed.pin)
+            if point is None:
+                seed.traceable = False
+                seed.layer = None
+                continue
+            if tuple(point) != tuple(seed.point):
+                seed.point = tuple(point)
+                seed.layer = None  # looked for again below
         # Labels that were on no shape: perhaps a wire is under them now.
         for seed in self.seeds:
             if seed.label is not None and seed.layer is None:

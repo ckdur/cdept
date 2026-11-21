@@ -15,6 +15,7 @@
 
 pub mod devices;
 pub mod nets;
+pub mod pins;
 pub mod schematic;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,7 +28,7 @@ use serde_json::{Value, json};
 
 use crate::layout::{Linked, Meta, Source};
 use crate::{Format, Project};
-pub use devices::DeviceMap;
+pub use devices::{DeviceMap, PinLayer, PinRules};
 
 /// GDS property attribute (`PROPATTR`) of a layout instance holding the name of the
 /// schematic instance it stands for. KLayout keeps it as the integer property key 61,
@@ -124,6 +125,9 @@ pub struct Schematic {
     pub problems: Vec<Problem>,
     /// Instances left out on purpose (labels, `lvs_ignore`, …), by name.
     pub skipped: Vec<String>,
+    /// The device map says how pins are made (a `generate` conductor or pin layers):
+    /// the layout is expected to have the schematic's pins (docs/LINKING.md §9).
+    pub pins_placeable: bool,
 }
 
 /// Symbol types that never become layout.
@@ -235,6 +239,10 @@ pub fn read_schematic(
         pins: Vec::new(),
         problems: Vec::new(),
         skipped: Vec::new(),
+        pins_placeable: {
+            let rules = map.pins.rules();
+            rules.generate.is_some() || rules.layers.iter().any(|l| l.pin.is_some())
+        },
     };
     let mut infos: BTreeMap<String, schematic::SymbolInfo> = BTreeMap::new();
     let mut names = BTreeSet::new();
@@ -410,6 +418,12 @@ pub struct Plan {
     pub other_source: Option<String>,
     /// In sync.
     pub ok: Vec<String>,
+    /// Pins of the schematic the layout does not have (docs/LINKING.md §9).
+    pub pins_add: Vec<String>,
+    /// Pins of the layout the schematic does not have.
+    pub pins_extra: Vec<String>,
+    /// Pins whose direction is not the schematic's.
+    pub pins_direction: Vec<Change>,
 }
 
 impl Plan {
@@ -464,6 +478,33 @@ impl Plan {
                 });
             }
         }
+        let empty = BTreeMap::new();
+        let layout_pins = meta.map_or(&empty, |m| &m.pins);
+        // Without a way to make pins (no rules) and none made by hand: not compared.
+        let pins_compared = schematic.pins_placeable || !layout_pins.is_empty();
+        for pin in schematic.pins.iter().filter(|_| pins_compared) {
+            match layout_pins.get(&pin.name) {
+                None => plan.pins_add.push(pin.name.clone()),
+                Some(have)
+                    if pins::direction(&have.direction) != pins::direction(&pin.direction) =>
+                {
+                    plan.pins_direction.push(Change {
+                        name: pin.name.clone(),
+                        what: format!(
+                            "{} → {}",
+                            pins::direction(&have.direction),
+                            pins::direction(&pin.direction)
+                        ),
+                    });
+                }
+                Some(_) => {}
+            }
+        }
+        for name in layout_pins.keys() {
+            if !schematic.pins.iter().any(|p| &p.name == name) {
+                plan.pins_extra.push(name.clone());
+            }
+        }
         let wanted: BTreeSet<&str> = schematic.wanted.iter().map(|w| w.name.as_str()).collect();
         for (name, cells) in &state.bound {
             if !wanted.contains(name.as_str()) {
@@ -485,6 +526,9 @@ impl Plan {
             && self.duplicates.is_empty()
             && self.problems.is_empty()
             && self.other_source.is_none()
+            && self.pins_add.is_empty()
+            && self.pins_extra.is_empty()
+            && self.pins_direction.is_empty()
     }
 }
 
@@ -514,6 +558,15 @@ impl fmt::Display for Plan {
         for p in &self.problems {
             let name = if p.name.is_empty() { "?" } else { &p.name };
             writeln!(f, "problem  {name} ({}): {}", p.symbol, p.reason)?;
+        }
+        for name in &self.pins_add {
+            writeln!(f, "add pin  {name}")?;
+        }
+        for c in &self.pins_direction {
+            writeln!(f, "pin      {}: direction {}", c.name, c.what)?;
+        }
+        for name in &self.pins_extra {
+            writeln!(f, "extra    pin {name} (not in the schematic)")?;
         }
         if self.unbound > 0 {
             writeln!(
@@ -580,11 +633,23 @@ pub fn apply_request(
             item
         })
         .collect();
+    // The schematic's pins: a pin's net is the net its label names (its name).
+    let pins: Vec<Value> = schematic
+        .pins
+        .iter()
+        .map(|p| json!({"name": p.name, "direction": pins::direction(&p.direction), "net": p.name}))
+        .collect();
+    let rules = map.pins.rules();
+    // A device map of before pin objects (a label layer only): labels, as then.
+    let legacy = rules
+        .generate
+        .is_none()
+        .then(|| map.pins.layer.clone())
+        .flatten();
     json!({
         "items": items,
-        "pins": schematic.pins,
-        "pin_layer": map.pins.layer,
-        "pin_size": map.pins.size,
+        "pins": pins,
+        "pin_layer": legacy,
         "remove": options.remove,
     })
 }
@@ -675,7 +740,7 @@ impl fmt::Display for Applied {
         }
         write!(
             f,
-            "{} unchanged, {} pin label(s) added",
+            "{} unchanged, {} pin(s) added",
             self.unchanged.len(),
             self.pins.len()
         )
@@ -836,6 +901,7 @@ mod tests {
             pins: Vec::new(),
             problems: Vec::new(),
             skipped: Vec::new(),
+            pins_placeable: true,
         }
     }
 
@@ -913,5 +979,42 @@ mod tests {
         let mut other = meta.clone();
         other.source.as_mut().unwrap().cell = "buf".into();
         assert!(Plan::new(&sch, Some(&other), &state).other_source.is_some());
+
+        // Pins (docs/LINKING.md §9): the schematic's against the sidecar's.
+        let mut sch = schematic(vec![wanted("M3", "1u")]);
+        sch.pins = vec![
+            Pin {
+                name: "A".into(),
+                direction: "i".into(),
+            },
+            Pin {
+                name: "Y".into(),
+                direction: "o".into(),
+            },
+        ];
+        let mut with_pins = meta.clone();
+        let layout_pin = |direction: &str| crate::layout::Pin {
+            direction: direction.into(),
+            ..Default::default()
+        };
+        with_pins.pins.insert("A".into(), layout_pin("input"));
+        with_pins.pins.insert("Y".into(), layout_pin("input"));
+        with_pins.pins.insert("Q".into(), layout_pin("inout"));
+        let plan = Plan::new(&sch, Some(&with_pins), &state);
+        assert!(plan.pins_add.is_empty());
+        assert_eq!(plan.pins_extra, ["Q"]);
+        assert_eq!(plan.pins_direction[0].name, "Y");
+        assert_eq!(plan.pins_direction[0].what, "input → output");
+        assert!(!plan.in_sync());
+        assert!(
+            plan.to_string()
+                .contains("pin      Y: direction input → output"),
+            "{plan}"
+        );
+        let plan = Plan::new(&sch, Some(&meta), &state);
+        assert_eq!(plan.pins_add, ["A", "Y"]);
+        // A device map that cannot make pins: they are not expected.
+        sch.pins_placeable = false;
+        assert!(Plan::new(&sch, Some(&meta), &state).in_sync());
     }
 }

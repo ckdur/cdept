@@ -172,7 +172,9 @@ already resolved:
 ```
 
 A ghost name of a file that is not in its `refs` is treated as missing with the name
-as label. Rust types: `libcdept::layout::RefTable`, `FileRefs`, `Ref`.
+as label. Rust types: `libcdept::layout::RefTable`, `FileRefs`, `Ref`. A file's entry
+also carries its sidecar's `pins`, and the table the technology's `pin_rules` (the
+device map's `[pins]`, docs/LINKING.md §9).
 
 OASIS views are read the same way (`libcdept::layout::oasis`: CELLNAME tables, CELL,
 PLACEMENT, CBLOCK); KLayout writes a ghost cell as a CELLNAME without a CELL record.
@@ -264,7 +266,7 @@ Methods (`call`):
 | method | params | value |
 |--------|--------|-------|
 | `open` | `{refs: RefTable, editable, technology?, layer_properties?, locked?}` | `{top, dbu, missing: [name], external: [name], notes}` |
-| `save` | `{file?}` (default: the root) | `{file, top, references: {name: {file, missing, bbox}}, also: [SaveReport]}` |
+| `save` | `{file?}` (default: the root) | `{file, top, references: {name: {file, missing, bbox}}, pins: {name: Pin}, also: [SaveReport]}` (`pins`: the file's pins for its sidecar, docs/LINKING.md §9) |
 | `descend` | `{}` (the selected instance) | `{cell, context}`: edit that cell in place (§3.4) |
 | `ascend` | `{all?}` | `{cell, context}` |
 | `locks` | `{files}` | files with unsaved changes elsewhere (not to be changed) |
@@ -280,7 +282,7 @@ Methods (`call`):
 | `place` | `{name?, refs: RefTable}` | loads the cell (external) and switches to `instance` mode |
 | `config` / `get_config` | `{name, value}` / `{name}` | KLayout's `set_config` / `get_config` |
 | `render` | `{refs?, width, height, out}` | writes a PNG (previews; works without display) |
-| `export` | `{refs?, out}` (no `refs`: the open layout) | writes a self-contained GDS/OASIS (all references filled); `{file, missing}` |
+| `export` | `{refs?, out}` (no `refs`: the open layout) | writes a self-contained GDS/OASIS (all references filled); `{file, missing, pins}` (the pins as they are now, for the net check) |
 | `info` | | `{klayout, technology, file, top, cells, dbu}` |
 | `properties` | `{}` | `{objects: [Object], count, layers}`: the selection as the properties dialog shows it (µm) |
 | `set_properties` | `{index, key, object, pcell}` | as `properties`; one undo step; refused when the selection changed or the object is inside another view's cell |
@@ -289,7 +291,8 @@ Methods (`call`):
 | `place_library` | `{library, cell, values}` | `{name, pcell}`: instance mode with a library cell or PCell |
 | `replace_cell` | `{index, key, library, cell, values}` or `{index, key, refs, name}` | as `properties`: the instance places another cell, transformation kept; one undo step |
 | `refresh_pcells` | `{pcells?}` | `{changed, libraries}`: PCell files that changed registered again |
-| `link_apply` / `link_instances` / `link_select` / `link_selected` / `link_highlight` | see docs/LINKING.md §5 | linking with the schematic |
+| `link_apply` / `link_instances` / `link_select` / `link_selected` / `link_highlight` | see docs/LINKING.md §5 | linking with the schematic; select/selected take instance paths (`x1/M1`, §10) |
+| `pins_list` / `pins_add` / `pins_update` / `pins_rename` / `pins_remove` / `pins_select` / `pins_tool` / `pins_style` | see docs/LINKING.md §9 | pins, CDePT objects kept in the sidecar |
 | `nets_load` / `nets_highlight` / `nets_flylines` / `nets_probe` / `nets_clear` | see docs/LINKING.md §8 | nets: the LVS database of the last extraction, highlights, flylines, probing |
 | `nets_live` | `{connectivity?, rules?, on?, delay_ms?, limit_ms?, update?}` | live flylines (LINKING.md §8.1): set up from the extraction's JSON, switch, or trace now; then `nets_live` events |
 | `markers` | `{shapes: [{kind: polygon\|box\|edge\|text, …}], color?, zoom?}` | `{markers}`; empty clears (DRC/LVS highlights, never part of the layout) |

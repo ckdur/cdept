@@ -6,11 +6,23 @@
 format = "cdept-devices"
 version = 1
 
-# Labels for ipin/opin/iopin: text on Metal1.text (8/25), the layer IHP's LVS deck
-# reads pin names from.
+# Pins (docs/LINKING.md §9): a pin on a metal is a shape on its pin layer (datatype 2)
+# with its name as a text on the metal's text layer (datatype 25), the layer IHP's LVS
+# deck reads net names from (rule_decks/layers_definitions.lvs, general_connections.lvs).
+# Generated pins are 0.5 µm squares of Metal1.
 [pins]
-layer = "8/25"
+generate = "8/0"
+box = 0.5
 size = 0.1
+layers = [
+  { drawing = "8/0", pin = "8/2", label = "8/25" },      # Metal1
+  { drawing = "10/0", pin = "10/2", label = "10/25" },   # Metal2
+  { drawing = "30/0", pin = "30/2", label = "30/25" },   # Metal3
+  { drawing = "50/0", pin = "50/2", label = "50/25" },   # Metal4
+  { drawing = "67/0", pin = "67/2", label = "67/25" },   # Metal5
+  { drawing = "126/0", pin = "126/2", label = "126/25" },  # TopMetal1
+  { drawing = "134/0", pin = "134/2", label = "134/25" },  # TopMetal2
+]
 
 [[device]]
 symbol = "sg13g2_pr/sg13_lv_nmos.sym"

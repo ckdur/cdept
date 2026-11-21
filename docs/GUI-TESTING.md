@@ -42,6 +42,7 @@ folder of examples/):
 | `cdept-gui/scripts/layout-pcells.script` | PCells: the project's PCell view `logic/rpoly` placed by `logic/rdiv` (its parameters), a shape parameter (Basic CIRCLE's handle), another cell for an instance (Change… › Library Cell / Layout View), placing a project PCell | into the project: run it on a copy |
 | `cdept-gui/scripts/layout-checks.script` | Run DRC / Run LVS, the results panel, highlight and zoom (needs `PDK_ROOT=/opt/ext/OpenPDKs PDK=ihp-sg13g2` or similar; not in the default set) | nothing |
 | `cdept-gui/scripts/layout-nets.script` | nets on examples/ihp-inv: Update Connectivity, flylines, a net shown in the layout and highlighted in the schematic, a wire selected in the schematic highlighted in the layout, probing, the flyline style, a short traced live, out of date after an edit with live flylines off, the schematic saved before Update Connectivity (needs the PDK: `PDK_ROOT=/opt/ext/OpenPDKs CDEPT_EXAMPLE=ihp-inv run.sh cdept-gui/scripts/layout-nets.script`) | into the project: run it on a copy |
+| `cdept-gui/scripts/layout-pins.script` | pins on examples/ihp-inv: the Pins panel, a pin removed and undone, added on Metal1, renamed, shown, deleted, the net check's pin statuses; cross-probing through the hierarchy: a device inside x1 selected in buf's layout and in buf's schematic, inside x1 after xschem descended, inv's own layout following the schematic shown inside x1, a net inside x1 highlighted in buf's layout (needs the PDK: `PDK_ROOT=/opt/ext/OpenPDKs CDEPT_EXAMPLE=ihp-inv run.sh cdept-gui/scripts/layout-pins.script`) | into the project: run it on a copy |
 | `cdept-gui/scripts/layout-link.script` | linking buf's schematic with its layout: Generate takes over the inv instances, the Link panel, cross-probing both ways, undo | into the project: run it on a copy |
 
 
@@ -214,14 +215,20 @@ and path tools take **clicks**; a box can also be dragged (press, move, release)
 | `expect_flyline_style <key> <value>` | Fail unless the helper drew the flylines with this setting |
 | `parallel <n> <on\|off>` | Join the n-th parallel group (from 1) or not, as its checkbox in the Nets panel does |
 | `expect_parallel <groups…\|none>` | Fail unless the comparison found these parallel groups: members joined by commas, `!` after a group that is not joined |
-| `expect_schematic_nets <nets…\|none>` | Fail unless the active schematic last exchanged these nets with a layout (cross-probing) |
+| `expect_schematic_nets <nets…\|none>` | Fail unless the active schematic last exchanged these nets with a layout (cross-probing); names are net paths from the tab's own schematic (`x1/A` while xschem shows the inside of x1) |
 | `layout_check <drc\|lvs>` | Run DRC or LVS on the open layout (needs the PDK in the environment) |
 | `expect_check <text>` | Wait until the last check is done and fail unless its summary contains the text |
 | `check_show <n>` | Highlight DRC result n (from 1), as a click in the results panel does |
 | `link_generate [remove]` | Generate / Update from Schematic (docs/LINKING.md); `remove` also deletes instances whose schematic instance is gone |
-| `link_select <instance> ...` | Select instances by schematic name, as a click in the Link panel does (the schematic tabs follow) |
+| `link_select <instance> ...` | Select instances by schematic name, as a click in the Link panel does (the schematic tabs follow); a name may be a path through the hierarchy (`x1/M1`: the device inside the placed x1) |
 | `expect_link <instance> <status>` | Fail unless the Link panel shows this status (`ok`, `missing`, `parameters`, `other cell`, `twice`) |
-| `expect_probed <instance ...\|none>` | Fail unless these names are bound to the layout's selection, as cross-probing last saw them |
+| `expect_probed <instance ...\|none>` | Fail unless these names (instance paths, `x1/M1`) are bound to the layout's selection, as cross-probing last saw them |
+| `pins_panel <on\|off>` | Show or hide the Pins panel (docs/LINKING.md §9) |
+| `pin_add <name> <direction> <layer> <l> <b> <r> <t>` | Add a pin with a box (µm) on a conductor (`8/0`); direction `input`, `output`, `inout` (or `i`, `o`, `io`) |
+| `pin_from_selection <name> <direction>` | The selected shapes become pin `name`, as the panel's From Selection does |
+| `pin_draw <name> <direction>` | Draw Pin: the next box drawn on the current layer becomes the pin |
+| `pin_remove <name>` / `pin_rename <name> <new>` / `pin_show <name>` | Delete, rename, select and show a pin |
+| `expect_pin <name> <status>` | Fail unless the Pins panel shows this status: `placed`, `not placed`, `not in the schematic`, `twice`, `label off the pin`, `other direction`, what the net check says (`the pin is on no wire`, …), or `absent` |
 
 KLayout reports a changed modified flag with the next request it handles, so the
 `expect_*` commands above ask it for a sign of life while they wait.

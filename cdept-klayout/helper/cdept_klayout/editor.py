@@ -115,10 +115,17 @@ class Editor:
         self.layer_iters = []
         # Box mode by dragging (see _box_drag): the press held back.
         self.drag = None
+        # Cross-probing selected objects inside other views' cells (link.select): kept
+        # until the next press or key (drop_probe_selection).
+        self.probe_selection = False
         # Handles of PCell shape parameters (handles.py; imported here: it uses this
         # module).
         from .handles import Handles
         self.handles = Handles(self)
+        # Draw Pin (pins.py): the next box drawn becomes a pin.
+        from . import pins
+        self.pin_tool = pins.Tool(self)
+        self.pin_style = dict(pins.DEFAULT_STYLE)
 
     # -- opening ---------------------------------------------------------------
 
@@ -145,6 +152,10 @@ class Editor:
             view.load_layer_props(layer_properties, True)
         view.add_missing_layers()
         self._style_marker(view)
+        from . import pins
+        pins.style_view(view, self.pin_style)
+        doc.pins.fresh = False
+        self.pin_tool.armed = None
         view.max_hier()
         if self.width and self.height:
             view.resize(self.width, self.height)
@@ -357,14 +368,37 @@ class Editor:
 
     def drop_foreign_selection(self):
         """Unselect objects that must not be edited (they would be edited but never
-        saved) and cancel a move that may have started with them."""
-        if not self.foreign_selection():
+        saved) and cancel a move that may have started with them. A selection made by
+        cross-probing (`probe_selection`, link.select: a device inside a placed cell of
+        another view) stays until the next press or key."""
+        if self.probe_selection or not self.foreign_selection():
             return
         keep = [s for s in self.view.each_object_selected() if not self._blocked(s)]
         self.view.cancel()
         self.view.object_selection = keep
         self.notice("warning", "objects inside cells of other views cannot be edited here; "
                                "descend into the instance (Shift+X) or open that view")
+        self.dirty_frame = True
+
+    def show_pin_layer(self):
+        """The in-memory layer of CDePT's pins was just made: show it, styled."""
+        pins = getattr(self.doc, "pins", None) if self.doc is not None else None
+        if pins is None or not pins.fresh or self.view is None:
+            return
+        pins.fresh = False
+        from . import pins as pin_objects
+        self.view.add_missing_layers()
+        pin_objects.style_view(self.view, self.pin_style)
+
+    def drop_probe_selection(self):
+        """Before input: what cross-probing selected inside other views' cells goes,
+        quietly (it was for showing, not for editing)."""
+        self.probe_selection = False
+        if self.view is None or not self.foreign_selection():
+            return
+        keep = [s for s in self.view.each_object_selected() if not self._blocked(s)]
+        self.view.cancel()
+        self.view.object_selection = keep
         self.dirty_frame = True
 
     def descend(self):
@@ -477,6 +511,9 @@ class Editor:
             self.unsaved.add(path)
         self.depth += 1
         self.revision += 1
+        # Draw Pin: the box just drawn becomes the pin (a step of its own).
+        if self.pin_tool.armed is not None and self.pin_tool.changed():
+            self.track()
 
     def undone(self, step):
         """After undo (step -1) or redo (+1)."""

@@ -243,6 +243,87 @@ pub fn placements(bytes: &[u8], attr: u16) -> Result<Vec<Placement>> {
     Ok(out)
 }
 
+/// A shape (`BOUNDARY`, `BOX`, `PATH`, `TEXT`) that carries a property.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tagged {
+    /// The structure it is in.
+    pub structure: String,
+    pub layer: i16,
+    /// The datatype, or the texttype of a text.
+    pub datatype: i16,
+    pub text: bool,
+    pub value: String,
+}
+
+/// Every shape of the stream with a value for its property `attr`, in file order
+/// (pins carry their name in property 62, docs/LINKING.md §9).
+pub fn tagged_shapes(bytes: &[u8], attr: u16) -> Result<Vec<Tagged>> {
+    const BOUNDARY: u16 = 0x0800;
+    const PATH: u16 = 0x0900;
+    const TEXT: u16 = 0x0c00;
+    const BOX: u16 = 0x2d00;
+    const LAYER: u16 = 0x0d02;
+    const DATATYPE: u16 = 0x0e02;
+    const TEXTTYPE: u16 = 0x1602;
+    const BOXTYPE: u16 = 0x2e02;
+    const ENDEL: u16 = 0x1100;
+    const PROPATTR: u16 = 0x2b02;
+    const PROPVALUE: u16 = 0x2c06;
+    let int = |data: &[u8]| -> i16 {
+        if data.len() >= 2 {
+            i16::from_be_bytes([data[0], data[1]])
+        } else {
+            0
+        }
+    };
+    let mut out = Vec::new();
+    let mut structure = String::new();
+    let mut current: Option<Tagged> = None;
+    let mut wanted = false;
+    for record in records(bytes) {
+        let (kind, data) = record?;
+        match kind {
+            STRNAME => structure = text(data),
+            BOUNDARY | PATH | TEXT | BOX => {
+                current = Some(Tagged {
+                    structure: structure.clone(),
+                    layer: 0,
+                    datatype: 0,
+                    text: kind == TEXT,
+                    value: String::new(),
+                })
+            }
+            LAYER => {
+                if let Some(t) = &mut current {
+                    t.layer = int(data);
+                }
+            }
+            DATATYPE | TEXTTYPE | BOXTYPE => {
+                if let Some(t) = &mut current {
+                    t.datatype = int(data);
+                }
+            }
+            PROPATTR => wanted = data.len() >= 2 && u16::from_be_bytes([data[0], data[1]]) == attr,
+            PROPVALUE if wanted => {
+                if let Some(t) = &mut current {
+                    t.value = text(data);
+                }
+                wanted = false;
+            }
+            ENDEL => {
+                if let Some(t) = current.take()
+                    && !t.value.is_empty()
+                {
+                    out.push(t);
+                }
+            }
+            ENDLIB => break,
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
 /// Rename structures and the references to them: every `STRNAME` and `SNAME` equal to a
 /// key of `map` gets the value as name. Record lengths are recomputed (names are padded
 /// to an even length). The file is replaced through a temporary file; it is not touched

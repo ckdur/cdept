@@ -16,6 +16,7 @@ import pya
 from .document import RefTable
 from . import properties
 from . import link
+from . import pins
 from . import pcells
 from .editor import Editor, _message
 from .markers import Markers
@@ -176,10 +177,14 @@ class Server:
         kind = message.get("type")
         if kind == "input":
             event = message.get("input") or {}
+            if self.editor.probe_selection and event.get("kind") not in (
+                    "move", "wheel", "enter", "leave", "release"):
+                self.editor.drop_probe_selection()
             self.editor.input(event)
             full = event.get("kind") not in ("move", "wheel", "enter", "leave")
             if full:
                 self.editor.track()
+                self.editor.show_pin_layer()
                 self.editor.drop_foreign_selection()
             return full
         if kind == "resize":
@@ -203,6 +208,7 @@ class Server:
             return
         try:
             value = handler(params or {})
+            self.editor.show_pin_layer()
             if method not in ("undo", "redo", "save", "open", "place"):
                 self.editor.track()
             if method != "open":
@@ -481,6 +487,32 @@ class Server:
         return self.markers.set(self._view(), {"shapes": shapes, "color": p.get("color"),
                                                "zoom": bool(p.get("zoom"))})
 
+    # -- pins (pins.py, docs/LINKING.md §9) -------------------------------------------
+
+    def m_pins_list(self, p):
+        return pins.listing(self.editor)
+
+    def m_pins_add(self, p):
+        return pins.add(self.editor, p)
+
+    def m_pins_remove(self, p):
+        return pins.remove(self.editor, p)
+
+    def m_pins_rename(self, p):
+        return pins.rename(self.editor, p)
+
+    def m_pins_update(self, p):
+        return pins.update(self.editor, p)
+
+    def m_pins_select(self, p):
+        return pins.select(self.editor, p)
+
+    def m_pins_tool(self, p):
+        return self.editor.pin_tool.arm(p)
+
+    def m_pins_style(self, p):
+        return pins.style(self.editor, p)
+
     # -- nets (nets.py, docs/LINKING.md §8) -------------------------------------------
 
     def m_nets_load(self, p):
@@ -542,7 +574,7 @@ class Server:
         """Run Python code; the value of a last expression is returned as repr."""
         code = p.get("code", "")
         g = self.python_globals
-        g.update(view=self.editor.view, doc=self.editor.doc,
+        g.update(view=self.editor.view, doc=self.editor.doc, editor=self.editor,
                  layout=self.editor.doc.layout if self.editor.doc else None)
         tree = ast.parse(code, "<cdept>", "exec")
         last = None

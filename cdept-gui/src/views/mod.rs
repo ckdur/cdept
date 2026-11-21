@@ -185,48 +185,97 @@ impl Views {
             if !view.link_ready() {
                 return true;
             }
-            view.generate_from_schematic(ctx.project.as_ref(), false);
+            view.request_generate(false);
             false
         });
+        // Generate compares with the schematic as saved: an open schematic with
+        // unsaved changes is saved first (as for Update Connectivity, below).
         for layout in &mut layouts {
-            let Some(names) = layout.take_probe_out() else {
+            if layout.generate_wanted().is_none() {
+                continue;
+            }
+            let Some(file) = layout.link_schematic().map(std::path::Path::to_path_buf) else {
+                layout.start_generate(ctx.project.as_ref());
                 continue;
             };
+            if let Some(request) = layout.generate_save_request() {
+                let Some(view) = schematics.iter_mut().find(|s| s.file() == file) else {
+                    layout.start_generate(ctx.project.as_ref());
+                    continue;
+                };
+                if let Some(answer) = view.take_reply(request) {
+                    match schematic::SchematicView::saved(answer) {
+                        Ok(()) => layout.start_generate(ctx.project.as_ref()),
+                        Err(error) => layout.generate_not_started(&error),
+                    }
+                }
+                continue;
+            }
+            match schematics
+                .iter_mut()
+                .find(|s| s.file() == file && s.is_modified())
+            {
+                Some(view) => {
+                    let request = view.save();
+                    layout.generate_saving(file, request);
+                }
+                None => layout.start_generate(ctx.project.as_ref()),
+            }
+        }
+        // Cross-probing (docs/LINKING.md §6, §9). Names are instance (or net) paths:
+        // a layout tab's from its top cell, a schematic tab's from its own schematic.
+        // A layout linked with the schematic of the tab maps one to one; one linked
+        // with the schematic xschem shows after descending (into x1) maps below it.
+        for layout in &mut layouts {
+            let out = (layout.take_probe_out(), layout.take_net_probe_out());
+            if out == (None, None) {
+                continue;
+            }
             let Some(file) = layout.link_schematic().map(std::path::Path::to_path_buf) else {
                 continue;
             };
-            for view in schematics.iter_mut().filter(|s| s.file() == file) {
-                view.probe_in(&names);
-            }
-        }
-        for view in &mut schematics {
-            let Some(names) = view.take_probe_out() else {
-                continue;
-            };
-            for layout in &mut layouts {
-                if layout.link_schematic() == Some(view.file()) {
-                    layout.probe_in(&names);
+            for view in &mut schematics {
+                let Some(prefix) = link_prefix(view, &file) else {
+                    continue;
+                };
+                let lift = |names: &[String]| -> Vec<String> {
+                    names.iter().map(|n| format!("{prefix}{n}")).collect()
+                };
+                if let Some(names) = &out.0 {
+                    view.probe_in(&lift(names));
+                }
+                if let Some(names) = &out.1 {
+                    view.probe_nets_in(&lift(names));
                 }
             }
-        } // Nets, both ways.
-        for layout in &mut layouts {
-            let Some(names) = layout.take_net_probe_out() else {
-                continue;
-            };
-            let Some(file) = layout.link_schematic().map(std::path::Path::to_path_buf) else {
-                continue;
-            };
-            for view in schematics.iter_mut().filter(|s| s.file() == file) {
-                view.probe_nets_in(&names);
-            }
         }
         for view in &mut schematics {
-            let Some(names) = view.take_net_probe_out() else {
+            let out = (view.take_probe_out(), view.take_net_probe_out());
+            if out == (None, None) {
                 continue;
-            };
+            }
             for layout in &mut layouts {
-                if layout.link_schematic() == Some(view.file()) {
-                    layout.probe_nets_in(&names);
+                let Some(file) = layout.link_schematic().map(std::path::Path::to_path_buf) else {
+                    continue;
+                };
+                let Some(prefix) = link_prefix(view, &file) else {
+                    continue;
+                };
+                let lower = |names: &[String]| -> Vec<String> {
+                    names
+                        .iter()
+                        .filter_map(|n| n.strip_prefix(prefix.as_str()))
+                        .map(str::to_string)
+                        .collect()
+                };
+                if let Some(names) = &out.0 {
+                    layout.probe_in(&lower(names));
+                }
+                if let Some(names) = &out.1 {
+                    let names = lower(names);
+                    if !names.is_empty() {
+                        layout.probe_nets_in(&names);
+                    }
                 }
             }
         }
@@ -270,6 +319,24 @@ impl Views {
     pub fn retain_documents(&mut self, keep: impl Fn(DocId) -> bool) {
         self.documents.retain(|id, _| keep(*id));
     }
+}
+
+/// How a layout linked with the schematic `file` sees the names of a schematic tab:
+/// `Some("")` when the tab is that schematic, `Some("x1/")` when xschem shows it inside
+/// instance x1 of the tab's schematic, `None` when the tab has nothing to do with it.
+fn link_prefix(view: &schematic::SchematicView, file: &std::path::Path) -> Option<String> {
+    if view.file() == file {
+        return Some(String::new());
+    }
+    let prefix = view.hierarchy_prefix();
+    let shown = view.shown_schematic()?;
+    let same = |a: &std::path::Path, b: &std::path::Path| {
+        a == b
+            || a.canonicalize()
+                .ok()
+                .is_some_and(|a| b.canonicalize().ok() == Some(a))
+    };
+    (!prefix.is_empty() && same(shown, file)).then_some(prefix)
 }
 
 /// Grey, centered text for empty states.
