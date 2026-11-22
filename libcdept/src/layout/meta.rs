@@ -313,6 +313,24 @@ impl Meta {
         Meta::read(&path).map(Some)
     }
 
+    /// The text [`Meta::write`] writes: pretty JSON with a trailing newline, with the
+    /// oldest version that can hold what the sidecar has.
+    pub fn to_json(&self) -> Result<String> {
+        self.validate()
+            .map_err(|e| eyre!("not a valid sidecar: {e}"))?;
+        let mut meta = self.clone();
+        meta.version = if !meta.pins.is_empty() {
+            3
+        } else if meta.is_linked() {
+            2
+        } else {
+            1
+        };
+        let mut text = serde_json::to_string_pretty(&meta)?;
+        text.push('\n');
+        Ok(text)
+    }
+
     /// Write as pretty JSON with a trailing newline, through a temporary file.
     pub fn write(&self, sidecar: &Path) -> Result<()> {
         self.validate()

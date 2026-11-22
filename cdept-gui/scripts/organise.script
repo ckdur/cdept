@@ -1,0 +1,76 @@
+# Categories, Go to Cell, the Search panel and Import Project on examples/buffer.
+# Writes to the project it is run on: use a copy (cdept-gui/scripts/run.sh does).
+#
+#   cdept-gui/scripts/run.sh cdept-gui/scripts/organise.script
+#
+# Exit status 0: every check passed.
+
+panel Library Manager
+wait 0.2
+
+# --- Categories: kept in the library's lib.toml, shown as a Category column.
+organise category show on
+organise category add logic gates
+organise category assign logic gates inv
+organise category assign logic gates buf
+organise category assign logic passives/resistors rdiv
+organise category expect logic gates buf,inv
+organise category expect logic passives rdiv
+select logic
+organise category pick logic gates
+organise category expect_shown logic 2
+organise category pick logic none
+organise category expect_shown logic 1
+organise category pick logic all
+organise category expect_shown logic 4
+organise category rename logic gates logic-gates
+organise category expect logic logic-gates buf,inv
+organise category unassign logic logic-gates buf
+organise category expect logic logic-gates inv
+organise category remove logic passives
+organise category expect logic passives none
+organise category show off
+organise category expect_shown logic 4
+
+# --- Go to Cell: the first hit is selected, or opened.
+organise find tb
+organise go
+organise expect_selection bench tb_buf
+organise find logic/in
+organise go
+organise expect_selection logic inv
+organise find inv kind:symbol
+organise go
+organise expect_selection logic inv symbol
+
+# --- The Search panel: names, filters, inside the files.
+panel Search
+organise search buf
+organise expect_hits 2
+organise expect_hit logic / buf
+organise expect_hit bench / tb_buf
+organise search kind:schematic lib:logic
+organise expect_hit logic / inv / schematic
+organise search cat:logic-gates
+organise expect_hits 1
+organise search in:content inv.sym
+organise expect_hit logic / buf / schematic
+organise expect_hit [instance]
+
+# --- Open a hit in its editor.
+organise find buf kind:schematic lib:logic
+organise open
+expect_documents 1
+expect_title buf (schematic)
+close_tab
+expect_documents 0
+
+# --- Import Project: the libraries of a folder that has no project yet.
+organise import $PROJECT/libs
+organise import_expect 2
+organise import_skip bench
+organise import_expect 1
+organise import_create
+expect_project libs
+
+quit

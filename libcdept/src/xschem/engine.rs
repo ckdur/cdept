@@ -521,7 +521,7 @@ impl Engine {
         let file = format!("{cell}.{}", format.suffix());
         let output = match library.layout {
             LibraryLayout::Cells => library.path.join(cell).join("netlist").join(file),
-            LibraryLayout::Flat => library.path.join(file),
+            LibraryLayout::Flat | LibraryLayout::Ref => library.path.join(file),
         };
         self.load(&schematic)?;
         self.netlist(format, &output)?;

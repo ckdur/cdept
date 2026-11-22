@@ -263,6 +263,14 @@ class Server:
         else:
             view = self.editor.require()
         if p.get("refs"):
+            # One cell of a file that holds several (a standard-cell GDS).
+            cell = p.get("cell")
+            if cell:
+                ly = view.cellview(0).layout()
+                if not ly.has_cell(cell):
+                    raise ValueError("render: no cell %s" % cell)
+                view.select_cell_path([ly.cell(cell).cell_index()], 0)
+                view.max_hier()
             view.resize(width, height)
             view.zoom_fit()
         view.get_pixels_with_options(width, height).write_png(out)

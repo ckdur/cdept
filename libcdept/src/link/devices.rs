@@ -30,7 +30,8 @@
 //! A parameter template replaces `@name` with the instance's attribute `name` (else
 //! the symbol's default from `template=`), and `@{name|u}` with that value read as a
 //! SPICE number and written in units of `u` (µ) with the suffix: `0.5e-6` → `0.5u`.
-//! The units are `f p n u m k` (suffix written) and `num` (a plain number, no suffix).
+//! The units are `f p n u m k` (suffix written), `num` (a plain number, no suffix) and
+//! `um` (a plain number of micron: `0.5e-6` → `0.5`, for PCells that count in micron).
 //!
 //! The PDK's map lives in `pdk/<PDK>/devices.toml` (installed under
 //! `share/cdept/pdk/`); the project's `[klayout] devices` file comes on top: an entry
@@ -454,6 +455,7 @@ pub fn expand(template: &str, value: &dyn Fn(&str) -> Option<String>) -> Result<
                     "u" => (1e-6, "u"),
                     "m" => (1e-3, "m"),
                     "k" => (1e3, "k"),
+                    "um" => (1e-6, ""),
                     "num" => (1.0, ""),
                     other => return Err(format!("unknown unit '{other}' in '{template}'")),
                 };

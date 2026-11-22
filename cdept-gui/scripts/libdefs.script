@@ -1,0 +1,82 @@
+# Library definitions and path prompts (docs/GUI-TESTING.md): Library Properties,
+# Add Existing Library with its folder field, Remove Library, the project's problems,
+# CDePT's own path prompt for Open Project and New Project.
+# Writes into the project and next to it: run it on a copy
+#   cdept-gui/scripts/run.sh cdept-gui/scripts/libdefs.script
+panel Libraries
+expect_project buffer
+expect_problem none
+expect_library logic path libs/logic
+expect_library logic layout_written detect
+expect_library logic origin project
+expect_library logic read_only no
+
+# Library Properties: read-only and a layout that is said, written to cdept.toml.
+select logic
+lib_properties logic
+lib_set read_only yes
+lib_set layout cells
+lib_save
+expect_library logic read_only yes
+expect_library logic layout_written cells
+expect_library logic path libs/logic
+
+# A read-only library takes no description (it is in the folder's lib.toml).
+lib_properties logic
+lib_set description The logic cells
+lib_save_error read-only
+expect_lib_error read-only
+lib_set read_only no
+lib_save
+expect_library logic description The logic cells
+expect_library logic read_only no
+
+# A folder that is not there is refused; nothing changes.
+lib_properties bench
+lib_set path libs/nowhere
+lib_save_error folder not found
+lib_cancel
+expect_library bench path libs/bench
+
+# Add Existing Library: the dialog asks for the folder itself. The layout found in
+# the folder is written with the definition.
+pick_folder library
+lib_set path libs/logic/inv
+lib_set name invlib
+lib_save
+expect_library invlib present yes
+expect_library invlib layout_written cells
+expect_library invlib folder $PROJECT/libs/logic/inv
+
+# A library that cannot be read is a problem of the project, shown over the trees.
+lib_properties invlib
+lib_set path libs/bench
+lib_save
+expect_library invlib path libs/bench
+lib_remove invlib
+expect_library invlib present no
+expect_problem none
+
+# Open Project asks with CDePT's own path prompt: a wrong folder is refused there.
+pick_folder open
+expect_path_prompt Open project folder
+path_wrong $PROJECT/nowhere
+expect_path_note not found
+path_answer $PROJECT/libs/logic
+expect_path_prompt none
+expect_project buffer
+
+# Cancel leaves everything as it is.
+pick_folder open
+expect_path_prompt Open project folder
+path_cancel
+expect_path_prompt none
+expect_project buffer
+
+# New Project: the folder need not exist.
+pick_folder new
+expect_path_prompt Folder for the new project
+path_answer $PROJECT/../fresh
+expect_project fresh
+expect_problem none
+quit

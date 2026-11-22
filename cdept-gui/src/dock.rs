@@ -108,6 +108,10 @@ pub enum Tab {
     Console,
     Jobs,
     Problems,
+    /// What CDePT knows about the project's PDK (the technology snapshot).
+    Technology,
+    /// Search across the libraries.
+    Search,
     /// An opened view of a cell (see [`Documents`]).
     Document(DocId),
 }
@@ -123,7 +127,7 @@ pub enum Area {
 
 impl Tab {
     /// The fixed tabs, in the order the Window menu lists them.
-    pub const ALL: [Tab; 9] = [
+    pub const ALL: [Tab; 11] = [
         Tab::Start,
         Tab::LibraryManager,
         Tab::Libraries,
@@ -133,14 +137,16 @@ impl Tab {
         Tab::Console,
         Tab::Jobs,
         Tab::Problems,
+        Tab::Technology,
+        Tab::Search,
     ];
 
     pub fn area(self) -> Area {
         match self {
-            Tab::Start | Tab::LibraryManager | Tab::Document(_) => Area::Center,
+            Tab::Start | Tab::LibraryManager | Tab::Technology | Tab::Document(_) => Area::Center,
             Tab::Libraries | Tab::Hierarchy => Area::Left,
             Tab::Inspector | Tab::Tools => Area::Right,
-            Tab::Console | Tab::Jobs | Tab::Problems => Area::Bottom,
+            Tab::Console | Tab::Jobs | Tab::Problems | Tab::Search => Area::Bottom,
         }
     }
 
@@ -520,7 +526,9 @@ impl TabViewer for Viewer<'_> {
     fn scroll_bars(&self, tab: &Tab) -> [bool; 2] {
         // Views with their own scroll areas (tables, console) handle scrolling themselves.
         match tab {
-            Tab::Console | Tab::Tools | Tab::LibraryManager | Tab::Document(_) => [false, false],
+            Tab::Console | Tab::Tools | Tab::LibraryManager | Tab::Search | Tab::Document(_) => {
+                [false, false]
+            }
             _ => [true, true],
         }
     }
@@ -535,7 +543,10 @@ mod tests {
         let state = default_layout();
         for tab in Tab::ALL {
             let n = state.iter_all_tabs().filter(|(_, t)| **t == tab).count();
-            let expected = usize::from(tab != Tab::LibraryManager);
+            let expected = usize::from(!matches!(
+                tab,
+                Tab::LibraryManager | Tab::Technology | Tab::Search
+            ));
             assert_eq!(n, expected, "{tab:?}");
         }
     }

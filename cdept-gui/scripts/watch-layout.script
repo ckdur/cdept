@@ -1,0 +1,66 @@
+# Layout tabs and files that change on disk (cdept-gui/src/background/disk.rs): a
+# tab's own save is not a change behind its back; a change by another program opens
+# the file again in the tabs that show it, or asks when the tab has changes.
+# Needs cdept-klayout/.bin/klayout. Writes into the project: run it on a copy
+#   cdept-gui/scripts/run.sh cdept-gui/scripts/watch-layout.script
+
+# inv.gds as it is before this script touches it, next to the project folder.
+shell cp libs/logic/inv/layout/inv.gds ../inv-original.gds
+open logic inv layout
+wait_frame
+expect_modified no
+expect_stale no
+
+# Its own save: no notice, and nothing is opened again (the layer keeps the name it
+# got in this tab; read from the file it would be 10/0).
+add_layer 10 0 smoke
+current_layer smoke
+mode box
+click 150 30
+click 190 70
+expect_modified yes
+save
+expect_modified no
+expect_notice Saved
+wait 1.5
+expect_stale no
+expect_layer smoke
+
+# Another program writes inv.gds (here: the version before the save comes back). The
+# tab has no changes: it opens the file again, and the layer is gone.
+shell git init -q -b main . && git add . && git -c user.name=t -c user.email=t@example.com commit -q -m saved
+shell cp libs/logic/inv/layout/inv.gds ../inv-saved.gds && cat ../inv-original.gds > libs/logic/inv/layout/inv.gds
+wait 1.5
+wait_frame
+expect_stale no
+expect_modified no
+expect_git modified logic inv layout
+
+# buf places inv: its tab follows a change of inv.gds too.
+open logic buf layout
+wait_frame
+expect_stale no
+shell cat ../inv-saved.gds > libs/logic/inv/layout/inv.gds
+wait 1.5
+wait_frame
+expect_stale no
+expect_cell inv external
+
+# With changes of its own the tab asks.
+open logic inv layout
+wait_frame
+expect_layer 10/0
+current_layer 1/0
+mode box
+click 20 20
+click 60 60
+expect_modified yes
+shell cat ../inv-original.gds > libs/logic/inv/layout/inv.gds
+expect_stale yes
+expect_modified yes
+stale_answer reload
+expect_stale no
+wait 1
+wait_frame
+expect_modified no
+quit

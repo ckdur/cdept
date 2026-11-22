@@ -21,7 +21,7 @@ impl View for StartView {
 
         ui.horizontal(|ui| {
             if ui.button("New Project…").clicked() {
-                ctx.request(Action::PickFolder(PickFor::NewProject));
+                crate::newproject::open(ctx, ui.ctx());
             }
             if ui.button("Open Project…").clicked() {
                 ctx.request(Action::PickFolder(PickFor::OpenProject));
@@ -49,7 +49,7 @@ impl View for StartView {
         }
         let mut open = None;
         for path in &ctx.settings.recent_projects {
-            if ui.link(path.display().to_string()).clicked() {
+            if crate::background::recent_button(ui, &mut ctx.background, path, true) {
                 open = Some(path.clone());
             }
         }

@@ -1,0 +1,42 @@
+# Reference libraries (the `ref` layout): a standard cell is one cell of the library's
+# GDS; its layout view opens that cell, read-only. Needs sky130A and KLayout
+# (cdept-klayout/.bin or on PATH). Not an example project: make one that lists the
+# PDK's library, e.g.
+#
+#   mkdir /tmp/refproj && cd /tmp/refproj && cat > cdept.toml <<END
+#   name = "refproj"
+#   pdk_root = "/opt/ext/OpenPDKs"
+#   technology = "sky130A"
+#   [libraries]
+#   sky130_fd_sc_hd = { path = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd", read_only = true }
+#   END
+#   HOME=$(mktemp -d) XDG_DATA_HOME=$(mktemp -d) \
+#     target/debug/cdept -p /tmp/refproj gui --script cdept-gui/scripts/reflib.script
+#
+# Exit status 0: every check passed.
+
+expect_project refproj
+# The Inspector draws the selected cell, not the first cell of the file.
+select sky130_fd_sc_hd sky130_fd_sc_hd__inv_1 layout
+expect_preview
+screenshot /tmp/cdept-reflib-1-inspector.png
+
+open sky130_fd_sc_hd sky130_fd_sc_hd__inv_1 layout
+wait_frame
+expect_documents 1
+expect_title sky130_fd_sc_hd__inv_1 (layout)
+expect_shown sky130_fd_sc_hd__inv_1
+# The other cells of the file are there, this one is shown.
+expect_cell sky130_fd_sc_hd__dfxtp_1 local
+expect_modified no
+check_picture
+screenshot /tmp/cdept-reflib-2-inv.png
+
+# Another cell of the same file is another tab.
+open sky130_fd_sc_hd sky130_fd_sc_hd__dfxtp_1 layout
+wait_frame
+expect_documents 2
+expect_shown sky130_fd_sc_hd__dfxtp_1
+expect_modified no
+screenshot /tmp/cdept-reflib-3-dfxtp.png
+quit

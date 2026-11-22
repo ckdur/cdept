@@ -164,11 +164,22 @@ fn library_items(ui: &mut Ui, lib: &Library, links: &[Unlinked], cmds: &mut Vec<
             }));
         }
     }
+    if ui
+        .button("Library Properties…")
+        .on_hover_text("Folder, layout, read-only and description, where the library is defined")
+        .clicked()
+    {
+        cmds.push(Cmd::Dialog(Dialog::LibraryProperties(
+            crate::library_dialog::Properties::new(&lib.name),
+        )));
+    }
+    super::categories::library_menu(ui, lib);
     if ui.button("Remove Library…").clicked() {
         cmds.push(Cmd::Dialog(Dialog::RemoveLibrary {
             library: lib.name.clone(),
         }));
     }
+    cmds.extend(crate::refactor::library_menu(ui, lib).map(Cmd::Dialog));
     if ui.button("Copy Folder Path").clicked() {
         cmds.push(Cmd::CopyText(lib.path.display().to_string()));
     }
@@ -186,6 +197,7 @@ fn cell_items(ui: &mut Ui, project: &Project, lib: &Library, cell: &Cell, cmds: 
     if ui.button("Copy Cell…").clicked() {
         cmds.push(Cmd::Dialog(copy_cell_dialog(project, lib, cell)));
     }
+    super::categories::cell_menu(ui, lib, cell);
     let netlist = ui.add_enabled_ui(rw && crate::app::schematic_file(cell).is_some(), |ui| {
         ui.menu_button("Netlist to View", |ui| {
             for (label, format) in super::NETLIST_FORMATS {
@@ -204,6 +216,9 @@ fn cell_items(ui: &mut Ui, project: &Project, lib: &Library, cell: &Cell, cmds: 
     } else {
         READ_ONLY
     });
+    let (dialog, action) = crate::refactor::cell_menu(ui, project, lib, cell);
+    cmds.extend(dialog.map(Cmd::Dialog));
+    cmds.extend(action.map(Cmd::Action));
     if ui
         .add_enabled(rw, Button::new("Rename Cell…"))
         .on_disabled_hover_text(READ_ONLY)
@@ -259,6 +274,7 @@ fn view_items(
         cmds.push(Cmd::FixLink(u.clone()));
     }
     ui.separator();
+    cmds.extend(crate::refactor::view_menu(ui, lib, cell, entry).map(Cmd::Dialog));
     if ui
         .add_enabled(writable(lib), Button::new("Delete View…"))
         .on_disabled_hover_text(READ_ONLY)
@@ -282,6 +298,9 @@ fn matches(name: &str, filter: &str) -> bool {
 
 /// Shown instead of the libraries while no project is open.
 fn no_project(ui: &mut Ui, ctx: &mut AppCtx) {
+    if crate::background::loading_ui(ui, ctx) {
+        return;
+    }
     empty_state(ui, "No project open.", None);
     ui.add_space(8.0);
     ui.vertical_centered(|ui| {
@@ -321,6 +340,7 @@ impl View for LibrariesView {
             {
                 ctx.request(Action::OpenTab(Tab::LibraryManager));
             }
+            super::categories::toggle_button(ui);
             ui.add(
                 egui::TextEdit::singleline(&mut self.filter)
                     .hint_text("🔍 Filter cells")
@@ -328,6 +348,8 @@ impl View for LibrariesView {
             );
         });
         ui.separator();
+        // Problems of the project file (a library defined twice, names, …).
+        crate::library_dialog::problems_banner(ui, ctx);
         let Some(project) = &ctx.project else {
             return no_project(ui, ctx);
         };
@@ -366,11 +388,16 @@ impl View for LibrariesView {
                     } else if cells.is_empty() {
                         ui.weak("No cells");
                     }
-                    for cell in cells {
+                    // One after the other, or under their categories.
+                    super::categories::grouped(ui, lib, &cells, |ui, cell| {
+                        let open = super::vcs::node_open(ui, ("cell", &lib.name, &cell.name));
+                        if super::vcs::skip_hidden_row(ui, open) {
+                            return;
+                        }
                         cell_node(
                             ui, project, lib, cell, selected, selection, links, &mut cmds,
                         );
-                    }
+                    });
                 })
                 .header_response
                 .on_hover_text(if broken > 0 {
@@ -381,6 +408,7 @@ impl View for LibrariesView {
                 } else {
                     library_hover(lib)
                 });
+            let header = super::vcs::library_badge(ui, header, lib);
             if header.clicked() {
                 cmds.push(Cmd::Select(Selection::library(&lib.name)));
             }
@@ -438,6 +466,7 @@ fn cell_node(
                     )),
                     None => response.on_hover_text(view_label(entry)),
                 };
+                response = super::vcs::view_badge(ui, response, entry);
                 if response.double_clicked() {
                     cmds.push(Cmd::Open(target));
                 } else if response.clicked() {
@@ -453,6 +482,7 @@ fn cell_node(
             link_hover(u)
         ));
     }
+    header = super::vcs::cell_badge(ui, header, cell);
     if header.clicked() {
         cmds.push(Cmd::Select(Selection::cell(&lib.name, &cell.name)));
     }
@@ -481,7 +511,15 @@ impl LibraryManagerView {
             .and_then(|name| project.library(name));
         let cell = library.and_then(|lib| lib.cell(selection.cell.as_deref()?));
 
-        ui.columns(3, |cols| {
+        // With categories shown: Library | Category | Cell | View.
+        let extra = usize::from(super::categories::shown(ui));
+        ui.columns(3 + extra, |cols| {
+            if extra == 1 {
+                column(&mut cols[1], "Category", |ui| match library {
+                    Some(lib) if lib.error.is_none() => super::categories::picker(ui, lib),
+                    _ => empty_state(ui, "Select a library", None),
+                });
+            }
             column(&mut cols[0], "Library", |ui| {
                 if project.libraries.is_empty() {
                     empty_state(ui, "No libraries", Some("Use Library ▸ New Library…"));
@@ -491,6 +529,7 @@ impl LibraryManagerView {
                     let response = ui
                         .selectable_label(selected, library_label(lib))
                         .on_hover_text(library_hover(lib));
+                    let response = super::vcs::library_badge(ui, response, lib);
                     if response.clicked() {
                         cmds.push(Cmd::Select(Selection::library(&lib.name)));
                     }
@@ -504,7 +543,7 @@ impl LibraryManagerView {
                 Some(lib) => format!("Cell ({})", lib.cells.len()),
                 None => "Cell".into(),
             };
-            column(&mut cols[1], &header, |ui| {
+            column(&mut cols[1 + extra], &header, |ui| {
                 let Some(lib) = library else {
                     return empty_state(ui, "Select a library", None);
                 };
@@ -515,6 +554,7 @@ impl LibraryManagerView {
                     .cells
                     .iter()
                     .filter(|c| matches(&c.name, &filter))
+                    .filter(|c| super::categories::shows(ui, lib, &c.name))
                     .collect();
                 if cells.is_empty() {
                     let text = if lib.cells.is_empty() {
@@ -526,36 +566,38 @@ impl LibraryManagerView {
                 }
                 // Reference libraries can hold thousands of cells: draw visible rows only.
                 let row_height = ui.spacing().interact_size.y;
-                ScrollArea::vertical().auto_shrink(false).show_rows(
-                    ui,
-                    row_height,
-                    cells.len(),
-                    |ui, range| {
-                        for c in &cells[range] {
-                            let selected = cell.is_some_and(|s| s.name == c.name);
-                            let broken = cell_link(links, &lib.name, &c.name);
-                            let text = match broken {
-                                Some(_) => RichText::new(format!("{LINK_MARK} {}", c.name))
-                                    .color(ui.visuals().warn_fg_color.gamma_multiply(0.6)),
-                                None => RichText::new(&c.name),
-                            };
-                            let mut response = ui.selectable_label(selected, text);
-                            if let Some(u) = broken {
-                                response = response.on_hover_text(format!(
-                                    "A symbol of this cell has a broken schematic link:\n{}",
-                                    link_hover(u)
-                                ));
-                            }
-                            if response.clicked() {
-                                cmds.push(Cmd::Select(Selection::cell(&lib.name, &c.name)));
-                            }
-                            response.context_menu(|ui| cell_items(ui, project, lib, c, cmds));
+                // Go to Cell scrolls the list to the selected cell.
+                let at = cell.and_then(|s| cells.iter().position(|c| c.name == s.name));
+                let mut rows = ScrollArea::vertical().auto_shrink(false);
+                if let Some(offset) = super::search::reveal_offset(ui, at, row_height) {
+                    rows = rows.vertical_scroll_offset(offset);
+                }
+                rows.show_rows(ui, row_height, cells.len(), |ui, range| {
+                    for c in &cells[range] {
+                        let selected = cell.is_some_and(|s| s.name == c.name);
+                        let broken = cell_link(links, &lib.name, &c.name);
+                        let text = match broken {
+                            Some(_) => RichText::new(format!("{LINK_MARK} {}", c.name))
+                                .color(ui.visuals().warn_fg_color.gamma_multiply(0.6)),
+                            None => RichText::new(&c.name),
+                        };
+                        let mut response = ui.selectable_label(selected, text);
+                        if let Some(u) = broken {
+                            response = response.on_hover_text(format!(
+                                "A symbol of this cell has a broken schematic link:\n{}",
+                                link_hover(u)
+                            ));
                         }
-                    },
-                );
+                        response = super::vcs::cell_badge(ui, response, c);
+                        if response.clicked() {
+                            cmds.push(Cmd::Select(Selection::cell(&lib.name, &c.name)));
+                        }
+                        response.context_menu(|ui| cell_items(ui, project, lib, c, cmds));
+                    }
+                });
             });
 
-            column(&mut cols[2], "View", |ui| {
+            column(&mut cols[2 + extra], "View", |ui| {
                 let (Some(lib), Some(cell)) = (library, cell) else {
                     return empty_state(ui, "Select a cell", None);
                 };
@@ -571,6 +613,7 @@ impl LibraryManagerView {
                     if let Some(u) = link {
                         response = response.on_hover_text(link_hover(u));
                     }
+                    response = super::vcs::view_badge(ui, response, entry);
                     if response.double_clicked() {
                         cmds.push(Cmd::Open(target));
                     } else if response.clicked() {
@@ -607,8 +650,11 @@ impl View for LibraryManagerView {
             if !self.filter.is_empty() && ui.button("✖").clicked() {
                 self.filter.clear();
             }
+            super::categories::toggle(ui);
         });
         ui.separator();
+        // Problems of the project file (a library defined twice, names, …).
+        crate::library_dialog::problems_banner(ui, ctx);
         let Some(project) = &ctx.project else {
             return no_project(ui, ctx);
         };

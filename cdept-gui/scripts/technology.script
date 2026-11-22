@@ -1,0 +1,103 @@
+# The New Project wizard and the Technology tab, with IHP SG13G2.
+#
+# Needs the PDK: run it with PDK_ROOT pointing at the folder that holds ihp-sg13g2,
+# and with the xschem helper built (cargo build -p cdept-xschem):
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs cdept-gui/scripts/run.sh cdept-gui/scripts/technology.script
+#
+# It starts on a copy of examples/buffer (any project will do) and creates a new
+# project next to it: nothing of the user's changes.
+#
+# `tech <verb> …` drives the wizard and looks at the technology snapshot:
+#   tech wizard                     File > New Project…
+#   tech folder <dir> / name <text> the fields of the first page
+#   tech root <dir>                 "Other folder…": look for PDKs there
+#   tech pdk <name|none>            choose a PDK; expect_pdk <name> checks the choice
+#   tech expect_pdks <name>…        these PDKs are listed
+#   tech expect_no_pdk <text>       no listed PDK has this text in its folder
+#   tech files_only <on|off>        scan without KLayout and xschem
+#   tech next / back / create / cancel
+#   tech expect_scanned             the scan is done (tried for a while)
+#   tech library <name> <on|off>    list or leave out a library of the PDK
+#   tech expect <path> <value>      a value of tech.toml (klayout.tech) or, with the
+#                                   prefix catalog., of tech.catalog.json
+#   tech expect_line <text>         a line of the summary has this text
+#   tech page <name>                a page of the Technology tab (Layers, Models, …)
+#   tech rescan [files]             Rescan of the open project; expect_rescanned
+#   tech expect_offer <on|off>      "The technology changed: reopen tabs?" is shown
+#   tech restart <on|off>           answer it
+
+# --- Three clicks: New Project…, Next, Create --------------------------------------
+tech wizard
+tech expect_pdks ihp-sg13g2
+# Only PDKs are listed: nothing from a folder that is not one.
+tech expect_no_pdk XFAB
+# $PDK is not set here, so the first PDK found is chosen; make it the one we test.
+tech pdk ihp-sg13g2
+tech expect_pdk ihp-sg13g2
+tech folder $PROJECT/../ihp-project
+tech name ihp_demo
+tech next
+tech expect_scanned
+# What the scan found, before anything is written.
+tech expect klayout.tech sg13g2
+tech expect pdk.family ihp-sg13g2
+tech expect_line KLayout technology: sg13g2
+tech expect_line xschem start-up file: $PDK_ROOT/ihp-sg13g2/libs.tech/xschem/xschemrc
+tech expect_line Model corners (ngspice)
+tech expect_line Libraries
+# The test benches of the PDK are found but not listed; list one, leave it out again.
+tech library sg13g2_tests on
+tech expect_line sg13g2_tests
+tech library sg13g2_tests off
+tech create
+expect_project ihp_demo
+
+# --- The Technology tab -------------------------------------------------------------
+panel Technology
+tech expect pdk.name ihp-sg13g2
+tech expect klayout.dbu 0.001
+tech expect catalog.pdk ihp-sg13g2
+tech expect catalog.klayout.layers.0.name Substrate.drawing
+# Every page draws (a frame or two each).
+tech page Layers
+wait 0.2
+tech page Models
+wait 0.2
+tech page Devices
+wait 0.2
+tech page Libraries
+wait 0.2
+tech page Everything
+wait 0.2
+tech page Overview
+
+# --- The tools open with the PDK's set-up ---------------------------------------------
+# A symbol of the PDK opens in the embedded xschem, which has read the PDK's xschemrc:
+# the variable it sets names the model folder of this PDK.
+open sg13g2_pr sg13_lv_nmos symbol
+wait_frame
+expect_documents 1
+tcl_expect 1 file isdir $SG13G2_MODELS
+tcl_expect ihp-sg13g2 set PDK
+
+# --- Rescan while a tab is open: offer to reopen it ------------------------------------
+tech rescan files
+tech expect_rescanned
+tech expect_offer on
+tech restart on
+wait_frame
+expect_documents 1
+tech expect_offer off
+tcl_expect 1 file isdir $SG13G2_MODELS
+
+# --- Leaving a PDK library out of the project ---------------------------------------
+close_tab
+expect_documents 0
+tech expect xschem.libraries.0.name sg13g2_pr
+tech expect xschem.libraries.0.enabled yes
+tech library sg13g2_pr off
+tech expect xschem.libraries.0.enabled no
+tech library sg13g2_pr on
+tech expect xschem.libraries.0.enabled yes
+quit

@@ -209,6 +209,8 @@ impl View for Document {
     }
 
     fn ui(&mut self, ui: &mut Ui, ctx: &mut AppCtx) {
+        // The notice of a file that changed on disk behind the document's back.
+        crate::background::stale_ui(self, ui, ctx);
         self.view_mut().ui(ui, ctx);
     }
 

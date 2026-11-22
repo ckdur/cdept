@@ -39,6 +39,7 @@ serde_json = "1"
 rfd = "0.18"
 ron = "0.11"
 tempfile = "3"
+toml = "1"
 toml_edit = "0.25"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

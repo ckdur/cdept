@@ -263,31 +263,24 @@ fn start_chooser(window: &Window, ctx: &Context) -> Chooser {
         .split_whitespace()
         .map(str::to_string)
         .collect();
-    let title = window.title.clone();
-    let (sender, result) = mpsc::channel();
-    let ctx = ctx.clone();
-    std::thread::spawn(move || {
-        let mut dialog = rfd::FileDialog::new();
-        if !title.is_empty() {
-            dialog = dialog.set_title(title);
-        }
-        if !dir.is_empty() {
-            dialog = dialog.set_directory(dir);
-        }
-        if !file.is_empty() {
-            dialog = dialog.set_file_name(file);
-        }
-        if !extensions.is_empty() {
-            dialog = dialog.add_filter("xschem", &extensions);
-        }
-        let chosen = match mode.as_str() {
-            "save" => dialog.save_file(),
-            "directory" => dialog.pick_folder(),
-            _ => dialog.pick_file(),
-        };
-        let _ = sender.send(chosen);
-        ctx.request_repaint();
-    });
+    // The desktop's file dialog, or CDePT's own path prompt where there is none.
+    let request = crate::pathfield::Request {
+        kind: match mode.as_str() {
+            "save" => crate::pathfield::Kind::SaveFile,
+            "directory" => crate::pathfield::Kind::Folder,
+            _ => crate::pathfield::Kind::File,
+        },
+        title: window.title.clone(),
+        directory: (!dir.is_empty()).then(|| PathBuf::from(&dir)),
+        file_name: (!file.is_empty()).then(|| file.clone()),
+        filters: if extensions.is_empty() {
+            Vec::new()
+        } else {
+            vec![("xschem".into(), extensions)]
+        },
+        ..Default::default()
+    };
+    let result = crate::pathfield::ask_here(ctx, request);
     Chooser {
         path: window.path.clone(),
         result,

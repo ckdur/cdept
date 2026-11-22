@@ -825,7 +825,7 @@ pub fn layout_view(
     if !create {
         return Err(eyre!("{library}/{cell} has no layout view"));
     }
-    let file = lib.create_view(cell, crate::Template::GdsLayout)?;
+    let file = lib.create_view_with(cell, crate::Template::GdsLayout, &project.template_setup())?;
     project.rescan();
     Ok(file)
 }

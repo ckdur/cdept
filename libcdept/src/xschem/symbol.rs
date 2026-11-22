@@ -474,7 +474,7 @@ pub(crate) fn follow_cell(
                     continue;
                 }
                 match layout {
-                    LibraryLayout::Flat => None,
+                    LibraryLayout::Flat | LibraryLayout::Ref => None,
                     LibraryLayout::Cells => {
                         if let Some(last) = inside.last_mut()
                             && let Some(rest) = last.strip_prefix(old)

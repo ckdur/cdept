@@ -415,9 +415,13 @@ check colour-unknown {[catch {cdept::colour nosuchcolour}]}
 check_eq colour-winfo-rgb [winfo rgb . {Deep Pink}] {65535 5140 37779}
 
 # --- the selection, for the Inspector --------------------------------------------------
-check_eq selection-empty [cdept::selection] {count 0 instances {} wires 0 texts 0 nets {}}
+# `path` and `schematic` say where in the hierarchy the selection is; checked apart.
+check_eq selection-empty [dict remove [cdept::selection] path schematic] \
+  {count 0 instances {} wires 0 texts 0 nets {}}
+check_eq selection-path [dict get [cdept::selection] path] .
+check_eq selection-schematic [file tail [dict get [cdept::selection] schematic]] tb_buf.sch
 xschem select instance x1
-check_eq selection-instance [cdept::selection] \
+check_eq selection-instance [dict remove [cdept::selection] path schematic] \
   {count 1 instances {{x1 logic/buf/symbol/buf.sym name=x1}} wires 0 texts 0 nets {}}
 xschem select instance C1
 set s [cdept::selection]

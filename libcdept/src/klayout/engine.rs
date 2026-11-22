@@ -349,7 +349,24 @@ impl Engine {
         height: u32,
         out: &Path,
     ) -> Result<()> {
+        self.render_cell_png(refs, None, width, height, out)
+    }
+
+    /// [`Engine::render_png`] of one cell of the root file: `cell` names a cell of a
+    /// file that holds several (a standard-cell GDS, see [`crate::Entry::member`]);
+    /// `None` draws the file's top cell.
+    pub fn render_cell_png(
+        &mut self,
+        refs: &RefTable,
+        cell: Option<&str>,
+        width: u32,
+        height: u32,
+        out: &Path,
+    ) -> Result<()> {
         let mut params = self.options.open_params(refs, false);
+        if let (Value::Object(map), Some(cell)) = (&mut params, cell) {
+            map.insert("cell".into(), cell.into());
+        }
         if let Value::Object(map) = &mut params {
             map.insert("width".into(), width.into());
             map.insert("height".into(), height.into());

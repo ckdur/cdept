@@ -138,6 +138,8 @@ impl View for InspectorView {
         if let Some(error) = &lib.error {
             ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {error}"));
         }
+        // Files of the library (or the selected cell) that are part of no view.
+        crate::library_dialog::unrecognised_selected(ui, ctx);
 
         let Some(cell) = ctx.selected_cell() else {
             return;
@@ -184,6 +186,10 @@ impl View for InspectorView {
             if let Some(file) = &entry.main_file {
                 row(ui, "File", file.display().to_string());
             }
+            // What the file says about the cell (LEF, Liberty, netlists, …).
+            for (name, value) in super::contained::facts(ui, entry, &cell.name).iter() {
+                row(ui, name, value);
+            }
         });
         let mut fix = None;
         if let Some(u) = view_link(&ctx.links, entry) {
@@ -229,6 +235,8 @@ impl View for InspectorView {
             Some(Format::XschemSchematic | Format::XschemSymbol)
         );
         let main_file = entry.main_file.clone();
+        // Of a file that holds several cells, the one this view is.
+        let member = entry.member.clone();
         if let (true, Some(file)) = (drawable, main_file.clone()) {
             ui.add_space(6.0);
             ctx.engines.preview(ui, project, &file);
@@ -236,7 +244,8 @@ impl View for InspectorView {
         // A picture of a layout, drawn by a KLayout of its own.
         if let (true, Some(file)) = (layout, main_file) {
             ui.add_space(6.0);
-            ctx.engines.layout_preview(ui, project, &file);
+            ctx.engines
+                .layout_member_preview(ui, project, &file, member.as_deref());
         }
     }
 }

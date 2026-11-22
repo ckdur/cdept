@@ -363,6 +363,32 @@ pub fn resolve(project: &Project, file: &Path) -> RefTable {
     table
 }
 
+/// The references of one layout file, not followed further: each ghost name of `file`
+/// resolved as [`resolve`] does (sidecar first, then by searching the libraries).
+/// For the reference index (`crate::hierarchy`).
+pub fn resolve_file(project: &Project, file: &Path) -> FileRefs {
+    let meta = read_meta(file);
+    let mut entry = FileRefs {
+        label: file_label(project, file, meta.as_ref()),
+        read_only: locate(project, file).is_some_and(|(lib, _, _)| lib.read_only),
+        refs: BTreeMap::new(),
+        pins: BTreeMap::new(),
+    };
+    for name in ghosts_of(file) {
+        let r = resolve_name(project, meta.as_ref(), &name);
+        entry.refs.insert(
+            name,
+            Ref {
+                file: r.file,
+                label: r.label,
+                bbox: r.bbox,
+                reason: r.reason,
+            },
+        );
+    }
+    entry
+}
+
 /// Write the sidecar of the saved file from the helper's report.
 ///
 /// The file's own library/cell/view/top are kept from its sidecar, or taken from the

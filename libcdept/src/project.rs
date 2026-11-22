@@ -21,8 +21,23 @@
 //! when set, the environment's variables otherwise (see [`Pdk`]). `layout = "cells" | "flat"` (see [`LibraryLayout`]) is detected
 //! from the folder when left out. The file is meant to be edited by hand as well as by
 //! CDePT, so edits made here keep its comments and formatting.
+//!
+//! `format = 1` says which format of the file this is (a newer one loads with a
+//! warning), and `[suffixes]` what a file suffix means in this project
+//! (`".lib" = "spice"`; see [`crate::formats`]). Definitions are changed where they are
+//! defined, also in an included file: [`crate::project_edit`].
+//!
+//! Two more files may sit next to it (docs/TECH.md):
+//!
+//! - `tech.toml` ([`crate::tech`]): the technology snapshot, what CDePT read out of the
+//!   PDK when the project was set up for it. It gives the defaults for `[xschem] rc`
+//!   and `[klayout]` and brings the PDK's libraries (read-only). Whatever `cdept.toml`
+//!   says wins over it.
+//! - `cdept.local.toml` ([`LOCAL_FILE`]): what differs per user and machine and is not
+//!   committed: `pdk_root`, and an `[env]` table of variables for `$VAR` in paths, also
+//!   given to every tool. It wins over `cdept.toml`.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -30,20 +45,41 @@ use eyre::{Context, Result, bail, eyre};
 use toml_edit::{DocumentMut, InlineTable, Item, TableLike, Value, value};
 
 use crate::library::{self, validate_name};
-use crate::technology::Pdk;
+use crate::tech::{Catalog, PdkDir, Tech};
+use crate::technology::{Pdk, Resolved, Source};
 use crate::{Library, LibraryLayout};
 
 /// The project file, in the project's root folder.
 pub const PROJECT_FILE: &str = "cdept.toml";
 
+/// The user's own settings for a project, next to the project file and not meant for
+/// version control: `pdk_root` and `[env]`.
+pub const LOCAL_FILE: &str = "cdept.local.toml";
+
+const NEW_LOCAL: &str = r#"# CDePT settings of this user and this machine for the project next to this file.
+# Not for version control (CDePT adds the file to .gitignore). What is set here wins
+# over cdept.toml.
+
+# Where PDKs are installed on this machine ($PDK_ROOT):
+# pdk_root = "/opt/ext/OpenPDKs"
+
+# Variables for $VAR in the project's paths, also given to every tool CDePT starts:
+# [env]
+# MY_LIBS = "/work/libs"
+"#;
+
 const NEW_PROJECT: &str = r#"# CDePT project file. Edit it by hand or from the Library Manager.
+format = 1
 name = ""
 
-# The PDK: its name ($PDK) and the folder PDKs are installed in ($PDK_ROOT). What is
-# left out is taken from the environment CDePT is started in. Both are also used in
-# the paths below and in the environment of every tool CDePT starts.
+# The PDK: its name ($PDK). The folder PDKs are installed in ($PDK_ROOT) differs per
+# machine: it is `pdk_root` in cdept.local.toml next to this file (not committed), else
+# PDK_ROOT of the environment CDePT is started in. Both are used in the paths below
+# and given to every tool CDePT starts.
+# `cdept init --technology <pdk>` and `cdept tech scan` read the PDK's files and write
+# tech.toml next to this file: tool set-ups, decks, model corners, the PDK's libraries.
+# What is set in this file wins over tech.toml.
 # technology = "ihp-sg13g2"
-# pdk_root = "/opt/ext/OpenPDKs"
 
 # Libraries, as  name = "folder"  (relative to this file; $VAR and ~ are expanded).
 # Long form, for reference libraries such as PDK primitives:
@@ -52,14 +88,20 @@ name = ""
 # (<library>/<cell>.<ext>, one view per file); detected from the folder when left out.
 [libraries]
 
+# What a file suffix means in this project, where CDePT's guess is wrong or missing
+# (spice, cdl, verilog, liberty, gds, …; "none": not a design file):
+#   [suffixes]
+#   ".lib" = "spice"
+#   ".net" = "spice"
+
 # Start-up file of the PDK for the embedded xschem (it is read before the libraries
-# above are added to xschem's search path):
+# above are added to xschem's search path; default: the one tech.toml names):
 #   [xschem]
 #   rc = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/xschemrc"
 
 # The embedded KLayout: folders for KLAYOUT_PATH (default: the PDK's libs.tech/klayout),
 # the technology (a name or a .lyt file), the layer properties (.lyp) and the DRC and
-# LVS decks (default: found in the KLAYOUT_PATH folders):
+# LVS decks (defaults: what tech.toml names, else found in the KLAYOUT_PATH folders):
 #   [klayout]
 #   path = ["$PDK_ROOT/ihp-sg13g2/libs.tech/klayout"]
 #   tech = "sg13g2"
@@ -86,7 +128,7 @@ pub struct AddLibrary {
     pub create: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Project {
     /// The folder holding `cdept.toml`.
     pub root: PathBuf,
@@ -97,15 +139,26 @@ pub struct Project {
     /// `technology` as written in the project file: the PDK name. [`Project::pdk`] has
     /// the value in use, which may come from the environment.
     pub technology: Option<String>,
-    /// `pdk_root` as written in the project file (`$VAR` and `~` not expanded).
+    /// `pdk_root` as written (`$VAR` and `~` not expanded): the one of the user's
+    /// `cdept.local.toml`, else the one of the project file.
     pub pdk_root: Option<String>,
-    /// `$PDK_ROOT` and `$PDK` as resolved: the project file first, then the environment.
+    /// `[env]` of the user's `cdept.local.toml`, expanded: variables for `$VAR` in the
+    /// project's paths, also given to every tool ([`Project::tool_env`]).
+    pub local_env: BTreeMap<String, String>,
+    /// `$PDK_ROOT` and `$PDK` as resolved: the user's local file, the project file,
+    /// the technology snapshot (its PDK name), then the environment.
     pub pdk: Pdk,
     /// Start-up files (`xschemrc`, Tcl) the embedded xschem reads before the project's
     /// libraries are added, typically the PDK's. From `[xschem] rc = …`.
     pub xschem_rc: Vec<PathBuf>,
     /// Settings of the embedded KLayout, from `[klayout]`.
     pub klayout: KlayoutSettings,
+    /// The technology snapshot (`tech.toml` next to the project file), when the
+    /// project has one. See [`crate::tech`].
+    pub tech: Option<Tech>,
+    /// The snapshot is in use: it was made for the project's PDK. (One made for
+    /// another PDK stays in [`Project::tech`], with a warning, and is not used.)
+    pub tech_in_use: bool,
     /// Libraries in definition order: the project file first, then included files.
     pub libraries: Vec<Library>,
     /// Problems found while loading that did not prevent it.
@@ -182,7 +235,8 @@ impl Project {
         Self::create_with(dir, name, None, None)
     }
 
-    /// Like [`Project::create`], also setting `technology` and `pdk_root`.
+    /// Like [`Project::create`], also setting `technology` (in the project file) and
+    /// `pdk_root` (in the user's `cdept.local.toml`, as it differs per machine).
     pub fn create_with(
         dir: &Path,
         name: Option<&str>,
@@ -204,13 +258,28 @@ impl Project {
         };
         let mut doc: DocumentMut = NEW_PROJECT.parse().expect("the template is valid TOML");
         doc["name"] = value(name);
-        for (key, setting) in [("technology", technology), ("pdk_root", pdk_root)] {
-            if let Some(setting) = setting.filter(|s| !s.trim().is_empty()) {
-                doc[key] = value(setting.trim());
-            }
+        if let Some(technology) = technology.filter(|s| !s.trim().is_empty()) {
+            doc["technology"] = value(technology.trim());
         }
         write(&file, &doc.to_string())?;
+        if let Some(pdk_root) = pdk_root.filter(|s| !s.trim().is_empty()) {
+            set_local_pdk_root(dir, Some(pdk_root.trim()))?;
+        }
         Self::load(dir)
+    }
+
+    /// Create a project in `dir` for the PDK `pdk`, with the snapshot `tech` and
+    /// `catalog` of a scan (see [`crate::tech::scan`]).
+    pub fn create_for_pdk(
+        dir: &Path,
+        name: Option<&str>,
+        pdk: &PdkDir,
+        tech: &Tech,
+        catalog: &Catalog,
+    ) -> Result<Project> {
+        let mut project = Self::create(dir, name)?;
+        project.set_technology(pdk, tech, catalog)?;
+        Ok(project)
     }
 
     /// Load a project from its folder or its `cdept.toml`.
@@ -248,20 +317,54 @@ impl Project {
             }
         };
         let technology = text("technology")?;
-        let pdk_root = text("pdk_root")?;
         let mut warnings = Vec::new();
+        // The format of the file; its `[suffixes]` apply to all that is loaded below.
+        let _suffixes = crate::project_edit::loading(&doc, &file, &mut warnings);
+        // The user's own file: the PDK folder of this machine and more variables.
+        let local = Local::read(&root, env, &mut warnings);
+        let lookup = |name: &str| local.env.get(name).cloned().or_else(|| env(name));
+        let (pdk_root, root_source) = match (&local.pdk_root, text("pdk_root")?) {
+            (Some(local), _) => (Some(local.clone()), Source::Local),
+            (None, project) => (project, Source::Project),
+        };
         // `pdk_root` may use `$VAR` and `~`, but not `$PDK_ROOT` itself.
         let expanded_root =
             pdk_root
                 .as_deref()
-                .and_then(|raw| match expand(raw, env).map(|e| root.join(e)) {
-                    Ok(path) => Some(path.to_string_lossy().into_owned()),
+                .and_then(|raw| match expand(raw, lookup).map(|e| root.join(e)) {
+                    Ok(path) => Some(Resolved {
+                        value: path.to_string_lossy().into_owned(),
+                        source: root_source,
+                    }),
                     Err(e) => {
                         warnings.push(format!("pdk_root '{raw}': {e}; using the environment"));
                         None
                     }
                 });
-        let pdk = Pdk::resolve(expanded_root, technology.as_deref(), env, &mut warnings);
+        // The snapshot: a project that does not name its PDK takes the snapshot's.
+        let tech = match crate::tech::file::load_tech_with(&root, &mut warnings) {
+            Ok(tech) => tech,
+            Err(e) => {
+                warnings.push(format!("{e:#}"));
+                None
+            }
+        };
+        let snapshot_pdk = tech
+            .as_ref()
+            .map(|t| t.pdk.name.clone())
+            .filter(|name| !name.is_empty());
+        let mut pdk = Pdk::resolve_from(
+            expanded_root,
+            technology.as_deref().or(snapshot_pdk.as_deref()),
+            &lookup,
+            &mut warnings,
+        );
+        if technology.is_none()
+            && let Some(name) = &mut pdk.name
+            && snapshot_pdk.is_some()
+        {
+            name.source = Source::Snapshot;
+        }
         let mut project = Project {
             name: text("name")?.unwrap_or_else(|| {
                 root.file_name()
@@ -271,20 +374,173 @@ impl Project {
             description: text("description")?,
             technology,
             pdk_root,
+            local_env: local.env,
             pdk,
             xschem_rc: Vec::new(),
             klayout: KlayoutSettings::default(),
+            tech,
+            tech_in_use: false,
             root,
             file: file.clone(),
             libraries: Vec::new(),
             warnings,
             env: EnvFn(env),
         };
+        project.check_snapshot();
         project.load_xschem_rc(&doc);
         project.load_klayout(&doc);
+        project.apply_snapshot();
         let mut seen = HashSet::from([file.clone()]);
         project.load_definitions(&file, &doc, &mut seen)?;
+        project.load_snapshot_libraries();
+        crate::project_edit::after_load(&mut project);
         Ok(project)
+    }
+
+    /// Is the snapshot made for the project's PDK, and is that PDK on this machine?
+    /// Sets [`Project::tech_in_use`]; says in `warnings` why not.
+    fn check_snapshot(&mut self) {
+        let Some(tech) = &self.tech else {
+            return;
+        };
+        let made_for = tech.pdk.name.as_str();
+        if let Some(name) = self.pdk.var("PDK")
+            && !made_for.is_empty()
+            && name != made_for
+        {
+            self.warnings.push(format!(
+                "{} was made for the PDK \"{made_for}\" but the project uses \"{name}\": \
+                 it is not used; run `cdept tech refresh` to make it again",
+                crate::tech::TECH_FILE
+            ));
+            return;
+        }
+        self.tech_in_use = true;
+        match self.pdk.var("PDK_ROOT") {
+            None => self.warnings.push(format!(
+                "{} names files below $PDK_ROOT, which is not set: set `pdk_root` in \
+                 {LOCAL_FILE} or PDK_ROOT in the environment",
+                crate::tech::TECH_FILE
+            )),
+            Some(root) if !made_for.is_empty() && !Path::new(root).join(made_for).is_dir() => {
+                self.warnings.push(format!(
+                    "the PDK \"{made_for}\" is not in {root}: set `pdk_root` in {LOCAL_FILE} \
+                     to the folder that holds it on this machine"
+                ))
+            }
+            Some(_) => {
+                // The PDK is there: is it still the one that was scanned?
+                if let Some(why) = self.snapshot_stale() {
+                    self.warnings.push(format!(
+                        "{} is out of date ({why}): run `cdept tech refresh`",
+                        crate::tech::TECH_FILE
+                    ));
+                }
+            }
+        }
+    }
+
+    /// A path of the snapshot on this machine; `None` when it cannot be worked out
+    /// (`$PDK_ROOT` not set) or, with `must_exist`, is not there. Nothing is reported:
+    /// [`Project::check_snapshot`] has said what is wrong with the PDK folder.
+    fn snapshot_path(&self, path: &crate::tech::TechPath, must_exist: bool) -> Option<PathBuf> {
+        let path = self.root.join(path.resolve(|name| self.var(name)).ok()?);
+        (!must_exist || path.exists()).then_some(path)
+    }
+
+    /// Fill what the project file leaves open from the snapshot: `[xschem] rc` and the
+    /// `[klayout]` settings. What the project file sets stays.
+    fn apply_snapshot(&mut self) {
+        if !self.tech_in_use {
+            return;
+        }
+        let Some(tech) = self.tech.clone() else {
+            return;
+        };
+        if self.xschem_rc.is_empty()
+            && let Some(rc) = &tech.xschem.rc
+            && let Some(file) = self.snapshot_path(rc, true)
+        {
+            self.xschem_rc.push(file);
+        }
+        let klayout = &tech.klayout;
+        if self.klayout.path.is_empty() {
+            self.klayout.path = klayout
+                .path
+                .iter()
+                .filter_map(|dir| self.snapshot_path(dir, true))
+                .collect();
+        }
+        if self.klayout.tech.is_none() {
+            self.klayout.tech = klayout.tech.clone().or_else(|| {
+                let lyt = self.snapshot_path(klayout.lyt.as_ref()?, true)?;
+                Some(lyt.to_string_lossy().into_owned())
+            });
+        }
+        if self.klayout.layer_properties.is_none() {
+            self.klayout.layer_properties = klayout
+                .layer_properties
+                .as_ref()
+                .and_then(|lyp| self.snapshot_path(lyp, true));
+        }
+        if self.klayout.drc.is_none() {
+            self.klayout.drc = klayout
+                .drc
+                .first()
+                .and_then(|deck| self.snapshot_path(&deck.file, true));
+        }
+        if self.klayout.lvs.is_none() {
+            self.klayout.lvs = klayout
+                .lvs
+                .first()
+                .and_then(|deck| self.snapshot_path(&deck.file, true));
+        }
+    }
+
+    /// The libraries the PDK brings ([`Tech::project_libraries`]: those marked
+    /// `enabled`, each name once), after the project's own: read-only, defined in
+    /// `tech.toml`. A name the project defines wins. A PDK library left out because
+    /// another of its name is listed was noted by the scan (`notes` in `tech.toml`);
+    /// here it is only logged, or every load of the project would warn.
+    fn load_snapshot_libraries(&mut self) {
+        if !self.tech_in_use {
+            return;
+        }
+        let Some(tech) = self.tech.clone() else {
+            return;
+        };
+        let file = crate::tech::file::tech_file(&self.root);
+        let (entries, left_out) = tech.project_libraries();
+        for (listed, other) in &left_out {
+            tracing::debug!(
+                "PDK library '{}': {} is listed, {} is left out",
+                listed.name,
+                listed.path,
+                other.path
+            );
+        }
+        for entry in entries {
+            if self.library(&entry.name).is_some() {
+                // Defined by the project: that one is meant.
+                continue;
+            }
+            let mut library = new_library(&entry.name, Path::new(entry.path.as_str()), &file);
+            library.read_only = true;
+            match entry.path.resolve(|name| self.var(name)) {
+                Ok(folder) => {
+                    let folder = self.root.join(folder);
+                    library.layout = LibraryLayout::from_name(&entry.layout)
+                        .unwrap_or_else(|| LibraryLayout::detect(&folder));
+                    library.path = folder;
+                    library.scan();
+                }
+                Err(e) => library.error = Some(e),
+            }
+            if library.description.is_none() {
+                library.description = entry.description.clone();
+            }
+            self.libraries.push(library);
+        }
     }
 
     /// `[xschem] rc`: one file or a list. A file that cannot be found is left out,
@@ -492,11 +748,16 @@ impl Project {
     }
 
     /// The value of environment variable `name` as seen in the project's paths:
-    /// `$PDK_ROOT` and `$PDK` from [`Project::pdk`], the rest from the environment.
+    /// `$PDK_ROOT` and `$PDK` from [`Project::pdk`], then `[env]` of the user's local
+    /// file, the rest from the environment.
     pub fn var(&self, name: &str) -> Option<String> {
         match self.pdk.var(name) {
             Some(value) => Some(value.to_string()),
-            None => (self.env.0)(name),
+            None => self
+                .local_env
+                .get(name)
+                .cloned()
+                .or_else(|| (self.env.0)(name)),
         }
     }
 
@@ -506,22 +767,220 @@ impl Project {
         Ok(base.join(expanded))
     }
 
-    /// Environment variables for every tool CDePT starts for this project: `PDK_ROOT`
-    /// and `PDK` as resolved, set on top of whatever the tool would inherit.
+    /// Environment variables for every tool CDePT starts for this project, set on top
+    /// of whatever the tool would inherit: `[env]` of the user's local file, `PDK_ROOT`
+    /// and `PDK` as resolved (one PDK, also when the environment lists several) and,
+    /// with both known, `PDKPATH` (`$PDK_ROOT/$PDK`, as open_pdks scripts expect it).
     pub fn tool_env(&self) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
-        self.pdk.env()
+        let mut env: Vec<(std::ffi::OsString, std::ffi::OsString)> = self
+            .local_env
+            .iter()
+            .filter(|(name, _)| !matches!(name.as_str(), "PDK_ROOT" | "PDK" | "PDKPATH"))
+            .map(|(name, value)| (name.into(), value.into()))
+            .collect();
+        env.extend(self.pdk.env());
+        if let Some(pdk) = self.pdk.dir() {
+            env.push(("PDKPATH".into(), pdk.dir().into_os_string()));
+        }
+        env
     }
 
-    /// Change `name`, `description`, `technology` and `pdk_root` in the project file,
-    /// keeping its comments and everything else, then load it again (the PDK is
-    /// resolved anew, libraries are scanned again).
+    /// The user's local file of this project (it may not exist).
+    pub fn local_file(&self) -> PathBuf {
+        self.root.join(LOCAL_FILE)
+    }
+
+    /// The project's PDK folder, when `$PDK_ROOT` and `$PDK` are both known.
+    pub fn pdk_dir(&self) -> Option<PdkDir> {
+        self.pdk.dir()
+    }
+
+    /// The snapshot, when the project has one and it is in use (made for its PDK).
+    pub fn snapshot(&self) -> Option<&Tech> {
+        self.tech.as_ref().filter(|_| self.tech_in_use)
+    }
+
+    /// A file or folder the snapshot names, on this machine, when it is there.
+    pub fn tech_path(&self, path: &crate::tech::TechPath) -> Option<PathBuf> {
+        self.snapshot_path(path, true)
+    }
+
+    /// Magic's start-up file of the PDK (`<pdk>.magicrc`), from the snapshot.
+    pub fn magic_rc(&self) -> Option<PathBuf> {
+        self.tech_path(self.snapshot()?.magic.rc.as_ref()?)
+    }
+
+    /// The technology name magic knows the PDK by (the `tech` line of a `.mag` file),
+    /// from the snapshot.
+    pub fn magic_tech(&self) -> Option<String> {
+        self.snapshot()?.magic.tech.clone()
+    }
+
+    /// Netgen's LVS set-up file of the PDK, from the snapshot.
+    pub fn netgen_setup(&self) -> Option<PathBuf> {
+        self.tech_path(self.snapshot()?.netgen.setup.as_ref()?)
+    }
+
+    /// The model sets or simulators the snapshot has models for (`ngspice`, `xyce`).
+    pub fn model_simulators(&self) -> Vec<String> {
+        self.snapshot()
+            .map(|tech| {
+                tech.models
+                    .simulators()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The corner sets of a simulator's models (`tt`, `ff`, `ss`, …), the usual ones
+    /// first. Empty without a snapshot.
+    pub fn model_corners(&self, simulator: &str) -> Vec<String> {
+        self.snapshot()
+            .map(|tech| {
+                let corners = tech.models.corners(simulator);
+                corners.iter().map(|c| c.to_string()).collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The lines a testbench needs for the models of `simulator` at `corner`:
+    /// `.lib <file> <section>` and `.include <file>`, with this machine's paths.
+    pub fn model_lines(&self, simulator: &str, corner: &str) -> Result<Vec<String>, String> {
+        let tech = self.snapshot().ok_or_else(|| {
+            format!(
+                "the project has no technology snapshot ({}): run `cdept tech scan`",
+                crate::tech::TECH_FILE
+            )
+        })?;
+        tech.models.lines(simulator, corner, |name| self.var(name))
+    }
+
+    /// The start-up files a simulator must read for the PDK's models (ngspice's
+    /// `.spiceinit`), those that are on this machine.
+    pub fn model_init(&self, simulator: &str) -> Vec<PathBuf> {
+        let Some((_, set)) = self.snapshot().and_then(|tech| tech.models.set(simulator)) else {
+            return Vec::new();
+        };
+        set.init
+            .iter()
+            .filter_map(|file| self.tech_path(file))
+            .collect()
+    }
+
+    /// The database unit of new layouts in micron: the snapshot's (KLayout
+    /// technology), else 1 nm.
+    pub fn dbu(&self) -> f64 {
+        self.snapshot()
+            .and_then(|tech| tech.klayout.dbu)
+            .filter(|dbu| dbu.is_finite() && *dbu > 0.0)
+            .unwrap_or(0.001)
+    }
+
+    /// What new views of this project start with: the database unit and the magic
+    /// technology of the snapshot. See [`crate::template::Setup`].
+    pub fn template_setup(&self) -> crate::template::Setup {
+        crate::template::Setup {
+            dbu: self.dbu(),
+            magic_tech: self.magic_tech(),
+            ..crate::template::Setup::default()
+        }
+    }
+
+    /// The catalog behind the technology snapshot (`tech.catalog.json`): layers,
+    /// PCells, symbols, cells. Read from disk each time; `None` when there is none.
+    pub fn catalog(&self) -> Result<Option<Catalog>> {
+        crate::tech::file::load_catalog(&self.root)
+    }
+
+    /// Why the snapshot should be made again, if so: it was made for another PDK, or
+    /// the PDK on this machine is another version than the one scanned. Looks at the
+    /// PDK folder ([`crate::tech::discover::info`]), so it is not part of loading.
+    pub fn snapshot_stale(&self) -> Option<String> {
+        let tech = self.tech.as_ref()?;
+        if !self.tech_in_use {
+            return Some(format!(
+                "made for the PDK \"{}\", the project uses \"{}\"",
+                tech.pdk.name,
+                self.pdk.var("PDK").unwrap_or("none")
+            ));
+        }
+        let pdk = self.pdk.dir().filter(|pdk| pdk.dir().is_dir())?;
+        let now = crate::tech::discover::info(&pdk);
+        let changed = |what: &str, then: &Option<String>, now: &Option<String>| match (then, now) {
+            (Some(then), Some(now)) if then != now => Some(format!(
+                "the PDK's {what} was {then} when scanned and is {now} now"
+            )),
+            _ => None,
+        };
+        changed("commit", &tech.pdk.commit, &now.commit)
+            .or_else(|| changed("version", &tech.pdk.version, &now.version))
+    }
+
+    /// Make `pdk` the PDK of this project: write the snapshot (`tech.toml` and
+    /// `tech.catalog.json`), set `technology` in the project file and, when the
+    /// environment does not already say so, the PDK folder of this machine in the
+    /// user's local file; then load the project again.
+    pub fn set_technology(&mut self, pdk: &PdkDir, tech: &Tech, catalog: &Catalog) -> Result<()> {
+        crate::tech::file::save(&self.root, tech, catalog)?;
+        let mut doc = read(&self.file)?;
+        set_key(&mut doc, "technology", &pdk.name);
+        write(&self.file, &doc.to_string())?;
+        // Where would $PDK_ROOT point without the local file?
+        let env = self.env.0;
+        let without = doc
+            .get("pdk_root")
+            .and_then(Item::as_str)
+            .and_then(|raw| expand(raw, env).ok())
+            .map(|path| self.root.join(path))
+            .or_else(|| {
+                env("PDK_ROOT")
+                    .filter(|v| !v.trim().is_empty())
+                    .map(PathBuf::from)
+            });
+        if without
+            .as_deref()
+            .is_some_and(|dir| same_folder(dir, &pdk.root))
+        {
+            if Local::has_pdk_root(&self.root) {
+                set_local_pdk_root(&self.root, None)?;
+            }
+        } else {
+            set_local_pdk_root(&self.root, Some(&pdk.root.to_string_lossy()))?;
+        }
+        self.reload()
+    }
+
+    /// Scan the project's PDK again and write the snapshot. The PDK is the one in use
+    /// (`technology` and the PDK folder); fails when that is not a PDK folder.
+    pub fn scan_technology(&mut self, helpers: bool) -> Result<()> {
+        let pdk = self.pdk.dir().ok_or_else(|| {
+            eyre!(
+                "the project has no PDK: set `technology` in {PROJECT_FILE} and `pdk_root` \
+                 in {LOCAL_FILE} (or PDK and PDK_ROOT in the environment)"
+            )
+        })?;
+        if !pdk.dir().is_dir() {
+            bail!("the PDK folder {} does not exist", pdk.dir().display());
+        }
+        let mut ctx = crate::tech::ScanContext::new(pdk.clone());
+        ctx.helpers = helpers;
+        ctx.env.extend(self.tool_env());
+        let (tech, catalog) = crate::tech::scan(&ctx);
+        self.set_technology(&pdk, &tech, &catalog)
+    }
+
+    /// Change `name`, `description` and `technology` in the project file, keeping its
+    /// comments and everything else, and the PDK folder of this machine (`pdk_root`,
+    /// in the user's local file); then load the project again (the PDK is resolved
+    /// anew, libraries are scanned again).
     pub fn set_settings(&mut self, settings: &Settings) -> Result<()> {
         let mut doc = read(&self.file)?;
         for (key, text) in [
             ("name", &settings.name),
             ("description", &settings.description),
             ("technology", &settings.technology),
-            ("pdk_root", &settings.pdk_root),
         ] {
             let text = text.trim();
             if text.is_empty() {
@@ -532,19 +991,27 @@ impl Project {
                     doc.remove(key);
                 }
             } else {
-                match doc.get_mut(key) {
-                    Some(item) if item.is_value() => {
-                        // Keep the comment after the old value.
-                        let suffix = item.as_value().and_then(|v| v.decor().suffix().cloned());
-                        let mut new = Value::from(text);
-                        if let Some(suffix) = suffix {
-                            new.decor_mut().set_suffix(suffix);
-                        }
-                        *item = Item::Value(new);
-                    }
-                    _ => doc[key] = value(text),
-                }
+                set_key(&mut doc, key, text);
             }
+        }
+        // The PDK folder differs per machine: it goes into the local file. One written
+        // in the project file by hand is kept as long as it is the one meant.
+        let pdk_root = settings.pdk_root.trim();
+        let in_project = doc
+            .get("pdk_root")
+            .and_then(Item::as_str)
+            .map(str::to_string);
+        if pdk_root.is_empty() {
+            doc.remove("pdk_root");
+            if Local::has_pdk_root(&self.root) {
+                set_local_pdk_root(&self.root, None)?;
+            }
+        } else if in_project.as_deref() == Some(pdk_root) {
+            if Local::has_pdk_root(&self.root) {
+                set_local_pdk_root(&self.root, None)?;
+            }
+        } else {
+            set_local_pdk_root(&self.root, Some(pdk_root))?;
         }
         write(&self.file, &doc.to_string())?;
         let env = self.env.0;
@@ -572,11 +1039,8 @@ impl Project {
     /// `path` as it should be written in the project file: relative when inside the
     /// project folder, absolute otherwise.
     pub fn portable_path(&self, path: &Path) -> String {
-        match path.strip_prefix(&self.root) {
-            Ok(rel) if rel.as_os_str().is_empty() => ".".into(),
-            Ok(rel) => rel.to_string_lossy().into_owned(),
-            Err(_) => path.to_string_lossy().into_owned(),
-        }
+        // Also when the folder was reached through a symbolic link to the project.
+        crate::project_edit::portable(&self.root, path)
     }
 
     /// Define a library in the project file. `path` is written as given (it may be
@@ -605,44 +1069,52 @@ impl Project {
             .or_insert(toml_edit::table())
             .as_table_like_mut()
             .ok_or_else(|| eyre!("{}: `libraries` must be a table", self.file.display()))?;
-        let definition = if options.layout.is_none() && !options.read_only {
-            value(path)
-        } else {
+        // The layout is always written: detecting it again later may give another
+        // answer once files are added to the folder.
+        let layout = options
+            .layout
+            .unwrap_or_else(|| LibraryLayout::detect(&folder));
+        let definition = {
             let mut table = InlineTable::new();
             table.insert("path", path.into());
-            if let Some(layout) = options.layout {
-                table.insert("layout", layout.name().into());
-            }
+            table.insert("layout", layout.name().into());
             if options.read_only {
                 table.insert("read_only", true.into());
             }
             Item::Value(Value::InlineTable(table))
         };
         libraries.insert(name, definition);
-        write(&self.file, &doc.to_string())?;
+        write(&self.file, &doc.to_string()).wrap_err_with(|| {
+            if options.create {
+                format!(
+                    "library '{name}' is not defined; its folder {} was made and is left there",
+                    folder.display()
+                )
+            } else {
+                format!("library '{name}' is not defined")
+            }
+        })?;
         self.reload()
     }
 
-    /// Remove a library definition from the project file. The folder is left untouched.
+    /// Remove a library definition from the file that holds it: the project file, or
+    /// the included file that defines the library. The folder is left untouched.
     pub fn remove_library(&mut self, name: &str) -> Result<()> {
         let library = self
             .library(name)
             .ok_or_else(|| eyre!("no library '{name}'"))?;
-        if library.defined_in != self.file {
-            bail!(
-                "library '{name}' is defined in {}; remove it there",
-                library.defined_in.display()
-            );
-        }
-        let mut doc = read(&self.file)?;
+        let file = library.defined_in.clone();
+        // A library the PDK brings is not a definition to remove.
+        self.editable(name)?;
+        let mut doc = read(&file)?;
         let removed = doc
             .get_mut("libraries")
             .and_then(Item::as_table_like_mut)
             .and_then(|libraries| libraries.remove(name));
         if removed.is_none() {
-            bail!("library '{name}' is not in {}", self.file.display());
+            bail!("library '{name}' is not in {}", file.display());
         }
-        write(&self.file, &doc.to_string())?;
+        write(&file, &doc.to_string())?;
         self.reload()
     }
 
@@ -717,16 +1189,9 @@ impl Project {
                 definition(name, table)?
             }
         };
-        let mut library = Library {
-            name: name.to_string(),
-            path: PathBuf::from(path),
-            layout: layout.unwrap_or_default(),
-            read_only,
-            description: None,
-            defined_in: file.to_path_buf(),
-            error: None,
-            cells: Vec::new(),
-        };
+        let mut library = new_library(name, Path::new(path), file);
+        library.layout = layout.unwrap_or_default();
+        library.read_only = read_only;
         // A library that cannot be resolved stays listed, with its error.
         match self.resolve(path, dir) {
             Ok(folder) => {
@@ -772,6 +1237,211 @@ fn definition<'a>(
     Ok((path, layout, read_only))
 }
 
+/// A library not yet read from disk. The one place that fills in every field.
+fn new_library(name: &str, path: &Path, defined_in: &Path) -> Library {
+    Library {
+        name: name.to_string(),
+        path: path.to_path_buf(),
+        layout: LibraryLayout::default(),
+        read_only: false,
+        description: None,
+        defined_in: defined_in.to_path_buf(),
+        error: None,
+        cells: Vec::new(),
+    }
+}
+
+/// Set a top-level text key, keeping the comment after an old value.
+fn set_key(doc: &mut DocumentMut, key: &str, text: &str) {
+    match doc.get_mut(key) {
+        Some(item) if item.is_value() => {
+            let suffix = item.as_value().and_then(|v| v.decor().suffix().cloned());
+            let mut new = Value::from(text);
+            if let Some(suffix) = suffix {
+                new.decor_mut().set_suffix(suffix);
+            }
+            *item = Item::Value(new);
+        }
+        _ => doc[key] = value(text),
+    }
+}
+
+/// Do two paths name the same folder? (Symbolic links and `..` resolved when both
+/// exist; compared as written otherwise.)
+fn same_folder(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// The user's local file (`cdept.local.toml`) as read.
+#[derive(Debug, Default)]
+struct Local {
+    /// `pdk_root` as written.
+    pdk_root: Option<String>,
+    /// `[env]`, values expanded (`$VAR` of the environment, a leading `~`).
+    env: BTreeMap<String, String>,
+}
+
+impl Local {
+    /// Read the local file of the project in `root`. A file that cannot be read or a
+    /// value of the wrong kind becomes a warning; the rest is used.
+    fn read(root: &Path, env: fn(&str) -> Option<String>, warnings: &mut Vec<String>) -> Local {
+        let file = root.join(LOCAL_FILE);
+        let mut local = Local::default();
+        if !file.is_file() {
+            return local;
+        }
+        let doc = match read(&file) {
+            Ok(doc) => doc,
+            Err(e) => {
+                warnings.push(format!("{e:#}"));
+                return local;
+            }
+        };
+        for (key, item) in doc.iter() {
+            match key {
+                "pdk_root" => match item.as_str() {
+                    Some(text) if text.trim().is_empty() => {}
+                    Some(text) => local.pdk_root = Some(text.to_string()),
+                    None => warnings.push(format!("{LOCAL_FILE}: `pdk_root` must be a text")),
+                },
+                "env" => {
+                    let Some(table) = item.as_table_like() else {
+                        warnings.push(format!("{LOCAL_FILE}: `env` must be a table"));
+                        continue;
+                    };
+                    for (name, item) in table.iter() {
+                        let valid = !name.is_empty()
+                            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                            && !name.starts_with(|c: char| c.is_ascii_digit());
+                        match item
+                            .as_str()
+                            .filter(|_| valid)
+                            .map(|text| expand(text, env))
+                        {
+                            Some(Ok(text)) => {
+                                local.env.insert(name.to_string(), text);
+                            }
+                            Some(Err(e)) => {
+                                warnings.push(format!("{LOCAL_FILE}: [env] {name}: {e}"))
+                            }
+                            None => warnings.push(format!(
+                                "{LOCAL_FILE}: [env] {name} must be a variable name with a text"
+                            )),
+                        }
+                    }
+                }
+                other => warnings.push(format!(
+                    "{LOCAL_FILE}: unknown key `{other}` (known: pdk_root, [env])"
+                )),
+            }
+        }
+        local
+    }
+
+    /// Does the local file of the project in `root` set `pdk_root`?
+    fn has_pdk_root(root: &Path) -> bool {
+        read(&root.join(LOCAL_FILE)).is_ok_and(|doc| doc.get("pdk_root").is_some())
+    }
+}
+
+/// Set (or with `None` remove) `pdk_root` in the local file of the project in `root`,
+/// keeping whatever else is in it. A new file starts from a commented template and is
+/// added to `.gitignore` when the project is in a git repository.
+fn set_local_pdk_root(root: &Path, pdk_root: Option<&str>) -> Result<()> {
+    let file = root.join(LOCAL_FILE);
+    let is_new = !file.is_file();
+    if is_new && pdk_root.is_none() {
+        return Ok(());
+    }
+    let mut doc = if is_new {
+        NEW_LOCAL
+            .parse::<DocumentMut>()
+            .expect("the template is valid TOML")
+    } else {
+        read(&file)?
+    };
+    // In a file that still has the template's commented line, the setting takes that
+    // line's place (a key added to the document would come before the comments).
+    const PLACE: &str = "# pdk_root = ";
+    let text_now = doc.to_string();
+    let text = match pdk_root {
+        Some(text) if doc.get("pdk_root").is_none() && text_now.contains(PLACE) => {
+            let line = format!("pdk_root = {}", Value::from(text));
+            let mut out = String::new();
+            let mut placed = false;
+            for old in text_now.lines() {
+                if !placed && old.starts_with(PLACE) {
+                    out.push_str(&line);
+                    placed = true;
+                } else {
+                    out.push_str(old);
+                }
+                out.push('\n');
+            }
+            out
+        }
+        Some(text) => {
+            set_key(&mut doc, "pdk_root", text);
+            doc.to_string()
+        }
+        None => {
+            // The line stays as a comment, so that setting it again finds its place.
+            let mut out = String::new();
+            let mut top_level = true;
+            for old in text_now.lines() {
+                top_level &= !old.trim_start().starts_with('[');
+                let is_key = top_level
+                    && old
+                        .strip_prefix("pdk_root")
+                        .is_some_and(|rest| rest.trim_start().starts_with('='));
+                if is_key {
+                    out.push_str("# ");
+                }
+                out.push_str(old);
+                out.push('\n');
+            }
+            out
+        }
+    };
+    write(&file, &text)?;
+    if is_new && let Err(e) = ignore_in_git(root, LOCAL_FILE) {
+        tracing::warn!("{LOCAL_FILE} could not be added to .gitignore: {e:#}");
+    }
+    Ok(())
+}
+
+/// Add `name` to the `.gitignore` of `root` when `root` is inside a git repository and
+/// the file does not list it yet.
+fn ignore_in_git(root: &Path, name: &str) -> Result<()> {
+    if !root.ancestors().any(|dir| dir.join(".git").exists()) {
+        return Ok(());
+    }
+    let file = root.join(".gitignore");
+    let old = match fs::read_to_string(&file) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).wrap_err_with(|| format!("cannot read {}", file.display())),
+    };
+    let listed = old.lines().any(|line| {
+        let line = line.trim();
+        line == name || line.strip_prefix('/') == Some(name) || line == "*.local.toml"
+    });
+    if listed {
+        return Ok(());
+    }
+    let mut text = old;
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str("# CDePT: this user's settings for the project (PDK folder of this machine)\n");
+    text.push_str(name);
+    text.push('\n');
+    fs::write(&file, text).wrap_err_with(|| format!("cannot write {}", file.display()))
+}
+
 fn read(file: &Path) -> Result<DocumentMut> {
     let text =
         fs::read_to_string(file).wrap_err_with(|| format!("cannot read {}", file.display()))?;
@@ -780,10 +1450,9 @@ fn read(file: &Path) -> Result<DocumentMut> {
 }
 
 /// Write through a temporary file so a failure cannot truncate the project file.
+/// A symbolic link stays one and the permissions are kept: [`crate::project_edit::write_file`].
 fn write(file: &Path, text: &str) -> Result<()> {
-    let tmp = file.with_extension("toml.tmp");
-    fs::write(&tmp, text).wrap_err_with(|| format!("cannot write {}", tmp.display()))?;
-    fs::rename(&tmp, file).wrap_err_with(|| format!("cannot write {}", file.display()))
+    crate::project_edit::write_file(file, text)
 }
 
 /// Expand `$VAR`, `${VAR}` and a leading `~`.
@@ -955,9 +1624,12 @@ layout = "flat"
         // broken (no path), nowhere.toml, duplicate `a`.
         assert_eq!(project.warnings.len(), 3, "{:?}", project.warnings);
 
-        // Libraries from an included file cannot be removed from the project file.
+        // A library from an included file is removed from that file.
+        let included = prims.defined_in.clone();
         let mut project = project;
-        assert!(project.remove_library("prims").is_err());
+        project.remove_library("prims").unwrap();
+        assert!(project.library("prims").is_none());
+        assert!(!fs::read_to_string(included).unwrap().contains("prims ="));
         assert_eq!(Project::find_root(&root.join("libs/a")), Some(root.clone()));
     }
 
@@ -1073,8 +1745,9 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
         let root = tmp.path().join("p");
         let mut project = Project::create_with(&root, Some("p"), Some("ihp"), None).unwrap();
         let text = fs::read_to_string(&project.file).unwrap();
-        assert!(text.contains("# pdk_root = "), "{text}");
+        assert!(text.contains("cdept.local.toml"), "{text}");
         assert!(text.contains("technology = \"ihp\""));
+        assert!(!project.local_file().exists());
         let mut with_comment = text.replace("technology = \"ihp\"", "technology = \"ihp\" # mine");
         with_comment.push_str("# note\n[extra]\nkey = 1\n");
         fs::write(&project.file, with_comment).unwrap();
@@ -1094,8 +1767,13 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
         assert_eq!(project.name, "q");
         assert_eq!(project.technology.as_deref(), Some("sky130A"));
         assert_eq!(project.pdk.var("PDK_ROOT"), Some("/opt/x"));
-        // The keys come before the tables, so they stay top-level keys.
-        assert!(text.find("pdk_root = ").unwrap() < text.find("[libraries]").unwrap());
+        // The PDK folder is this machine's: it is in the local file, not the project's.
+        assert!(!text.contains("pdk_root = \"/opt/x\""), "{text}");
+        let local = fs::read_to_string(project.local_file()).unwrap();
+        assert!(local.contains("pdk_root = \"/opt/x\""), "{local}");
+        assert!(local.contains("# CDePT settings of this user"));
+        assert_eq!(project.pdk_root.as_deref(), Some("/opt/x"));
+        assert_eq!(project.pdk.root.as_ref().unwrap().source, Source::Local);
 
         project
             .set_settings(&Settings {
@@ -1105,6 +1783,337 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
             .unwrap();
         assert!(project.technology.is_none() && project.pdk_root.is_none());
         assert!(project.description.is_none());
+        let local = fs::read_to_string(project.local_file()).unwrap();
+        assert!(!local.contains("\npdk_root = "), "{local}");
+        assert!(local.contains("\n# pdk_root = \"/opt/x\"\n"), "{local}");
+        // Set again: the line is back where it was, below its comment.
+        set_local_pdk_root(&project.root, Some("/opt/y")).unwrap();
+        let local = fs::read_to_string(project.local_file()).unwrap();
+        let at = local
+            .find("\npdk_root = \"/opt/y\"\n")
+            .expect("the setting");
+        assert!(
+            local.find("# Where PDKs are installed").unwrap() < at,
+            "{local}"
+        );
+        assert!(
+            local.starts_with("# CDePT settings of this user"),
+            "{local}"
+        );
+        assert_eq!(local.matches("pdk_root").count(), 1, "{local}");
+    }
+
+    #[test]
+    fn the_local_file_wins_and_brings_variables() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("mine/ihp/libs")).unwrap();
+        fs::create_dir_all(root.join("work/shared")).unwrap();
+        fs::write(
+            root.join(PROJECT_FILE),
+            "name = \"p\"\ntechnology = \"ihp\"\npdk_root = \"/team/pdks\"\n[libraries]\n\
+             prims = \"$PDK_ROOT/$PDK/libs\"\nshared = \"$WORK/shared\"\n",
+        )
+        .unwrap();
+        // Without the local file: the project's folder, and $WORK is not set.
+        let project = Project::load_with(root, |_| None).unwrap();
+        assert_eq!(project.pdk.var("PDK_ROOT"), Some("/team/pdks"));
+        assert_eq!(project.pdk.root.as_ref().unwrap().source, Source::Project);
+        assert!(project.library("shared").unwrap().error.is_some());
+
+        fs::write(
+            root.join(LOCAL_FILE),
+            "pdk_root = \"mine\"\nshade = 1\n[env]\nWORK = \"~/work\"\n\"bad name\" = \"x\"\nN = 3\n",
+        )
+        .unwrap();
+        fn env(name: &str) -> Option<String> {
+            // HOME is the test's folder, given through a variable the test sets up.
+            match name {
+                "HOME" => std::env::var("CDEPT_TEST_LOCAL_HOME").ok(),
+                "PDK_ROOT" => Some("/env/pdks".into()),
+                _ => None,
+            }
+        }
+        // SAFETY: only this test reads the variable.
+        unsafe { std::env::set_var("CDEPT_TEST_LOCAL_HOME", root) };
+        let project = Project::load_with(root, env).unwrap();
+        let root = root.canonicalize().unwrap();
+        assert_eq!(
+            project.pdk.var("PDK_ROOT"),
+            Some(root.join("mine").to_str().unwrap())
+        );
+        assert_eq!(project.pdk.root.as_ref().unwrap().source, Source::Local);
+        assert_eq!(project.pdk_root.as_deref(), Some("mine"));
+        assert_eq!(project.library("prims").unwrap().error, None);
+        assert_eq!(project.library("shared").unwrap().error, None);
+        assert_eq!(
+            project.var("WORK").as_deref(),
+            Some(tmp.path().join("work").to_str().unwrap())
+        );
+        // shade, "bad name", N: three warnings.
+        assert_eq!(project.warnings.len(), 3, "{:?}", project.warnings);
+        let tool_env = project.tool_env();
+        assert!(tool_env.iter().any(|(name, _)| name == "WORK"));
+        assert!(tool_env.contains(&("PDK".into(), "ihp".into())));
+        assert!(tool_env.contains(&("PDKPATH".into(), root.join("mine/ihp").into_os_string())));
+    }
+
+    #[test]
+    fn the_local_file_is_ignored_by_git() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        let root = repo.join("designs/p");
+        Project::create_with(&root, None, Some("ihp"), Some("/opt/pdks")).unwrap();
+        let ignore = fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(ignore.lines().any(|l| l == LOCAL_FILE), "{ignore}");
+        // Not twice, and an existing file keeps its lines.
+        fs::write(root.join(".gitignore"), "/target\n/cdept.local.toml").unwrap();
+        fs::remove_file(root.join(LOCAL_FILE)).unwrap();
+        set_local_pdk_root(&root, Some("/x")).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join(".gitignore")).unwrap(),
+            "/target\n/cdept.local.toml"
+        );
+        // Outside a repository there is nothing to ignore.
+        let alone = tmp.path().join("alone");
+        Project::create_with(&alone, None, None, Some("/opt/pdks")).unwrap();
+        assert!(alone.join(LOCAL_FILE).is_file());
+        assert!(!alone.join(".gitignore").exists());
+    }
+
+    /// A made-up PDK folder and its snapshot, for the tests below.
+    fn snapshot_fixture(pdks: &Path) -> (PdkDir, Tech, Catalog) {
+        let pdk = PdkDir::new(pdks, "mypdk");
+        let klayout = pdk.tech("klayout");
+        fs::create_dir_all(klayout.join("tech")).unwrap();
+        for file in ["tech/my.lyt", "tech/my.lyp", "tech/my.drc", "tech/my.lvs"] {
+            fs::write(klayout.join(file), "").unwrap();
+        }
+        let xschem = pdk.tech("xschem");
+        fs::create_dir_all(xschem.join("my_pr")).unwrap();
+        fs::create_dir_all(xschem.join("my_tests")).unwrap();
+        fs::write(xschem.join("xschemrc"), "").unwrap();
+        fs::write(xschem.join("my_pr/nmos.sym"), "").unwrap();
+        fs::create_dir_all(pdk.tech("magic")).unwrap();
+        fs::write(pdk.tech("magic").join("mypdk.magicrc"), "").unwrap();
+
+        let mut tech = Tech::default();
+        tech.pdk.name = pdk.name.clone();
+        tech.klayout.path = vec![pdk.portable(&klayout)];
+        tech.klayout.tech = Some("my".into());
+        tech.klayout.dbu = Some(0.005);
+        tech.klayout.layer_properties = Some(pdk.portable(&klayout.join("tech/my.lyp")));
+        for (decks, file) in [
+            (&mut tech.klayout.drc, "tech/my.drc"),
+            (&mut tech.klayout.lvs, "tech/my.lvs"),
+        ] {
+            decks.push(crate::tech::klayout::Deck {
+                name: "my".into(),
+                file: pdk.portable(&klayout.join(file)),
+                ..Default::default()
+            });
+        }
+        tech.xschem.rc = Some(pdk.portable(&xschem.join("xschemrc")));
+        for (name, role, enabled) in [("my_pr", "primitives", true), ("my_tests", "tests", false)] {
+            tech.xschem.libraries.push(crate::tech::TechLibrary {
+                name: name.into(),
+                path: pdk.portable(&xschem.join(name)),
+                layout: "flat".into(),
+                role: role.into(),
+                description: Some(format!("{role} of mypdk")),
+                enabled,
+            });
+        }
+        tech.magic.rc = Some(pdk.portable(&pdk.tech("magic").join("mypdk.magicrc")));
+        tech.magic.tech = Some("mypdk".into());
+        tech.netgen.setup = Some(pdk.portable(&pdk.tech("netgen").join("setup.tcl")));
+        (pdk, tech, Catalog::default())
+    }
+
+    #[test]
+    fn a_snapshot_fills_what_the_project_leaves_open() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pdks = tmp.path().join("pdks");
+        let (pdk, tech, catalog) = snapshot_fixture(&pdks);
+        let root = tmp.path().join("p");
+        let project = Project::create_for_pdk(&root, Some("p"), &pdk, &tech, &catalog).unwrap();
+        assert!(project.warnings.is_empty(), "{:?}", project.warnings);
+        assert!(project.tech_in_use && project.snapshot().is_some());
+        assert_eq!(project.technology.as_deref(), Some("mypdk"));
+        assert_eq!(project.pdk.root.as_ref().unwrap().source, Source::Local);
+        assert_eq!(project.pdk_dir(), Some(pdk.clone()));
+        let klayout = pdk.tech("klayout");
+        assert_eq!(project.xschem_rc, [pdk.tech("xschem").join("xschemrc")]);
+        assert_eq!(project.klayout.path, std::slice::from_ref(&klayout));
+        assert_eq!(project.klayout_path(), std::slice::from_ref(&klayout));
+        assert_eq!(project.klayout.tech.as_deref(), Some("my"));
+        assert_eq!(
+            project.klayout.layer_properties,
+            Some(klayout.join("tech/my.lyp"))
+        );
+        assert_eq!(project.klayout.drc, Some(klayout.join("tech/my.drc")));
+        assert_eq!(project.klayout.lvs, Some(klayout.join("tech/my.lvs")));
+        assert_eq!(
+            project.magic_rc(),
+            Some(pdk.tech("magic").join("mypdk.magicrc"))
+        );
+        assert_eq!(project.magic_tech().as_deref(), Some("mypdk"));
+        // Named by the snapshot but not on this machine.
+        assert_eq!(project.netgen_setup(), None);
+        assert_eq!(project.dbu(), 0.005);
+        assert_eq!(
+            project.template_setup().magic_tech.as_deref(),
+            Some("mypdk")
+        );
+        // The PDK's enabled libraries are the project's, read-only.
+        let names: Vec<_> = project.libraries.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["my_pr"]);
+        let prims = project.library("my_pr").unwrap();
+        assert!(prims.read_only && prims.error.is_none());
+        assert_eq!(prims.layout, LibraryLayout::Flat);
+        assert_eq!(prims.cells.len(), 1);
+        assert_eq!(
+            prims.defined_in,
+            crate::tech::file::tech_file(&project.root)
+        );
+        assert_eq!(prims.description.as_deref(), Some("primitives of mypdk"));
+        assert!(project.catalog().unwrap().is_some());
+
+        // What the project file sets wins: its rc, its deck, its own library `my_pr`.
+        fs::create_dir_all(root.join("own_pr")).unwrap();
+        fs::write(root.join("own.rc"), "").unwrap();
+        fs::write(root.join("own.drc"), "").unwrap();
+        let mut text = fs::read_to_string(&project.file).unwrap();
+        text = text.replace("[libraries]\n", "[libraries]\nmy_pr = \"own_pr\"\n");
+        text.push_str(
+            "[xschem]\nrc = \"own.rc\"\n[klayout]\ntech = \"other\"\ndrc = \"own.drc\"\n",
+        );
+        fs::write(&project.file, text).unwrap();
+        let project = Project::load(&root).unwrap();
+        assert!(project.warnings.is_empty(), "{:?}", project.warnings);
+        assert_eq!(project.xschem_rc, [project.root.join("own.rc")]);
+        assert_eq!(project.klayout.tech.as_deref(), Some("other"));
+        assert_eq!(project.klayout.drc, Some(project.root.join("own.drc")));
+        assert_eq!(project.klayout.lvs, Some(klayout.join("tech/my.lvs")));
+        let prims = project.library("my_pr").unwrap();
+        assert_eq!(prims.path, project.root.join("own_pr"));
+        assert!(!prims.read_only);
+        assert_eq!(project.libraries.len(), 1);
+    }
+
+    #[test]
+    fn a_snapshot_for_another_pdk_or_machine_is_reported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pdks = tmp.path().join("pdks");
+        let (pdk, mut tech, catalog) = snapshot_fixture(&pdks);
+        // The PDK has a symbol library and a reference library of one name.
+        tech.xschem.libraries.push(crate::tech::TechLibrary {
+            name: "my_pr".into(),
+            path: pdk.portable(&pdk.refs().join("my_pr")),
+            layout: "flat".into(),
+            role: "primitives".into(),
+            description: None,
+            enabled: true,
+        });
+        // And one whose symbols are a folder inside its reference library: the outer
+        // folder is the library, whichever comes first.
+        fs::create_dir_all(pdk.refs().join("my_cells/sym/xschem")).unwrap();
+        fs::create_dir_all(pdk.refs().join("my_io/sym/xschem")).unwrap();
+        for (name, path) in [
+            ("my_cells", "my_cells/sym/xschem"),
+            ("my_cells", "my_cells"),
+            ("my_io", "my_io"),
+            ("my_io", "my_io/sym/xschem"),
+        ] {
+            tech.xschem.libraries.push(crate::tech::TechLibrary {
+                name: name.into(),
+                path: pdk.portable(&pdk.refs().join(path)),
+                layout: "flat".into(),
+                role: "stdcells".into(),
+                description: None,
+                enabled: true,
+            });
+        }
+        let (_, left_out) = tech.project_libraries();
+        assert_eq!(left_out.len(), 1);
+        assert_eq!(left_out[0].1.path, pdk.portable(&pdk.refs().join("my_pr")));
+        let root = tmp.path().join("p");
+        let mut project = Project::create_for_pdk(&root, None, &pdk, &tech, &catalog).unwrap();
+        // Told by the scan (its notes), not at every load.
+        assert!(project.warnings.is_empty(), "{:?}", project.warnings);
+        let names: Vec<_> = project.libraries.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["my_pr", "my_cells", "my_io"]);
+        assert_eq!(
+            project.library("my_cells").unwrap().path,
+            pdk.refs().join("my_cells")
+        );
+        assert_eq!(
+            project.library("my_io").unwrap().path,
+            pdk.refs().join("my_io")
+        );
+        assert_eq!(
+            project.library("my_pr").unwrap().path,
+            pdk.tech("xschem").join("my_pr")
+        );
+
+        // Another PDK chosen: the snapshot is kept but not used.
+        project
+            .set_settings(&Settings {
+                name: "p".into(),
+                technology: "otherpdk".into(),
+                pdk_root: pdks.to_string_lossy().into_owned(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(project.tech.is_some() && !project.tech_in_use);
+        assert!(project.snapshot().is_none() && project.libraries.is_empty());
+        assert!(project.xschem_rc.is_empty() && project.klayout.tech.is_none());
+        assert!(
+            project
+                .warnings
+                .iter()
+                .any(|w| w.contains("was made for the PDK \"mypdk\""))
+        );
+        assert!(project.snapshot_stale().unwrap().contains("otherpdk"));
+
+        // The project file names no PDK: the snapshot's is used.
+        let text = fs::read_to_string(&project.file).unwrap();
+        fs::write(&project.file, text.replace("technology = \"otherpdk\"", "")).unwrap();
+        let project = Project::load_with(&root, |_| None).unwrap();
+        assert_eq!(project.pdk.var("PDK"), Some("mypdk"));
+        assert_eq!(project.pdk.name.as_ref().unwrap().source, Source::Snapshot);
+        assert!(project.tech_in_use);
+
+        // The PDK folder of another machine: one warning says what to set.
+        fs::write(project.local_file(), "pdk_root = \"/nowhere/pdks\"\n").unwrap();
+        let project = Project::load_with(&root, |_| None).unwrap();
+        assert!(
+            project
+                .warnings
+                .iter()
+                .any(|w| w.contains("is not in /nowhere/pdks")),
+            "{:?}",
+            project.warnings
+        );
+        assert!(project.xschem_rc.is_empty());
+        assert!(project.library("my_pr").unwrap().error.is_some());
+        // No PDK folder at all.
+        fs::remove_file(project.local_file()).unwrap();
+        let project = Project::load_with(&root, |_| None).unwrap();
+        assert!(
+            project
+                .warnings
+                .iter()
+                .any(|w| w.contains("$PDK_ROOT, which is not set")),
+            "{:?}",
+            project.warnings
+        );
+        // A snapshot that cannot be read is a warning, not a failure.
+        fs::write(crate::tech::file::tech_file(&root), "schema = 3\n").unwrap();
+        let project = Project::load_with(&root, |_| None).unwrap();
+        assert!(project.tech.is_none());
+        assert_eq!(project.warnings.len(), 1, "{:?}", project.warnings);
     }
 
     #[test]

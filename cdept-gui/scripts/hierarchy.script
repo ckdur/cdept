@@ -1,0 +1,68 @@
+# The Hierarchy panel read from the files, Used By, and renaming / moving with what
+# refers to the thing following (docs/GUI-TESTING.md), on examples/buffer.
+# Writes into the project: run it on a copy (cdept-gui/scripts/run.sh does).
+#
+#   cdept-gui/scripts/run.sh cdept-gui/scripts/hierarchy.script
+
+# The hierarchy of the selected cell, from the files: one line per cell used.
+select logic buf
+panel Hierarchy
+hierarchy_mode schematic files
+expect_hierarchy inv ×2 (x1, x2)
+hierarchy_mode layout
+expect_hierarchy inv ×2
+select logic rdiv
+expect_hierarchy rdiv
+
+# Who uses inv: what "Used By…" of the library views shows.
+used_by logic inv
+expect_hierarchy logic/buf/layout  placement ×2
+expect_hierarchy logic/buf/schematic  instance ×2 (x1, x2)
+hierarchy_of selection
+
+# Rename inv while its schematic is open: the plan first, then the files; the tab is
+# opened again at the new place.
+open logic inv schematic
+wait_frame
+expect_documents 1
+refactor rename_cell logic inv inv
+refactor_set name inv_x1
+expect_plan move libs/logic/inv -> libs/logic/inv_x1
+expect_plan 2 instance(s) of logic/inv/symbol/inv.sym -> logic/inv_x1/symbol/inv_x1.sym
+expect_plan structure inv -> inv_x1
+refactor_ok
+expect_listed logic inv_x1 schematic
+expect_not_listed logic inv
+shell grep -c 'C {logic/inv_x1/symbol/inv_x1.sym}' libs/logic/buf/schematic/buf.sch | grep -qx 2
+shell grep -q '"inv_x1"' libs/logic/buf/layout/buf.gds.json
+expect_title inv_x1 (schematic)
+expect_documents 1
+close
+expect_documents 0
+
+# The panel reads the files again after the operation.
+select logic buf
+hierarchy_mode schematic files
+expect_hierarchy inv_x1 ×2 (x1, x2)
+
+# A name that is taken: the dialog stays open with the error.
+refactor rename_cell logic buf inv_x1
+refactor_fails already exists
+refactor_cancel
+
+# Into another library, then the library itself with its folder.
+refactor move_cell logic inv_x1 bench
+expect_plan 2 instance(s) of logic/inv_x1/symbol/inv_x1.sym -> bench/inv_x1/symbol/inv_x1.sym
+refactor_ok
+expect_listed bench inv_x1 symbol
+shell grep -q 'schematic=bench/@symname/schematic/@symname.sch' libs/bench/inv_x1/symbol/inv_x1.sym
+refactor rename_library logic core folder
+expect_plan library 'logic' is defined as 'core'
+refactor_ok
+shell test -d libs/core -a ! -e libs/logic
+shell grep -q 'C {core/buf/symbol/buf.sym}' libs/bench/tb_buf/schematic/tb_buf.sch
+shell grep -q '^core = "libs/core"' cdept.toml
+select core buf
+hierarchy_mode used-by
+expect_hierarchy bench/tb_buf/schematic  instance ×1 (x1)
+quit

@@ -71,6 +71,12 @@ pub enum Dialog {
         /// Also rewrite links that point to another cell's schematic.
         foreign: bool,
     },
+    /// Change a library definition where it is defined (library_dialog.rs).
+    LibraryProperties(crate::library_dialog::Properties),
+    /// What is wrong with the project file and its libraries (library_dialog.rs).
+    Problems,
+    /// Move a cell, rename or copy a view, rename a library (refactor.rs).
+    Refactor(crate::refactor::Refactor),
 }
 
 impl Dialog {
@@ -149,12 +155,17 @@ impl Dialog {
             Self::DeleteView { .. } => "Delete View",
             Self::ProjectSettings(_) => "Project Settings",
             Self::FixLinks { .. } => "Fix Schematic Links",
+            Self::LibraryProperties(_) => "Library Properties",
+            Self::Problems => "Project Problems",
+            Self::Refactor(refactor) => refactor.title(),
         }
     }
 
     fn confirm_label(&self) -> &'static str {
         match self {
-            Self::Error(_) => "Close",
+            Self::Error(_) | Self::Problems => "Close",
+            Self::LibraryProperties(_) => "Save",
+            Self::Refactor(refactor) => refactor.confirm_label(),
             Self::NewLibrary { .. } | Self::NewCell { .. } | Self::NewView { .. } => "Create",
             Self::AddLibrary { .. } => "Add",
             Self::RemoveLibrary { .. } => "Remove",
@@ -172,6 +183,8 @@ pub(crate) struct DialogState {
     error: Option<String>,
     /// The first text field still has to take the keyboard focus.
     focus: bool,
+    /// Delete dialogs: delete for good instead of moving to the trash.
+    permanent: bool,
 }
 
 impl DialogState {
@@ -180,6 +193,7 @@ impl DialogState {
             dialog,
             error: None,
             focus: true,
+            permanent: false,
         }
     }
 }
@@ -213,7 +227,7 @@ pub(crate) fn show(ctx: &Context, app: &mut AppCtx) {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
         ui.add_space(10.0);
-        let is_error = matches!(state.dialog, Dialog::Error(_));
+        let is_error = matches!(state.dialog, Dialog::Error(_) | Dialog::Problems);
         ui.horizontal(|ui| {
             if ui.button(state.dialog.confirm_label()).clicked() {
                 outcome = Outcome::Confirm;
@@ -238,10 +252,51 @@ pub(crate) fn show(ctx: &Context, app: &mut AppCtx) {
         Outcome::Open => app.dialog = Some((win, state)),
         Outcome::Cancel => {}
         Outcome::Confirm => {
+            app.background.removal = crate::background::removal(state.permanent);
             if let Err(e) = apply(&state.dialog, app) {
                 state.error = Some(format!("{e:#}"));
                 app.dialog = Some((win, state));
             }
+        }
+    }
+}
+
+/// Confirm the open dialog, as its button does (for the test driver). `permanent`: a
+/// delete dialog deletes for good instead of moving to the trash.
+pub(crate) fn confirm(app: &mut AppCtx, permanent: bool) -> Result<(), String> {
+    let (_, state) = app.dialog.take().ok_or("no dialog is open")?;
+    app.background.removal = crate::background::removal(permanent);
+    apply(&state.dialog, app).map_err(|e| format!("{e:#}"))
+}
+
+/// The open dialog, for test scripts.
+/// The open dialog.
+pub(crate) fn open(app: &AppCtx) -> Option<&Dialog> {
+    app.dialog.as_ref().map(|(_, state)| &state.dialog)
+}
+
+pub(crate) fn open_mut(app: &mut AppCtx) -> Option<&mut Dialog> {
+    app.dialog.as_mut().map(|(_, state)| &mut state.dialog)
+}
+
+/// The error the open dialog shows, for test scripts.
+pub(crate) fn open_error(app: &AppCtx) -> Option<String> {
+    app.dialog.as_ref()?.1.error.clone()
+}
+
+/// Confirm the open dialog as its button does, for test scripts: a failure keeps it
+/// open with the error.
+pub(crate) fn confirm_open(app: &mut AppCtx) -> Result<()> {
+    let (win, mut state) = app
+        .dialog
+        .take()
+        .ok_or_else(|| eyre!("no dialog is open"))?;
+    match apply(&state.dialog, app) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            state.error = Some(format!("{error:#}"));
+            app.dialog = Some((win, state));
+            Err(error)
         }
     }
 }
@@ -307,6 +362,11 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
         Dialog::Error(message) => {
             ui.label(message.as_str());
         }
+        Dialog::LibraryProperties(properties) => {
+            crate::library_dialog::body(ui, properties, app, focus);
+        }
+        Dialog::Problems => crate::library_dialog::problems_body(ui, app),
+        Dialog::Refactor(refactor) => crate::refactor::body(ui, refactor, app, focus),
         Dialog::ProjectSettings(settings) => {
             grid.show(ui, |ui| {
                 field(ui, "Name", &mut settings.name);
@@ -314,6 +374,7 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
                 field(ui, "Technology", &mut settings.technology);
                 field(ui, "PDK folder", &mut settings.pdk_root);
             });
+            crate::newproject::settings_ui(ui, settings, app);
             ui.small(
                 "Technology is the PDK name ($PDK), e.g. ihp-sg13g2. PDK folder is where PDKs \
                  are installed ($PDK_ROOT), relative to the project file; $VAR and ~ are \
@@ -336,11 +397,14 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
                 if field(ui, "Name", name).changed() && !*custom_path {
                     *path = format!("libs/{name}");
                 }
-                if field(ui, "Folder", path).changed() {
+                // A path field: completion and "Browse…".
+                let root = project.map(|p| p.root.as_path());
+                if crate::pathfield::folder_row(ui, "Folder", path, root) {
                     *custom_path = true;
                 }
             });
             ui.small("The folder is relative to the project and is created if missing.");
+            crate::library_dialog::folder_hint(ui, project, name, path);
         }
         Dialog::AddLibrary {
             name,
@@ -350,13 +414,18 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
         } => {
             grid.show(ui, |ui| {
                 field(ui, "Name", name);
-                field(ui, "Folder", path);
+                // A path field: completion, "Browse…", and the name follows the folder.
+                crate::library_dialog::add_folder_row(ui, project, name, path);
                 ui.label("Layout");
                 egui::ComboBox::from_id_salt("dialog-layout")
                     .selected_text(layout_label(*layout))
                     .show_ui(ui, |ui| {
-                        for option in [None, Some(LibraryLayout::Cells), Some(LibraryLayout::Flat)]
-                        {
+                        for option in [
+                            None,
+                            Some(LibraryLayout::Cells),
+                            Some(LibraryLayout::Flat),
+                            Some(LibraryLayout::Ref),
+                        ] {
                             ui.selectable_value(layout, option, layout_label(option));
                         }
                     });
@@ -366,6 +435,7 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
                 ui.end_row();
             });
             ui.small("$VAR and ~ in the folder are kept as written, e.g. $PDK_ROOT/….");
+            crate::library_dialog::folder_hint(ui, project, name, path);
         }
         Dialog::RemoveLibrary { library } => {
             ui.label(format!("Remove library '{library}' from the project?"));
@@ -425,7 +495,12 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
                 ui.end_row();
                 field(ui, "New name", name);
             });
-            ui.small("Files named after the cell are renamed. Other cells that use it are not updated yet.");
+            let operation = libcdept::refactor::Operation::RenameCell {
+                library: library.clone(),
+                cell: cell.clone(),
+                new: name.trim().to_string(),
+            };
+            crate::refactor::preview(ui, app, &operation);
         }
         Dialog::CopyCell {
             library,
@@ -450,10 +525,18 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
                 ui.end_row();
                 field(ui, "Name", name);
             });
+            let operation = libcdept::refactor::Operation::CopyCell {
+                library: library.clone(),
+                cell: cell.clone(),
+                to_library: to.clone(),
+                new: name.trim().to_string(),
+                hierarchy: false,
+            };
+            crate::refactor::preview(ui, app, &operation);
         }
         Dialog::DeleteCell { library, cell } => {
             ui.label(format!("Delete cell '{cell}' from library '{library}'?"));
-            ui.label(RichText::new("All its views are deleted from disk.").strong());
+            crate::background::delete_note(ui, app, &mut state.permanent, library, cell, None);
         }
         Dialog::DeleteView {
             library,
@@ -461,16 +544,24 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
             view,
         } => {
             ui.label(format!("Delete view '{view}' of '{library} / {cell}'?"));
-            ui.label(RichText::new("Its files are deleted from disk.").strong());
+            crate::background::delete_note(
+                ui,
+                app,
+                &mut state.permanent,
+                library,
+                cell,
+                Some(view),
+            );
         }
     }
 }
 
-fn layout_label(layout: Option<LibraryLayout>) -> &'static str {
+pub(crate) fn layout_label(layout: Option<LibraryLayout>) -> &'static str {
     match layout {
         None => "Detect from the folder",
         Some(LibraryLayout::Cells) => "Cells: library/cell/view/files",
         Some(LibraryLayout::Flat) => "Flat: library/cell.ext",
+        Some(LibraryLayout::Ref) => "Reference: library/format/files (read only)",
     }
 }
 
@@ -497,6 +588,13 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
     }
     if let Dialog::ProjectSettings(settings) = dialog {
         return app.change_settings(settings);
+    }
+    if let Dialog::LibraryProperties(properties) = dialog {
+        return crate::library_dialog::apply(properties, app);
+    }
+    // Renames, copies and moves: with what refers to the thing following.
+    if let Some(operation) = crate::refactor::operation_of(dialog) {
+        return crate::refactor::apply(app, &operation);
     }
     if let Dialog::FixLinks { library, foreign } = dialog {
         let items: Vec<Unlinked> = fixable_links(&app.links, library, *foreign)
@@ -526,6 +624,10 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
     const TARGET: &str = "cdept::library";
     let selection = match dialog {
         Dialog::Error(_) | Dialog::FixLinks { .. } | Dialog::ProjectSettings(_) => return Ok(()),
+        Dialog::LibraryProperties(_) | Dialog::Problems => return Ok(()),
+        Dialog::RenameCell { .. } | Dialog::CopyCell { .. } | Dialog::Refactor(_) => {
+            unreachable!("handled by crate::refactor above")
+        }
         Dialog::NewLibrary { name, path, .. } => {
             let options = AddLibrary {
                 create: true,
@@ -567,7 +669,7 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
                     if target.cell(name).is_some() {
                         return Err(eyre!("'{name}' already exists in library '{lib}'"));
                     }
-                    target.create_view(name, *template)?;
+                    target.create_view_with(name, *template, &project.template_setup())?;
                 }
                 None => {
                     target.create_cell(name)?;
@@ -581,35 +683,17 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
             cell,
             template,
         } => {
-            let file = library(project, lib)?.create_view(cell, *template)?;
+            let file = library(project, lib)?.create_view_with(
+                cell,
+                *template,
+                &project.template_setup(),
+            )?;
             tracing::info!(target: TARGET, "created {}", file.display());
             Selection::view(lib, cell, template.view_name())
         }
-        Dialog::RenameCell {
-            library: lib,
-            cell,
-            name,
-        } => {
-            let name = name.trim();
-            let followed = library(project, lib)?.rename_cell_following(project, cell, name)?;
-            tracing::info!(target: TARGET, "renamed {lib}/{cell} to {name}");
-            report_layouts(&followed);
-            Selection::cell(lib, name)
-        }
-        Dialog::CopyCell {
-            library: lib,
-            cell,
-            to,
-            name,
-        } => {
-            let name = name.trim();
-            library(project, lib)?.copy_cell(cell, &library(project, to)?, name)?;
-            tracing::info!(target: TARGET, "copied {lib}/{cell} to {to}/{name}");
-            Selection::cell(to, name)
-        }
         Dialog::DeleteCell { library: lib, cell } => {
             let orphans = libcdept::layout::follow::placed_by(project, lib, cell, None);
-            library(project, lib)?.delete_cell(cell)?;
+            crate::background::remove_cell(&mut app.background, &library(project, lib)?, cell)?;
             report_layouts(&orphans);
             tracing::info!(target: TARGET, "deleted cell {lib}/{cell}");
             Selection::library(lib)
@@ -620,13 +704,18 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
             view,
         } => {
             let orphans = libcdept::layout::follow::placed_by(project, lib, cell, Some(view));
-            library(project, lib)?.delete_view(cell, view)?;
+            crate::background::remove_view(
+                &mut app.background,
+                &library(project, lib)?,
+                cell,
+                view,
+            )?;
             report_layouts(&orphans);
             tracing::info!(target: TARGET, "deleted view {lib}/{cell}/{view}");
             Selection::cell(lib, cell)
         }
     };
-    project.rescan();
+    crate::background::rescan_after(project, dialog);
     app.refresh_links();
     app.selection = selection;
     app.validate_selection();

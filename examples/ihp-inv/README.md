@@ -1,11 +1,16 @@
 # Example project: ihp-inv
 
 Schematics linked with layouts (docs/LINKING.md) in IHP SG13G2. Needs the PDK:
-`PDK_ROOT` pointing at the folder that holds `ihp-sg13g2` (or `pdk_root` in
-`cdept.toml`), and KLayout (`cdept-klayout/build.sh`).
+`PDK_ROOT` pointing at the folder that holds `ihp-sg13g2` (or `pdk_root` in a
+`cdept.local.toml` next to `cdept.toml`), and KLayout (`cdept-klayout/build.sh`).
 
 ```
-cdept.toml                      technology ihp-sg13g2, [klayout] tech = "sg13g2"
+cdept.toml                      technology ihp-sg13g2, the library `cells`
+tech.toml                       technology snapshot (docs/TECH.md): the PDK's xschemrc,
+                                KLayout technology and decks, model corners, and the
+                                PDK's libraries (sg13g2_pr, sg13g2_stdcell, …); made by
+                                `cdept tech scan`, again by `cdept tech refresh`
+tech.catalog.json               the lists behind it (layers, PCells, symbols, cells)
 libs/cells/inv/schematic/       inverter: sg13_lv_pmos + sg13_lv_nmos, pins A Y VDD VSS
 libs/cells/inv/symbol/          its symbol
 libs/cells/inv/layout/inv.gds   generated from the schematic: two SG13_dev PCells (pmos,

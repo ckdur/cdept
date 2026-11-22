@@ -147,6 +147,29 @@ impl LayoutPreview {
     }
 }
 
+/// What separates the file from the cell in the key of a member's picture.
+const MEMBER_MARK: char = '\u{1f}';
+
+/// The key of the picture of `member` in `file`: the file alone when there is none.
+fn member_key(file: &Path, member: Option<&str>) -> PathBuf {
+    match member {
+        Some(member) => {
+            let mut key = file.as_os_str().to_owned();
+            key.push(format!("{MEMBER_MARK}{member}"));
+            PathBuf::from(key)
+        }
+        None => file.to_path_buf(),
+    }
+}
+
+/// The file and the cell of a [`member_key`].
+fn split_member_key(key: &Path) -> (PathBuf, Option<String>) {
+    match key.to_str().and_then(|text| text.rsplit_once(MEMBER_MARK)) {
+        Some((file, member)) => (PathBuf::from(file), Some(member.to_string())),
+        None => (key.to_path_buf(), None),
+    }
+}
+
 /// A scratch file for a rendered preview (one per process; the job is one at a time).
 fn preview_png() -> PathBuf {
     std::env::temp_dir().join(format!("cdept-layout-preview-{}.png", std::process::id()))
@@ -242,15 +265,27 @@ impl Engines {
     /// Whether the Inspector's picture shows `file`.
     pub fn preview_shows(&self, file: &Path) -> bool {
         self.preview.as_ref().is_some_and(|p| p.shows(file))
-            || self
-                .layout_preview
-                .as_ref()
-                .is_some_and(|p| p.shown.as_ref().is_some_and(|(f, ..)| f == file))
+            || self.layout_preview.as_ref().is_some_and(|p| {
+                p.shown
+                    .as_ref()
+                    .is_some_and(|(f, ..)| split_member_key(f).0 == file)
+            })
     }
 
     /// Draw the picture of the layout `file` (GDS or OASIS), as wide as the space left.
     /// A KLayout of its own draws it (`render`); nothing can change the file.
-    pub fn layout_preview(&mut self, ui: &mut Ui, project: &Project, file: &Path) {
+    /// `member` is one cell of a file that holds several (a cell of a standard-cell
+    /// GDS); `None` draws the file.
+    pub fn layout_member_preview(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        file: &Path,
+        member: Option<&str>,
+    ) {
+        // The pictures are told apart by file and cell: one key for both.
+        let key = member_key(file, member);
+        let file = key.as_path();
         let options = klayout::EngineOptions::for_project(project);
         let setup = (options.cwd.clone(), options.env.clone());
         if self
@@ -303,11 +338,11 @@ impl Engines {
         let failed = preview.error.as_ref().is_some_and(|(f, _)| f == file);
         if preview.job.is_none() && !current && !failed {
             if let Some(file) = preview.wanted.settled(now) {
-                let (render_file, project) = (file.clone(), project.clone());
+                let ((render_file, member), project) = (split_member_key(file), project.clone());
                 let out = preview_png();
                 let pending = preview.service.run(move |engine| {
                     let table = refs::resolve(&project, &render_file);
-                    engine.render_png(&table, size.0, size.1, &out)?;
+                    engine.render_cell_png(&table, member.as_deref(), size.0, size.1, &out)?;
                     Ok(out)
                 });
                 preview.job = Some((file.clone(), size, pending));

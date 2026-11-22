@@ -130,6 +130,10 @@ impl Format {
     /// Split a file name into its stem and format, by suffix only (no file access).
     /// `ota.gds.gz` gives `("ota", Gds)`.
     pub fn split_name(file_name: &str) -> Option<(&str, Format)> {
+        // The project's own suffixes (`[suffixes]` in cdept.toml) go first.
+        if let Some(found) = crate::formats::split_name(file_name, SUFFIXES) {
+            return found;
+        }
         let lower = file_name.to_ascii_lowercase();
         SUFFIXES
             .iter()
@@ -217,6 +221,24 @@ pub struct Entry {
     pub format: Option<Format>,
     /// All files of the view (not recursive), sorted.
     pub files: Vec<PathBuf>,
+    /// The cell's name inside [`Entry::main_file`], when that file holds several cells
+    /// and this view is one of them (a standard-cell GDS, a LEF, a Liberty file, a
+    /// Verilog or SPICE library: see [`crate::container`]). `None`: the file is the
+    /// view. Such a view cannot be renamed, copied or deleted on its own.
+    pub member: Option<String>,
+}
+
+impl Entry {
+    /// The view is one cell of a file that holds several.
+    pub fn is_member(&self) -> bool {
+        self.member.is_some()
+    }
+
+    /// The name of the view's cell inside its main file: [`Entry::member`], else
+    /// `cell` (the name of the cell the view belongs to).
+    pub fn member_or<'a>(&'a self, cell: &'a str) -> &'a str {
+        self.member.as_deref().unwrap_or(cell)
+    }
 }
 
 #[cfg(test)]

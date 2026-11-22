@@ -4,17 +4,29 @@
 //! This crate has no GUI dependencies so it can back both the egui frontend and the
 //! headless CLI.
 
+pub mod category;
 pub mod cell;
+pub mod container;
 pub mod entry;
+pub mod formats;
+pub mod hierarchy;
+pub mod import;
 pub mod klayout;
 pub mod layout;
 pub mod library;
 pub mod link;
 pub mod project;
+pub mod project_edit;
+pub mod refactor;
+pub mod search;
+pub mod tech;
 pub mod technology;
 pub mod template;
 pub mod tools;
+pub mod trash;
+pub mod vcs;
 pub mod version;
+pub mod watch;
 pub mod xschem;
 
 pub use cell::Cell;

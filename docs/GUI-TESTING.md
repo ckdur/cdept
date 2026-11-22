@@ -43,7 +43,12 @@ folder of examples/):
 | `cdept-gui/scripts/layout-checks.script` | Run DRC / Run LVS, the results panel, highlight and zoom (needs `PDK_ROOT=/opt/ext/OpenPDKs PDK=ihp-sg13g2` or similar; not in the default set) | nothing |
 | `cdept-gui/scripts/layout-nets.script` | nets on examples/ihp-inv: Update Connectivity, flylines, a net shown in the layout and highlighted in the schematic, a wire selected in the schematic highlighted in the layout, probing, the flyline style, a short traced live, out of date after an edit with live flylines off, the schematic saved before Update Connectivity (needs the PDK: `PDK_ROOT=/opt/ext/OpenPDKs CDEPT_EXAMPLE=ihp-inv run.sh cdept-gui/scripts/layout-nets.script`) | into the project: run it on a copy |
 | `cdept-gui/scripts/layout-pins.script` | pins on examples/ihp-inv: the Pins panel, a pin removed and undone, added on Metal1, renamed, shown, deleted, the net check's pin statuses; cross-probing through the hierarchy: a device inside x1 selected in buf's layout and in buf's schematic, inside x1 after xschem descended, inv's own layout following the schematic shown inside x1, a net inside x1 highlighted in buf's layout (needs the PDK: `PDK_ROOT=/opt/ext/OpenPDKs CDEPT_EXAMPLE=ihp-inv run.sh cdept-gui/scripts/layout-pins.script`) | into the project: run it on a copy |
+| `cdept-gui/scripts/hierarchy.script` | the Hierarchy panel read from the files (schematic and layout hierarchy, Used By), a cell renamed while its schematic is open (plan, files, tab opened again), a taken name, a cell moved to another library, a library renamed with its folder | into the project: run it on a copy |
 | `cdept-gui/scripts/layout-link.script` | linking buf's schematic with its layout: Generate takes over the inv instances, the Link panel, cross-probing both ways, undo | into the project: run it on a copy |
+| `cdept-gui/scripts/watch.script` | the project follows the disk and git: cells made, renamed and removed by other programs, `cdept.toml` edited by hand, git marks (untracked, added, modified, clean) per view, cell and library, Delete to the trash and for good, a schematic whose file changes behind its back (opened again, or Reload / Keep Mine), the settings (needs git; `run.sh cdept-gui/scripts/watch.script`) | into the project, which becomes a git repository: run it on a copy |
+| `cdept-gui/scripts/watch-layout.script` | the same for layout tabs: a tab's own save is no change behind its back, a file written by another program is opened again in every tab showing it (also the tabs placing the cell), a tab with changes asks | into the project: run it on a copy |
+| `cdept-gui/scripts/libdefs.script` | library definitions: Library Properties (read-only, layout, description, folder), Add Existing Library with its folder field, Remove Library, the project's problems; CDePT's own path prompt for Open Project and New Project (a wrong folder refused, cancel) | into the project and next to it: run it on a copy (`run.sh cdept-gui/scripts/libdefs.script`) |
+| `cdept-gui/scripts/technology.script` | the New Project wizard (PDKs found, scan, summary, libraries, Create), the Technology tab and its pages, a PDK symbol opening with the PDK's `xschemrc` in effect, Rescan with a tab open and the offer to reopen it, listing and leaving out a PDK library (needs IHP SG13G2: `PDK_ROOT=/opt/ext/OpenPDKs run.sh cdept-gui/scripts/technology.script`; the `tech <verb>` commands are listed at the top of the script) | a new project next to the copy |
 
 
 `$PROJECT` in a script stands for the folder of the project being opened.
@@ -195,6 +200,7 @@ and path tools take **clicks**; a box can also be dragged (press, move, release)
 | `expect_notice <text>` | Fail unless a message of the editor (the transient line over the picture, also in the Console) contains the text |
 | `expect_layer <name or source>` | Fail unless the layer list has it |
 | `expect_cell <name> [local\|external\|missing]` | Fail unless the cell tree has this cell (of this kind) |
+| `expect_shown <cell>` | Fail unless the tab shows this cell (a view that is one cell of a file holding several, e.g. a standard cell of a PDK GDS) |
 | `expect_selection <n>` | Fail unless `n` objects are selected |
 | `expect_modified <yes\|no>` | Fail unless the layout does (not) have unsaved changes (the tab's star) |
 | `expect_mode <name>` | Fail unless the editor is in this mode |
@@ -233,6 +239,71 @@ and path tools take **clicks**; a box can also be dragged (press, move, release)
 KLayout reports a changed modified flag with the next request it handles, so the
 `expect_*` commands above ask it for a sign of life while they wait.
 
+## Library definitions and path prompts
+
+CDePT's own dialogs for libraries, and its path prompt (the window with a path field
+that asks for a folder or file; `cdept-gui/src/pathfield.rs`). The system's file dialog
+cannot be answered by a script, CDePT's prompt can. `CDEPT_NATIVE_DIALOG=off` in the
+environment makes CDePT behave as where there is no system dialog: every question for
+a path becomes a prompt.
+
+| Command | Does |
+|---|---|
+| `lib_properties <library>` | Open Library Properties for a library |
+| `pick_folder <open\|new\|library>` | What File › Open Project, New Project (the plain folder question) and Library › Add Existing Library do: the first two open the path prompt, the third the Add Existing Library dialog |
+| `lib_set <field> <value>` | Set a field of the open library dialog: `path`, `read_only` (`yes`/`no`), `layout` (`cells`, `flat`, `ref`, `detect`), `description` in Library Properties; `name`, `path`, `read_only`, `layout` in Add Existing Library; `name`, `path` in New Library |
+| `lib_save` | Confirm the open dialog; fails with the dialog's error |
+| `lib_save_error <text>` | Confirm it and fail unless it is refused with an error containing the text (the dialog stays open) |
+| `lib_cancel` | Close the open dialog |
+| `lib_remove <library>` | Remove Library, confirmed |
+| `expect_lib_error <text>` | Fail unless the open dialog shows an error containing the text |
+| `expect_library <name> <key> <value>` | Fail unless the library has this: `present` (`yes`/`no`), `path` (as written), `folder` (on disk), `layout`, `layout_written` (`detect` when not written), `read_only`, `description`, `cells`, `origin` (`project`, `included`, `pdk`), `unrecognised` (files that are part of no view) |
+| `expect_problem <text\|none>` | Fail unless the project has a problem containing the text (what the line over the library trees counts), or none |
+| `expect_path_prompt <title\|none>` | Fail unless a path prompt with this title is open (or none) |
+| `path_answer <text>` | Type the text into the prompt and press OK; fails when the prompt refuses it |
+| `path_wrong <text>` | The same, failing unless the prompt refuses it (it stays open) |
+| `path_cancel` | Cancel the prompt |
+| `expect_path_note <text>` | Fail unless the prompt's note or error contains the text |
+
+## Hierarchy, Used By, renames that follow references
+
+`expect_hierarchy` and `hierarchy_open` (above) work on whatever the Hierarchy panel
+shows. From the files a line reads `inv ×2 (x1, x2)` (a cell used, how often, through
+which instances); in "Used by" mode `logic/buf/schematic  instance ×2 (x1, x2)`.
+
+| Command | What it does |
+|---|---|
+| `hierarchy_mode <schematic\|layout\|netlist\|hdl\|used-by> [files\|instances]` | The panel's mode. For schematics `instances` is xschem's tree (one line per instance, the default), `files` the tree read from the files |
+| `hierarchy_of <library> <cell>` / `hierarchy_of selection` | Show this cell whatever is selected / follow the document in front and the selection again |
+| `used_by <library> <cell>` | What Used By… in the library views does: the Hierarchy panel shows the users of the cell |
+| `refactor rename_cell <library> <cell> <name>` | Open the Rename Cell dialog. Also: `copy_cell <library> <cell> <to library> <name>`, `move_cell <library> <cell> <to library> [name]`, `copy_hierarchy <library> <cell> <to library> [name]`, `rename_view <library> <cell> <view> <name>`, `copy_view <library> <cell> <view> <to library> <to cell> <name>`, `rename_library <library> <name> [folder]` |
+| `refactor_set <field> <value>` | A field of the open dialog: `name`, `to`, `to_cell`, `folder` (`yes`/`no`) |
+| `expect_plan <text>` | A line of the open dialog's plan (what `cdept cell rename … --dry-run` prints) has this text |
+| `refactor_ok` | Confirm the open dialog; fails if the operation does |
+| `refactor_fails <text>` | Confirm the open dialog; it must fail with this text and stay open |
+| `refactor_cancel` | Close the open dialog |
+
+## Changes on disk, git, trash
+
+Commands of `cdept-gui/src/background/script.rs`. The driver does not go on to the
+next command while the project is being read or a library scanned.
+
+| Command | Does |
+|---|---|
+| `shell <command>` | Run a shell command in the project folder, the way another program changes files (`$PROJECT` is set) |
+| `expect_listed <library> <cell> [<view>]`, `expect_not_listed …` | Fail unless the library views list (do not list) the cell or view; tried for a while, so it also waits for the watcher |
+| `expect_git <state> <library> [<cell> [<view>]]` | Fail unless git says `clean`, `modified`, `untracked`, `added`, `staged`, `ignored`, `conflict` or `none` (not in a repository) |
+| `expect_branch <name>` | Fail unless the project's repository is on this branch |
+| `delete_dialog <library> <cell> [<view>]` | Open the Delete Cell / Delete View dialog |
+| `confirm_dialog [permanent]` | Confirm the open dialog as its button does: a delete goes to the trash, with `permanent` for good |
+| `expect_trashed <path ending>` | Fail unless the last delete moved a file or folder whose path ends like this to the trash |
+| `expect_stale <yes\|no>` | Fail unless the document shows (does not show) the "changed on disk" notice |
+| `stale_answer <reload\|keep>` | Answer the notice |
+| `expect_changed <yes\|no>` | Fail unless the document has (has no) changes of its own |
+| `reload_project` | Project ▸ Reload |
+| `load_project <folder>` | Open another project |
+| `setting <watch\|auto_reload> <on\|off>` | Project ▸ Follow Changes on Disk / Reload Unchanged Documents |
+
 ## Notes
 
 - `tcl` can make the helper report widgets by hand, which is useful to test how a
@@ -242,7 +313,8 @@ KLayout reports a changed modified flag with the next request it handles, so the
   as the helper reports it.
 - `Ctrl+C`, `Ctrl+X` and `Ctrl+V` reach xschem as the keys they are, as with a real
   keyboard.
-- Dialogs that use the desktop's file chooser cannot be answered by a script.
+- The desktop's file chooser cannot be answered by a script; CDePT's own path prompt can
+  (above). With `CDEPT_NATIVE_DIALOG=off` every question for a path is such a prompt.
 - Checks wait up to 8 seconds for the program to get there (a dialog to open, a
   background job to finish) before they fail.
 - A script is fast. Two clicks on the same spot within about half a second are a double

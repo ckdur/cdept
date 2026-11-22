@@ -26,6 +26,13 @@ pub struct Settings {
     /// How flylines and net highlights look in layout tabs (a project's
     /// `[klayout.flylines]` goes on top).
     pub flylines: libcdept::link::nets::FlylineStyle,
+    /// More folders that hold PDKs, looked at when choosing one (New Project).
+    pub pdk_folders: Vec<PathBuf>,
+    /// Follow what changes on disk behind CDePT's back (see `crate::background`).
+    pub watch: bool,
+    /// A document without changes of its own opens its file again when it changed
+    /// on disk; off: it shows a notice like a changed one.
+    pub auto_reload: bool,
 }
 
 impl Default for Settings {
@@ -34,6 +41,9 @@ impl Default for Settings {
             recent_projects: Vec::new(),
             console_level: ConsoleLevel::Info,
             flylines: libcdept::link::nets::FlylineStyle::default(),
+            pdk_folders: Vec::new(),
+            watch: true,
+            auto_reload: true,
         }
     }
 }
@@ -120,6 +130,11 @@ pub enum Action {
         format: NetlistFormat,
     },
     DetectTools,
+    /// Show the users of a cell in the Hierarchy panel.
+    UsedBy(Selection),
+    /// Start the open documents again (not those with unsaved changes), so they run
+    /// with the project's present technology.
+    RestartDocuments,
     /// Show the About dialog over the given window.
     ShowAbout(WindowId),
     Quit,
@@ -299,10 +314,22 @@ pub struct AppCtx {
     pub schematic: Option<ActiveSchematic>,
     /// The native window whose UI is being built.
     pub window: WindowId,
+    /// The technology: the New Project wizard, a rescan of the PDK.
+    pub tech: crate::pdkscan::TechState,
+    /// How many documents are open, refreshed every frame.
+    pub open_documents: usize,
+    /// Renaming and moving with references following: the open documents, requests
+    /// to the Hierarchy panel (refactor.rs).
+    pub refactor: crate::refactor::Shared,
     /// The open modal dialog and the window it belongs to.
     pub(crate) dialog: Option<(WindowId, DialogState)>,
     picker: Option<Picker>,
+    /// The window a folder was last asked for from: its prompt and the dialogs that
+    /// follow belong there.
+    pick_window: WindowId,
     actions: Vec<Action>,
+    /// Watching the files, scanning and git status behind the window.
+    pub background: crate::background::Background,
 }
 
 impl AppCtx {
@@ -317,13 +344,21 @@ impl AppCtx {
             engines: Engines::default(),
             schematic: None,
             window: WindowId::Main,
+            tech: Default::default(),
+            open_documents: 0,
+            refactor: Default::default(),
             dialog: None,
             picker: None,
+            pick_window: WindowId::Main,
             actions: Vec::new(),
+            background: Default::default(),
         }
     }
 
     pub fn request(&mut self, action: Action) {
+        if matches!(action, Action::PickFolder(_)) {
+            self.pick_window = self.window;
+        }
         if !self.actions.contains(&action) {
             self.actions.push(action);
         }
@@ -368,6 +403,7 @@ impl AppCtx {
         }
         self.refresh_links();
         self.validate_selection();
+        crate::pdkscan::after_settings(self, changed);
         Ok(())
     }
 
@@ -430,7 +466,7 @@ impl AppCtx {
         }
     }
 
-    fn set_project(&mut self, project: Project) {
+    pub(crate) fn set_project(&mut self, project: Project) {
         let cells: usize = project.libraries.iter().map(|l| l.cells.len()).sum();
         tracing::info!(
             target: "cdept::project",
@@ -509,32 +545,52 @@ impl AppCtx {
         self.selection = Selection::default();
     }
 
-    /// Open the native folder dialog on a background thread; the choice is picked up
-    /// by [`take_picked`](Self::take_picked).
+    /// Ask for a folder, on the window that requested it: CDePT's own path prompt
+    /// (a text field with completion, and "Browse…" for the system's dialog where
+    /// there is one; see [`crate::pathfield`]). The choice is picked up by
+    /// [`take_picked`](Self::take_picked). A library folder is asked for in the "Add
+    /// Existing Library" dialog itself.
     pub fn pick_folder(&mut self, ctx: &egui::Context, purpose: PickFor) {
+        if purpose == PickFor::AddLibrary {
+            let here = std::mem::replace(&mut self.window, self.pick_window);
+            self.open_dialog(Dialog::AddLibrary {
+                name: String::new(),
+                path: String::new(),
+                read_only: false,
+                layout: None,
+            });
+            self.window = here;
+            return;
+        }
         if self.picker.is_some() {
             return;
         }
-        let title = match purpose {
-            PickFor::NewProject => "Folder for the new project",
-            PickFor::OpenProject => "Open project folder",
-            PickFor::AddLibrary => "Library folder",
+        let (title, hint) = match purpose {
+            PickFor::NewProject => (
+                "Folder for the new project",
+                "The folder is created if it does not exist.",
+            ),
+            _ => (
+                "Open project folder",
+                "The folder with the cdept.toml, or any folder inside the project.",
+            ),
         };
+        // Start next to the open project, where other projects usually are.
         let start = self
             .project
             .as_ref()
-            .map(|p| p.root.clone())
+            .and_then(|p| p.root.parent().map(Path::to_path_buf))
             .or_else(|| std::env::current_dir().ok());
-        let (sender, result) = mpsc::channel();
-        let ctx = ctx.clone();
-        thread::spawn(move || {
-            let mut dialog = rfd::FileDialog::new().set_title(title);
-            if let Some(dir) = start {
-                dialog = dialog.set_directory(dir);
-            }
-            let _ = sender.send(dialog.pick_folder());
-            ctx.request_repaint();
-        });
+        let request = crate::pathfield::Request {
+            kind: crate::pathfield::Kind::Folder,
+            title: title.into(),
+            directory: start,
+            must_exist: purpose == PickFor::OpenProject,
+            prompt_first: true,
+            hint: Some(hint.into()),
+            ..Default::default()
+        };
+        let result = crate::pathfield::ask(ctx, self.pick_window, request);
         self.picker = Some(Picker { purpose, result });
     }
 

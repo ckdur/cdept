@@ -143,7 +143,7 @@ impl CdeptApp {
         let mut ctx = AppCtx::new(settings, log);
         tracing::info!(target: "cdept", "CDePT {} started", libcdept::version::long_version());
         if let Some(path) = options.project {
-            ctx.load_project(&path);
+            crate::background::load_at_start(&mut ctx, egui_ctx, &path);
         }
         ctx.tools.start_detection(egui_ctx);
 
@@ -159,7 +159,10 @@ impl CdeptApp {
             quit_confirmed: false,
             script,
         };
-        app.restore_documents(egui_ctx);
+        // With the project still being read, the documents come back once it is there.
+        if !app.ctx.background.restoring() {
+            app.restore_documents(egui_ctx);
+        }
         app
     }
 
@@ -186,10 +189,15 @@ impl CdeptApp {
         match Format::of_file(&file) {
             Some(Format::Gds | Format::Oasis) => {
                 // Layouts of read-only libraries open for looking only.
-                let editable = project
-                    .library(&doc.library)
-                    .is_none_or(|library| !library.read_only);
-                let view = LayoutView::open(id, doc, file, editable, project, ctx);
+                // One cell of a file that holds several (a standard-cell GDS) too:
+                // the file belongs to all of them.
+                let member = crate::views::layout_member_of(project, &doc);
+                let editable = member.is_none()
+                    && project
+                        .library(&doc.library)
+                        .is_none_or(|library| !library.read_only);
+                let mut view = LayoutView::open(id, doc, file, editable, project, ctx);
+                view.set_member(member);
                 self.views.add_document(id, view);
             }
             _ => {
@@ -219,6 +227,33 @@ impl CdeptApp {
             }
         }
         self.layout.sync_documents();
+    }
+
+    /// Start the open documents again in their tabs, so they run with the project's
+    /// present technology. Documents with unsaved changes are left as they are.
+    fn restart_documents(&mut self, ctx: &Context) {
+        let modified = self.modified_documents();
+        let open: Vec<(DocId, DocRef)> = self
+            .layout
+            .documents
+            .iter()
+            .filter(|(id, _)| !modified.contains(id))
+            .map(|(id, doc)| (id, doc.clone()))
+            .collect();
+        let mut restarted = 0;
+        for (id, doc) in open {
+            if self.start_document(ctx, id, doc) {
+                restarted += 1;
+            }
+        }
+        tracing::info!(
+            target: "cdept::tech",
+            "{restarted} tab(s) reopened with the new technology{}",
+            match modified.len() {
+                0 => String::new(),
+                n => format!("; {n} with unsaved changes left as they are"),
+            }
+        );
     }
 
     /// Open a view of a cell in a document tab, or show the tab it is already in.
@@ -389,7 +424,57 @@ impl CdeptApp {
             .is_some()
     }
 
+    /// `tech …` of a test script: the New Project wizard and the technology.
+    pub(crate) fn script_tech(&mut self, ctx: &Context, args: &[String]) -> Result<(), String> {
+        crate::newproject::script(&mut self.ctx, ctx, args)
+    }
+
+    /// `organise …` of a test script: Go to Cell, categories, Import Project, and the
+    /// Search panel (`search <query>`, `expect_hits <n>`, `expect_hit <text>`).
+    pub(crate) fn script_organise(&mut self, ctx: &Context, args: &[String]) -> Result<(), String> {
+        let text = args.get(1..).unwrap_or_default().join(" ");
+        match args.first().map(String::as_str) {
+            Some("search") => {
+                let project = self.ctx.project.as_ref().ok_or("no project is open")?;
+                self.views.search_mut().script_search(ctx, project, &text);
+                Ok(())
+            }
+            Some("expect_hits" | "expect_hit") if self.views.search_mut().script_busy() => {
+                Err("the search is still running".into())
+            }
+            Some("expect_hits") => {
+                let hits = self.views.search_mut().script_hits();
+                let wanted: usize = text
+                    .trim()
+                    .parse()
+                    .map_err(|_| "not a number".to_string())?;
+                if hits.len() == wanted {
+                    Ok(())
+                } else {
+                    Err(format!("{} hits, expected {wanted}: {hits:?}", hits.len()))
+                }
+            }
+            Some("expect_hit") => {
+                let hits = self.views.search_mut().script_hits();
+                if hits.iter().any(|hit| hit.contains(text.trim())) {
+                    Ok(())
+                } else {
+                    Err(format!("no hit has '{}': {hits:?}", text.trim()))
+                }
+            }
+            _ => crate::import::script(&mut self.ctx, ctx, args),
+        }
+    }
+
     /// The lines of the Hierarchy panel.
+    /// Run a script command of refactor.rs.
+    pub(crate) fn script_refactor(
+        &mut self,
+        command: crate::refactor::ScriptCommand,
+    ) -> Result<(), String> {
+        crate::refactor::script_run(command, &mut self.ctx, &mut self.views)
+    }
+
     pub(crate) fn script_hierarchy(&self) -> Vec<String> {
         self.views.hierarchy().lines()
     }
@@ -408,6 +493,21 @@ impl CdeptApp {
     pub(crate) fn script_select(&mut self, selection: Selection) {
         self.ctx.selection = selection;
         self.ctx.validate_selection();
+    }
+
+    /// For the commands of `background::script`: the shared state and the document
+    /// the script acts on.
+    pub(crate) fn script_disk(&mut self) -> (&mut AppCtx, Option<&mut Document>) {
+        let doc = match self.script_document() {
+            Some(Tab::Document(id)) => self.views.document_mut(id),
+            _ => None,
+        };
+        (&mut self.ctx, doc)
+    }
+
+    /// The shared state, for the test-script commands of other modules.
+    pub(crate) fn script_ctx(&mut self) -> &mut AppCtx {
+        &mut self.ctx
     }
 
     pub(crate) fn script_project(&self) -> Option<&Project> {
@@ -496,7 +596,7 @@ impl CdeptApp {
         self.ctx.window = WindowId::Main;
         match leaving {
             Leaving::CloseProject => self.ctx.close_project(),
-            Leaving::LoadProject(path) => self.ctx.load_project(&path),
+            Leaving::LoadProject(path) => crate::background::load(&mut self.ctx, ctx, &path),
             Leaving::NewProject(path) => self.ctx.new_project(&path),
             Leaving::Quit => {
                 self.quit_confirmed = true;
@@ -612,6 +712,8 @@ impl CdeptApp {
                     Some(Tab::Document(id)) => Some(*id),
                     _ => None,
                 });
+        self.ctx.open_documents = self.layout.documents.iter().count();
+        self.ctx.refactor.documents = crate::refactor::open_files(&self.views);
         self.ctx.schematic = active.and_then(|id| {
             let view = self.views.document(id)?.as_schematic()?;
             Some(ActiveSchematic {
@@ -677,6 +779,9 @@ impl CdeptApp {
     /// Keep the documents in step with the tabs and the project: a closed tab closes
     /// its document, another project closes them all.
     fn sync_documents(&mut self) {
+        if self.ctx.background.restoring() {
+            return;
+        }
         let root = self.ctx.project.as_ref().map(|p| p.root.clone());
         if self.layout.documents.project != root {
             self.layout.retain_documents(|_| false);
@@ -796,6 +901,9 @@ impl CdeptApp {
             self.guard_ui(ui.ctx());
         }
         dialogs::show(ui.ctx(), &mut self.ctx);
+        // CDePT's own path prompts (and the native dialogs behind them).
+        crate::pathfield::show(ui.ctx(), win);
+        crate::newproject::show(ui.ctx(), &mut self.ctx);
     }
 
     /// A detached window, as an immediate viewport (a real OS window where supported).
@@ -842,18 +950,20 @@ impl CdeptApp {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.button("New Project…").clicked() {
-                    self.ctx.request(Action::PickFolder(PickFor::NewProject));
+                    crate::newproject::open(&mut self.ctx, ui.ctx());
                 }
                 if ui.button("Open Project…").clicked() {
                     self.ctx.request(Action::PickFolder(PickFor::OpenProject));
                 }
+                crate::import::file_menu(ui);
                 ui.menu_button("Recent Projects", |ui| {
                     if self.ctx.settings.recent_projects.is_empty() {
                         ui.weak("None");
                     }
                     let mut open = None;
                     for path in &self.ctx.settings.recent_projects {
-                        if ui.button(path.display().to_string()).clicked() {
+                        let background = &mut self.ctx.background;
+                        if crate::background::recent_button(ui, background, path, false) {
                             open = Some(path.clone());
                         }
                     }
@@ -928,12 +1038,23 @@ impl CdeptApp {
                     let dialog = Dialog::project_settings(project);
                     self.ctx.open_dialog(dialog);
                 }
+                if ui
+                    .add_enabled(open, Button::new("Technology…"))
+                    .on_hover_text(
+                        "What CDePT read out of the PDK: layers, decks, corners, libraries",
+                    )
+                    .clicked()
+                {
+                    self.ctx.request(Action::OpenTab(Tab::Technology));
+                }
+                crate::background::menu_ui(ui, &mut self.ctx);
             });
 
             ui.menu_button("Tools", |ui| {
                 if ui.button("Library Manager").clicked() {
                     self.ctx.request(Action::OpenTab(Tab::LibraryManager));
                 }
+                crate::import::tools_menu(ui, &mut self.ctx);
                 ui.separator();
                 for name in LAUNCHERS {
                     ui.add_enabled(false, Button::new(format!("Launch {name}")))
@@ -1099,6 +1220,7 @@ impl CdeptApp {
             if let Some(root) = self.ctx.pdk_root() {
                 ui.weak(format!("in {root}"));
             }
+            crate::background::status_ui(ui, &self.ctx);
             ui.separator();
             ui.label("Jobs: 0");
             ui.separator();
@@ -1176,7 +1298,7 @@ impl CdeptApp {
             }
             Action::PickFolder(purpose) => self.ctx.pick_folder(ctx, purpose),
             Action::LoadProject(path) => self.leave(ctx, Leaving::LoadProject(path)),
-            Action::ReloadProject => self.ctx.reload_project(),
+            Action::ReloadProject => crate::background::reload(&mut self.ctx, ctx),
             Action::CloseProject => self.leave(ctx, Leaving::CloseProject),
             Action::NetlistToView {
                 library,
@@ -1184,6 +1306,18 @@ impl CdeptApp {
                 format,
             } => self.netlist_to_view(ctx, &library, &cell, format),
             Action::DetectTools => self.ctx.tools.start_detection(ctx),
+            Action::UsedBy(selection) => {
+                if let (Some(library), Some(cell)) = (selection.library, selection.cell) {
+                    self.ctx.refactor.show = Some(crate::refactor::Show {
+                        library,
+                        cell,
+                        used_by: true,
+                    });
+                    let win = self.layout.open_tab(Tab::Hierarchy);
+                    Self::focus(ctx, win);
+                }
+            }
+            Action::RestartDocuments => self.restart_documents(ctx),
             Action::ShowAbout(win) => self.about = Some(win),
             Action::Quit => self.leave(ctx, Leaving::Quit),
         }
@@ -1225,6 +1359,8 @@ impl eframe::App for CdeptApp {
         let ctx = &ui.ctx().clone();
         self.refresh_window_names();
         self.publish_schematic();
+        // Go to Cell, the categories, Import Project (before the views take the keys).
+        crate::import::frame(ctx, &mut self.ctx);
 
         // The close button of the main window: not with unsaved changes unasked.
         if ctx.input(|i| i.viewport().close_requested()) && !self.quit_confirmed {
@@ -1252,6 +1388,10 @@ impl eframe::App for CdeptApp {
             self.picked(ctx, purpose, path);
         }
         self.finish_netlists();
+        // What changed on disk, and what the worker threads finished.
+        if crate::background::tick(&mut self.ctx, &mut self.views, ctx).restore {
+            self.restore_documents(ctx);
+        }
         self.views.coordinate_layouts();
         self.views.coordinate_links(&mut self.ctx);
         // A detached window whose last tab was closed or dragged away disappears.
@@ -1262,7 +1402,10 @@ impl eframe::App for CdeptApp {
             for win in self.layout.window_ids() {
                 self.update_active_doc(win);
             }
-            script.advance(self, ctx);
+            // Not while the project is being read or scanned: the script looks at it.
+            if !self.ctx.background.busy() {
+                script.advance(self, ctx);
+            }
             self.script = Some(script);
         }
         self.layout.prune();
@@ -1299,6 +1442,16 @@ fn pdk_label(ui: &mut Ui, ctx: &AppCtx) {
     );
     match ctx.pdk() {
         Some(pdk) => ui.label(format!("PDK: {pdk}")).on_hover_text(tip),
+        // `$PDK` offers several and the project has not chosen one.
+        None if !project.pdk.available.is_empty() => ui
+            .weak(format!(
+                "PDK: choose one of {}",
+                project.pdk.available.len()
+            ))
+            .on_hover_text(format!(
+                "$PDK offers {}.\nChoose one in Project > Project Settings…",
+                project.pdk.available.join(", ")
+            )),
         None => ui.weak("PDK: none").on_hover_text(tip),
     };
 }

@@ -7,9 +7,11 @@
 //! status line.
 
 mod checks;
+mod disk;
 mod inplace;
 mod keys;
 mod linking;
+mod member;
 mod nets;
 mod panels;
 mod pcell;
@@ -33,6 +35,7 @@ use serde_json::{Value, json};
 
 pub use self::inplace::coordinate;
 use self::keys::Shortcut;
+pub use self::member::member_of;
 pub use self::properties::Replacement;
 use super::{CloseChoice, EditAction, EditCaps, Picture, View};
 use crate::dock::{DocId, DocRef, Tab};
@@ -207,6 +210,8 @@ pub struct LayoutView {
     nets: nets::NetsState,
     /// The pins (`pins`, docs/LINKING.md §9).
     pins: pins::PinsState,
+    /// The cell of the file shown, when the file holds several (`member`).
+    member: Option<String>,
 }
 
 impl LayoutView {
@@ -290,6 +295,7 @@ impl LayoutView {
             link: linking::LinkState::new(),
             nets: nets::NetsState::default(),
             pins: pins::PinsState::default(),
+            member: None,
         };
         view.find_link_source();
         view
@@ -576,6 +582,8 @@ impl LayoutView {
                 self.in_place = context;
                 // The first sight of a layout is all of it.
                 if std::mem::take(&mut self.fit_pending) {
+                    // One cell of a file that holds several: that cell.
+                    self.show_member();
                     self.zoom("fit");
                 }
             }
@@ -1169,25 +1177,21 @@ impl LayoutView {
         }
     }
 
-    /// Start the question for where to export to, with the desktop's file dialog.
-    fn ask_export(&mut self) {
+    /// Start the question for where to export to: the desktop's file dialog, or
+    /// CDePT's own path prompt where there is none (`crate::pathfield`).
+    fn ask_export(&mut self, ctx: &egui::Context) {
         if self.export_dialog.is_some() {
             return;
         }
-        let (send, receive) = std::sync::mpsc::channel();
-        let name = format!("{}.gds", self.doc.cell);
-        let folder = self.file.parent().map(Path::to_path_buf);
-        std::thread::spawn(move || {
-            let mut dialog = rfd::FileDialog::new()
-                .set_title("Export self-contained GDS")
-                .set_file_name(name)
-                .add_filter("Layout", &["gds", "oas"]);
-            if let Some(folder) = folder {
-                dialog = dialog.set_directory(folder);
-            }
-            let _ = send.send(dialog.save_file());
-        });
-        self.export_dialog = Some(receive);
+        let request = crate::pathfield::Request {
+            kind: crate::pathfield::Kind::SaveFile,
+            title: "Export self-contained GDS".into(),
+            directory: self.file.parent().map(Path::to_path_buf),
+            file_name: Some(format!("{}.gds", self.doc.cell)),
+            filters: vec![("Layout".into(), vec!["gds".into(), "oas".into()])],
+            ..Default::default()
+        };
+        self.export_dialog = Some(crate::pathfield::ask_here(ctx, request));
     }
 
     fn ready(&self) -> bool {
@@ -1471,7 +1475,7 @@ impl View for LayoutView {
             .on_hover_text("Write a stream with every referenced cell filled in")
             .clicked()
         {
-            self.ask_export();
+            self.ask_export(ui.ctx());
             ui.close();
         }
         ui.separator();

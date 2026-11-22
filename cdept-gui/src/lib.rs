@@ -1,10 +1,17 @@
 //! CDePT egui frontend: the docked main window and its views.
 
 mod app;
+mod background;
 mod dialogs;
 mod dock;
 mod engines;
+mod import;
+mod library_dialog;
 pub mod log;
+mod newproject;
+mod pathfield;
+mod pdkscan;
+mod refactor;
 mod script;
 mod state;
 mod views;

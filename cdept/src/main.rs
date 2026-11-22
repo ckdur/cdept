@@ -1,5 +1,14 @@
 //! `cdept`: opens the GUI by default; subcommands run headless.
 
+mod cmd_cell;
+mod cmd_find;
+mod cmd_import;
+mod cmd_lib;
+mod cmd_ls;
+mod cmd_pdk;
+mod cmd_status;
+mod cmd_tech;
+
 use std::path::PathBuf;
 
 use cdept_gui::{GuiOptions, LogBuffer};
@@ -46,12 +55,21 @@ enum Command {
         /// Project name. Defaults to the folder name.
         #[arg(long)]
         name: Option<String>,
-        /// PDK name (`technology` in cdept.toml, `$PDK` for tools), e.g. ihp-sg13g2.
+        /// PDK name (`technology` in cdept.toml, `$PDK` for tools), e.g. ihp-sg13g2,
+        /// or the path of a PDK folder. The PDK is scanned and what was found is
+        /// written next to cdept.toml (tech.toml, see `cdept tech`).
         #[arg(long)]
         technology: Option<String>,
-        /// Folder PDKs are installed in (`pdk_root`, `$PDK_ROOT` for tools).
+        /// Folder PDKs are installed in (`$PDK_ROOT` for tools); kept in
+        /// cdept.local.toml, as it differs per machine. Default: where the PDK is found.
         #[arg(long)]
         pdk_root: Option<String>,
+        /// Do not scan the PDK: only name it in cdept.toml.
+        #[arg(long)]
+        no_scan: bool,
+        /// Scan files only: do not start KLayout (PCells) or xschem (xschemrc).
+        #[arg(long)]
+        files_only: bool,
     },
     /// Show the project: its file, the PDK in use ($PDK, $PDK_ROOT) and where each
     /// value comes from, the libraries.
@@ -60,9 +78,16 @@ enum Command {
     Ls {
         /// Only this library.
         library: Option<String>,
+        /// Only this cell of the library: its views, their files and what the files
+        /// say about it (LEF class and size, Liberty area and pins, …).
+        cell: Option<String>,
         /// Only list libraries, not their cells.
         #[arg(short, long)]
         libraries: bool,
+        /// One line per view, with its file and, when the file holds many cells (a
+        /// standard-cell GDS, LEF, Liberty file), the cell inside it.
+        #[arg(short, long)]
+        files: bool,
     },
     /// Change the library definitions in cdept.toml.
     #[command(subcommand)]
@@ -92,6 +117,36 @@ enum Command {
     /// Use the embedded KLayout directly.
     #[command(subcommand)]
     Klayout(KlayoutCommand),
+    /// The PDKs installed on this machine and their versions (ciel).
+    #[command(subcommand)]
+    Pdk(cmd_pdk::PdkCommand),
+    /// The project's technology snapshot (tech.toml): scan the PDK, show, refresh.
+    #[command(subcommand)]
+    Tech(cmd_tech::TechCommand),
+    /// Search the libraries: cells and views by name, kind, format and category,
+    /// optionally inside the files (see `cdept find --help` for the query words).
+    Find(cmd_find::FindArgs),
+    /// Categories: named groups of the cells of a library.
+    #[command(subcommand)]
+    Category(cmd_find::CategoryCommand),
+    /// Propose a project (cdept.toml) for an existing design folder: its libraries
+    /// from the xschemrc, the folders with design files or a LibMan project file.
+    Import(cmd_import::ImportArgs),
+    /// IHP LibMan: write the libraries as a LibMan project file, start LibMan.
+    #[command(subcommand)]
+    Libman(cmd_import::LibmanCommand),
+    /// Cells: create, copy, rename, move, delete. What uses a cell follows.
+    #[command(subcommand)]
+    Cell(cmd_cell::CellCommand),
+    /// Views of a cell: create, copy, rename, delete.
+    #[command(subcommand)]
+    View(cmd_cell::ViewCommand),
+    /// The hierarchy below a cell, read from the files (schematic, layout, netlist, HDL).
+    Hier(cmd_cell::HierArgs),
+    /// Which cells use a cell, through which views, how often.
+    UsedBy(cmd_cell::UsedByArgs),
+    /// The git status of the project, by library, cell and view.
+    Status(cmd_status::StatusArgs),
     /// List the external tools found on PATH.
     Tools,
     /// Print version and build information.
@@ -111,9 +166,17 @@ enum LibCommand {
         /// Folder layout. Detected from the folder when left out.
         #[arg(long)]
         layout: Option<Layout>,
+        /// Define it also when its folder gets in the way of another library (the
+        /// same folder, or a folder of the same name, which xschem cannot tell apart).
+        #[arg(long)]
+        force: bool,
     },
     /// Remove a library definition. Its folder is left untouched.
     Remove { name: String },
+    /// Rename a library (and, with --folder, its folder). What names it follows.
+    Rename(cmd_cell::LibRename),
+    #[command(flatten)]
+    Definition(cmd_lib::Command),
 }
 
 #[derive(Subcommand)]
@@ -733,6 +796,8 @@ enum Layout {
     Cells,
     /// <library>/<cell>.<ext>, one view per file
     Flat,
+    /// <library>/<format>/<files>: a PDK reference library (libs.ref), read only
+    Ref,
 }
 
 /// The project named by `--project`, or the one the current folder belongs to.
@@ -976,6 +1041,7 @@ fn info(project: &Project) {
     };
     println!("PDK          {}", shown(&project.pdk.name));
     println!("PDK_ROOT     {}", shown(&project.pdk.root));
+    cmd_tech::info(project);
     for rc in &project.xschem_rc {
         println!("xschem rc    {}", rc.display());
     }
@@ -1063,25 +1129,46 @@ fn main() -> Result<()> {
             name,
             technology,
             pdk_root,
+            no_scan,
+            files_only,
         } => {
             init_tracing(cli.verbose, None);
-            let project = Project::create_with(
+            cmd_tech::init(
                 &dir,
                 name.as_deref(),
                 technology.as_deref(),
                 pdk_root.as_deref(),
-            )?;
-            println!("created {}", project.file.display());
-            Ok(())
+                no_scan,
+                files_only,
+            )
+        }
+        Command::Tech(command) => {
+            init_tracing(cli.verbose, None);
+            // `scan --print` works outside a project too.
+            let project = match project_root(cli.project) {
+                Some(root) => Some(Project::load(&root)?),
+                None => None,
+            };
+            cmd_tech::run(command, project)
         }
         Command::Info => {
             init_tracing(cli.verbose, None);
             info(&open_project(cli.project)?);
             Ok(())
         }
-        Command::Ls { library, libraries } => {
+        Command::Ls {
+            library,
+            cell,
+            libraries,
+            files,
+        } => {
             init_tracing(cli.verbose, None);
-            list(&open_project(cli.project)?, library.as_deref(), libraries)
+            let project = open_project(cli.project)?;
+            match (&library, &cell) {
+                (Some(library), Some(cell)) => cmd_ls::cell(&project, library, cell),
+                _ if files => cmd_ls::files(&project, library.as_deref()),
+                _ => list(&project, library.as_deref(), libraries),
+            }
         }
         Command::Lib(command) => {
             init_tracing(cli.verbose, None);
@@ -1092,11 +1179,14 @@ fn main() -> Result<()> {
                     path,
                     read_only,
                     layout,
+                    force,
                 } => {
+                    cmd_lib::check_folder(&project, &name, &path, force)?;
                     let options = AddLibrary {
                         layout: layout.map(|l| match l {
                             Layout::Cells => LibraryLayout::Cells,
                             Layout::Flat => LibraryLayout::Flat,
+                            Layout::Ref => LibraryLayout::Ref,
                         }),
                         read_only,
                         create: !read_only,
@@ -1105,10 +1195,9 @@ fn main() -> Result<()> {
                     let lib = project.library(&name).expect("just added");
                     println!("added {name} ({} cells)", lib.cells.len());
                 }
-                LibCommand::Remove { name } => {
-                    project.remove_library(&name)?;
-                    println!("removed {name} from {}", project.file.display());
-                }
+                LibCommand::Remove { name } => cmd_lib::remove(&mut project, &name)?,
+                LibCommand::Rename(args) => cmd_cell::lib_rename(&project, args)?,
+                LibCommand::Definition(command) => cmd_lib::run(&mut project, command)?,
             }
             Ok(())
         }
@@ -1259,7 +1348,9 @@ fn main() -> Result<()> {
                     let refs = libcdept::layout::refs::resolve(&project, &file);
                     let output = output.unwrap_or_else(|| PathBuf::from(format!("{cell}.png")));
                     let mut engine = KlayoutEngine::for_project(&project)?;
-                    engine.render_png(&refs, width, height, &output)?;
+                    // One cell of a file that holds several (a standard-cell GDS).
+                    let member = cmd_ls::member_of(&project, &library, &cell, &file);
+                    engine.render_cell_png(&refs, member.as_deref(), width, height, &output)?;
                     engine.shutdown()?;
                     println!("{}", output.display());
                     Ok(())
@@ -1383,6 +1474,52 @@ fn main() -> Result<()> {
             }
             engine.shutdown()?;
             Ok(())
+        }
+        Command::Pdk(command) => {
+            init_tracing(cli.verbose, None);
+            // Inside a project its PDK folder is looked at first; outside is fine too.
+            let project = project_root(cli.project).and_then(|root| Project::load(&root).ok());
+            cmd_pdk::run(command, project.as_ref())
+        }
+        Command::Find(args) => {
+            init_tracing(cli.verbose, None);
+            cmd_find::find(&open_project(cli.project)?, args)
+        }
+        Command::Category(command) => {
+            init_tracing(cli.verbose, None);
+            cmd_find::category(&open_project(cli.project)?, command)
+        }
+        Command::Import(args) => {
+            init_tracing(cli.verbose, None);
+            cmd_import::import(args, cli.project)
+        }
+        Command::Libman(command) => {
+            init_tracing(cli.verbose, None);
+            let project = match project_root(cli.project) {
+                Some(root) => Some(Project::load(&root)?),
+                None => None,
+            };
+            cmd_import::libman(command, project)
+        }
+        Command::Cell(command) => {
+            init_tracing(cli.verbose, None);
+            cmd_cell::cell(&open_project(cli.project)?, command)
+        }
+        Command::View(command) => {
+            init_tracing(cli.verbose, None);
+            cmd_cell::view(&open_project(cli.project)?, command)
+        }
+        Command::Hier(args) => {
+            init_tracing(cli.verbose, None);
+            cmd_cell::hier(&open_project(cli.project)?, args)
+        }
+        Command::UsedBy(args) => {
+            init_tracing(cli.verbose, None);
+            cmd_cell::used_by(&open_project(cli.project)?, args)
+        }
+        Command::Status(args) => {
+            init_tracing(cli.verbose, None);
+            cmd_status::run(args, &open_project(cli.project)?)
         }
         Command::Tools => {
             init_tracing(cli.verbose, None);

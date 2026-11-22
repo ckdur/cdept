@@ -87,6 +87,10 @@ enum Command {
     QuitAsk,
     LeaveAnswer(LeaveChoice),
     ExpectProject(Option<String>),
+    /// Library definitions and path prompts (library_dialog.rs).
+    Definitions(crate::library_dialog::ScriptCommand),
+    /// Renames and moves with references following, the Hierarchy panel (refactor.rs).
+    Refactor(crate::refactor::ScriptCommand),
     ExpectPicker(String),
     Picker(Selection),
     PickerFile(Option<PathBuf>),
@@ -96,6 +100,12 @@ enum Command {
     CheckPicture,
     Log(String),
     Layout(LayoutCommand),
+    /// `tech <verb> …`: the New Project wizard and the technology (newproject.rs).
+    Tech(Vec<String>),
+    /// `organise <verb> …`: Go to Cell, Search, categories, Import Project (import.rs).
+    Organise(Vec<String>),
+    /// Changes on disk, git marks, the trash (background/script.rs).
+    Disk(crate::background::script::DiskCommand),
     Quit,
 }
 
@@ -121,6 +131,8 @@ enum LayoutCommand {
     ExpectLayer(String),
     /// A cell of the tree, and what kind it is (`local`, `external`, `missing`).
     ExpectCell(String, Option<String>),
+    /// The cell the tab shows (one cell of a file that holds several).
+    ExpectShown(String),
     ExpectSelection(usize),
     ExpectModified(bool),
     ExpectMode(String),
@@ -205,6 +217,9 @@ impl Command {
     /// Commands that are tried again for a while before they fail. They do nothing
     /// when they fail, so trying again is safe.
     fn patient(&self) -> bool {
+        if let Command::Definitions(command) = self {
+            return command.patient();
+        }
         matches!(
             self,
             Command::Menu(_)
@@ -227,6 +242,8 @@ impl Command {
                 | Command::ExpectPicker(_)
                 | Command::Picker(_)
                 | Command::PickerFile(_)
+                | Command::Tech(_)
+                | Command::Organise(_)
                 | Command::Layout(
                     LayoutCommand::Place(_)
                         | LayoutCommand::CurrentLayer(_)
@@ -235,6 +252,7 @@ impl Command {
                         | LayoutCommand::ExpectNotice(_)
                         | LayoutCommand::ExpectLayer(_)
                         | LayoutCommand::ExpectCell(..)
+                        | LayoutCommand::ExpectShown(_)
                         | LayoutCommand::ExpectSelection(_)
                         | LayoutCommand::ExpectModified(_)
                         | LayoutCommand::ExpectMode(_)
@@ -251,7 +269,7 @@ impl Command {
                         | LayoutCommand::ExpectParallel(_)
                         | LayoutCommand::ExpectPin(..),
                 )
-        )
+        ) || matches!(self, Command::Disk(command) if command.patient())
     }
 }
 
@@ -564,6 +582,8 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
         "screenshot" => Command::Screenshot(PathBuf::from(text()?)),
         "check_picture" => Command::CheckPicture,
         "log" => Command::Log(rest.to_string()),
+        "tech" => Command::Tech(args.iter().map(|word| word.to_string()).collect()),
+        "organise" => Command::Organise(args.iter().map(|word| word.to_string()).collect()),
         "quit" => Command::Quit,
         "mode" => Command::Layout(LayoutCommand::Mode(text()?)),
         "layout_zoom" => match args.first().copied() {
@@ -642,6 +662,7 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
             ),
             _ => return Err("usage: expect_cell <name> [local|external|missing]".into()),
         },
+        "expect_shown" => Command::Layout(LayoutCommand::ExpectShown(text()?)),
         "properties" => Command::Layout(LayoutCommand::Properties),
         "properties_apply" => Command::Layout(LayoutCommand::PropertiesApply(false)),
         "properties_ok" => Command::Layout(LayoutCommand::PropertiesApply(true)),
@@ -843,7 +864,17 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
             ["none"] => Vec::new(),
             names => names.iter().map(|a| a.to_string()).collect(),
         }),
-        other => return Err(format!("unknown command '{other}'")),
+        other => match crate::library_dialog::script_parse(other, &args, rest) {
+            Some(command) => Command::Definitions(command?),
+            None if crate::refactor::script_parse(other, &args, rest).is_some() => {
+                let parsed = crate::refactor::script_parse(other, &args, rest);
+                Command::Refactor(parsed.expect("checked above")?)
+            }
+            None => match crate::background::script::parse(other, rest)? {
+                Some(command) => Command::Disk(command),
+                None => return Err(format!("unknown command '{other}'")),
+            },
+        },
     };
     Ok(Some(command))
 }
@@ -1215,6 +1246,15 @@ impl Script {
                     return Err(format!("cell '{name}' is {found}, expected {wanted}"));
                 }
                 _ => {}
+            },
+            LayoutCommand::ExpectShown(wanted) => match view.shown_cell() {
+                Some(shown) if shown == wanted => {}
+                shown => {
+                    return Err(format!(
+                        "the tab shows cell {}, expected '{wanted}'",
+                        shown.map_or("(none)".to_string(), |s| format!("'{s}'"))
+                    ));
+                }
             },
             LayoutCommand::ExpectSelection(wanted) => {
                 let count = view.selection_count();
@@ -1746,6 +1786,10 @@ impl Script {
                     return Err("nothing is asking about unsaved documents".into());
                 }
             }
+            Command::Definitions(command) => {
+                crate::library_dialog::script_run(command, app.script_ctx(), ctx)?;
+            }
+            Command::Refactor(command) => app.script_refactor(command)?,
             Command::ExpectProject(wanted) => {
                 let open = app.script_project().map(|p| p.name.clone());
                 if open != wanted {
@@ -1813,6 +1857,16 @@ impl Script {
             }
             Command::Layout(command) => self.layout_command(app, command)?,
             Command::Log(text) => tracing::info!(target: "cdept::script", "{text}"),
+            Command::Tech(args) => app.script_tech(ctx, &args)?,
+            Command::Organise(args) => app.script_organise(ctx, &args)?,
+            Command::Disk(command) => {
+                let mut requests = Vec::new();
+                let (shared, doc) = app.script_disk();
+                crate::background::script::run(command, shared, doc, ctx, &mut requests)?;
+                for action in requests {
+                    app.script_request(action);
+                }
+            }
             Command::Quit => {
                 self.finished = true;
                 app.script_quit(ctx);

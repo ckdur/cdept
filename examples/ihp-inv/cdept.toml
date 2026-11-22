@@ -1,16 +1,13 @@
 # CDePT example: an inverter and a buffer in IHP SG13G2, to link schematics with
 # layouts (docs/LINKING.md). Needs the PDK: PDK_ROOT pointing at the folder that holds
-# ihp-sg13g2 (or set pdk_root below).
+# ihp-sg13g2, or `pdk_root` in a cdept.local.toml next to this file (or set it below).
+#
+# tech.toml next to this file is the technology snapshot (docs/TECH.md): it names the
+# PDK's xschemrc, the KLayout technology and decks, the model corners, and brings the
+# PDK's libraries (sg13g2_pr, sg13g2_stdcell, …). `cdept tech refresh` makes it again.
 name = "ihp-inv"
 technology = "ihp-sg13g2"
 # pdk_root = "/opt/ext/OpenPDKs"
 
 [libraries]
 cells = "libs/cells"
-sg13g2_pr = { path = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_pr", read_only = true }
-
-[xschem]
-rc = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/xschemrc"
-
-[klayout]
-tech = "sg13g2"

@@ -1,0 +1,137 @@
+# The project follows the disk and git (cdept-gui/src/background.rs): files changed by
+# other programs show up without Reload, git marks, delete to the trash, a document
+# whose file changed behind its back.
+#
+# Needs git. Writes into the project and makes it a git repository: run it on a copy
+#   cdept-gui/scripts/run.sh cdept-gui/scripts/watch.script
+
+panel Libraries
+shell git init -q -b main . && git add . && git -c user.name=t -c user.email=t@example.com commit -q -m first
+expect_branch main
+expect_git clean logic
+expect_git clean logic inv
+
+# --- the tree follows the disk -------------------------------------------------------
+shell mkdir -p libs/logic/nand/schematic && cp libs/logic/inv/schematic/inv.sch libs/logic/nand/schematic/nand.sch
+expect_listed logic nand
+expect_listed logic nand schematic
+expect_git untracked logic nand
+expect_git untracked logic
+
+# A view more, by a copy; an editor's backup file is not a view and changes nothing.
+shell mkdir libs/logic/nand/symbol && cp libs/logic/inv/symbol/inv.sym libs/logic/nand/symbol/nand.sym
+expect_listed logic nand symbol
+shell touch libs/logic/nand/symbol/nand.sym~
+
+# git add from outside: the index is watched.
+shell git add libs/logic/nand
+expect_git added logic nand
+
+# Renamed and removed from outside.
+shell mv libs/logic/nand libs/logic/nor
+expect_listed logic nor
+expect_not_listed logic nand
+shell rm -r libs/logic/nor && git reset -q
+expect_not_listed logic nor
+expect_git clean logic
+
+# A tracked file changed: the view, the cell and the library say so.
+shell printf '\n' >> libs/logic/inv/symbol/inv.sym
+expect_git modified logic inv symbol
+expect_git clean logic inv schematic
+expect_git modified logic inv
+expect_git modified logic
+shell git checkout -q libs/logic/inv/symbol/inv.sym
+expect_git clean logic inv
+
+# cdept.toml edited by hand: a library more.
+shell mkdir -p libs/extra && cp libs/logic/inv/symbol/inv.sym libs/extra/x.sym && printf 'extra = "libs/extra"\n' >> cdept.toml
+expect_listed extra x
+expect_git untracked extra
+
+# --- delete goes to the trash ---------------------------------------------------------
+select logic rpoly
+delete_dialog logic rpoly
+confirm_dialog
+expect_not_listed logic rpoly
+expect_trashed libs/logic/rpoly
+# Tracked by git: it shows as changed (its files are gone from the work tree).
+expect_git modified logic
+
+# A view, for good.
+delete_dialog logic buf layout
+confirm_dialog permanent
+expect_not_listed logic buf layout
+expect_listed logic buf schematic
+
+# --- a document whose file changes on disk --------------------------------------------
+open logic inv schematic
+wait_frame
+expect_stale no
+tcl_expect 1 expr {[xschem get schname] ne {}}
+# Without changes of its own the tab opens the file again: buf's schematic has the
+# instances x1 and x2, inv's has M1 and M2.
+shell cp libs/logic/buf/schematic/buf.sch libs/logic/inv/schematic/inv.sch
+expect_git modified logic inv schematic
+wait 1
+sync
+tcl_expect 1 expr {[xschem instance_pos x1] >= 0}
+expect_stale no
+expect_changed no
+
+# The tab's own save is not a change behind its back: nothing is asked.
+tcl xschem set_modify 1
+expect_changed yes
+tcl xschem save
+expect_changed no
+wait 1
+expect_stale no
+
+# With changes of its own it asks.
+tcl xschem set_modify 1
+expect_changed yes
+shell git checkout -q libs/logic/inv/schematic/inv.sch
+expect_stale yes
+tcl_expect 1 expr {[xschem instance_pos x1] >= 0}
+stale_answer reload
+expect_stale no
+wait 0.5
+sync
+tcl_expect 1 expr {[xschem instance_pos M1] >= 0}
+expect_changed no
+
+# Keep Mine: the tab stays as it is.
+tcl xschem set_modify 1
+expect_changed yes
+shell cp libs/logic/buf/schematic/buf.sch libs/logic/inv/schematic/inv.sch
+expect_stale yes
+stale_answer keep
+expect_stale no
+tcl_expect 1 expr {[xschem instance_pos M1] >= 0}
+expect_changed yes
+close
+
+# With "Reload Unchanged Documents" off an unchanged tab asks as well.
+setting auto_reload off
+shell git checkout -q libs/logic/inv/schematic/inv.sch
+open logic inv schematic
+wait_frame
+shell cp libs/logic/buf/schematic/buf.sch libs/logic/inv/schematic/inv.sch
+expect_stale yes
+stale_answer reload
+wait 0.5
+sync
+tcl_expect 1 expr {[xschem instance_pos x1] >= 0}
+setting auto_reload on
+close
+
+# --- Reload, and nothing is followed with the setting off ----------------------------
+setting watch off
+wait 0.3
+shell mkdir -p libs/logic/late/schematic && cp libs/logic/buf/schematic/buf.sch libs/logic/late/schematic/late.sch
+wait 1
+expect_not_listed logic late
+reload_project
+expect_listed logic late
+setting watch on
+quit

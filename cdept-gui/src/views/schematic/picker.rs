@@ -68,7 +68,7 @@ impl Request<'_> {
 fn save_target(library: &Library, name: &str, ext: &str) -> PathBuf {
     let file = format!("{name}.{ext}");
     match library.layout {
-        LibraryLayout::Flat => library.path.join(file),
+        LibraryLayout::Flat | LibraryLayout::Ref => library.path.join(file),
         LibraryLayout::Cells => {
             let view = match ext {
                 "sch" => "schematic",

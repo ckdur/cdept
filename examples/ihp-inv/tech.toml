@@ -1,0 +1,549 @@
+# CDePT technology snapshot of the PDK "ihp-sg13g2": what CDePT read out of the PDK's
+# files when this project was set up for it. It says where each tool's set-up is
+# (KLayout technology and decks, xschemrc, magicrc, netgen set-up), which model files
+# and corners there are, and which libraries the PDK brings.
+#
+# Paths starting with $PDK_ROOT follow the PDK folder of each machine (cdept.local.toml
+# or the environment). The long lists (layers, PCells, symbols, cells) are next to
+# this file in tech.catalog.json.
+#
+# Made by `cdept init --technology ihp-sg13g2`; made again by `cdept tech refresh`, which
+# replaces the whole file. To change a setting for good, set it in cdept.toml: what is
+# written there wins over this file.
+
+schema = "cdept-tech"
+version = 1
+notes = [
+    "devices: 2 device(s) netlist as a model no model library defines (inductor, inductor3)",
+    "libraries: the PDK has two libraries named 'sg13g2_pr'; a project lists $PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_pr and not $PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_pr (a library cannot have several folders yet)",
+]
+
+[pdk]
+name = "ihp-sg13g2"
+family = "ihp-sg13g2"
+version = "unreleased (2026-09-01)"
+commit = "cb743f75aabc96e30450e9e53afc8d3c4867e5e2"
+source = "git"
+description = "IHP SG13G2 130 nm SiGe BiCMOS"
+tools = [
+    "digital",
+    "gdsfactory",
+    "gnucap",
+    "klayout",
+    "librelane",
+    "magic",
+    "netgen",
+    "ngspice",
+    "openems",
+    "openroad",
+    "palace",
+    "parasitics",
+    "qucs-s",
+    "verilog-a",
+    "xschem",
+    "xyce",
+]
+branch = "dev"
+
+[pdk.tested_with]
+klayout = "0.30.5"
+magic = "8.3.589"
+ngspice = "43"
+openems = "v0.0.35-108-gc651cce"
+openvaf = "23.5.0"
+python = "3.10.12"
+qucs-s = "s25.2.0"
+xschem = "3.4.8RC"
+xyce = "7.8-opensource"
+
+[klayout]
+path = ["$PDK_ROOT/ihp-sg13g2/libs.tech/klayout"]
+tech = "sg13g2"
+description = "IHP SiGe 130nm technology"
+lyt = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/sg13g2.lyt"
+base_path = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech"
+layer_properties = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/sg13g2.lyp"
+dbu = 0.001
+grids = [10.0, 5.0, 1.0, 0.5, 0.1, 0.05, 0.01, 0.005]
+default_grid = 0.005
+layer_maps = ["$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/sg13g2.map"]
+connectivity = [
+    "GatPoly,Cont,Metal1",
+    "Diff,Cont,Metal1",
+    "Metal1,Via1,Metal2",
+    "Metal2,Via2,Metal3",
+    "Metal3,Via3,Metal4",
+    "Metal4,Via4,Metal5",
+    "Metal5,TopVia1,TopMetal1",
+    "TopMetal1,TopVia2,TopMetal2",
+]
+pcell_libraries = ["SG13_dev", "SG13_native_pcell_lib"]
+d25 = ["$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/d25/sg13g2_beol.lyd25"]
+xsection = ["$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/xsect/sg13g2_for_EM.xs"]
+
+[[klayout.drc]]
+name = "ihp-sg13g2"
+file = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/drc/ihp-sg13g2.drc"
+form = "script"
+
+[[klayout.lvs]]
+name = "sg13g2"
+file = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/lvs/sg13g2.lvs"
+form = "script"
+
+[magic]
+rc = "$PDK_ROOT/ihp-sg13g2/libs.tech/magic/ihp-sg13g2.magicrc"
+tech = "ihp-sg13g2"
+tech_file = "$PDK_ROOT/ihp-sg13g2/libs.tech/magic/ihp-sg13g2.tech"
+version = "1.0.1"
+description = "IHP SG13G2: Open Source rules and DRC"
+requires = "magic-8.3.617"
+includes = [
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/magic/ihp-sg13g2-cifout.tech",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/magic/ihp-sg13g2-cifin.tech",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/magic/ihp-sg13g2-drc.tech",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/magic/ihp-sg13g2-extract.tech",
+]
+tcl = "$PDK_ROOT/ihp-sg13g2/libs.tech/magic/ihp-sg13g2.tcl"
+scale = "10 nanometers"
+settings = ["drc euclidean on", "ext2spice scale off"]
+cifoutput = ["gdsii", "drc", "density", "patternfill", "patternfill(tiled)"]
+cifinput = ["sg13g2"]
+extract = [
+    "ngspice",
+    "ngspice(lvs)",
+    "ngspice(hrhc)",
+    "ngspice(lrhc)",
+    "ngspice(hrlc)",
+    "ngspice(lrlc)",
+]
+drc = ["drc(fast)", "drc(full)", "drc(routing)"]
+
+[magic.globals]
+GND = "VSS"
+SUB = "sub!"
+VDD = "VDD"
+
+[[magic.scripts]]
+role = "density"
+file = "$PDK_ROOT/ihp-sg13g2/libs.tech/magic/check_density.py"
+
+[[magic.scripts]]
+role = "fill"
+file = "$PDK_ROOT/ihp-sg13g2/libs.tech/magic/generate_fill.py"
+
+[[magic.scripts]]
+role = "seal-ring"
+file = "$PDK_ROOT/ihp-sg13g2/libs.tech/magic/generate_seal.py"
+
+[[magic.scripts]]
+role = "gds-tech"
+file = "$PDK_ROOT/ihp-sg13g2/libs.tech/magic/ihp-sg13g2-GDS.tech"
+
+[netgen]
+setup = "$PDK_ROOT/ihp-sg13g2/libs.tech/netgen/ihp-sg13g2_setup.tcl"
+environment = ["NETGEN_COLUMNS"]
+
+[xschem]
+rc = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/xschemrc"
+evaluated = true
+start_window = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/start_page.sch"
+netlist_dir = "$PWD/simulations"
+library_path = [
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_pr",
+    "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/sym/xschem",
+]
+tcl_files = [
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_pr/cap_cmomi.tcl",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/xschem-drc",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/xschem-menu",
+    "$XSCHEM_SHAREDIR/ngspice_backannotate.tcl",
+]
+
+[xschem.variables]
+MODELS_NGSPICE = "$PDK_ROOT/ihp-sg13g2/libs.tech/ngspice/models"
+MODELS_XYCE = "$PDK_ROOT/ihp-sg13g2/libs.tech/xyce/models"
+SG13G2_MODELS = "$PDK_ROOT/ihp-sg13g2/libs.tech/ngspice/models"
+SG13G2_MODELS_XYCE = "$PDK_ROOT/ihp-sg13g2/libs.tech/xyce/models"
+
+[xschem.references]
+sg13g2_pr = "sg13g2_pr/"
+sg13g2_stdcell = ""
+sg13g2_test_stdcells = "sg13g2_test_stdcells/"
+sg13g2_tests = "sg13g2_tests/"
+sg13g2_tests_xyce = "sg13g2_tests_xyce/"
+
+[[xschem.libraries]]
+name = "sg13g2_pr"
+path = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_pr"
+layout = "flat"
+role = "primitives"
+description = "xschem: device symbols (47 symbols, 1 schematics)"
+enabled = true
+
+[[xschem.libraries]]
+name = "sg13g2_test_stdcells"
+path = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_test_stdcells"
+layout = "flat"
+role = "tests"
+description = "xschem: test benches of the PDK (1 symbols, 3 schematics)"
+enabled = false
+
+[[xschem.libraries]]
+name = "sg13g2_tests"
+path = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_tests"
+layout = "flat"
+role = "tests"
+description = "xschem: test benches of the PDK (50 symbols, 55 schematics)"
+enabled = false
+
+[[xschem.libraries]]
+name = "sg13g2_tests_xyce"
+path = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_tests_xyce"
+layout = "flat"
+role = "tests"
+description = "xschem: test benches of the PDK (41 symbols, 46 schematics)"
+enabled = false
+
+[[xschem.libraries]]
+name = "sg13g2_stdcell"
+path = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/sym/xschem"
+layout = "flat"
+role = "stdcells"
+description = "xschem: standard cell symbols (84 symbols, 0 schematics)"
+enabled = true
+
+[models]
+default = "ngspice"
+corner = "tt"
+verilog_a = "$PDK_ROOT/ihp-sg13g2/libs.tech/verilog-a"
+
+[models.ngspice]
+simulator = "ngspice"
+dir = "$PDK_ROOT/ihp-sg13g2/libs.tech/ngspice/models"
+libraries = [
+    "cornerCAP.lib",
+    "cornerDIO.lib",
+    "cornerHBT.lib",
+    "cornerMOSCAP.lib",
+    "cornerMOShv.lib",
+    "cornerMOSlv.lib",
+    "cornerRES.lib",
+]
+includes = ["sg13g2_bondpad.lib"]
+init = ["$PDK_ROOT/ihp-sg13g2/libs.tech/ngspice/.spiceinit"]
+search_path = [
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/ngspice/models",
+    "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/spice",
+    "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_io/spice",
+]
+osdi = [
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/ngspice/osdi/psp103.osdi",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/ngspice/osdi/psp103_nqs.osdi",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/ngspice/osdi/r3_cmc.osdi",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/ngspice/osdi/mosvar.osdi",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/ngspice/osdi/cap_cmomi.osdi",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/ngspice/osdi/cap_cmomf.osdi",
+]
+tnom = 27.0
+
+[models.ngspice.corners]
+ff = [
+    "cornerCAP.lib cap_bcs",
+    "cornerDIO.lib dio_ff",
+    "cornerHBT.lib hbt_bcs",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_ff",
+    "cornerMOSlv.lib mos_ff",
+    "cornerRES.lib res_bcs",
+]
+ff_mm = [
+    "cornerCAP.lib cap_bcs_mismatch",
+    "cornerDIO.lib dio_ff",
+    "cornerHBT.lib hbt_bcs_mismatch",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_ff_mismatch",
+    "cornerMOSlv.lib mos_ff_mismatch",
+    "cornerRES.lib res_bcs_mismatch",
+]
+fs = [
+    "cornerCAP.lib cap_typ",
+    "cornerDIO.lib dio_tt",
+    "cornerHBT.lib hbt_typ",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_fs",
+    "cornerMOSlv.lib mos_fs",
+    "cornerRES.lib res_typ",
+]
+fs_mm = [
+    "cornerCAP.lib cap_typ",
+    "cornerDIO.lib dio_tt",
+    "cornerHBT.lib hbt_typ",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_fs_mismatch",
+    "cornerMOSlv.lib mos_fs_mismatch",
+    "cornerRES.lib res_typ",
+]
+mc = [
+    "cornerCAP.lib cap_typ_stat",
+    "cornerDIO.lib dio_tt_stat",
+    "cornerHBT.lib hbt_typ_stat",
+    "cornerMOSCAP.lib moscap_tt_stat",
+    "cornerMOShv.lib mos_tt_stat",
+    "cornerMOSlv.lib mos_tt_stat",
+    "cornerRES.lib res_stat",
+]
+sf = [
+    "cornerCAP.lib cap_typ",
+    "cornerDIO.lib dio_tt",
+    "cornerHBT.lib hbt_typ",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_sf",
+    "cornerMOSlv.lib mos_sf",
+    "cornerRES.lib res_typ",
+]
+sf_mm = [
+    "cornerCAP.lib cap_typ",
+    "cornerDIO.lib dio_tt",
+    "cornerHBT.lib hbt_typ",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_sf_mismatch",
+    "cornerMOSlv.lib mos_sf_mismatch",
+    "cornerRES.lib res_typ",
+]
+ss = [
+    "cornerCAP.lib cap_wcs",
+    "cornerDIO.lib dio_ss",
+    "cornerHBT.lib hbt_wcs",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_ss",
+    "cornerMOSlv.lib mos_ss",
+    "cornerRES.lib res_wcs",
+]
+ss_mm = [
+    "cornerCAP.lib cap_wcs_mismatch",
+    "cornerDIO.lib dio_ss",
+    "cornerHBT.lib hbt_wcs_mismatch",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_ss_mismatch",
+    "cornerMOSlv.lib mos_ss_mismatch",
+    "cornerRES.lib res_wcs_mismatch",
+]
+tt = [
+    "cornerCAP.lib cap_typ",
+    "cornerDIO.lib dio_tt",
+    "cornerHBT.lib hbt_typ",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_tt",
+    "cornerMOSlv.lib mos_tt",
+    "cornerRES.lib res_typ",
+]
+tt_mm = [
+    "cornerCAP.lib cap_typ_mismatch",
+    "cornerDIO.lib dio_tt",
+    "cornerHBT.lib hbt_typ_mismatch",
+    "cornerMOSCAP.lib moscap_tt_mismatch",
+    "cornerMOShv.lib mos_tt_mismatch",
+    "cornerMOSlv.lib mos_tt_mismatch",
+    "cornerRES.lib res_typ_mismatch",
+]
+
+[models.xyce]
+simulator = "xyce"
+dir = "$PDK_ROOT/ihp-sg13g2/libs.tech/xyce/models"
+libraries = [
+    "cornerCAP.lib",
+    "cornerDIO.lib",
+    "cornerHBT.lib",
+    "cornerMOSCAP.lib",
+    "cornerMOShv.lib",
+    "cornerMOSlv.lib",
+    "cornerRES.lib",
+]
+includes = ["resistors_parm.lib", "sg13g2_bondpad.lib"]
+plugins = [
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/xyce/plugins/libXyce_Plugin_PSP103_VA.so",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/xyce/plugins/libXyce_Plugin_r3_cmc.so",
+]
+tnom = 27.0
+
+[models.xyce.corners]
+ff = [
+    "cornerCAP.lib cap_bcs",
+    "cornerDIO.lib dio_ff",
+    "cornerHBT.lib hbt_bcs",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_ff",
+    "cornerMOSlv.lib mos_ff",
+    "cornerRES.lib res_bcs",
+]
+fs = [
+    "cornerCAP.lib cap_typ",
+    "cornerDIO.lib dio_tt",
+    "cornerHBT.lib hbt_typ",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_fs",
+    "cornerMOSlv.lib mos_fs",
+    "cornerRES.lib res_typ",
+]
+mc = [
+    "cornerCAP.lib cap_typ_stat",
+    "cornerDIO.lib dio_tt_stat",
+    "cornerHBT.lib hbt_typ_stat",
+    "cornerMOSCAP.lib moscap_tt_stat",
+    "cornerMOShv.lib mos_tt_stat",
+    "cornerMOSlv.lib mos_tt_stat",
+    "cornerRES.lib res_typ_stat",
+]
+sf = [
+    "cornerCAP.lib cap_typ",
+    "cornerDIO.lib dio_tt",
+    "cornerHBT.lib hbt_typ",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_sf",
+    "cornerMOSlv.lib mos_sf",
+    "cornerRES.lib res_typ",
+]
+ss = [
+    "cornerCAP.lib cap_wcs",
+    "cornerDIO.lib dio_ss",
+    "cornerHBT.lib hbt_wcs",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_ss",
+    "cornerMOSlv.lib mos_ss",
+    "cornerRES.lib res_wcs",
+]
+tt = [
+    "cornerCAP.lib cap_typ",
+    "cornerDIO.lib dio_tt",
+    "cornerHBT.lib hbt_typ",
+    "cornerMOSCAP.lib moscap_tt",
+    "cornerMOShv.lib mos_tt",
+    "cornerMOSlv.lib mos_tt",
+    "cornerRES.lib res_typ",
+]
+tt_mm = [
+    "cornerCAP.lib cap_typ",
+    "cornerDIO.lib dio_tt",
+    "cornerHBT.lib hbt_typ",
+    "cornerMOSCAP.lib moscap_tt_mismatch",
+    "cornerMOShv.lib mos_tt",
+    "cornerMOSlv.lib mos_tt",
+    "cornerRES.lib res_typ",
+]
+
+[devices]
+pcells = "map"
+count = 43
+with_pcell = 15
+guessed = 0
+with_magic = 27
+without_model = 2
+
+[devices.classes]
+bjt = 7
+cap = 5
+diode = 4
+esd = 6
+ind = 2
+mos_hv = 4
+mos_lv = 4
+pad = 1
+res = 3
+tap = 4
+varactor = 3
+
+[refs]
+path = "$PDK_ROOT/ihp-sg13g2/libs.ref"
+
+[[refs.library]]
+name = "sg13g2_io"
+path = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_io"
+layout = "ref"
+role = "io"
+description = "IO cells (45 cells)"
+enabled = true
+cells = 45
+formats = ["cdl", "doc", "gds", "lef", "lib", "spice", "verilog"]
+default_corner = "typ_1p2V_3p3V_25C"
+
+[refs.library.sites]
+sg13g2_cornerSite = [180.0, 180.0]
+sg13g2_ioSite = [1.0, 180.0]
+
+[refs.library.liberty]
+dummy = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_io/lib/sg13g2_io_dummy.lib"
+fast_1p32V_3p6V_m40C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_io/lib/sg13g2_io_fast_1p32V_3p6V_m40C.lib"
+fast_1p65V_3p6V_m40C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_io/lib/sg13g2_io_fast_1p65V_3p6V_m40C.lib"
+slow_1p08V_3p0V_125C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_io/lib/sg13g2_io_slow_1p08V_3p0V_125C.lib"
+slow_1p35V_3p0V_125C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_io/lib/sg13g2_io_slow_1p35V_3p0V_125C.lib"
+typ_1p2V_3p3V_25C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_io/lib/sg13g2_io_typ_1p2V_3p3V_25C.lib"
+typ_1p5V_3p3V_25C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_io/lib/sg13g2_io_typ_1p5V_3p3V_25C.lib"
+
+[[refs.library]]
+name = "sg13g2_pr"
+path = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_pr"
+layout = "ref"
+role = "primitives"
+description = "Device primitives (fixed layouts) (46 cells)"
+enabled = true
+cells = 46
+formats = ["gds"]
+
+[[refs.library]]
+name = "sg13g2_sram"
+path = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_sram"
+layout = "ref"
+role = "memory"
+description = "Memory macros (34 cells)"
+enabled = true
+cells = 34
+formats = ["cdl", "doc", "gds", "lef", "lib", "verilog"]
+default_corner = "typ_1p20V_25C"
+
+[refs.library.liberty]
+fast_1p32V_m55C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_sram/lib/*_fast_1p32V_m55C.lib"
+slow_1p08V_125C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_sram/lib/*_slow_1p08V_125C.lib"
+typ_1p20V_25C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_sram/lib/*_typ_1p20V_25C.lib"
+
+[[refs.library]]
+name = "sg13g2_stdcell"
+path = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell"
+layout = "ref"
+role = "stdcells"
+description = "Standard cells (84 cells)"
+enabled = true
+cells = 84
+formats = ["cdl", "doc", "gds", "lef", "lib", "sch", "spice", "sym", "verilog"]
+techlef = ["$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/lef/sg13g2_tech.lef"]
+default_corner = "typ_1p20V_25C"
+
+[refs.library.sites]
+CoreSite = [0.48, 3.78]
+
+[refs.library.liberty]
+fast_1p32V_m40C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_fast_1p32V_m40C.lib"
+fast_1p65V_m40C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_fast_1p65V_m40C.lib"
+slow_1p08V_125C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_slow_1p08V_125C.lib"
+slow_1p35V_125C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_slow_1p35V_125C.lib"
+typ_1p20V_25C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_typ_1p20V_25C.lib"
+typ_1p50V_25C = "$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_typ_1p50V_25C.lib"
+
+[refs.digital]
+flow = "librelane"
+config = "$PDK_ROOT/ihp-sg13g2/libs.tech/librelane/config.tcl"
+default_library = "sg13g2_stdcell"
+pad_library = "sg13g2_io"
+default_corner = "nom_typ_1p20V_25C"
+corners = ["nom_fast_1p32V_m40C", "nom_slow_1p08V_125C", "nom_typ_1p20V_25C"]
+rcx_rules = [
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/librelane/openrcx/IHP_rcx_patterns.rules",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/librelane/openrcx/ihp-sg13g2.max.magic.rules",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/librelane/openrcx/ihp-sg13g2.min.magic.rules",
+    "$PDK_ROOT/ihp-sg13g2/libs.tech/librelane/openrcx/ihp-sg13g2.nom.magic.rules",
+]
+
+[refs.digital.libraries]
+sg13g2_io = "$PDK_ROOT/ihp-sg13g2/libs.tech/librelane/sg13g2_io/config.tcl"
+sg13g2_stdcell = "$PDK_ROOT/ihp-sg13g2/libs.tech/librelane/sg13g2_stdcell/config.tcl"

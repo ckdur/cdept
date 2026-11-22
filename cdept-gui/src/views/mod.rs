@@ -4,7 +4,9 @@
 //! contextual menus and toolbar buttons shown while it is the active document, so new
 //! views bring their own menus without the shell changing.
 
+pub(crate) mod categories;
 mod console;
+mod contained;
 mod document;
 mod hierarchy;
 mod inspector;
@@ -12,8 +14,11 @@ mod layout;
 mod library;
 mod placeholder;
 mod schematic;
+pub(crate) mod search;
 mod start;
+pub(crate) mod technology;
 mod tools;
+pub(crate) mod vcs;
 
 use std::collections::HashMap;
 
@@ -21,7 +26,7 @@ use egui::Ui;
 
 pub use self::document::Document;
 pub use self::hierarchy::HierarchyView;
-pub use self::layout::{LayoutView, Replacement};
+pub use self::layout::{LayoutView, Replacement, member_of as layout_member_of};
 pub use self::schematic::{
     CloseChoice, NETLIST_FORMATS, Picture, SchematicView, Selected, pretend_clipboard,
 };
@@ -79,9 +84,11 @@ pub struct Views {
     hierarchy: HierarchyView,
     inspector: inspector::InspectorView,
     tools: tools::ToolsView,
+    technology: technology::TechnologyView,
     console: console::ConsoleView,
     jobs: placeholder::Placeholder,
     problems: placeholder::Placeholder,
+    search: search::SearchView,
     /// The open documents, by the id of their tab.
     documents: HashMap<DocId, Document>,
     /// Stands in for a document tab that has no view (any more).
@@ -101,9 +108,11 @@ impl Default for Views {
             hierarchy: Default::default(),
             inspector: Default::default(),
             tools: Default::default(),
+            technology: Default::default(),
             console: Default::default(),
             jobs: Placeholder::new("Jobs", "No simulation or verification jobs.", "Phase 4"),
             problems: Placeholder::new("Problems", "No DRC/LVS results.", "Phase 7"),
+            search: Default::default(),
             generate: Vec::new(),
             documents: HashMap::new(),
             missing: Placeholder::new("Document", "This document is closed.", "a later step"),
@@ -120,9 +129,11 @@ impl Views {
             Tab::Hierarchy => &mut self.hierarchy,
             Tab::Inspector => &mut self.inspector,
             Tab::Tools => &mut self.tools,
+            Tab::Technology => &mut self.technology,
             Tab::Console => &mut self.console,
             Tab::Jobs => &mut self.jobs,
             Tab::Problems => &mut self.problems,
+            Tab::Search => &mut self.search,
             Tab::Document(id) => match self.documents.get_mut(&id) {
                 Some(view) => view,
                 None => &mut self.missing,
@@ -130,8 +141,17 @@ impl Views {
         }
     }
 
+    /// The Search panel.
+    pub(crate) fn search_mut(&mut self) -> &mut search::SearchView {
+        &mut self.search
+    }
+
     pub fn hierarchy(&self) -> &HierarchyView {
         &self.hierarchy
+    }
+
+    pub fn hierarchy_mut(&mut self) -> &mut HierarchyView {
+        &mut self.hierarchy
     }
 
     /// The open documents.
