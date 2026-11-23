@@ -139,9 +139,147 @@ pub fn parse(bytes: &[u8]) -> SpiceIndex {
     index
 }
 
+/// One `.subckt` … `.ends` block of a netlist (top level only), as lines.
+struct Block<'a> {
+    name: &'a str,
+    lines: Vec<&'a str>,
+}
+
+/// The word after the first word of a line (`.subckt NAME …`), with where it starts.
+fn second_word(line: &str) -> Option<(usize, &str)> {
+    let first_end = line.find(char::is_whitespace)?;
+    let rest = &line[first_end..];
+    let start = first_end + (rest.len() - rest.trim_start().len());
+    let word = line[start..].split_whitespace().next()?;
+    Some((start, word))
+}
+
+fn blocks(text: &str) -> Vec<Block<'_>> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut current: Option<Block> = None;
+    for line in text.lines() {
+        let trimmed = line.trim_start().as_bytes();
+        if lower_starts(trimmed, b".subckt") || lower_starts(trimmed, b".macro") {
+            if depth == 0 {
+                let name = second_word(line.trim_start()).map_or("", |(_, w)| w);
+                current = Some(Block {
+                    name,
+                    lines: Vec::new(),
+                });
+            }
+            depth += 1;
+        }
+        if let Some(block) = &mut current {
+            block.lines.push(line);
+        }
+        if (lower_starts(trimmed, b".ends") || lower_starts(trimmed, b".eom")) && depth > 0 {
+            depth -= 1;
+            if depth == 0 {
+                out.extend(current.take());
+            }
+        }
+    }
+    out
+}
+
+/// The subcircuits the instance lines of a block place: the last word before the
+/// parameters of each `X` card, `+` continuations joined.
+fn placed(block: &Block) -> Vec<String> {
+    let mut cards: Vec<String> = Vec::new();
+    for line in block.lines.iter().skip(1) {
+        let line = line.trim();
+        if let Some(more) = line.strip_prefix('+') {
+            if let Some(last) = cards.last_mut() {
+                last.push(' ');
+                last.push_str(more);
+            }
+        } else {
+            cards.push(line.to_string());
+        }
+    }
+    cards
+        .iter()
+        .filter(|c| c.starts_with(['x', 'X']))
+        .filter_map(|c| {
+            c.split_whitespace()
+                .skip(1)
+                .take_while(|w| !w.contains('=') && !w.eq_ignore_ascii_case("params:"))
+                .last()
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+/// `line` (a `.subckt` or `.ends` card) with the word after the first one replaced.
+fn with_name(line: &str, new: &str) -> String {
+    match second_word(line) {
+        Some((start, word)) => format!("{}{new}{}", &line[..start], &line[start + word.len()..]),
+        None => line.to_string(),
+    }
+}
+
+/// The subcircuit `name` of a netlist with the ones it places that the file defines
+/// (at any depth), as a netlist of its own, in the order of the file. The top one is
+/// named `new`. Nothing else is taken: no models, includes, parameters or other cells.
+pub fn extract_subckt(text: &str, name: &str, new: &str) -> eyre::Result<String> {
+    let all = blocks(text);
+    let find = |n: &str| all.iter().position(|b| b.name.eq_ignore_ascii_case(n));
+    let Some(top) = find(name) else {
+        eyre::bail!("the netlist has no subcircuit '{name}'");
+    };
+    let mut wanted = vec![false; all.len()];
+    let mut todo = vec![top];
+    while let Some(at) = todo.pop() {
+        if std::mem::replace(&mut wanted[at], true) {
+            continue;
+        }
+        todo.extend(placed(&all[at]).iter().filter_map(|n| find(n)));
+    }
+    let mut out = String::new();
+    for (at, block) in all.iter().enumerate().filter(|(at, _)| wanted[*at]) {
+        if at != top && block.name.eq_ignore_ascii_case(new) {
+            eyre::bail!("'{new}' is also the name of a subcircuit used by '{name}'");
+        }
+        for (i, line) in block.lines.iter().enumerate() {
+            let trimmed = line.trim_start().as_bytes();
+            // `.subckt NAME`, and `.ends NAME` of the top one, carry the new name.
+            let named_end = i + 1 == block.lines.len()
+                && (lower_starts(trimmed, b".ends") || lower_starts(trimmed, b".eom"))
+                && second_word(line).is_some_and(|(_, w)| w.eq_ignore_ascii_case(name));
+            if at == top && (i == 0 || named_end) {
+                out.push_str(&with_name(line, new));
+            } else {
+                out.push_str(line);
+            }
+            out.push('\n');
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extracts_a_subckt_with_the_ones_it_places() {
+        let text = ".include \"m.spice\"\n.subckt inv A Y\nXN0 Y A 0 0 nmos w=1u\n.ends\n\
+* c\n.subckt buf A Y VDD\nX1 A n inv\nX2 n Y inv m=1\n.ends buf\n\
+.subckt other A\nR1 A 0 1\n.ends\n";
+        let out = extract_subckt(text, "buf", "buf_copy").unwrap();
+        assert_eq!(
+            out,
+            ".subckt inv A Y\nXN0 Y A 0 0 nmos w=1u\n.ends\n\
+.subckt buf_copy A Y VDD\nX1 A n inv\nX2 n Y inv m=1\n.ends buf_copy\n"
+        );
+        assert_eq!(parse(out.as_bytes()).subckts.len(), 2);
+        let alone = extract_subckt(text, "INV", "x").unwrap();
+        assert!(alone.starts_with(".subckt x A Y"), "{alone}");
+        assert!(!alone.contains("other"));
+        assert!(extract_subckt(text, "zzz", "x").is_err());
+        assert!(extract_subckt(text, "buf", "inv").is_err());
+    }
 
     #[test]
     fn subcircuits_with_pins_and_parameters() {

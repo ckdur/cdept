@@ -243,6 +243,14 @@ enum Step {
     },
     /// Remove a folder that holds nothing but empty folders.
     RemoveEmpty(PathBuf),
+    /// A new file made from one cell of a file that holds several: `bytes` are written
+    /// to `to`; `from` is the file the cell is taken from and `what` says how.
+    Extract {
+        from: PathBuf,
+        to: PathBuf,
+        bytes: Vec<u8>,
+        what: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -453,6 +461,87 @@ impl Transfer {
         Ok(())
     }
 
+    /// The view `entry`, one cell (`cell` of its library) of a file that holds several,
+    /// is copied as a file of its own named `new`, made in the folder `dir` (made
+    /// first when `make_dir`). Only layouts in GDSII and SPICE/CDL netlists can be
+    /// taken apart: any other view is left out, with a note.
+    fn member(&mut self, entry: &Entry, cell: &str, new: &str, dir: &Path, make_dir: bool) -> Result<()> {
+        let file = entry.main_file.as_deref().unwrap_or(&entry.path);
+        let inside = entry.member_or(cell);
+        let name = file_name(file);
+        let suffix = Format::split_name(&name)
+            .map(|(stem, _)| name[stem.len()..].to_string())
+            .unwrap_or_default();
+        let (bytes, what) = match entry.format {
+            Some(Format::Gds) => {
+                let bytes = fs::read(file)
+                    .wrap_err_with(|| format!("cannot read {}", file.display()))?;
+                if bytes.starts_with(&[0x1f, 0x8b]) {
+                    self.notes.push(format!(
+                        "view '{}' is in {name}, a compressed file: not copied",
+                        entry.name
+                    ));
+                    return Ok(());
+                }
+                let mut out = layout::gds::extract_structure(&bytes, inside)
+                    .wrap_err_with(|| format!("cannot take '{inside}' out of {}", file.display()))?;
+                if inside != new {
+                    let map = BTreeMap::from([(inside.to_string(), new.to_string())]);
+                    if let Some(renamed) = layout::gds::rename_bytes(&out, &map)
+                        .wrap_err_with(|| format!("cannot name the structure '{new}'"))?
+                    {
+                        out = renamed;
+                    }
+                }
+                (
+                    out,
+                    format!("structure '{inside}' and what it places, as '{new}'"),
+                )
+            }
+            Some(Format::Spice | Format::Cdl) => {
+                let text = String::from_utf8_lossy(
+                    &fs::read(file).wrap_err_with(|| format!("cannot read {}", file.display()))?,
+                )
+                .into_owned();
+                let out = crate::container::spice::extract_subckt(&text, inside, new)
+                    .wrap_err_with(|| format!("cannot take '{inside}' out of {}", file.display()))?;
+                (
+                    out.into_bytes(),
+                    format!("subcircuit '{inside}' and those it places, as '{new}'"),
+                )
+            }
+            _ => {
+                self.notes.push(format!(
+                    "view '{}' is one cell of {name}, a file of {}: only GDSII layouts and \
+                     SPICE/CDL netlists can be copied out of such a file, so it is not copied",
+                    entry.name,
+                    entry.format.map_or("another kind", Format::label)
+                ));
+                return Ok(());
+            }
+        };
+        let to = dir.join(format!("{new}{suffix}"));
+        if to.exists()
+            || self.map.files.values().any(|t| *t == to)
+            || self
+                .steps
+                .iter()
+                .any(|s| matches!(s, Step::Extract { to: t, .. } if *t == to))
+        {
+            bail!("{} already exists", to.display());
+        }
+        if make_dir {
+            self.steps.push(Step::MakeDir(dir.to_path_buf()));
+        }
+        self.steps.push(Step::Extract {
+            from: file.to_path_buf(),
+            to,
+            bytes,
+            what,
+        });
+        Ok(())
+    }
+
     /// A whole folder goes to `to`; the files named after `old` in it (and in its
     /// folders, down to `depth`) are then renamed after `new`.
     fn folder(
@@ -519,6 +608,10 @@ fn transfer_cell(cell: &Cell, dst: &Library, new: &str, copy: bool) -> Result<Tr
             None => {
                 for entry in &cell.entries {
                     let dir = target.join(&entry.name);
+                    if entry.is_member() {
+                        t.member(entry, old, new, &dir, true)?;
+                        continue;
+                    }
                     t.steps.push(Step::MakeDir(dir.clone()));
                     for file in entry_files(entry) {
                         let name = file_name(&file);
@@ -536,7 +629,17 @@ fn transfer_cell(cell: &Cell, dst: &Library, new: &str, copy: bool) -> Result<Tr
                 .filter(|(_, rel)| rel.components().count() <= 2)
                 .map(|(file, _)| file)
                 .collect(),
-            None => cell.entries.iter().flat_map(entry_files).collect(),
+            None => {
+                let mut files = Vec::new();
+                for entry in &cell.entries {
+                    if entry.is_member() {
+                        t.member(entry, old, new, &dst.path, false)?;
+                    } else {
+                        files.extend(entry_files(entry));
+                    }
+                }
+                files
+            }
         };
         let mut left = Vec::new();
         for file in files {
@@ -565,7 +668,7 @@ fn transfer_cell(cell: &Cell, dst: &Library, new: &str, copy: bool) -> Result<Tr
                 left.len()
             ));
         }
-        if t.map.files.is_empty() {
+        if t.map.files.is_empty() && t.steps.is_empty() {
             bail!("cell '{old}' has no file named after it to put in a flat library");
         }
     } else {
@@ -573,6 +676,12 @@ fn transfer_cell(cell: &Cell, dst: &Library, new: &str, copy: bool) -> Result<Tr
             "library '{}' is laid out as '{}': cells cannot be put there",
             dst.name,
             dst.layout.name()
+        );
+    }
+    if t.steps.is_empty() && cell.entries.iter().any(Entry::is_member) {
+        bail!(
+            "no view of '{old}' can be copied out of the files that hold it: {}",
+            t.notes.join("; ")
         );
     }
     Ok(t)
@@ -1442,21 +1551,17 @@ pub fn plan(project: &Project, operation: &Operation, options: &Options) -> Resu
 }
 
 /// A cell or view that lives inside a file holding several cells (a standard-cell GDS,
-/// a Liberty file: [`crate::Entry::member`]) cannot be renamed, moved, copied or
-/// deleted by itself: the file belongs to every cell in it.
+/// a Liberty file: [`crate::Entry::member`]) cannot be renamed, moved or deleted by
+/// itself: the file belongs to every cell in it. It can be copied: the copy is a file
+/// of its own (GDSII layouts and SPICE/CDL netlists; other views are left out).
 fn not_in_a_collection(project: &Project, operation: &Operation) -> Result<()> {
     let (library, cell, view) = match operation {
         Operation::RenameCell { library, cell, .. }
         | Operation::MoveCell { library, cell, .. }
-        | Operation::CopyCell { library, cell, .. }
         | Operation::DeleteCell { library, cell } => (library, cell, None),
+        // Copies are made by taking the cell out of the file ([`Transfer::member`]).
+        Operation::CopyCell { .. } | Operation::CopyView { .. } => return Ok(()),
         Operation::RenameView {
-            library,
-            cell,
-            view,
-            ..
-        }
-        | Operation::CopyView {
             library,
             cell,
             view,
@@ -1677,7 +1782,12 @@ pub fn plan_with(
                 if taken || target.exists() {
                     bail!("cell '{to_library}/{to_cell}' already has a view '{new}'");
                 }
-                if entry.path.is_dir() {
+                if entry.is_member() {
+                    t.member(entry, name, to_cell, &target, true)?;
+                    if t.steps.is_empty() {
+                        bail!("{}", t.notes.join("; "));
+                    }
+                } else if entry.path.is_dir() {
                     t.folder(&entry.path, &target, name, to_cell, 1, true)?;
                 } else {
                     t.steps.push(Step::MakeDir(target.clone()));
@@ -1687,6 +1797,15 @@ pub fn plan_with(
                         t.item(&file, target.join(file_name), true)?;
                     }
                 }
+            } else if dst.layout == LibraryLayout::Flat && entry.is_member() {
+                t.member(entry, name, to_cell, &dst.path, false)?;
+                if t.steps.is_empty() {
+                    bail!("{}", t.notes.join("; "));
+                }
+                view_name = entry.kind.name().to_string();
+                notes.push(format!(
+                    "'{to_library}' is a flat library: the view is named after its kind of file"
+                ));
             } else if dst.layout == LibraryLayout::Flat {
                 let files: Vec<PathBuf> = if entry.path.is_dir() {
                     walk(&entry.path)?
@@ -1806,10 +1925,20 @@ pub fn plan_with(
     // What the plan shows.
     let mut changes = Vec::new();
     for step in &steps {
+        if let Step::Extract { from, to, what, .. } = step {
+            changes.push(Change {
+                kind: ChangeKind::Copy,
+                path: from.clone(),
+                to: Some(to.clone()),
+                label: String::new(),
+                details: vec![what.clone()],
+            });
+            continue;
+        }
         let (kind, from, to) = match step {
             Step::Move { from, to } => (ChangeKind::Move, from, to),
             Step::Copy { from, to } => (ChangeKind::Copy, from, to),
-            Step::MakeDir(_) | Step::RemoveEmpty(_) => continue,
+            Step::MakeDir(_) | Step::RemoveEmpty(_) | Step::Extract { .. } => continue,
         };
         changes.push(Change {
             kind,
@@ -2190,6 +2319,7 @@ pub fn apply(project: &Project, plan: &Plan) -> Result<Outcome> {
                     Step::Move { from, to } => journal.move_path(from, to)?,
                     Step::Copy { from, to } => journal.copy_path(from, to)?,
                     Step::RemoveEmpty(dir) => journal.empty_later.push(dir.clone()),
+                    Step::Extract { to, bytes, .. } => journal.write(to, bytes)?,
                 }
             }
             for write in &plan.writes {

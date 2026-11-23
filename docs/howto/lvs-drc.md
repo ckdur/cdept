@@ -22,51 +22,41 @@ examples need `PDK_ROOT=/opt/ext/OpenPDKs` and the tools of `/opt/ext/OpenLane/b
 ## Get a standard cell into the project
 
 The PDK's cells are in the read-only library `sg13g2_stdcell`, but all 84 cells are one
-GDS file (`gds/sg13g2_stdcell.gds`) and one SPICE file. The checks of the command line
-and the Layout menu work on a file with one top cell, so cut the cell out into a cell of
-your own library. Work in a scratch copy of `examples/ihp-inv`:
+GDS file (`gds/sg13g2_stdcell.gds`) and one SPICE file. Copy the cell into a library of
+your own: the copy gets a GDS with just that cell (and the cells it places) and a
+netlist with just its `.subckt`, each named after the new cell. Work in a scratch copy
+of `examples/ihp-inv`:
 
 ```sh
 cp -r examples/ihp-inv /tmp/lvs-demo && cd /tmp/lvs-demo
-L=$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell
 C=sg13g2_inv_1
-mkdir -p libs/cells/$C/layout libs/cells/$C/netlist
-cat > /tmp/cut.py <<EOF
-import pya, os
-ly = pya.Layout(); ly.read(os.environ["SRC"])
-o = pya.SaveLayoutOptions(); o.format = "GDS2"
-o.select_cell(ly.cell(os.environ["CELL"]).cell_index())
-ly.write(os.environ["OUT"], o)
-EOF
-SRC=$L/gds/sg13g2_stdcell.gds CELL=$C OUT=libs/cells/$C/layout/$C.gds klayout -b -r /tmp/cut.py
+cdept cell copy sg13g2_stdcell $C $C --to cells
+cdept ls cells        # sg13g2_inv_1 now has layout, netlist, schematic and symbol views
 ```
 
-For the reference netlist take the cell's `.subckt` out of the PDK's SPICE file. The PDK
-writes the two transistors as subcircuit calls (`XN0 ... sg13_lv_nmos`); KLayout reads a
-netlist with no models, so they must be MOS devices (`M...`):
+The command prints what it does: the structure taken out of the PDK's GDS, the
+subcircuit taken out of its SPICE and CDL files, and the files that are copied as they
+are (the cell's schematic and symbol). The views that are one cell of a larger file and
+cannot be taken apart (LEF, Verilog, Liberty) are named in notes and left out. Use
+`--dry-run` to see the plan first. The cell itself stays in the read-only library: it
+cannot be renamed, moved or deleted.
+
+LVS needs a schematic. The PDK has one for the cell, so the copy has it; for a cell
+without one, draw it or copy another cell's schematic.
+
+The PDK writes the two transistors of the netlist as subcircuit calls
+(`XN0 ... sg13_lv_nmos`); KLayout reads a netlist with no models, so to compare against
+the copied netlist (not the schematic) they must be MOS devices (`M...`):
 
 ```sh
-awk -v c=$C '$1==".subckt"&&$2==c{p=1} p{print} /^\.ends/{p=0}' \
-    $L/spice/sg13g2_stdcell.spice | sed 's/^X\([NP]\)/M\1/' > libs/cells/$C/netlist/$C.spice
-cdept ls cells        # sg13g2_inv_1 now has layout and netlist views
-```
-
-For the GUI (which compares with a schematic, not a netlist) the cell also needs a
-schematic view. The PDK has symbols only, so copy the example inverter's schematic,
-which places the same two `sg13_lv` devices, and set the widths of the cell (PMOS 1.12u,
-NMOS 0.74u, see the `.subckt`):
-
-```sh
-mkdir libs/cells/$C/schematic
-sed 's/^w=1.5u/w=1.12u/' libs/cells/inv/schematic/inv.sch > libs/cells/$C/schematic/$C.sch
+sed -i 's/^X\([NP]\)/M\1/' libs/cells/$C/netlist/$C.spice
 ```
 
 ```{note}
-DRC can be run on the cell in place (`cdept layout drc sg13g2_stdcell sg13g2_inv_1`, or
-Run DRC on the cell's layout): the check works on the cell named, not on the first cell of
-the library's GDS file. LVS needs a schematic of the cell, which the PDK does not have
-for the standard cells (symbols only), so for LVS copy the cell into a library of the
-project as above.
+DRC can also be run on the cell in place (`cdept layout drc sg13g2_stdcell sg13g2_inv_1`,
+or Run DRC on the cell's layout): the check works on the cell named, not on the first
+cell of the library's GDS file. LVS needs a schematic of the cell, so for LVS copy the
+cell into a library of the project as above.
 ```
 
 ## What is taken from the technology

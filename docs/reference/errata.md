@@ -91,11 +91,6 @@ DRC and LVS results are not stored in the project
   `~/.cache/cdept/index`: both are per user. The Magic outputs go to `<project>/magic/`.
   DRC results from Magic do not reach the GUI. See [DRC and LVS](../howto/lvs-drc.md).
 
-`cdept cell copy` from a PDK library with one GDS for many cells
-: Fails because the GDS holds several cells, so the cell has to be cut out with
-  KLayout first ([DRC and LVS](../howto/lvs-drc.md)). Running DRC or LVS on such a cell
-  in place works: the checks use the cell named, not the first top cell of the file.
-
 KLayout LVS on PDK SPICE netlists
 : A PDK netlist that writes devices as `X` subcircuit calls is compared against an empty
   schematic ("Mismatch layout X / schematic "), so the `X` lines have to be `M` lines.

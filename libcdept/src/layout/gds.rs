@@ -385,9 +385,113 @@ pub fn rename_bytes(bytes: &[u8], map: &BTreeMap<String, String>) -> Result<Opti
     Ok(changed.then_some(out))
 }
 
+/// A standalone stream with the structure `top` and every structure it places, at any
+/// depth: the library header and units are kept, the structures keep their order and
+/// content, the others are dropped. Fails when `top` is not defined in the stream.
+/// Names placed but not defined (ghost cells) stay ghosts.
+pub fn extract_structure(bytes: &[u8], top: &str) -> Result<Vec<u8>> {
+    let summary = parse(bytes)?;
+    if !summary.defines(top) {
+        bail!("the stream has no structure '{top}'");
+    }
+    let mut wanted: BTreeSet<&str> = BTreeSet::new();
+    let mut todo = vec![top];
+    while let Some(name) = todo.pop() {
+        if !wanted.insert(name) {
+            continue;
+        }
+        if let Some(s) = summary.structures.iter().find(|s| s.name == name) {
+            todo.extend(s.refs.iter().map(String::as_str));
+        }
+    }
+    let mut out = Vec::new();
+    let mut pending: Vec<u8> = Vec::new();
+    let mut inside = false;
+    let mut name = String::new();
+    for record in records(bytes) {
+        let (kind, data) = record?;
+        let mut raw = Vec::with_capacity(data.len() + 4);
+        raw.extend_from_slice(&((data.len() + 4) as u16).to_be_bytes());
+        raw.extend_from_slice(&kind.to_be_bytes());
+        raw.extend_from_slice(data);
+        match kind {
+            BGNSTR => {
+                inside = true;
+                name.clear();
+                pending = raw;
+            }
+            ENDSTR => {
+                pending.extend_from_slice(&raw);
+                inside = false;
+                if wanted.contains(name.as_str()) {
+                    out.append(&mut pending);
+                }
+                pending.clear();
+            }
+            ENDLIB => {
+                out.extend_from_slice(&raw);
+                break;
+            }
+            _ if inside => {
+                if kind == STRNAME {
+                    name = text(data);
+                }
+                pending.extend_from_slice(&raw);
+            }
+            _ => out.extend_from_slice(&raw),
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn extracts_a_structure_and_what_it_places() {
+        let gds = build(&[
+            ("inv", &[]),
+            ("other", &["inv"]),
+            ("buf", &["inv", "leaf", "inv"]),
+            ("leaf", &[]),
+            ("unused", &["leaf"]),
+        ]);
+        let out = extract_structure(&gds, "buf").unwrap();
+        let s = parse(&out).unwrap();
+        let names: Vec<&str> = s.structures.iter().map(|s| s.name.as_str()).collect();
+        // Order of the source, the unreachable ones dropped.
+        assert_eq!(names, ["inv", "buf", "leaf"]);
+        assert_eq!(s.library, "LIB");
+        assert!((s.user_per_dbu - 0.001).abs() < 1e-12);
+        assert!((s.dbu_in_meters - 1e-9).abs() < 1e-18);
+        assert!(s.ghosts().is_empty());
+        assert_eq!(s.top_cells(), ["buf"]);
+        // A leaf alone, and the whole stream when everything is reachable.
+        let leaf = parse(&extract_structure(&gds, "leaf").unwrap()).unwrap();
+        assert_eq!(leaf.structures.len(), 1);
+        let single = build(&[("a", &[])]);
+        assert_eq!(extract_structure(&single, "a").unwrap(), single);
+        // Renaming the top afterwards is what the copy of a cell does.
+        let map = BTreeMap::from([("buf".to_string(), "buf_copy".to_string())]);
+        let renamed = rename_bytes(&out, &map).unwrap().unwrap();
+        assert_eq!(parse(&renamed).unwrap().top_cells(), ["buf_copy"]);
+    }
+
+    #[test]
+    fn extracting_a_missing_structure_fails() {
+        let gds = build(&[("a", &[])]);
+        let error = extract_structure(&gds, "zzz").unwrap_err().to_string();
+        assert!(error.contains("zzz"), "{error}");
+    }
+
+    #[test]
+    fn extraction_keeps_ghosts_as_ghosts() {
+        let gds = build(&[("a", &["ext"]), ("b", &[])]);
+        let s = parse(&extract_structure(&gds, "a").unwrap()).unwrap();
+        assert_eq!(s.structures.len(), 1);
+        assert_eq!(s.ghosts(), ["ext"]);
+    }
 
     pub(crate) fn rec(out: &mut Vec<u8>, kind: u16, data: &[u8]) {
         out.extend_from_slice(&((data.len() + 4) as u16).to_be_bytes());
