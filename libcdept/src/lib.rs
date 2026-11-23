@@ -4,6 +4,7 @@
 //! This crate has no GUI dependencies so it can back both the egui frontend and the
 //! headless CLI.
 
+pub mod batch;
 pub mod category;
 pub mod cell;
 pub mod container;

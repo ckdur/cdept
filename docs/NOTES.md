@@ -60,6 +60,13 @@ SIMULATION.md §4 (GUI, job queue, sweeps, results DB). `libcdept/tests/sim.rs` 
 `CDEPT_XSCHEM` and `CDEPT_NGSPICE` set to run (else it skips).
 Job queue / process supervisor: `libcdept::jobs` ([JOBS.md](JOBS.md)); `sim::run_testbench` runs points in parallel, `cdept sim run --jobs N`. Open: SLURM/ssh, results DB, process-group kill.
 
+### Batch adapters (2026-11-23, [BATCH.md](BATCH.md))
+`libcdept/src/batch/`: Job/Adapter layer, Xyce (also `simulator = "xyce"` in testbenches),
+netgen LVS, Yosys synth, OpenROAD scripts; `cdept netgen|yosys|openroad`. Tested against the real
+programs in `/opt/ext/OpenLane/bin`. Open: VACASK, Qucs-S, Xyce AC/noise/plugins, Yosys with
+a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-process settings
+(the adapter sets them).
+
 ### Embedded xschem ([XSCHEM.md](XSCHEM.md))
 - [x] Decisions: helper process (GPL helper, MIT rest), pinned to the asic-all commit,
       no patches unless unavoidable.

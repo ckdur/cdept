@@ -8,6 +8,7 @@ mod cmd_ls;
 mod cmd_ngspice;
 mod cmd_magic;
 mod cmd_pdk;
+mod cmd_batch;
 mod cmd_sim;
 mod cmd_status;
 mod cmd_tech;
@@ -132,6 +133,15 @@ enum Command {
     /// Testbenches: decks and ngspice runs with corners and specs.
     #[command(subcommand)]
     Sim(cmd_sim::SimCommand),
+    /// LVS with netgen (batch).
+    #[command(subcommand)]
+    Netgen(cmd_batch::NetgenCommand),
+    /// Synthesis with Yosys (batch).
+    #[command(subcommand)]
+    Yosys(cmd_batch::YosysCommand),
+    /// Run OpenROAD scripts (batch).
+    #[command(subcommand)]
+    Openroad(cmd_batch::OpenroadCommand),
     /// The project's technology snapshot (tech.toml): scan the PDK, show, refresh.
     #[command(subcommand)]
     Tech(cmd_tech::TechCommand),
@@ -1171,6 +1181,18 @@ fn main() -> Result<()> {
         Command::Sim(command) => {
             init_tracing(cli.verbose, None);
             cmd_sim::run(command, &open_project(cli.project)?)
+        }
+        Command::Netgen(command) => {
+            init_tracing(cli.verbose, None);
+            cmd_batch::netgen(command, &open_project(cli.project)?)
+        }
+        Command::Yosys(command) => {
+            init_tracing(cli.verbose, None);
+            cmd_batch::yosys(command, &open_project(cli.project)?)
+        }
+        Command::Openroad(command) => {
+            init_tracing(cli.verbose, None);
+            cmd_batch::openroad(command, &open_project(cli.project)?)
         }
         Command::Info => {
             init_tracing(cli.verbose, None);
