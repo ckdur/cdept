@@ -38,6 +38,7 @@ pub mod vcs;
 pub mod vacask;
 pub mod version;
 pub mod watch;
+pub mod wave;
 pub mod xschem;
 
 pub use cell::Cell;

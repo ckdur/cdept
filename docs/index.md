@@ -46,6 +46,7 @@ howto/monte-carlo
 howto/suites
 howto/custom-test-template
 howto/other-simulators
+howto/view-waveforms
 howto/lvs-drc
 howto/import-files
 ```

@@ -106,6 +106,8 @@ enum Command {
     Tech(Vec<String>),
     /// `sim <verb> …`: the Simulation tab (views/simulation.rs).
     Sim(Vec<String>),
+    /// `wave open <lib> <cell> <view> <point>`: start UberWave on a run point.
+    Wave(Vec<String>),
     /// `organise <verb> …`: Go to Cell, Search, categories, Import Project (import.rs).
     Organise(Vec<String>),
     /// Changes on disk, git marks, the trash (background/script.rs).
@@ -599,6 +601,7 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
         "log" => Command::Log(rest.to_string()),
         "tech" => Command::Tech(args.iter().map(|word| word.to_string()).collect()),
         "sim" => Command::Sim(args.iter().map(|word| word.to_string()).collect()),
+        "wave" => Command::Wave(args.iter().map(|word| word.to_string()).collect()),
         "organise" => Command::Organise(args.iter().map(|word| word.to_string()).collect()),
         "quit" => Command::Quit,
         "mode" => Command::Layout(LayoutCommand::Mode(text()?)),
@@ -1875,6 +1878,7 @@ impl Script {
             Command::Log(text) => tracing::info!(target: "cdept::script", "{text}"),
             Command::Tech(args) => app.script_tech(ctx, &args)?,
             Command::Sim(args) => app.script_sim(&args)?,
+            Command::Wave(args) => crate::uberwave::script(app.script_project(), &args)?,
             Command::Organise(args) => app.script_organise(ctx, &args)?,
             Command::Disk(command) => {
                 let mut requests = Vec::new();

@@ -12,6 +12,7 @@ mod cmd_magic;
 mod cmd_ngspice;
 mod cmd_pdk;
 mod cmd_qucs;
+mod cmd_wave;
 mod cmd_sim;
 mod cmd_status;
 mod cmd_tech;
@@ -149,6 +150,8 @@ enum Command {
     /// Qucs-S: schematic to SPICE netlist (headless), open in Qucs-S, S-parameter viewer.
     #[command(subcommand)]
     Qucs(cmd_qucs::QucsCommand),
+    /// Open the waveforms of a run point (or a raw file) in UberWave, the waveform viewer.
+    Wave(cmd_wave::WaveArgs),
     /// VACASK models of the technology (made from its ngspice models and Verilog-A).
     #[command(subcommand)]
     Vacask(cmd_vacask::VacaskCommand),
@@ -1246,6 +1249,11 @@ fn main() -> Result<()> {
                 None => None,
             };
             cmd_qucs::run(command, project.as_ref())
+        }
+        Command::Wave(args) => {
+            init_tracing(cli.verbose, None);
+            let project = project_root(cli.project).and_then(|r| Project::load(&r).ok());
+            cmd_wave::run(args, project.as_ref())
         }
         Command::Vacask(command) => {
             init_tracing(cli.verbose, None);

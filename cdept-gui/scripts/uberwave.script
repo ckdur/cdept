@@ -1,0 +1,50 @@
+# "Open in UberWave" on examples/ihp-inv: run tb_inv, then start the waveform viewer on
+# the raw file of a run point. The viewer is a separate program (UberWave); this script
+# uses a stand-in, fake-uberwave.sh, which writes the arguments it got to
+# uberwave-args.txt (one per line) and its working folder to uberwave-cwd.txt, in the
+# run point's folder. Writes into the project: use a copy (run.sh does).
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice \
+#   CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=ihp-inv \
+#   CDEPT_UBERWAVE=$PWD/cdept-gui/scripts/fake-uberwave.sh \
+#     cdept-gui/scripts/run.sh cdept-gui/scripts/uberwave.script
+#
+# `wave open <lib> <cell> <view> <point>` (uberwave.rs): what the "Open in UberWave"
+# button of a point of the results table does (a script cannot press a button by its
+# text): start the viewer on <runs>/<point>/out.raw, and fail when it cannot be
+# started or the point has no raw file. With CDEPT_UBERWAVE naming a fake program a
+# script checks what the viewer was started with. Not a `sim` command: the viewer is
+# not part of the simulation tab.
+
+# The fake is what is started, not a real viewer.
+shell test -x "$CDEPT_UBERWAVE"
+shell case "$CDEPT_UBERWAVE" in *fake-uberwave*) true;; *) false;; esac
+
+panel Library Manager
+wait 0.3
+open cells tb_inv testbench
+sim expect_target cells/tb_inv/testbench
+sim run
+sim wait
+sim expect_state finished
+sim expect_points 3
+sim expect_rows 3 PASS
+
+# One analysis (tran): the file path only, started in the point's folder.
+wave open cells tb_inv testbench tt_27
+shell for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -s simulations/cells/tb_inv/testbench/tt_27/uberwave-args.txt ] && break; sleep 0.2; done
+shell test "$(wc -l < simulations/cells/tb_inv/testbench/tt_27/uberwave-args.txt)" = 1
+shell grep -q "/simulations/cells/tb_inv/testbench/tt_27/out.raw$" simulations/cells/tb_inv/testbench/tt_27/uberwave-args.txt
+shell grep -q "/tt_27$" simulations/cells/tb_inv/testbench/tt_27/uberwave-cwd.txt
+
+# A file with two analyses (an operating point and the transient): the transient one is
+# preselected with --analysis.
+shell printf 'Title: t\nPlotname: Operating Point\nFlags: real\nNo. Variables: 1\nNo. Points: 1\nVariables:\n\t0\tv(a)\tvoltage\nValues:\n 0\t1.0\n\nTitle: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 2\nVariables:\n\t0\ttime\ttime\n\t1\tv(a)\tvoltage\nValues:\n 0\t0\n\t1\n 1\t1e-9\n\t0\n\n' > simulations/cells/tb_inv/testbench/ss_27/out.raw
+wave open cells tb_inv testbench ss_27
+shell for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -s simulations/cells/tb_inv/testbench/ss_27/uberwave-args.txt ] && break; sleep 0.2; done
+shell test "$(wc -l < simulations/cells/tb_inv/testbench/ss_27/uberwave-args.txt)" = 3
+shell sed -n 2p simulations/cells/tb_inv/testbench/ss_27/uberwave-args.txt | grep -qx -- --analysis
+shell sed -n 3p simulations/cells/tb_inv/testbench/ss_27/uberwave-args.txt | grep -qx tran
+
+log uberwave: ok
+quit
