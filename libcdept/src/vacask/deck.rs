@@ -100,12 +100,23 @@ fn node_of(vector: &str) -> Result<String> {
     Ok(name(v))
 }
 
+/// The name the netlist gives an instance that the setup names in any case (SPICE has
+/// none, VACASK is case sensitive): `Vin` for `vin`.
+fn instance_name(netlist: &str, source: &str) -> String {
+    let want = name(source);
+    netlist
+        .lines()
+        .filter_map(|l| l.split_whitespace().next())
+        .find(|n| n.eq_ignore_ascii_case(&want))
+        .map_or(want, str::to_string)
+}
+
 /// The parameter a DC sweep of `source` has to move. A source with a waveform has its
 /// DC value from the waveform (the pulse's `val0`, the sine's offset), not from `dc`,
 /// so that is what ngspice's `dc` sweep replaces and what is swept here.
 fn sweep_parameter(netlist: &str, source: &str) -> Result<&'static str> {
     let want = name(source);
-    let line = netlist.lines().find(|l| l.split_whitespace().next() == Some(want.as_str()));
+    let line = netlist.lines().find(|l| l.split_whitespace().next().is_some_and(|n| n.eq_ignore_ascii_case(&want)));
     let Some(line) = line else {
         return Err(eyre::eyre!("the DC sweep names '{source}', which is not a source of the testbench netlist"));
     };
@@ -147,7 +158,7 @@ fn analysis(a: &Analysis, n: usize, netlist: &str, out: &mut Vec<String>) -> Res
             let name = format!("dc{n}");
             out.push(format!(
                 "  sweep {name}_sweep instance=\"{}\" parameter=\"{}\" from={} to={} step={}",
-                translate::name(source),
+                instance_name(netlist, source),
                 sweep_parameter(netlist, source)?,
                 e(start)?,
                 sweep_end(stop, step)?,
@@ -179,7 +190,7 @@ fn analysis(a: &Analysis, n: usize, netlist: &str, out: &mut Vec<String>) -> Res
             out.push(format!(
                 "  analysis {name} noise out=\"{}\" in=\"{}\" from={} to={} mode=\"{}\" points={points}",
                 node_of(output)?,
-                translate::name(source),
+                instance_name(netlist, source),
                 e(start)?,
                 e(stop)?,
                 mode(sweep)?
@@ -201,6 +212,8 @@ pub struct Inputs<'a> {
     /// The `subckt` and `model` names the technology's converted files define, to
     /// check the netlist's devices against; `None` skips the check.
     pub defined: Option<&'a BTreeSet<String>>,
+    /// What the technology's statistical models draw ([`super::stat`]); `None`: nothing.
+    pub mm: Option<&'a super::stat::MmInfo>,
     /// The technology (for messages) and what it says about models VACASK cannot have.
     pub pdk: &'a str,
     pub notes: &'a [String],
@@ -236,16 +249,73 @@ pub fn check_devices(t: &Translation, i: &Inputs) -> Result<()> {
     Ok(())
 }
 
+/// The netlist without the `.include` lines of PDK model files that the technology's
+/// converted set has (by file name, in the folder of its converted corner files), and the
+/// model lines that bring the converted files instead.
+fn adopt_includes(netlist: &str, mm: Option<&super::stat::MmInfo>, models: &[String]) -> (String, Vec<String>) {
+    let Some(mm) = mm else { return (netlist.to_string(), vec![]) };
+    let dir = models.iter().find_map(|l| {
+        let path = l.split_whitespace().nth(1)?.trim_matches('"');
+        let p = std::path::Path::new(path);
+        mm.files.contains_key(p.file_name()?.to_str()?).then(|| p.parent().map(|d| d.to_path_buf())).flatten()
+    });
+    let Some(dir) = dir else { return (netlist.to_string(), vec![]) };
+    let mut out = String::new();
+    let mut brought: Vec<String> = vec![];
+    for l in netlist.lines() {
+        let mut w = l.split_whitespace();
+        let adopted = (w.next().is_some_and(|c| c.eq_ignore_ascii_case(".include") || c.eq_ignore_ascii_case(".inc")))
+            .then(|| w.next())
+            .flatten()
+            .map(|f| f.trim_matches(['"', '\'']))
+            .and_then(|f| std::path::Path::new(f).file_name()?.to_str().map(str::to_string))
+            .filter(|name| mm.files.contains_key(name) && dir.join(name).is_file());
+        match adopted {
+            Some(name) => {
+                let line = format!(".include {}", dir.join(&name).display());
+                if !brought.contains(&line) && !models.contains(&line) {
+                    brought.push(line);
+                }
+                out.push_str(&format!("* {l}\n"));
+            }
+            None => {
+                out.push_str(l);
+                out.push('\n');
+            }
+        }
+    }
+    (out, brought)
+}
+
 /// Build the deck. Errors say what could not be expressed for VACASK.
 pub fn build(i: &Inputs) -> Result<Deck> {
-    let t = translate::translate(i.netlist)?;
+    // A `.include` of a PDK model file in the netlist (the symbol of `bondpad` brings one)
+    // is the converted file of the technology's set, when there is one.
+    let (netlist, brought) = adopt_includes(i.netlist, i.mm, i.models);
+    let models: Vec<String> = i.models.iter().cloned().chain(brought).collect();
+    let mut t = translate::translate(&netlist)?;
     check_devices(&t, i)?;
+    let resolved = i.mm.map(|mm| super::stat::resolve(&models, mm));
+    let model_lines: &[String] = resolved.as_ref().map_or(&models, |r| &r.lines);
+    if resolved.is_some() {
+        // The converted subcircuits have lower-case parameters (`nx`), SPICE writes `Nx=1`.
+        let texts: Vec<String> = model_lines.iter().flat_map(|l| model_texts(l)).collect();
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        t.text = super::stat::fix_param_case(&t.text, &refs);
+    }
+    // Monte Carlo point: every device of the circuit gets a key for its own draws.
+    let mut leaves = 0;
+    if let (Some(r), Some(_)) = (&resolved, i.point.seed)
+        && !r.masters.is_empty()
+    {
+        (t.text, leaves) = super::stat::instrument(&t.text, &r.masters);
+    }
     let mut out = String::new();
     out.push_str(&format!("// CDePT testbench {}, run {} (VACASK)\n", i.title, i.point.name()));
     out.push_str("ground 0\ninclude \"builtins.inc\"\n");
     let mut loaded = BTreeSet::new();
     let mut body = vec![];
-    for line in i.models {
+    for line in model_lines {
         let text = model_line(line)?;
         if text.starts_with("load ") && !loaded.insert(text.clone()) {
             continue;
@@ -262,6 +332,15 @@ pub fn build(i: &Inputs) -> Result<Deck> {
     for f in &t.loads {
         let l = format!("load {}", quoted(f));
         if loaded.insert(l.clone()) {
+            out.push_str(&l);
+            out.push('\n');
+        }
+    }
+    if let (Some(r), Some(mm)) = (&resolved, i.mm)
+        && r.uses_draws
+    {
+        let nz = r.masters.values().copied().max().unwrap_or(1);
+        for l in super::stat::draw_lines(i.point.seed, nz, leaves, mm.globals.len()) {
             out.push_str(&l);
             out.push('\n');
         }
@@ -290,8 +369,20 @@ pub fn build(i: &Inputs) -> Result<Deck> {
     if !options.is_empty() {
         out.push_str(&format!("  options {}\n", options.join(" ")));
     }
+    // `@n.xdut.xm1.nsg13_lv_pmos[vds]` names devices inside the models: look them up.
+    let structure = i.setup.save.iter().any(|s| s.trim_start().starts_with('@')).then(|| {
+        let mut texts = vec![t.text.clone()];
+        for l in model_lines {
+            texts.extend(model_texts(l));
+        }
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        super::stat::structure(&refs)
+    });
     for s in &i.setup.save {
-        out.push_str(&format!("  save {}\n", save_item(s)?));
+        match (&structure, s.trim_start().starts_with('@')) {
+            (Some(st), true) => out.push_str(&format!("  save {}\n", super::stat::device_save(s, st).map_err(|e| eyre::eyre!(e))?)),
+            _ => out.push_str(&format!("  save {}\n", save_item(s)?)),
+        }
     }
     let mut lines = vec![];
     let mut analyses = vec![];
@@ -326,6 +417,30 @@ pub fn build(i: &Inputs) -> Result<Deck> {
     Ok(Deck { text: out, analyses, warnings: t.warnings })
 }
 
+/// The text of the converted files a model line brings in (`.include`, `.lib` with the
+/// files of its section), for looking up the devices inside them.
+fn model_texts(line: &str) -> Vec<String> {
+    let t = line.trim();
+    let (card, rest) = t.split_once(char::is_whitespace).unwrap_or((t, ""));
+    let rest = rest.trim();
+    match card.to_lowercase().as_str() {
+        ".include" | ".inc" => std::fs::read_to_string(rest.trim_matches('"')).into_iter().collect(),
+        ".lib" => {
+            let (file, section) = match rest.strip_prefix('"').and_then(|r| r.split_once('"')) {
+                Some((f, s)) => (f, s.trim()),
+                None => rest.split_once(char::is_whitespace).map_or((rest, ""), |(f, s)| (f, s.trim())),
+            };
+            let Ok(text) = std::fs::read_to_string(file) else { return vec![] };
+            let dir = std::path::Path::new(file).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+            super::stat::section_includes(&text, section)
+                .iter()
+                .filter_map(|f| std::fs::read_to_string(dir.join(f)).ok())
+                .collect()
+        }
+        _ => vec![],
+    }
+}
+
 /// `v(out)` and `i(vdd)` as VACASK saves them; anything else as written.
 fn save_item(s: &str) -> Result<String> {
     let lower = s.trim().to_lowercase();
@@ -334,6 +449,10 @@ fn save_item(s: &str) -> Result<String> {
     }
     if let Some(inner) = lower.strip_prefix("i(").and_then(|r| r.strip_suffix(')')) {
         return Ok(format!("{}:flow(br)", name(&s.trim()[2..2 + inner.len()])));
+    }
+    // ngspice's "all" is what VACASK saves by default (node voltages and branch flows).
+    if lower == "all" {
+        return Ok("default".to_string());
     }
     Ok(s.trim().to_string())
 }
@@ -380,7 +499,7 @@ mod tests {
             ".include /p/extra.lib".to_string(),
         ];
         let defined: BTreeSet<String> = ["pm", "nm"].iter().map(|s| s.to_string()).collect();
-        let i = Inputs { setup: &s, point: &point, title: "t", models: &models, netlist: NET, defined: Some(&defined), pdk: "x", notes: &[] };
+        let i = Inputs { setup: &s, point: &point, title: "t", models: &models, netlist: NET, defined: Some(&defined), mm: None, pdk: "x", notes: &[] };
         let d = build(&i).unwrap();
         let t = &d.text;
         assert!(t.contains("ground 0\ninclude \"builtins.inc\"\n"), "{t}");
@@ -402,7 +521,7 @@ mod tests {
         )
         .unwrap();
         let point = RunPoint { corner: "tt".into(), ..Default::default() };
-        let i = Inputs { setup: &s, point: &point, title: "t", models: &[], netlist: "t\nV1 out 0 dc 1 ac 1\nR1 out 0 1k\n", defined: None, pdk: "x", notes: &[] };
+        let i = Inputs { setup: &s, point: &point, title: "t", models: &[], netlist: "t\nV1 out 0 dc 1 ac 1\nR1 out 0 1k\n", defined: None, mm: None, pdk: "x", notes: &[] };
         let d = build(&i).unwrap();
         for want in [
             "analysis op1 op",
@@ -421,7 +540,7 @@ mod tests {
         let point = RunPoint { corner: "tt".into(), ..Default::default() };
         let defined: BTreeSet<String> = ["pm"].iter().map(|s| s.to_string()).collect();
         let notes = vec!["vacask: cornerHBT.lib could not be converted: vbic".to_string(), "other note".to_string()];
-        let i = Inputs { setup: &s, point: &point, title: "t", models: &[], netlist: NET, defined: Some(&defined), pdk: "ihp-sg13g2", notes: &notes };
+        let i = Inputs { setup: &s, point: &point, title: "t", models: &[], netlist: NET, defined: Some(&defined), mm: None, pdk: "ihp-sg13g2", notes: &notes };
         let e = format!("{:#}", build(&i).unwrap_err());
         assert!(e.contains("'ihp-sg13g2'") && e.contains("'nm'") && e.contains("XM1"), "{e}");
         assert!(e.contains("cornerHBT.lib could not be converted") && !e.contains("other note"), "{e}");
@@ -430,10 +549,30 @@ mod tests {
     }
 
     #[test]
+    fn an_include_of_a_converted_file_becomes_the_converted_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("pad.lib"), "subckt bondpad (PAD)\nends\n").unwrap();
+        let mut mm = super::super::stat::MmInfo::default();
+        mm.files.insert("pad.lib".into(), super::super::stat::FileInfo { defs: vec!["bondpad".into()], ..Default::default() });
+        mm.files.insert("corner.lib".into(), Default::default());
+        let models = vec![format!(".lib {}/corner.lib tt", dir.path().display())];
+        let net = "t\n.include /elsewhere/models/pad.lib\n.include /elsewhere/other.lib\nXB1 a bondpad\n.end\n";
+        let (out, brought) = adopt_includes(net, Some(&mm), &models);
+        assert_eq!(brought, [format!(".include {}/pad.lib", dir.path().display())]);
+        assert!(out.contains("* .include /elsewhere/models/pad.lib\n") && out.contains("\n.include /elsewhere/other.lib\n"), "{out}");
+        // Without a converted set the netlist stays.
+        assert_eq!(adopt_includes(net, None, &models), (net.to_string(), vec![]));
+    }
+
+    #[test]
     fn refuses_what_vacask_cannot_do() {
+        // The setup is refused when it loads (sim::caps); a deck built from a setup that
+        // got around that is refused too.
         let point = RunPoint { corner: "tt".into(), ..Default::default() };
-        let s = Setup::parse("simulator=\"vacask\"\n[[analysis]]\nkind=\"tran\"\nstep=\"1n\"\nstop=\"1u\"\nstart=\"0.5u\"\n").unwrap();
-        let i = Inputs { setup: &s, point: &point, title: "t", models: &[], netlist: "t\nR1 a 0 1\n", defined: None, pdk: "x", notes: &[] };
+        let text = "simulator=\"vacask\"\n[[analysis]]\nkind=\"tran\"\nstep=\"1n\"\nstop=\"1u\"\nstart=\"0.5u\"\n";
+        assert!(format!("{:#}", Setup::parse(text).unwrap_err()).contains("start time"));
+        let s = Setup::parse(&text.replace("vacask", "ngspice")).unwrap();
+        let i = Inputs { setup: &s, point: &point, title: "t", models: &[], netlist: "t\nR1 a 0 1\n", defined: None, mm: None, pdk: "x", notes: &[] };
         assert!(format!("{:#}", build(&i).unwrap_err()).contains("start time"));
         let e = model_line(".lib /x/a.lib").unwrap_err();
         assert!(format!("{e}").contains("section"));

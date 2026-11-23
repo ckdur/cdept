@@ -145,6 +145,23 @@ pub fn evaluate(measure: &str, plot: &Plot) -> Result<Option<f64>> {
     let vec = w[3];
     let y = plot.get(vec).ok_or_else(|| eyre!("no vector '{vec}' in the {} results", plot.plotname))?;
     let x = plot.x();
+    if what == "find" && lower.get(4).is_some_and(|t| t == "when") {
+        // `find v(a) when v(b)=0.5 [rise|fall|cross=N]`: v(a) where v(b) crosses.
+        let (name, val) = lower.get(5).and_then(|t| t.split_once('=')).ok_or_else(|| eyre!("'{measure}': find .. when needs vec=value"))?;
+        let mut ev = vec![w[5][..name.len()].to_string()];
+        ev.push(format!("val={val}"));
+        ev.extend(w[6..].iter().map(|s| s.to_string()));
+        let ev: Vec<&str> = ev.iter().map(String::as_str).collect();
+        let event = parse_event(&ev)?;
+        let Some(t) = crossing(plot, &event)? else { return Ok(None) };
+        for i in 1..x.len() {
+            if (x[i - 1] <= t && t <= x[i]) || (x[i - 1] >= t && t >= x[i]) {
+                let f = if x[i] == x[i - 1] { 0.0 } else { (t - x[i - 1]) / (x[i] - x[i - 1]) };
+                return Ok(Some(y[i - 1] + f * (y[i] - y[i - 1])));
+            }
+        }
+        return Ok(None);
+    }
     if what == "find" {
         let at = w[4..]
             .iter()
@@ -225,6 +242,9 @@ mod tests {
         assert_eq!(evaluate("tran m pp v(in)", &p).unwrap(), Some(1.0));
         assert!((evaluate("tran m find v(out) at=2.5", &p).unwrap().unwrap() - 0.25).abs() < 1e-12);
         assert!((evaluate("tran m integ v(out)", &p).unwrap().unwrap() - 5.0).abs() < 1e-12);
+        // v(out) where v(in) rises through 0.5 (t = 1.5).
+        assert!((evaluate("tran m find v(out) when v(in)=0.5 rise=1", &p).unwrap().unwrap() - 0.15).abs() < 1e-12);
+        assert!(evaluate("tran m find v(out) when v(in)=0.5 fall=1", &p).unwrap().is_none());
     }
 
     #[test]

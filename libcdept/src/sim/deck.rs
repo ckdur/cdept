@@ -196,7 +196,7 @@ pub fn build(setup: &Setup, point: &RunPoint, title: &str, models: &[String], ne
     }
     if setup.simulator == "vacask" {
         // The model lines are the SPICE ones; `vacask::build_point` adds the OSDI loads.
-        let inputs = crate::vacask::deck::Inputs { setup, point, title, models, netlist, defined: None, pdk: "", notes: &[] };
+        let inputs = crate::vacask::deck::Inputs { setup, point, title, models, netlist, defined: None, mm: None, pdk: "", notes: &[] };
         return crate::vacask::deck::build_or_comment(&inputs);
     }
     let mut out = String::new();

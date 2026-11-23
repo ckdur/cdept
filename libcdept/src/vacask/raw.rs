@@ -148,6 +148,49 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Plot>> {
     Ok(plots)
 }
 
+/// A noise plot of VACASK (`onoise`: output power spectral density in V^2/Hz, `gain`:
+/// power gain from the input source) with ngspice's two spectra added, which the test
+/// templates read: `onoise_spectrum` = sqrt(onoise) and `inoise_spectrum` =
+/// sqrt(onoise / gain), both in V/sqrt(Hz). A plot that is not VACASK's noise result,
+/// or has them already, is returned as it is.
+pub fn with_noise_spectra(mut plot: Plot) -> Plot {
+    let (Some(o), Some(g)) = (plot.index("onoise"), plot.index("gain")) else { return plot };
+    if plot.complex || plot.index("onoise_spectrum").is_some() {
+        return plot;
+    }
+    let out: Vec<f64> = plot.data[o].iter().map(|p| p.max(0.0).sqrt()).collect();
+    let inp: Vec<f64> = plot.data[o].iter().zip(&plot.data[g]).map(|(n, g)| if *g > 0.0 { (n / g).max(0.0).sqrt() } else { f64::NAN }).collect();
+    for (name, v) in [("onoise_spectrum", out), ("inoise_spectrum", inp)] {
+        plot.names.push(name.to_string());
+        plot.data.push(v);
+    }
+    plot
+}
+
+/// A real plot as a binary raw file (what [`parse`] reads and ngspice's tools too).
+pub fn write_real(plot: &Plot) -> Vec<u8> {
+    let mut out = format!(
+        "Title: {}\nDate: CDePT\nPlotname: {}\nFlags: real\nNo. Variables: {}\nNo. Points: {}\nVariables:\n",
+        plot.title,
+        plot.plotname,
+        plot.names.len(),
+        plot.points()
+    );
+    for (i, n) in plot.names.iter().enumerate() {
+        let kind = if n == "frequency" { "frequency" } else { "notype" };
+        let _ = i;
+        out.push_str(&format!("\t{i}\t{n}\t{kind}\n"));
+    }
+    out.push_str("Binary:\n");
+    let mut bytes = out.into_bytes();
+    for p in 0..plot.points() {
+        for c in &plot.data {
+            bytes.extend_from_slice(&c[p].to_le_bytes());
+        }
+    }
+    bytes
+}
+
 /// Every plot of a raw file.
 pub fn read(path: &Path) -> Result<Vec<Plot>> {
     let bytes = std::fs::read(path).wrap_err_with(|| format!("cannot read {}", path.display()))?;
@@ -204,6 +247,22 @@ pub(crate) mod tests {
         assert_eq!((p.data[1][0], p.imag[1][0]), (0.5, -0.5));
         head.truncate(head.len() - 4);
         assert!(parse(&head).unwrap_err().to_string().contains("short"));
+    }
+
+    #[test]
+    fn noise_plots_get_ngspices_spectra() {
+        let bytes = binary(&["frequency", "onoise", "gain"], &[vec![1.0, 10.0], vec![4e-18, 16e-18], vec![4.0, 4.0]]);
+        let p = with_noise_spectra(parse(&bytes).unwrap().remove(0));
+        assert_eq!(p.get("onoise_spectrum").unwrap(), [2e-9, 4e-9]);
+        let inp = p.get("inoise_spectrum").unwrap();
+        assert!((inp[0] - 1e-9).abs() < 1e-21 && (inp[1] - 2e-9).abs() < 1e-21, "{inp:?}");
+        // Written and read again.
+        let again = parse(&write_real(&p)).unwrap().remove(0);
+        assert_eq!(again.names, p.names);
+        assert_eq!(again.data, p.data);
+        // Not a noise plot: unchanged.
+        let tran = parse(&binary(&["time", "out"], &[vec![0.0], vec![1.0]])).unwrap().remove(0);
+        assert_eq!(with_noise_spectra(tran.clone()).names, tran.names);
     }
 
     #[test]
