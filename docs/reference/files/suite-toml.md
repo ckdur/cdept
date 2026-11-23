@@ -33,6 +33,12 @@ name = "ac"
 | `view` | string | required | The testbench view: `view` (a view of this cell), `cell/view` (this library), or `library/cell/view`. More than three parts is an error. |
 | `name` | string | `cell/view` | The label in the report table. |
 
+### `[cace]`
+
+A table written by `cdept cace import`: the datasheet header and the CACE parameters that
+are not testbenches. Not used to run; `cdept cace export` reads it. Keys:
+[CACE datasheets](cace.md#the-cace-tables).
+
 ## Behaviour
 
 `cdept sim suite <library> <cell> [--view V] [-j N] [--all-columns] [--json] [--no-store]`

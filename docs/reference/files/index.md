@@ -14,6 +14,7 @@ designed for version control. CDePT edits them in place and keeps comments and l
 | [`setup.toml`](setup-toml.md) | A testbench: analyses, corners, sweeps, measures and specs. |
 | [`suite.toml`](suite-toml.md) | A suite: several testbenches run together. |
 | [Test templates](test-template.md) | The schema of a test template, built in or written by the user. |
+| [CACE datasheets](cace.md) | The CACE datasheet that `cdept cace import` and `export` read and write. |
 | [Results](results.md) | What a simulation run leaves on disk: decks, raw files, `result.json`, `results.db`. |
 
 ```{toctree}
@@ -26,6 +27,7 @@ categories
 project-folders
 setup-toml
 suite-toml
+cace
 test-template
 results
 ```

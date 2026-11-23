@@ -39,7 +39,8 @@ repeat it.
 
 `cdept tools` also detects tools that CDePT does not drive yet (Verilator, Icarus,
 OpenSTA, gdsfactory, CACE, and others). They are listed with the phase of the plan that
-integrates them; detection is all CDePT does with them.
+integrates them; detection is all CDePT does with them. (CACE itself is not run either, but
+CDePT imports and exports its datasheets: [CACE datasheets](reference/files/cace.md).)
 
 ## Licences
 

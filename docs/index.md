@@ -49,6 +49,7 @@ howto/other-simulators
 howto/view-waveforms
 howto/lvs-drc
 howto/import-files
+howto/cace
 ```
 
 ```{toctree}

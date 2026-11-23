@@ -124,6 +124,12 @@ of the corner grid. Not available with `simulator = "vacask"`.
 | `mismatch_corner` | string | `tt_mm` | Corner set for `mismatch`. Required with Xyce. |
 | `both_corner` | string | `mc_mm`, else `corner` with the model's `mc_mm_switch` set to 1 | Corner set for `both`. Required with Xyce. |
 
+## `[cace]`
+
+A table written by `cdept cace import` with what the CACE parameter had that CDePT has no
+field for (`parameter`, `display`, `tool`, `template`, `collate`, `units`, `yaml`). It is not
+used to run; `cdept cace export` reads it. Keys: [CACE datasheets](cace.md#the-cace-tables).
+
 ## Examples
 
 `examples/ihp-inv/libs/cells/tb_inv/` has `testbench` (corners and one spec), `sweep`,

@@ -81,6 +81,10 @@ pub enum Dialog {
     ImportFiles(crate::import_files::ImportFiles),
     /// What an import did: one line each.
     ImportSummary(Vec<String>),
+    /// Testbenches and a suite of a cell from a CACE datasheet (cace.rs).
+    CaceImport(crate::cace::CaceImport),
+    /// A cell's suite or testbench as a CACE datasheet (cace.rs).
+    CaceExport(crate::cace::CaceExport),
 }
 
 impl Dialog {
@@ -164,13 +168,16 @@ impl Dialog {
             Self::Refactor(refactor) => refactor.title(),
             Self::ImportFiles(_) => "Import Files",
             Self::ImportSummary(_) => "Import Finished",
+            Self::CaceImport(_) => "Import CACE Datasheet",
+            Self::CaceExport(_) => "Export CACE Datasheet",
         }
     }
 
     fn confirm_label(&self) -> &'static str {
         match self {
             Self::Error(_) | Self::Problems | Self::ImportSummary(_) => "Close",
-            Self::ImportFiles(_) => "Import",
+            Self::ImportFiles(_) | Self::CaceImport(_) => "Import",
+            Self::CaceExport(_) => "Export",
             Self::LibraryProperties(_) => "Save",
             Self::Refactor(refactor) => refactor.confirm_label(),
             Self::NewLibrary { .. } | Self::NewCell { .. } | Self::NewView { .. } => "Create",
@@ -378,6 +385,8 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
         Dialog::Problems => crate::library_dialog::problems_body(ui, app),
         Dialog::Refactor(refactor) => crate::refactor::body(ui, refactor, app, focus),
         Dialog::ImportFiles(import) => crate::import_files::body(ui, import, app),
+        Dialog::CaceImport(import) => crate::cace::import_body(ui, import, app),
+        Dialog::CaceExport(export) => crate::cace::export_body(ui, export, app),
         Dialog::ImportSummary(lines) => {
             for line in lines {
                 ui.label(egui::RichText::new(line.as_str()).small());
@@ -605,6 +614,12 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
     if let Dialog::ImportFiles(import) = dialog {
         return crate::import_files::apply(app, import);
     }
+    if let Dialog::CaceImport(import) = dialog {
+        return crate::cace::apply_import(app, import);
+    }
+    if let Dialog::CaceExport(export) = dialog {
+        return crate::cace::apply_export(app, export);
+    }
     if let Dialog::ProjectSettings(settings) = dialog {
         return app.change_settings(settings);
     }
@@ -647,6 +662,7 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
         Dialog::ImportFiles(_) | Dialog::ImportSummary(_) => {
             unreachable!("handled by crate::import_files above")
         }
+        Dialog::CaceImport(_) | Dialog::CaceExport(_) => unreachable!("handled by crate::cace above"),
         Dialog::RenameCell { .. } | Dialog::CopyCell { .. } | Dialog::Refactor(_) => {
             unreachable!("handled by crate::refactor above")
         }

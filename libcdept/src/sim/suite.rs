@@ -43,6 +43,10 @@ pub struct Suite {
     pub temperatures: Vec<f64>,
     #[serde(rename = "test")]
     pub tests: Vec<TestRef>,
+    /// The CACE datasheet the suite came from (`cdept cace import`): its header and the
+    /// parameters that are not testbenches. Not used to run (docs/reference/files/cace.md).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cace: Option<toml::Table>,
 }
 
 /// One test of the family.

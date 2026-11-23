@@ -5,6 +5,7 @@
 //! headless CLI.
 
 pub mod batch;
+pub mod cace;
 pub mod calc;
 pub mod category;
 pub mod cell;

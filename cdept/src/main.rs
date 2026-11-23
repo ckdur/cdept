@@ -1,6 +1,7 @@
 //! `cdept`: opens the GUI by default; subcommands run headless.
 
 mod cmd_batch;
+mod cmd_cace;
 mod cmd_calc;
 mod cmd_cell;
 mod cmd_find;
@@ -138,6 +139,9 @@ enum Command {
     /// Testbenches: decks and ngspice runs with corners and specs.
     #[command(subcommand)]
     Sim(cmd_sim::SimCommand),
+    /// CACE datasheets: import into testbenches and a suite, export with the results.
+    #[command(subcommand)]
+    Cace(cmd_cace::CaceCommand),
     /// LVS with netgen (batch).
     #[command(subcommand)]
     Netgen(cmd_batch::NetgenCommand),
@@ -1229,6 +1233,10 @@ fn main() -> Result<()> {
         Command::Sim(command) => {
             init_tracing(cli.verbose, None);
             cmd_sim::run(command, &open_project(cli.project)?)
+        }
+        Command::Cace(command) => {
+            init_tracing(cli.verbose, None);
+            cmd_cace::run(command, &open_project(cli.project)?)
         }
         Command::Netgen(command) => {
             init_tracing(cli.verbose, None);

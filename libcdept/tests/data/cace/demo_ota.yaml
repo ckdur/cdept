@@ -1,0 +1,217 @@
+#--------------------------------------------------------------
+# A made-up CACE datasheet (cace_format 5.2, CACE 2.x) for the
+# tests and the how-to of `cdept cace`: a small OTA.
+#--------------------------------------------------------------
+
+name:           demo_ota
+description:    A two-stage OTA, for the CACE import tests
+PDK:            ihp-sg13g2
+
+cace_format:    5.2
+
+authorship:
+  designer:         CDePT tests
+  creation_date:    November 23, 2026
+  license:          MIT
+
+paths:
+  root:             ..
+  schematic:        xschem
+  layout:           gds
+  netlist:          netlist
+  documentation:    docs
+
+pins:
+  VDD:
+    description: Supply
+    type: power
+    direction: inout
+    Vmin: 1.08
+    Vmax: 1.32
+  VSS:
+    description: Ground
+    type: ground
+    direction: inout
+  INP:
+    description: Positive input
+    type: signal
+    direction: input
+  INN:
+    description: Negative input
+    type: signal
+    direction: input
+  OUT:
+    description: Output
+    type: signal
+    direction: output
+
+default_conditions:
+  vdd:
+    description: Supply voltage
+    display: Vdd
+    unit: V
+    typical: 1.2
+  vcm:
+    description: Input common mode
+    display: Vcm
+    unit: V
+    typical: 0.6
+  ib:
+    description: Bias current
+    display: Ib
+    unit: uA
+    typical: 10
+  corner:
+    description: Process corner
+    display: Corner
+    typical: tt
+  temperature:
+    description: Ambient temperature
+    display: Temp
+    unit: °C
+    typical: 27
+
+parameters:
+  dc_params:
+    display: DC Params
+    spec:
+      a0:
+        display: DC gain
+        unit: V/V
+        minimum:
+          value: 50
+        typical:
+          value: any
+        maximum:
+          value: any
+      ugf:
+        display: Unity gain frequency
+        unit: MHz
+        minimum:
+          value: 10
+        typical:
+          value: any
+      pm:
+        display: Phase margin
+        unit: °
+        minimum:
+          value: 60
+    tool:
+      ngspice:
+        template: ac.sch
+        format: ascii
+        suffix: .data
+        variables: [a0, ugf, pm]
+    plot:
+      gain_vs_temp:
+        type: xyplot
+        xaxis: temperature
+        yaxis: a0
+    conditions:
+      corner:
+        enumerate: [ss, tt, ff]
+      vdd:
+        minimum: 1.08
+        typical: 1.2
+        maximum: 1.32
+      temperature:
+        minimum: -40
+        typical: 27
+        maximum: 125
+
+  offset:
+    display: Offset
+    description: Input offset voltage over common mode
+    unit: mV
+    spec:
+      vos:
+        minimum:
+          value: -5
+        maximum:
+          value: 5
+      ibias:
+        unit: uA
+        maximum:
+          value: 15
+          fail: false
+    tool:
+      ngspice:
+        template: dc.sch
+        format: ascii
+        suffix: .data
+        variables: [vos, ibias]
+    conditions:
+      vcm:
+        enumerate: [0.4, 0.6, 0.8]
+      ib:
+        typical: 12
+
+  gain_mc:
+    display: DC gain MC
+    unit: V/V
+    spec:
+      a0:
+        minimum:
+          value: 45
+    tool:
+      ngspice:
+        template: ac.sch
+        collate: iterations
+        format: ascii
+        suffix: .data
+        variables: [a0, null, null]
+    plot:
+      gain_mc:
+        type: histogram
+        xaxis: a0
+    conditions:
+      iterations:
+        display: Iterations
+        minimum: 1
+        maximum: 20
+        step: linear
+        stepsize: 1
+      corner:
+        typical: mc
+
+  transient:
+    display: Step response
+    status: skip
+    tool:
+      ngspice:
+        template: tran.sch
+        format: ascii
+        suffix: .data
+        variables: [time, Vout]
+    variables:
+      time:
+        display: Time
+        unit: ns
+      Vout:
+        display: Vout
+        unit: V
+    conditions:
+      Tmax:
+        display: Simulation time
+        unit: ns
+        typical: 200
+
+  magic_area:
+    spec:
+      area:
+        display: Area
+        unit: µm²
+        maximum:
+          value: 900
+    tool:
+      magic_area
+
+  klayout_lvs:
+    display: KLayout LVS
+    spec:
+      lvs_errors:
+        maximum:
+          value: 0
+    tool:
+      klayout_lvs:
+        args: ['-rd', 'spice_net_names=true']
