@@ -923,7 +923,14 @@ pub struct LvsRun {
     pub log: PathBuf,
     /// The netlist extracted from the layout.
     pub extracted: PathBuf,
+    /// The netlist the user gave.
     pub schematic: PathBuf,
+    /// The netlist the deck compared: `schematic`, or the copy with the PDK's device
+    /// calls written as devices ([`super::reference`]).
+    pub reference: PathBuf,
+    /// What was done for the run, one sentence each: the rewrite of the reference
+    /// netlist, deck variables the technology supplied.
+    pub notes: Vec<String>,
     pub summary: LvsSummary,
 }
 
@@ -938,7 +945,8 @@ pub fn run_lvs(
 ) -> Result<LvsRun> {
     let summary_file = dir.join("summary.json");
     remove_stale(&summary_file)?;
-    let (report, extracted, log) = lvs_deck(project, deck, stream, schematic, dir, defines)?;
+    let prepared = lvs_deck(project, deck, stream, schematic, dir, defines)?;
+    let (report, extracted, log) = (prepared.report, prepared.extracted, prepared.log);
     let helper = setup::find_helper_dir()
         .ok_or_else(|| eyre!("the cdept-klayout helper scripts are not installed"))?;
     let script = helper.join(LVSDB_SCRIPT);
@@ -962,6 +970,8 @@ pub fn run_lvs(
         log,
         extracted,
         schematic: schematic.to_path_buf(),
+        reference: prepared.reference,
+        notes: prepared.notes,
         summary,
     })
 }
@@ -975,10 +985,57 @@ pub fn run_lvs_database(
     schematic: &Path,
     dir: &Path,
 ) -> Result<PathBuf> {
-    lvs_deck(project, deck, stream, schematic, dir, &[]).map(|(report, _, _)| report)
+    lvs_deck(project, deck, stream, schematic, dir, &[]).map(|run| run.report)
 }
 
-/// The deck run of [`run_lvs`]: (database, extracted netlist, log).
+/// What [`lvs_deck`] made.
+struct DeckRun {
+    report: PathBuf,
+    extracted: PathBuf,
+    log: PathBuf,
+    reference: PathBuf,
+    notes: Vec<String>,
+}
+
+/// The netlist the deck gets: `schematic` with the PDK's device calls written as
+/// devices, in `dir`, when it has any; else `schematic` itself.
+pub fn reference_netlist(
+    project: &Project,
+    schematic: &Path,
+    dir: &Path,
+    top: &str,
+) -> Result<(PathBuf, Vec<String>)> {
+    let text = std::fs::read_to_string(schematic)
+        .wrap_err_with(|| format!("cannot read {}", schematic.display()))?;
+    let catalog = project.catalog().ok().flatten();
+    let models = super::reference::DeviceModels::from_catalog(catalog.as_ref());
+    let rewrite = super::reference::device_calls(&text, &models);
+    let note = rewrite.note();
+    let notes = if note.is_empty() { Vec::new() } else { vec![note] };
+    if rewrite.converted == 0 {
+        return Ok((schematic.to_path_buf(), notes));
+    }
+    let file = dir.join(format!("{top}_reference.spice"));
+    std::fs::write(&file, &rewrite.text)
+        .wrap_err_with(|| format!("cannot write {}", file.display()))?;
+    Ok((file, notes))
+}
+
+/// The variables for the deck: those of the project (`lvs_variables` of `cdept.toml`,
+/// else of the technology), then `defines`, which win by name.
+fn deck_variables(project: &Project, defines: &[(String, String)]) -> Vec<(String, String)> {
+    let mut vars: Vec<(String, String)> = project
+        .klayout
+        .lvs_variables
+        .iter()
+        .filter(|(name, _)| !defines.iter().any(|(d, _)| d == *name))
+        .map(|(n, v)| (n.clone(), v.clone()))
+        .collect();
+    vars.extend(defines.iter().cloned());
+    vars
+}
+
+/// The deck run of [`run_lvs`].
 fn lvs_deck(
     project: &Project,
     deck: &Path,
@@ -986,22 +1043,35 @@ fn lvs_deck(
     schematic: &Path,
     dir: &Path,
     defines: &[(String, String)],
-) -> Result<(PathBuf, PathBuf, PathBuf)> {
+) -> Result<DeckRun> {
     let report = dir.join(format!("{}.lvsdb", stream.top));
     let extracted = dir.join(format!("{}_extracted.cir", stream.top));
     let log = dir.join("lvs.log");
     for stale in [&report, &extracted] {
         remove_stale(stale)?;
     }
+    let (reference, mut notes) = reference_netlist(project, schematic, dir, &stream.top)?;
     let mut vars = vec![
         ("input".to_string(), path_text(&absolute(&stream.file)?)),
         ("topcell".to_string(), stream.top.clone()),
         ("report".to_string(), path_text(&report)),
-        ("schematic".to_string(), path_text(&absolute(schematic)?)),
+        ("schematic".to_string(), path_text(&absolute(&reference)?)),
         ("target_netlist".to_string(), path_text(&extracted)),
     ];
-    vars.extend(defines.iter().cloned());
-    run_batch(project, deck, &vars, dir, &log)?;
+    let extra = deck_variables(project, defines);
+    for (name, value) in &extra {
+        if !defines.iter().any(|(d, _)| d == name) {
+            notes.push(format!("deck variable {name}={value} from the technology"));
+        }
+    }
+    vars.extend(extra);
+    // A deck may exit with an error when the netlists differ (the sky130 one does):
+    // what counts is the database it wrote.
+    if let Err(error) = run_batch(project, deck, &vars, dir, &log)
+        && !report.is_file()
+    {
+        return Err(error);
+    }
     if !report.is_file() {
         bail!(
             "the LVS deck wrote no database {} (does it take input, topcell, report and \
@@ -1010,7 +1080,13 @@ fn lvs_deck(
             log.display()
         );
     }
-    Ok((report, extracted, log))
+    Ok(DeckRun {
+        report,
+        extracted,
+        log,
+        reference,
+        notes,
+    })
 }
 
 /// The schematic file of `library/cell`: the view `view`, else the first xschem

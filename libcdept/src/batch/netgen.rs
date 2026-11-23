@@ -189,6 +189,65 @@ pub fn project_setup(project: &crate::Project) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
+/// The netlist `file` for netgen: when it has devices written as `M`, `D` or `Q` lines
+/// of the technology's models (the netlist KLayout extracts), a copy in `dir` with them
+/// written as `X` calls, as the PDK's own netlists have them (netgen does not compare a
+/// MOSFET with a call of the same model). Else `file` itself. The note says what was
+/// done.
+pub fn prepare_netlist(
+    project: &crate::Project,
+    file: &Path,
+    dir: &Path,
+) -> Result<(PathBuf, Option<String>)> {
+    let text = std::fs::read_to_string(file)
+        .wrap_err_with(|| format!("cannot read {}", file.display()))?;
+    let catalog = project.catalog().ok().flatten();
+    let models = crate::klayout::reference::DeviceModels::from_catalog(catalog.as_ref());
+    let rewrite = crate::klayout::reference::calls_of_devices(&text, &models);
+    if rewrite.converted == 0 {
+        return Ok((file.to_path_buf(), None));
+    }
+    std::fs::create_dir_all(dir)?;
+    let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let out = dir.join(format!("{stem}_calls.spice"));
+    std::fs::write(&out, &rewrite.text)
+        .wrap_err_with(|| format!("cannot write {}", out.display()))?;
+    let note = format!(
+        "{}: {} device line(s) written as calls of {} (netgen does not compare a MOSFET with a \
+         call of its model, which is how the PDK's netlists have them); copy {}",
+        file.display(),
+        rewrite.converted,
+        rewrite.models.iter().cloned().collect::<Vec<_>>().join(", "),
+        out.display()
+    );
+    Ok((out, Some(note)))
+}
+
+/// What to say when netgen does not accept a netlist that KLayout extracted: the
+/// differences left are KLayout's, not the layout's. `None` for any other netlist.
+pub fn klayout_hint(layout: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(layout).ok()?;
+    let from_klayout = text
+        .lines()
+        .take(3)
+        .any(|l| l.starts_with('*') && l.contains("Extracted by KLayout"));
+    let from_copy = layout
+        .file_stem()
+        .is_some_and(|s| s.to_string_lossy().ends_with("_calls"));
+    if !from_klayout && !from_copy {
+        return None;
+    }
+    Some(
+        "the layout netlist was extracted by KLayout. Its decks add what a netlist of the PDK \
+         does not have: a substrate pin of their own for a cell without a tap (sky130: \
+         `sky130_gnd`, so the pin lists differ) and sizes in other units (sky130: scaled by \
+         1e6, so the properties differ). Netgen cannot be told to ignore either: compare a \
+         netlist extracted with Magic (`cdept magic extract`), or use `cdept layout lvs` for \
+         KLayout's own comparison"
+            .to_string(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

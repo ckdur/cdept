@@ -756,6 +756,12 @@ fn layout_check(
     };
     println!("netlist {}", netlist.display());
     let run = verify::run_lvs(project, &deck, &stream, &netlist, &dir, &args.defines)?;
+    if run.reference != netlist {
+        println!("reference {}", run.reference.display());
+    }
+    for note in &run.notes {
+        println!("note    {note}");
+    }
     for circuit in &run.summary.circuits {
         println!(
             "{:<16} layout {} / schematic {}",

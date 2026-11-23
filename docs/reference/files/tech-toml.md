@@ -91,6 +91,7 @@ magic = "8.3.589"
 | `d25` | list of path | `[]` | 2.5D view scripts (`.lyd25`). |
 | `xsection` | list of path | `[]` | Cross-section scripts (`.xs`). |
 | `other_technologies` | list of path | `[]` | Other technology files found in the PDK; the one in `lyt` was chosen. |
+| `[klayout.lvs_variables]` | table of strings | `{}` | Variables of the LVS deck (`-rd name=value`) that every LVS run passes. The scan sets `scale = "true"` when the first LVS deck has a `scale` switch (the sky130 deck: its sizes are in micron, the PDK's netlists write `w=650000u`). `lvs_variables` of `cdept.toml` and `-D` on `cdept layout lvs` override it, name by name. |
 | `[[klayout.drc]]` | list of tables | `[]` | DRC decks. The first is the default. |
 | `[[klayout.lvs]]` | list of tables | `[]` | LVS decks. The first is the default. |
 

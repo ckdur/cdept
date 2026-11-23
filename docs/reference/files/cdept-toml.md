@@ -157,6 +157,7 @@ How xschem uses it: [XSCHEM.md](../../XSCHEM.md).
 | `layer_properties` | string | `tech.toml` | A `.lyp` layer-properties file. |
 | `drc` | string | `tech.toml`, else looked for in the `KLAYOUT_PATH` folders | The DRC deck (`.drc`, `.lydrc`). |
 | `lvs` | string | like `drc` | The LVS deck (`.lvs`, `.lylvs`). |
+| `lvs_variables` | table | `tech.toml` (`[klayout.lvs_variables]`) | Variables passed to the LVS deck (`-rd name=value`), for example `lvs_sub = "VNB"`; a value is a text, a number or `true`/`false`. They win over `tech.toml` by name, and `-D` wins over both. |
 | `devices` | string | the PDK's device map only | The project's device map (schematic symbol to layout PCell) that adds to the PDK's. See [LINKING.md](../../LINKING.md). |
 | `[klayout.flylines]` | table | the user's own settings | How flylines look in this project. |
 

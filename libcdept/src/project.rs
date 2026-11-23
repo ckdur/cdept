@@ -186,6 +186,10 @@ pub struct KlayoutSettings {
     /// `devices`: the project's device map for linking schematics with layouts
     /// (docs/LINKING.md), on top of the PDK's. `None`: the PDK's only.
     pub devices: Option<PathBuf>,
+    /// `lvs_variables`: variables of the LVS deck (`-rd name=value`) that every LVS run
+    /// of the project passes: what `cdept.toml` sets, else what `tech.toml` says for the
+    /// PDK's deck. `-D` of `cdept layout lvs` comes on top.
+    pub lvs_variables: std::collections::BTreeMap<String, String>,
     /// `[klayout.flylines]`: how flylines look in this project (on top of the user's
     /// settings), docs/LINKING.md §8.
     pub flylines: crate::link::nets::FlylineOverride,
@@ -495,6 +499,13 @@ impl Project {
                 .first()
                 .and_then(|deck| self.snapshot_path(&deck.file, true));
         }
+        // The project file's variables win over the snapshot's, name by name.
+        for (name, value) in &klayout.lvs_variables {
+            self.klayout
+                .lvs_variables
+                .entry(name.clone())
+                .or_insert_with(|| value.clone());
+        }
     }
 
     /// The libraries the PDK brings ([`Tech::project_libraries`]: those marked
@@ -729,6 +740,32 @@ impl Project {
                 None => self
                     .warnings
                     .push("[klayout] layer_properties must be a file name".into()),
+            }
+        }
+        if let Some(item) = table.get("lvs_variables") {
+            match item.as_table_like() {
+                Some(vars) => {
+                    for (name, value) in vars.iter() {
+                        let text = match value.as_value() {
+                            Some(v) if v.is_str() => v.as_str().map(str::to_string),
+                            Some(v) if v.is_bool() => v.as_bool().map(|b| b.to_string()),
+                            Some(v) if v.is_integer() => v.as_integer().map(|n| n.to_string()),
+                            Some(v) if v.is_float() => v.as_float().map(|n| n.to_string()),
+                            _ => None,
+                        };
+                        match text {
+                            Some(text) => {
+                                self.klayout.lvs_variables.insert(name.to_string(), text);
+                            }
+                            None => self.warnings.push(format!(
+                                "[klayout] lvs_variables: {name} must be a text, a number or true/false"
+                            )),
+                        }
+                    }
+                }
+                None => self
+                    .warnings
+                    .push("[klayout] lvs_variables must be a table".into()),
             }
         }
         for key in ["drc", "lvs", "devices"] {
@@ -1577,6 +1614,25 @@ mod tests {
         assert_eq!(expand("a~b$", env).unwrap(), "a~b$");
         assert!(expand("$NOPE/x", env).unwrap_err().contains("NOPE"));
         assert!(expand("${PDK_ROOT", env).is_err());
+    }
+
+    #[test]
+    fn lvs_variables_of_the_project_file() {
+        let _env = crate::testutil::hermetic_env();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(PROJECT_FILE),
+            "name = \"v\"\n[klayout.lvs_variables]\nscale = \"false\"\nlvs_sub = \"VNB\"\nn = 3\nflag = true\nbad = [1]\n",
+        )
+        .unwrap();
+        let project = Project::load(tmp.path()).unwrap();
+        let vars = &project.klayout.lvs_variables;
+        assert_eq!(vars.get("scale").map(String::as_str), Some("false"));
+        assert_eq!(vars.get("lvs_sub").map(String::as_str), Some("VNB"));
+        assert_eq!(vars.get("n").map(String::as_str), Some("3"));
+        assert_eq!(vars.get("flag").map(String::as_str), Some("true"));
+        assert!(!vars.contains_key("bad"));
+        assert!(project.warnings.iter().any(|w| w.contains("lvs_variables: bad")));
     }
 
     #[test]

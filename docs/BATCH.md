@@ -41,7 +41,10 @@ hangs before reading anything without them, here at least.
 else `--setup`, else an empty one written to the run folder. Verdicts: `Match` (clean),
 `PropertyErrors` (also when netgen says "match uniquely" but lists cells with property
 errors), `PinMismatch`, `Mismatch`, `Unknown`. netgen exits 0 on all of them, so the
-verdict is read from `Final result:`. Netlist paths with spaces are refused.
+verdict is read from `Final result:`. Netlist paths with spaces are refused. `cdept netgen lvs` writes the `M`/`D`/`Q` lines of the technology's models as `X` calls in a
+copy of a netlist (`netgen::prepare_netlist`): netgen reads the PDK's `X sg13_lv_nmos` as a
+cell of pins `1`..`4` and KLayout's `M ... sg13_lv_nmos` as a MOSFET, and never matches
+the two (that was the `PinMismatch` of a KLayout-extracted netlist).
 
 **Yosys.** `synth` writes `read_verilog`, `hierarchy`, `synth -flatten`, `dfflibmap` and
 `abc` with the Liberty file, `stat`, `write_verilog`. The Liberty file is

@@ -95,14 +95,11 @@ DRC and LVS results are not stored in the project
   `~/.cache/cdept/index`: both are per user. The Magic outputs go to `<project>/magic/`.
   DRC results from Magic do not reach the GUI. See [DRC and LVS](../howto/lvs-drc.md).
 
-KLayout LVS on PDK SPICE netlists
-: A PDK netlist that writes devices as `X` subcircuit calls is compared against an empty
-  schematic ("Mismatch layout X / schematic "), so the `X` lines have to be `M` lines.
-  On sky130 a cell with no substrate tap also needs `-D lvs_sub=VNB -D scale=true`.
-
-netgen on a KLayout-extracted netlist
-: A KLayout-extracted `.cir` compared with the PDK netlist gives `PinMismatch`; the
-  netlist extracted by Magic matches.
+netgen on a KLayout-extracted netlist of sky130
+: The IHP netlist of KLayout is accepted by netgen (CDePT writes the devices as calls, as
+  the PDK does). The sky130 deck adds a substrate pin of its own to a cell without a tap
+  (`sky130_gnd`) and scales sizes by 1e6, so netgen reports `PinMismatch` or property
+  errors: use the netlist extracted by Magic. `cdept netgen lvs` says so.
 
 `.cdept/` holds only compiled OSDI models
 : Nothing else of the project's state lives there.

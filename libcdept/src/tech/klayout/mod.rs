@@ -79,6 +79,10 @@ pub struct KlayoutTech {
     /// LVS decks, the one to use by default first.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub lvs: Vec<Deck>,
+    /// Variables of the LVS deck (`-rd name=value`) that every LVS run passes, by name;
+    /// `lvs_variables` of `cdept.toml` and `-D` on the command line come on top.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub lvs_variables: BTreeMap<String, String>,
     /// 2.5D view scripts (`.lyd25`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub d25: Vec<TechPath>,
@@ -475,6 +479,17 @@ pub fn scan(ctx: &ScanContext) -> Scanned<KlayoutTech, KlayoutCatalog> {
             ));
         }
         let list: Vec<Deck> = found.iter().map(deck_of).collect();
+        // The sky130 deck has a `scale` switch: its extracted sizes are in micron, and
+        // the PDK's netlists write the same sizes with a `u` (`w=650000u`), so every
+        // comparison needs `scale=true`; the project does not have to know.
+        if check == Check::Lvs
+            && let Some(first) = found.first()
+            && first.switches.iter().any(|s| s.name == "scale")
+        {
+            section
+                .lvs_variables
+                .insert("scale".to_string(), "true".to_string());
+        }
         match check {
             Check::Drc => section.drc = list,
             Check::Lvs => section.lvs = list,
@@ -659,6 +674,7 @@ mod tests {
         assert_eq!(drc, ["demo", "demo_antenna"]);
         assert!(s.drc[1].partial && !s.drc[0].partial);
         assert_eq!(s.lvs[0].name, "demo");
+        assert!(s.lvs_variables.is_empty());
         assert!(s.pcell_libraries.is_empty());
 
         let c = &scanned.catalog;
@@ -695,6 +711,29 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<KlayoutCatalog>(&json).unwrap(),
             scanned.catalog
+        );
+    }
+
+    #[test]
+    fn a_deck_with_a_scale_switch_gets_scale_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let pdk = demo_pdk(dir.path());
+        let lvs = pdk.tech("klayout").join("tech/lvs/demo.lvs");
+        std::fs::write(
+            lvs,
+            "if $scale == \"true\"\n device_scaling(1000000)\nend\nschematic($schematic)\n",
+        )
+        .unwrap();
+        let scanned = scan(&ScanContext::new(pdk).files_only());
+        assert_eq!(
+            scanned.section.lvs_variables.get("scale").map(String::as_str),
+            Some("true")
+        );
+        let text = toml::to_string(&scanned.section).unwrap();
+        assert!(text.contains("[lvs_variables]"), "{text}");
+        assert_eq!(
+            toml::from_str::<KlayoutTech>(&text).unwrap(),
+            scanned.section
         );
     }
 

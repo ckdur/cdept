@@ -1,8 +1,8 @@
 # Run DRC, LVS and extraction
 
 This page runs every layout check CDePT has on a real, clean layout: the standard cell
-`sg13g2_inv_1` of the IHP SG13G2 PDK (the same steps work for `sg13g2_nand2_1` and,
-with two extra switches, for `sky130_fd_sc_hd__inv_1`). The checks:
+`sg13g2_inv_1` of the IHP SG13G2 PDK (the same steps work for `sg13g2_nand2_1` and for
+`sky130_fd_sc_hd__inv_1`). The checks:
 
 | Check | Tool | Command | Where it is available |
 |---|---|---|---|
@@ -45,12 +45,10 @@ LVS needs a schematic. The PDK has one for the cell, so the copy has it; for a c
 without one, draw it or copy another cell's schematic.
 
 The PDK writes the two transistors of the netlist as subcircuit calls
-(`XN0 ... sg13_lv_nmos`); KLayout reads a netlist with no models, so to compare against
-the copied netlist (not the schematic) they must be MOS devices (`M...`):
-
-```sh
-sed -i 's/^X\([NP]\)/M\1/' libs/cells/$C/netlist/$C.spice
-```
+(`XN0 ... sg13_lv_nmos`). That is fine: the copied netlist is used as it is. Before the
+KLayout deck reads it, CDePT writes the calls of the technology's device models as
+device lines (`MN0 ...`) in a copy in the run folder (`<cell>_reference.spice`); the
+PDK's file and yours are never edited.
 
 ```{note}
 DRC can also be run on the cell in place (`cdept layout drc sg13g2_stdcell sg13g2_inv_1`,
@@ -65,6 +63,8 @@ cell into a library of the project as above.
 |---|---|
 | KLayout DRC deck | `[klayout] drc` of `cdept.toml`, else the first `klayout.drc` entry of `tech.toml`, else the first `*.drc` in the `KLAYOUT_PATH` folders |
 | KLayout LVS deck | `[klayout] lvs`, else the first `klayout.lvs` entry, else the first `*.lvs` |
+| Variables of the LVS deck | `[klayout] lvs_variables` of `cdept.toml` over `[klayout.lvs_variables]` of `tech.toml`, over `-D` |
+| Models that are devices | the snapshot's device list (`tech.catalog.json`); without a snapshot, models named like `nmos`, `pmos`, `nfet`, `pfet` |
 | KLayout technology | `[klayout] tech`, else `klayout.tech` |
 | Magic start-up file | `magic.rc` (else `$PDK_ROOT/$PDK/libs.tech/magic/$PDK.magicrc`) |
 | Magic extraction and DRC style | the first entry of `magic.extract` and `magic.drc`, unless `--style` is given |
@@ -144,6 +144,19 @@ Options are those of DRC plus `--schematic VIEW` (the schematic view, when the c
 several) and `--netlist FILE`, which compares with a SPICE netlist you provide. A match
 exits 0. `sg13g2_nand2_1` matches the same way.
 
+With a netlist file the output also says what was done to it:
+
+```text
+reference ~/.cache/cdept/verify/ihp-inv/cells/sg13g2_inv_1/lvs/sg13g2_inv_1_reference.spice
+note    2 device call(s) written as devices (sg13_lv_nmos, sg13_lv_pmos) in the reference netlist
+```
+
+Calls of models that are not devices of the technology (another cell, a block) stay
+calls and are listed (`kept as subcircuit calls: ...`): the deck cannot compare those
+by itself, so they need their own `.subckt` in the netlist, or a netlist of the whole
+hierarchy. Resistors, capacitors, diodes and bipolar transistors of the technology are
+written as `R`, `C`, `D` and `Q` lines the same way.
+
 Results land in `.../<cell>/lvs/`: the stream, `<cell>.spice` (schematic netlist, when
 there is no `--netlist`), `<cell>.lvsdb` (what the GUI's net highlighting reads),
 `<cell>_extracted.cir`, `lvs.log`, `summary.json` and `summary.log`.
@@ -163,18 +176,36 @@ Two related checks need no deck and are quicker for day-to-day work:
 In a project made with `cdept init --technology sky130A` (add `cells = "libs/cells"` under
 `[libraries]`), cut `sky130_fd_sc_hd__inv_1` out of
 `libs.ref/sky130_fd_sc_hd/gds/sky130_fd_sc_hd.gds` the same way, and use the
-`.subckt` of `spice/sky130_fd_sc_hd.spice` (again with `X` turned into `M`). DRC is clean.
-LVS needs two deck variables, because the standard cell has no substrate tap and the
-PDK's netlist has widths such as `w=650000u`:
+`.subckt` of `spice/sky130_fd_sc_hd.spice` as it is. DRC is clean, and LVS matches:
 
 ```sh
-cdept layout lvs cells sky130_fd_sc_hd__inv_1 --netlist .../sky130_fd_sc_hd__inv_1.spice \
-    -D lvs_sub=VNB -D scale=true
+cdept layout lvs cells sky130_fd_sc_hd__inv_1 --netlist .../sky130_fd_sc_hd__inv_1.spice
 ```
 
-`lvs_sub=VNB` names the substrate net after the cell's `VNB` pin (the deck's default is
-`sky130_gnd`) and `scale=true` makes the deck write sizes in the netlist's units. Without
-them the result is a mismatch of one net and the sizes, although the layout is right.
+```text
+note    2 device call(s) written as devices (sky130_fd_pr__nfet_01v8, sky130_fd_pr__pfet_01v8_hvt) ...
+note    deck variable scale=true from the technology
+Match            layout sky130_fd_sc_hd__inv_1 / schematic SKY130_FD_SC_HD__INV_1
+```
+
+The sky130 deck needs `scale=true` (the PDK's sizes are written `w=650000u`, the deck
+extracts micron); the scan puts it in `[klayout.lvs_variables]` of `tech.toml`, so it is
+passed on every run. Tell the project another value in `cdept.toml`, or for one run with
+`-D`:
+
+```toml
+[klayout.lvs_variables]
+scale = "true"
+lvs_sub = "VNB"     # the substrate net of cells that have a tap: the deck's default is sky130_gnd
+```
+
+```sh
+cdept layout lvs cells my_cell -D lvs_sub=VSUBS
+```
+
+A cell without a substrate tap matches without `lvs_sub`: the extracted netlist then
+has one more pin (`sky130_gnd`), which the comparison accepts. Old snapshots do not
+have the variable: `cdept tech refresh` adds it.
 
 ## Extraction and DRC with Magic
 
@@ -237,9 +268,25 @@ log says which. The set-up file is `netgen.setup` of the snapshot unless `--setu
 given. The netlists need a `.subckt` for the cell: the netlist `cdept netlist` writes by
 default has the header commented out.
 
-Netgen is not interchangeable with the KLayout netlist: comparing the KLayout-extracted
-`sg13g2_inv_1_extracted.cir` with the PDK's `X`-form netlist fails with `PinMismatch`
-(different pin order, MOS devices against subcircuit calls). Compare like with like.
+The KLayout-extracted netlist can be compared too:
+
+```sh
+cdept netgen lvs ~/.cache/cdept/verify/ihp-inv/cells/sg13g2_inv_1/lvs/sg13g2_inv_1_extracted.cir \
+    sg13g2_inv_1 /tmp/pdk_inv1.spice sg13g2_inv_1
+```
+
+KLayout writes the transistors as `M` lines and the PDK's netlist has `X` calls of the
+same model; netgen compares a MOSFET with a MOSFET and a call with a call, never the
+two, so everything came out as `PinMismatch` although the nets were right. CDePT now
+writes the `M`/`D`/`Q` lines of the technology's models as `X` calls in a copy of the
+netlist (in the run folder, `*_calls.spice`; the output has a `note:` line) and the
+result is `Circuits match uniquely`. The pin order is not a problem: netgen aligns it.
+
+This does not carry over to the sky130 deck: for a cell without a tap it adds a pin of
+its own (`sky130_gnd`) and scales the sizes by 1e6, so netgen reports `PinMismatch` or
+property errors. `cdept netgen lvs` says so when a netlist extracted by KLayout does
+not match; compare a netlist extracted by Magic (`cdept magic extract`) or use
+`cdept layout lvs`.
 
 ## What a failing result looks like
 
@@ -273,8 +320,8 @@ Checks that fail for reasons other than the layout:
 - "Cell name X not found in input layout": the cell is not in the GDS file; check the
   name of the cell and of the view.
 - An LVS where the schematic side is empty (`schematic ` with no name): the netlist has no
-  matching `.subckt`, or its devices are subcircuit calls the deck cannot read; use `M`
-  lines.
+  matching `.subckt` (the calls of device models are written as devices for you, other
+  calls are not).
 - netgen `Unknown`: a cell name is missing from a file; see its log.
 
 ## Where the results are

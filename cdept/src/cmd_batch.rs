@@ -85,6 +85,11 @@ pub fn netgen(command: NetgenCommand, project: &Project) -> Result<()> {
     let program = netgen::ADAPTER.require()?;
     let setup = setup.or_else(|| netgen::project_setup(project));
     let dir = run_dir(project, dir, "netgen");
+    let (layout, note_a) = netgen::prepare_netlist(project, &layout, &dir)?;
+    let (schematic, note_b) = netgen::prepare_netlist(project, &schematic, &dir)?;
+    for note in [note_a, note_b].into_iter().flatten() {
+        println!("note: {note}");
+    }
     let lvs = netgen::Lvs { layout, layout_cell, schematic, schematic_cell, setup };
     let report = netgen::run(&program, &lvs, &dir, &project.tool_env())?;
     println!("{}", if report.result.is_empty() { "(no result)" } else { &report.result });
@@ -101,6 +106,9 @@ pub fn netgen(command: NetgenCommand, project: &Project) -> Result<()> {
         println!("log: {}", log.display());
     }
     if !report.verdict.clean() {
+        if let Some(hint) = netgen::klayout_hint(&lvs.layout) {
+            println!("note: {hint}");
+        }
         bail!("LVS is not clean ({:?})", report.verdict);
     }
     Ok(())

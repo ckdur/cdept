@@ -13,6 +13,7 @@
 mod engine;
 pub mod lef;
 pub mod protocol;
+pub mod reference;
 pub mod service;
 pub mod session;
 pub mod setup;

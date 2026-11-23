@@ -357,7 +357,14 @@ Unknown method → `ok: false`, error "unknown method …".
   coordinates. LVS results: `cdept_klayout/lvsdb.py` (GPL, run by `klayout -b`) writes
   `{matched, circuits: [{layout, schematic, status, nets, devices, pins, subcircuits}]}`.
 - Schematic netlist for LVS: xschem with `lvs_netlist` set (top cell is a `.subckt`,
-  devices use `lvs_format`).
+  devices use `lvs_format`). A netlist whose devices are `X` calls of the technology's
+  models (`XN0 ... sg13_lv_nmos`, the PDK's own SPICE files) is copied to
+  `<cell>_reference.spice` in the run folder with those calls written as `M`/`R`/`C`/`D`/`Q`
+  lines (`klayout/reference.rs`, models and element letters from the snapshot's devices);
+  calls of other subcircuits stay and are listed. The PDK's file is not edited.
+- Deck variables: `[klayout.lvs_variables]` of `tech.toml` (the scan sets `scale=true`
+  for the sky130 deck), `lvs_variables` of `cdept.toml`, then `-D`. A deck that exits
+  with an error on a mismatch (sky130) still gives its database, which is read as usual.
 - CLI `cdept layout drc|lvs <lib> <cell> [--deck] [--view] [-D NAME=VALUE]`, exit 1 on
   violations / mismatch. GUI: Layout › Run DRC / Run LVS (background), results panel,
   a click highlights (`markers`) and zooms.
