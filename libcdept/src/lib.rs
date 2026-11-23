@@ -19,6 +19,7 @@ pub mod project;
 pub mod project_edit;
 pub mod refactor;
 pub mod search;
+pub mod sim;
 pub mod tech;
 pub mod technology;
 pub mod template;

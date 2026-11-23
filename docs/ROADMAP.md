@@ -126,7 +126,7 @@ milestone).
   The list covers the asic-all image (see §3, "External tools").
 - **Milestone:** empty app with docked panels, CLI stub, CI green.
 
-### Phase 1: Project & Library Manager (~80 h)
+### Phase 1: Project & Library Manager (~80 h) — done 2026-11-22
 Done:
 - Data model: Project → Library → Cell → View (`Entry`), with typed views (`ViewKind`) and
   file formats (`Format`, which names the tool).
@@ -140,7 +140,9 @@ Done:
 - GUI: New/Open/Recent/Close Project, library tree (side panel), 3-column Library Manager
   with cell filter, context menus and dialogs for all operations, Inspector.
 
-To do:
+Also done in the 2026-11-22 round: hierarchy browser, reference rewriting, file watching, git
+status, categories, search, import, new-project wizard. Leftovers: NOTES.md §1.
+Original to-do (kept for the record):
 - Rewrite references when a cell is renamed or copied (instances in other `.sch` files,
   the structure name inside GDS). Needs the parsers of the hierarchy browser.
 - Hierarchy browser: parse xschem instances and GDS references → tree, "used by" query.
@@ -157,7 +159,7 @@ To do:
   `[libraries]`, read its categories, and offer "open in LibMan".
 - **Milestone:** manage a real project (e.g. ASICONE SAR-ADC) entirely from CDePT.
 
-### Phase 2: Technology / PDK Manager (~60 h)
+### Phase 2: Technology / PDK Manager (~60 h) — done 2026-11-22 (details: [TECH.md](TECH.md); leftovers in NOTES.md)
 - Discover PDKs: `$PDK_ROOT` / open_pdks tree (`libs.tech/{klayout,magic,xschem,ngspice,netgen,qflow}`,
   `libs.ref/*`), with per-PDK quirks for sky130, gf180mcu and ihp-sg13g2.
 - Technology description (`tech.toml`): model files plus corner sections (tt/ff/ss/fs/sf,
@@ -206,6 +208,8 @@ To do:
 - **Milestone:** double-click a view to open it in the correct tool. Netlist any cell from CDePT.
 
 ### Phase 4: Simulation Environment, "ADE-lite" (~120 h)
+First slice done 2026-11-23: testbench view, deck, ngspice batch over corners × temperatures,
+measures and specs ([SIMULATION.md](SIMULATION.md)). The rest below is still to do.
 - Testbench view: DUT cell, analyses (op/dc/ac/tran/noise/pss if available), design
   variables, model corners (from tech.toml), temperature, saves/probes.
 - Netlisting pipeline: xschem netlist → wrapper with includes, `.param` and `.control`.

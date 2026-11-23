@@ -6,6 +6,7 @@ mod cmd_import;
 mod cmd_lib;
 mod cmd_ls;
 mod cmd_pdk;
+mod cmd_sim;
 mod cmd_status;
 mod cmd_tech;
 
@@ -120,6 +121,9 @@ enum Command {
     /// The PDKs installed on this machine and their versions (ciel).
     #[command(subcommand)]
     Pdk(cmd_pdk::PdkCommand),
+    /// Testbenches: decks and ngspice runs with corners and specs.
+    #[command(subcommand)]
+    Sim(cmd_sim::SimCommand),
     /// The project's technology snapshot (tech.toml): scan the PDK, show, refresh.
     #[command(subcommand)]
     Tech(cmd_tech::TechCommand),
@@ -1150,6 +1154,10 @@ fn main() -> Result<()> {
                 None => None,
             };
             cmd_tech::run(command, project)
+        }
+        Command::Sim(command) => {
+            init_tracing(cli.verbose, None);
+            cmd_sim::run(command, &open_project(cli.project)?)
         }
         Command::Info => {
             init_tracing(cli.verbose, None);

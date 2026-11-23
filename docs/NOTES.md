@@ -4,7 +4,7 @@ What is still to do and what may cause trouble. [ROADMAP.md](ROADMAP.md) is the 
 file is the running list behind it. Update it when an item is done or a new problem shows
 up. Items marked **(verify)** are suspicions, not confirmed facts.
 
-Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built; PCell views; schematic ↔ layout linking with nets, pins as objects, hierarchical cross-probing).
+Last updated: 2026-11-23 (Phase 1 and 2 built and merged into the docs; tests re-run green).
 
 ---
 
@@ -17,19 +17,47 @@ Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built; PCell views; sche
 - [x] Let CI run once: `rfd` builds on the runner and with the MSRV toolchain (CI run
       of fd11b7b, 2026-11-18).
 
-### Phase 1, remaining (suggested order)
-1. [ ] **xschem and GDS readers** (instances in `.sch`, structures and references in GDS).
-       Everything below in this group depends on them.
-2. [ ] **Hierarchy browser**: tree of a cell, "used by" query. List the structures inside
-       a multi-cell GDS (a standard-cell GDS is one cell today).
-3. [ ] **Rewrite references on rename/copy**: instances in other `.sch` files, the
-       structure name inside the GDS, the `.subckt`/`module` name in netlist and HDL views.
-4. [ ] **File watching** (`notify`) so external edits show up without Reload.
-5. [ ] **Git status** per cell (and decide what Delete does in a git repo, see §2.3).
-6. [ ] **Categories** and search across libraries.
-7. [ ] **Import** an existing xschem/KLayout project (scan → `[libraries]` table).
-8. [ ] **LibMan**: import its `define(name, path)` list, read `Category.group`, "open in
-       LibMan".
+### Phase 1: done (2026-11-22), what is left
+All of the original list is built: xschem and GDS readers, hierarchy browser and "used by",
+reference rewriting on rename/copy/move (with rollback, `refactor.rs`), file watching,
+git status, categories and search, import of existing projects, new-project wizard,
+trash. Open:
+- [ ] LibMan: import its `define(name, path)` list, read `Category.group`, "open in
+      LibMan" (not exercised).
+- [ ] Hierarchy gaps: OASIS PCells, instance-level `schematic=`, read-only layouts are not
+      indexed, multi-cell GDS is not used by the index.
+- [ ] Auto-reload can drop edits made within 0.3-2 s of an outside change.
+- [ ] Quick-open shortcuts only work in the main window (Ctrl+P is xschem's add-pin; use
+      Ctrl+Shift+F).
+- [ ] Dead code: old New Project folder flow (`PickFor::NewProject`); `Library::rename_cell`,
+      `copy_cell`, `rename_cell_following`.
+- [ ] Member (collection) cells are refused by refactor on purpose; categories follow
+      rename/delete/move.
+- [ ] Not exercised: native-dialog fallback without a portal.
+
+### Phase 2: done (2026-11-22), what is left
+Technology snapshot (`tech.toml` + `tech.catalog.json`, design in [TECH.md](TECH.md)),
+`cdept tech|pdk`, per-user `cdept.local.toml`, Technology tab. Open:
+- [ ] Decide whether to commit `examples/ihp-inv/tech.catalog.json` (1 MB). The PDK commit
+      pinned in `tech.toml` gives "out of date" warnings; NDA PDK snapshots are not
+      checked before commit.
+- [ ] `tech refresh` overwrites hand edits to `tech.toml`; enabling a PDK library has no
+      `cdept.toml` key.
+- [ ] Library is one folder: `libs.ref/sg13g2_pr` and `sky130_fd_pr` are left out beside
+      their xschem namesakes.
+- [ ] Deck switches: `klayout::verify` passes only the IHP variable names; the catalog has
+      the roles.
+- [ ] Default-deck order is implemented twice (`tech::klayout::decks` and
+      `klayout::verify::best_deck`).
+- [ ] `tech::scan` has no progress hook (the GUI pdkscan mirrors it).
+- [ ] Not exercised: the `ciel` program, gf180mcu and ihp-sg13cmos5l (not installed), a CI
+      KLayout job.
+- Never read `/opt/ext/OpenPDKs/XFAB` (NDA); discovery only stats its subfolders.
+
+### Phase 4 (first slice, 2026-11-23, [SIMULATION.md](SIMULATION.md))
+`cdept sim run|deck`, `setup.toml` testbench view, deck builder, ngspice batch, specs. Open: see
+SIMULATION.md §4 (GUI, job queue, sweeps, results DB). `libcdept/tests/sim.rs` needs
+`CDEPT_XSCHEM` and `CDEPT_NGSPICE` set to run (else it skips).
 
 ### Embedded xschem ([XSCHEM.md](XSCHEM.md))
 - [x] Decisions: helper process (GPL helper, MIT rest), pinned to the asic-all commit,
@@ -310,7 +338,6 @@ Last updated: 2026-11-20 (embedded KLayout: steps 0–4 built; PCell views; sche
 - [ ] CLI for cells and views (`cdept cell new|copy|rename|rm`); only `init`, `ls` and
       `lib add|remove` exist.
 - [ ] A text field as fallback for the folder dialog (see §2.1).
-- [ ] Hierarchy panel is still a placeholder.
 
 ### Carried to later phases
 - Phase 2: GDS template units and the xschem header version should come from the

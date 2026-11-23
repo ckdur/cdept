@@ -1,0 +1,18 @@
+# Testbench of the inverter: a pulse on `in`, 10 fF on `out`. The schematic is the
+# one of this cell; corners and models come from tech.toml. Run it with
+#   cdept sim run cells tb_inv
+corners = ["tt", "ff", "ss"]
+temperatures = [27]
+save = ["v(in)", "v(out)"]
+measures = [
+  "tran tpd trig v(in) val=0.6 rise=1 targ v(out) val=0.6 fall=1",
+]
+
+[[analysis]]
+kind = "tran"
+step = "5p"
+stop = "1.2n"
+
+[[spec]]
+name = "tpd"
+max = 3e-10

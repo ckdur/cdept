@@ -86,7 +86,16 @@ every machine and can be committed.
 
 ### 3.1 Finding the PDK (`tech::discover`, `tech::ciel`) → `[pdk]`
 
-*(Details: to be filled from the PDK fork's report.)* A PDK is looked for in the
+A PDK is a folder with `libs.tech` in it; a *root* (what `$PDK_ROOT` means) holds one
+subfolder per PDK. Discovery is cheap and careful: it lists each root once, asks only
+whether `<child>/libs.tech` exists and never lists a subfolder that is not a PDK (this is
+why NDA folders next to real PDKs are only stat'ed). A checkout that holds PDKs one level
+down (IHP-Open-PDK holds `ihp-sg13g2` and `ihp-sg13cmos5l`) is recognised by asking for
+the well-known names (`NESTED_NAMES`), not by walking it. ciel (formerly volare) keeps
+`<root>/ciel/<family>/versions/<commit>/<pdk>` and links the one in use into the root;
+CDePT reads that layout itself, so listing and switching to a version already there
+(`cdept pdk versions|enable`) work without the program. Fetching needs `ciel` (not
+exercised yet). A PDK is looked for in the
 project's PDK folder, `$PDK_ROOT`, `$CDEPT_PDK_PATH`, `~/.ciel`, `~/.volare`,
 `/usr/share/pdk`, `/usr/local/share/pdk`, `~/share/pdk` (`cdept pdk ls`). `[pdk]` has
 what the PDK says about itself: name, family (`sky130`, `gf180mcu`, `ihp-sg13g2`,
@@ -95,7 +104,7 @@ what the PDK says about itself: name, family (`sky130`, `gf180mcu`, `ihp-sg13g2`
 
 ### 3.2 KLayout (`tech::klayout`) → `[klayout]`
 
-*(Details: to be filled from the KL fork's report.)* From files: the technology
+The scan reads the files; no program is needed for the first part. From files: the technology
 (`.lyt`: name, database unit, layer properties file, reader options, connectivity),
 the layers (`.lyp`), the LEF/DEF layer maps, the DRC and LVS decks with the switches
 they read, macros, 2.5D and cross-section scripts. With the helper: the PCell
@@ -105,39 +114,48 @@ deck of each list is the default).
 
 ### 3.3 Magic (`tech::magic`) → `[magic]`
 
-*(Details: KL fork.)* The start-up file (`.magicrc`), the technology file (name,
-version, styles, GDS numbers), the device generators. Fixed keys: `rc`, `tech`,
+Read from the files; Magic is never started. The start-up file (`.magicrc`: technology it
+loads, Tcl it sources, supply names, cell paths), the technology file (`.tech` and what it includes: name, version, planes, CIF/GDS,
+extraction and DRC styles, GDS numbers, devices the extraction knows), the device
+generators (`<name>_defaults` procedures) and the scripts next to them. Fixed keys: `rc`, `tech`,
 `tech_file`.
 
 ### 3.4 Netgen (`tech::netgen`) → `[netgen]`
 
-*(Details: KL fork.)* The LVS set-up file and what it says about device groups.
+The LVS set-up file is Tcl; it is read, not run. Kept: the device groups it sets rules for
+(pin swaps, series/parallel merging, compared properties with tolerances, dropped ones),
+the cell name patterns it treats specially and the environment variables it looks at.
 Fixed key: `setup`.
 
 ### 3.5 xschem (`tech::xschem`) → `[xschem]`
 
-*(Details: XS fork.)* The `xschemrc`, evaluated in the engine when the helper may be
+The `xschemrc`, evaluated in the engine when the helper may be
 started (else read as text, with a note), the symbol libraries on its search path,
 the variables that point into the PDK; the catalog has every symbol. Fixed keys:
 `rc`, `libraries`.
 
 ### 3.6 Simulation models (`tech::models`) → `[models]`
 
-*(Details: XS fork.)* One model set per folder (`ngspice`, `xyce`, sky130's
+One model set per folder (`ngspice`, `xyce`, sky130's
 `combined`): library files, start-up files, OSDI, and the named corner sets (`tt`,
 `ff`, `ss`, `sf`, `fs`, `mc`, `tt_mm`, …), each a list of `"<file> <section>"`.
 
 ### 3.7 Devices (`tech::devices`) → `[devices]`
 
-*(Details: XS fork.)* The PDK's devices joined from the other sections: symbol →
+The PDK's devices joined from the other sections: symbol →
 model → KLayout PCell and Magic generator. The PCell comes from the device map
 shipped with CDePT when there is one (IHP SG13G2), else it is guessed and marked so;
 `cdept tech devices` writes the guesses as a draft map (docs/LINKING.md §3).
 
 ### 3.8 Reference libraries (`tech::refs`) → `[refs]`
 
-*(Details: REF fork.)* `libs.ref/<library>/<format>/…`: standard cells, IO,
-memories, primitives.
+`libs.ref/<library>/<format>/…`: standard cells, IO, memories, primitives, and the digital
+flow set-up next to them (`libs.tech/librelane` or `openlane`). Each library is read as a
+CDePT library of the `ref` layout, so what the snapshot lists is what the project shows.
+`tech.toml` gets, per library: purpose, formats, cell count, technology LEFs and Liberty
+corners (process, voltage, temperature); the catalog gets the cells with their views and
+facts (LEF class and size, Liberty area), every Liberty file, LEF layers and sites, and
+every digital-flow setting.
 
 ## 4. `tech.toml`
 
