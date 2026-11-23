@@ -5,6 +5,7 @@ mod cmd_calc;
 mod cmd_cell;
 mod cmd_find;
 mod cmd_import;
+mod cmd_importfile;
 mod cmd_lib;
 mod cmd_ls;
 mod cmd_magic;
@@ -168,6 +169,8 @@ enum Command {
     /// Propose a project (cdept.toml) for an existing design folder: its libraries
     /// from the xschemrc, the folders with design files or a LibMan project file.
     Import(cmd_import::ImportArgs),
+    #[command(name = "import-files")]
+    ImportFiles(cmd_importfile::ImportFilesArgs),
     /// IHP LibMan: write the libraries as a LibMan project file, start LibMan.
     #[command(subcommand)]
     Libman(cmd_import::LibmanCommand),
@@ -1589,6 +1592,10 @@ fn main() -> Result<()> {
         Command::Import(args) => {
             init_tracing(cli.verbose, None);
             cmd_import::import(args, cli.project)
+        }
+        Command::ImportFiles(args) => {
+            init_tracing(cli.verbose, None);
+            cmd_importfile::import_files(args, &open_project(cli.project)?)
         }
         Command::Libman(command) => {
             init_tracing(cli.verbose, None);

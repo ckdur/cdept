@@ -149,6 +149,7 @@ fn library_items(ui: &mut Ui, lib: &Library, links: &[Unlinked], cmds: &mut Vec<
     {
         cmds.push(Cmd::Dialog(Dialog::new_cell(lib)));
     }
+    cmds.extend(crate::import_files::menu(ui, lib).map(Cmd::Dialog));
     let broken = links.iter().filter(|u| u.library == lib.name).count();
     if broken > 0 {
         let fix = ui

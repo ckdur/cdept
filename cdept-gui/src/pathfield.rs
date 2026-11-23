@@ -200,7 +200,6 @@ impl<'a> PathField<'a> {
         Self::new(id_salt, text, Kind::Folder)
     }
 
-    #[allow(dead_code)] // part of the widget's API; no dialog asks for a file yet
     pub fn file(id_salt: impl Hash + std::fmt::Debug, text: &'a mut String) -> Self {
         Self::new(id_salt, text, Kind::File)
     }

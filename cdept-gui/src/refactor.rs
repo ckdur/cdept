@@ -367,7 +367,7 @@ enum Level {
 
 /// What the preview shows for an operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Shown {
+pub(crate) struct Shown {
     lines: Vec<(Level, String)>,
     /// Why there is no plan (a name that is taken, …).
     error: Option<String>,
@@ -399,7 +399,7 @@ fn options(app: &AppCtx) -> Options {
     }
 }
 
-fn shown(project: &Project, plan: Result<Plan>) -> Shown {
+pub(crate) fn shown(project: &Project, plan: Result<Plan>) -> Shown {
     let plan = match plan {
         Ok(plan) => plan,
         Err(e) => {
@@ -485,6 +485,11 @@ pub fn preview(ui: &mut Ui, app: &AppCtx, operation: &Operation) {
         return;
     };
     ui.add_space(6.0);
+    draw(ui, &shown);
+}
+
+/// Draw a plan that was made by someone else (the import dialog).
+pub(crate) fn draw(ui: &mut Ui, shown: &Shown) {
     if let Some(error) = &shown.error {
         ui.weak(error);
         return;
@@ -518,6 +523,12 @@ pub fn preview(ui: &mut Ui, app: &AppCtx, operation: &Operation) {
 fn plan_lines(app: &AppCtx) -> Result<Vec<String>, String> {
     let project = app.project.as_ref().ok_or("no project is open")?;
     let dialog = dialogs::open(app).ok_or("no dialog is open")?;
+    if let Dialog::ImportFiles(import) = dialog {
+        return crate::import_files::plan_lines(app, import);
+    }
+    if let Dialog::ImportSummary(lines) = dialog {
+        return Ok(lines.clone());
+    }
     let operation = operation_of(dialog).ok_or("the open dialog has no plan")?;
     let plan = refactor::plan(project, &operation, &options(app)).map_err(|e| format!("{e:#}"))?;
     Ok(plan.lines(&project.root))
@@ -747,7 +758,7 @@ const USAGE: &str = "usage: refactor rename_cell <library> <cell> <name> | copy_
                      [name] | copy_hierarchy <library> <cell> <to library> [name] | \
                      rename_view <library> <cell> <view> <name> | copy_view <library> <cell> \
                      <view> <to library> <to cell> <name> | rename_library <library> <name> \
-                     [folder]";
+                     [folder] | import_files <library>";
 
 pub(crate) fn script_parse(
     name: &str,
@@ -813,6 +824,7 @@ pub(crate) fn script_parse(
                         folder: args.len() == 4,
                     })
                 }
+                ["import_files", _] => Dialog::ImportFiles(crate::import_files::ImportFiles::new(args[1])),
                 _ => return Some(Err(USAGE.into())),
             };
             Ok(ScriptCommand::Open(dialog))
@@ -869,6 +881,7 @@ pub(crate) fn script_run(
         ScriptCommand::Set(field, value) => {
             match dialogs::open_mut(app).ok_or("no dialog is open")? {
                 Dialog::Refactor(refactor) => refactor.set(&field, &value)?,
+                Dialog::ImportFiles(import) => import.set(&field, &value)?,
                 Dialog::RenameCell { name, .. } if field == "name" => *name = value,
                 Dialog::CopyCell { name, .. } if field == "name" => *name = value,
                 Dialog::CopyCell { to, .. } if field == "to" => *to = value,

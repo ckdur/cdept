@@ -47,6 +47,7 @@ howto/suites
 howto/custom-test-template
 howto/other-simulators
 howto/lvs-drc
+howto/import-files
 ```
 
 ```{toctree}

@@ -13,39 +13,40 @@ Chip Design Project Tool
 Usage: cdept [OPTIONS] [COMMAND]
 
 Commands:
-  gui       Open the main window (default)
-  init      Create a project (a cdept.toml file) in a folder
-  info      Show the project: its file, the PDK in use ($PDK, $PDK_ROOT) and where each value comes from, the libraries
-  ls        List the libraries, cells and views of the project
-  lib       Change the library definitions in cdept.toml
-  netlist   Write the netlist of a cell's schematic, with its hierarchy (uses xschem)
-  xschem    Use the embedded xschem engine directly
-  layout    Layout views: references between them, export, pictures (uses KLayout)
-  klayout   Use the embedded KLayout directly
-  pdk       The PDKs installed on this machine and their versions (ciel)
-  ngspice   ngspice in-process (libngspice, loaded at run time)
-  magic     Magic in batch mode: extraction, DRC, LEF export
-  sim       Testbenches: decks and ngspice runs with corners and specs
-  netgen    LVS with netgen (batch)
-  yosys     Synthesis with Yosys (batch)
-  openroad  Run OpenROAD scripts (batch)
-  qucs      Qucs-S: schematic to SPICE netlist (headless), open in Qucs-S, S-parameter viewer
-  vacask    VACASK models of the technology (made from its ngspice models and Verilog-A)
-  openvaf   OpenVAF: compile Verilog-A to OSDI, cached per technology
-  tech      The project's technology snapshot (tech.toml): scan the PDK, show, refresh
-  calc      Evaluate a calculator expression on a SPICE raw file (`cdept calc --functions` lists them)
-  find      Search the libraries: cells and views by name, kind, format and category, optionally inside the files (see `cdept find --help` for the query words)
-  category  Categories: named groups of the cells of a library
-  import    Propose a project (cdept.toml) for an existing design folder: its libraries from the xschemrc, the folders with design files or a LibMan project file
-  libman    IHP LibMan: write the libraries as a LibMan project file, start LibMan
-  cell      Cells: create, copy, rename, move, delete. What uses a cell follows
-  view      Views of a cell: create, copy, rename, delete
-  hier      The hierarchy below a cell, read from the files (schematic, layout, netlist, HDL)
-  used-by   Which cells use a cell, through which views, how often
-  status    The git status of the project, by library, cell and view
-  tools     List the external tools found on PATH
-  version   Print version and build information
-  help      Print this message or the help of the given subcommand(s)
+  gui           Open the main window (default)
+  init          Create a project (a cdept.toml file) in a folder
+  info          Show the project: its file, the PDK in use ($PDK, $PDK_ROOT) and where each value comes from, the libraries
+  ls            List the libraries, cells and views of the project
+  lib           Change the library definitions in cdept.toml
+  netlist       Write the netlist of a cell's schematic, with its hierarchy (uses xschem)
+  xschem        Use the embedded xschem engine directly
+  layout        Layout views: references between them, export, pictures (uses KLayout)
+  klayout       Use the embedded KLayout directly
+  pdk           The PDKs installed on this machine and their versions (ciel)
+  ngspice       ngspice in-process (libngspice, loaded at run time)
+  magic         Magic in batch mode: extraction, DRC, LEF export
+  sim           Testbenches: decks and ngspice runs with corners and specs
+  netgen        LVS with netgen (batch)
+  yosys         Synthesis with Yosys (batch)
+  openroad      Run OpenROAD scripts (batch)
+  qucs          Qucs-S: schematic to SPICE netlist (headless), open in Qucs-S, S-parameter viewer
+  vacask        VACASK models of the technology (made from its ngspice models and Verilog-A)
+  openvaf       OpenVAF: compile Verilog-A to OSDI, cached per technology
+  tech          The project's technology snapshot (tech.toml): scan the PDK, show, refresh
+  calc          Evaluate a calculator expression on a SPICE raw file (`cdept calc --functions` lists them)
+  find          Search the libraries: cells and views by name, kind, format and category, optionally inside the files (see `cdept find --help` for the query words)
+  category      Categories: named groups of the cells of a library
+  import        Propose a project (cdept.toml) for an existing design folder: its libraries from the xschemrc, the folders with design files or a LibMan project file
+  import-files  Import files into a library
+  libman        IHP LibMan: write the libraries as a LibMan project file, start LibMan
+  cell          Cells: create, copy, rename, move, delete. What uses a cell follows
+  view          Views of a cell: create, copy, rename, delete
+  hier          The hierarchy below a cell, read from the files (schematic, layout, netlist, HDL)
+  used-by       Which cells use a cell, through which views, how often
+  status        The git status of the project, by library, cell and view
+  tools         List the external tools found on PATH
+  version       Print version and build information
+  help          Print this message or the help of the given subcommand(s)
 
 Options:
   -p, --project <PROJECT>  Project folder (the one holding cdept.toml). Defaults to the project the current folder belongs to
@@ -1582,6 +1583,63 @@ Options:
       --add                Add the libraries to the project the folder already has (or the one given with -p) instead of making a new one
       --no-helper          Do not run the xschemrc with the xschem helper: read its text only
       --toml               Print the project file the plan stands for instead of the plan
+```
+
+### cdept import-files
+
+```text
+Import files into a library.
+
+Reads the files and prints what would come in: which cells, in which views, written where. Nothing is written without `--write`.
+
+A file that holds several cells is taken apart: a GDSII file gives one cell per top structure (with the structures it places), a SPICE or CDL file one per `.subckt` (with the subcircuits it uses and the header of the file: `.include`, `.model`, `.param`), a LEF file one per `MACRO` (its layers and vias become the cell `<file>_tech`), a Liberty file one per `cell` group, a Verilog file one per module. Use `--no-split` to take each file as one cell named after it. xschem, Qucs-S, Magic, VHDL, Verilog-A and OASIS files are copied as they are.
+
+Cells of the same name from several files (an `inv` in a GDS and in a SPICE file) become one cell with several views: `layout`, `netlist`, `cdl`, `abstract`, `liberty`, `verilog`, `schematic`, `symbol`, ...
+
+Compressed files (`.gds.gz`) are refused: decompress them first. Files of unknown format are reported, not guessed.
+
+Usage: cdept import-files [OPTIONS] --to <LIBRARY> <FILES>...
+
+Arguments:
+  <FILES>...
+          The files to import
+
+Options:
+      --to <LIBRARY>
+          The library they go into (a `cells` or `flat` library of the project)
+
+      --split
+          Take the cells out of files that hold several (the default)
+
+      --no-split
+          Take every file as one cell named after it, whatever is inside
+
+      --prefix <PREFIX>
+          Put this in front of every cell name
+          
+          [default: ""]
+
+      --name <OLD=NEW>
+          Give a cell of a file another name: OLD=NEW (before the prefix). May be repeated
+
+      --on-clash <ON_CLASH>
+          What to do with a view the library has already
+
+          Possible values:
+          - skip:      Keep what the library has; the other views of the cell still come in
+          - rename:    Import the cell under another name (`inv_1`)
+          - overwrite: Replace the existing file of the view
+          
+          [default: skip]
+
+      --views <FORMAT>
+          Take only files of these formats (names as in `[suffixes]`: gds, spice, cdl, lef, liberty, verilog, xschem-schematic, ...). Comma separated or repeated
+
+      --write
+          Write the files. Without it the plan is only printed
+
+  -l, --long
+          List every view that would come in, not only the summary
 ```
 
 ### cdept libman

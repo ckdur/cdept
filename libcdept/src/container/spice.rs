@@ -258,6 +258,55 @@ pub fn extract_subckt(text: &str, name: &str, new: &str) -> eyre::Result<String>
     Ok(out)
 }
 
+/// The lines of a netlist that are not inside a subcircuit (`.include`, `.model`,
+/// comments, top-level circuit cards), in file order.
+pub fn outside_lines(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    for line in text.lines() {
+        let trimmed = line.trim_start().as_bytes();
+        let opens = lower_starts(trimmed, b".subckt") || lower_starts(trimmed, b".macro");
+        let closes = lower_starts(trimmed, b".ends") || lower_starts(trimmed, b".eom");
+        if depth == 0 && !opens {
+            out.push(line);
+        }
+        if opens {
+            depth += 1;
+        }
+        if closes && depth > 0 {
+            depth -= 1;
+        }
+    }
+    out
+}
+
+/// Subcircuits that `name` and what it places (in the file) instantiate and the file
+/// does not define, sorted. Empty when the file has no subcircuit `name`.
+pub fn unresolved(text: &str, name: &str) -> Vec<String> {
+    let all = blocks(text);
+    let find = |n: &str| all.iter().position(|b| b.name.eq_ignore_ascii_case(n));
+    let Some(top) = find(name) else {
+        return Vec::new();
+    };
+    let mut seen = vec![false; all.len()];
+    let mut todo = vec![top];
+    let mut missing = std::collections::BTreeSet::new();
+    while let Some(at) = todo.pop() {
+        if std::mem::replace(&mut seen[at], true) {
+            continue;
+        }
+        for n in placed(&all[at]) {
+            match find(&n) {
+                Some(i) => todo.push(i),
+                None => {
+                    missing.insert(n);
+                }
+            }
+        }
+    }
+    missing.into_iter().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

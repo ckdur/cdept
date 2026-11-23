@@ -6,6 +6,7 @@ mod dialogs;
 mod dock;
 mod engines;
 mod import;
+mod import_files;
 mod library_dialog;
 pub mod log;
 mod newproject;
