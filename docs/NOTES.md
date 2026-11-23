@@ -468,3 +468,6 @@ Job queue / process supervisor: `libcdept::jobs` ([JOBS.md](JOBS.md)); `sim::run
 
 ### 2.6 Standing risks from the roadmap
 See ROADMAP §4: per-tool IPC (Phase 3), PDK heterogeneity, large waveforms, scope creep.
+
+### 2.7 ngspice in-process (2026-11-23)
+`libcdept::ngspice` loads libngspice with dlopen (`$CDEPT_LIBNGSPICE`), one Session at a time; `cdept ngspice live`; `run_deck` is Outcome-compatible but not wired into sim yet. See [NGSPICE.md](NGSPICE.md).

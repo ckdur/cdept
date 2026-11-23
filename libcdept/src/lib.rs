@@ -15,6 +15,7 @@ pub mod jobs;
 pub mod klayout;
 pub mod layout;
 pub mod library;
+pub mod ngspice;
 pub mod link;
 pub mod project;
 pub mod project_edit;
