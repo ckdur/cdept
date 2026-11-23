@@ -214,8 +214,10 @@ Original to-do (kept for the record):
 Done 2026-11-23 ([SIMULATION.md](SIMULATION.md)): testbench view, deck, ngspice and Xyce batch runs,
 corners × temperatures × variable sweeps, Monte Carlo, measures and specs, job queue
 ([JOBS.md](JOBS.md)), results store (`result.json` + `results.db`), Simulation tab in the GUI.
-Still to do: OpenVAF on-demand compile, CACE import/export, SLURM/ssh, sweep/MC in the GUI form,
-Xyce Monte Carlo, VACASK; the rest of the list below as written.
+VACASK as a testbench simulator and OpenVAF on-demand compile (cached per technology) are
+done ([VACASK.md](VACASK.md): ihp-sg13g2 works, sky130 does not convert yet).
+Still to do: CACE import/export, SLURM/ssh, sweep/MC in the GUI form,
+Xyce Monte Carlo; the rest of the list below as written.
 - Testbench view: DUT cell, analyses (op/dc/ac/tran/noise/pss if available), design
   variables, model corners (from tech.toml), temperature, saves/probes.
 - Netlisting pipeline: xschem netlist → wrapper with includes, `.param` and `.control`.

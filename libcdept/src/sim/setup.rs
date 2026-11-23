@@ -263,6 +263,9 @@ impl Setup {
         if setup.simulator == "xyce" && setup.models.is_empty() {
             setup.models = "xyce".into();
         }
+        if setup.simulator == "vacask" && setup.models.is_empty() {
+            setup.models = "vacask".into();
+        }
         Ok(setup)
     }
 
@@ -273,8 +276,8 @@ impl Setup {
     }
 
     fn check(&self) -> Result<()> {
-        if !matches!(self.simulator.as_str(), "" | "ngspice" | "xyce") {
-            bail!("simulator '{}' is not supported yet (ngspice and xyce are)", self.simulator);
+        if !matches!(self.simulator.as_str(), "" | "ngspice" | "xyce" | "vacask") {
+            bail!("simulator '{}' is not supported yet (ngspice, xyce and vacask are)", self.simulator);
         }
         if self.simulator == "xyce" && self.analyses.iter().filter(|a| !matches!(a, Analysis::Op)).count() > 1 {
             bail!("Xyce runs one analysis per deck (op may come with it); split the testbench");
@@ -288,10 +291,13 @@ impl Setup {
                 bail!("variable '{}' is swept twice", sweep.variable);
             }
         }
-        if let Some(mc) = &self.montecarlo
-            && (mc.runs == 0 || mc.runs > 100_000)
-        {
-            bail!("montecarlo runs must be 1..100000");
+        if let Some(mc) = &self.montecarlo {
+            if mc.runs == 0 || mc.runs > 100_000 {
+                bail!("montecarlo runs must be 1..100000");
+            }
+            if self.simulator == "vacask" {
+                bail!("Monte Carlo is run with ngspice or Xyce only (the statistical models are not converted for VACASK)");
+            }
         }
         let word = |s: &str| !s.is_empty() && !s.contains(char::is_whitespace);
         for name in self.variables.keys().chain(self.options.keys()) {

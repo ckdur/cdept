@@ -133,6 +133,9 @@ pub fn run_testbench_with(
         .tech
         .as_ref()
         .ok_or_else(|| eyre!("the project has no technology snapshot (cdept tech scan)"))?;
+    // VACASK: the technology's ngspice models converted for it (made on first use).
+    let vacask_ready = if tb.setup.simulator == "vacask" { Some(crate::vacask::models::ready(project)?) } else { None };
+    let tech = vacask_ready.as_ref().map_or(tech, |r| &r.tech);
     let models = &tech.models;
     let set = if !tb.setup.models.is_empty() {
         tb.setup.models.clone()
@@ -156,6 +159,9 @@ pub fn run_testbench_with(
             })
         }
     };
+    if mc.is_some() && tb.setup.simulator == "vacask" {
+        return Err(eyre!("Monte Carlo is run with ngspice or Xyce only (the statistical models are not converted for VACASK)"));
+    }
     // The corner sets (and switches) the Monte Carlo mode draws from.
     let mc_plan = match &mc {
         Some(mc) => {
@@ -218,23 +224,31 @@ pub fn run_testbench_with(
         if cancelled() {
             break;
         }
-        let init = deck::spiceinit(model_set, |n| project.var(n)).map_err(|e| eyre!(e))?;
-        let lines = match &mc_plan {
-            Some(plan) => {
-                let mut all = vec![];
-                for c in &plan.corners {
-                    all.extend(models.lines(&set, c, |n| project.var(n)).map_err(|e| eyre!(e))?);
-                }
-                all.extend(plan.extra.iter().cloned());
-                all
-            }
-            None => models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?,
-        };
-        let text = deck::build(&tb.setup, point, &title, &lines, &netlist);
-        decks.push(text.clone());
         let dir = base.join(point.name());
         std::fs::create_dir_all(&dir)?;
-        std::fs::write(dir.join(".spiceinit"), &init)?;
+        let text = if let Some(ready) = &vacask_ready {
+            let d = crate::vacask::build_point(project, ready, &tb.setup, &set, point, &title, &netlist)?;
+            for w in &d.warnings {
+                tracing::warn!("{}: {w}", point.name());
+            }
+            d.text
+        } else {
+            let init = deck::spiceinit(model_set, |n| project.var(n)).map_err(|e| eyre!(e))?;
+            let lines = match &mc_plan {
+                Some(plan) => {
+                    let mut all = vec![];
+                    for c in &plan.corners {
+                        all.extend(models.lines(&set, c, |n| project.var(n)).map_err(|e| eyre!(e))?);
+                    }
+                    all.extend(plan.extra.iter().cloned());
+                    all
+                }
+                None => models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?,
+            };
+            std::fs::write(dir.join(".spiceinit"), &init)?;
+            deck::build(&tb.setup, point, &title, &lines, &netlist)
+        };
+        decks.push(text.clone());
         let slot: Slot = Arc::default();
         slots.push(slot.clone());
         let mut env = env.clone();

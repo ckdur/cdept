@@ -9,6 +9,8 @@
 pub mod netgen;
 pub mod openroad;
 pub mod qucs;
+pub mod openvaf;
+pub mod vacask;
 pub mod xyce;
 pub mod yosys;
 

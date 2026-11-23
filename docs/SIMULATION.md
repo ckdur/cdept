@@ -5,6 +5,10 @@ corners × temperatures, `.meas` results against specs. Code: `libcdept/src/sim/
 `cdept sim`; the Simulation tab (section 8). Also design-variable sweeps, Monte Carlo
 (process, mismatch, both; ngspice and Xyce), a results store and statistics (sections
 4 to 7). Not built yet: VACASK, waveform viewer (Phase 5).
+`cdept sim`. Since 2026-11-23 also design-variable sweeps, Monte Carlo and a results
+store (sections 5 to 7). VACASK runs as a testbench simulator too ([VACASK.md](VACASK.md)). Not built yet: waveform viewer (Phase 5).
+`cdept sim`; the Simulation tab (§5). Not built yet: sweeps of design variables, Monte Carlo,
+Xyce/VACASK, results database, waveform viewer (Phase 5).
 
 ## 1. The testbench view
 
@@ -15,7 +19,7 @@ is netlisted is an ordinary xschem schematic (DUT, sources, load, its own code b
 ```toml
 schematic = "lib/cell"        # default: the cell the view is in
 schematic_view = "schematic"  # default: the first xschem schematic
-simulator = "ngspice"         # the only one run today
+simulator = "ngspice"         # or "xyce", "vacask" (docs/VACASK.md)
 models = "ngspice"            # model set of [models] in tech.toml; default: the snapshot's
 corners = ["tt", "ff", "ss"]  # corner sets of that set; default: the snapshot's corner
 temperatures = [-40, 27, 125] # °C, one run each; default: the simulator's 27

@@ -32,6 +32,7 @@ pub mod template;
 pub mod tools;
 pub mod trash;
 pub mod vcs;
+pub mod vacask;
 pub mod version;
 pub mod watch;
 pub mod xschem;

@@ -111,12 +111,18 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             };
             let corner = tech.models.corner.clone().unwrap_or_default();
             let point = sim::deck::points(&tb.setup, &corner).remove(0);
-            let lines = tech.models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?;
             let file = std::env::temp_dir().join(format!("cdept-deck-{}.spice", std::process::id()));
             sim::netlist_for(project, &tb.schematic, &file, &tb.setup.simulator)?;
             let netlist = std::fs::read_to_string(&file)?;
             let _ = std::fs::remove_file(&file);
-            print!("{}", sim::build_deck(&tb.setup, &point, &format!("{library}/{cell}/{view}"), &lines, &netlist));
+            let title = format!("{library}/{cell}/{view}");
+            if tb.setup.simulator == "vacask" {
+                let ready = libcdept::vacask::models::ready(project)?;
+                print!("{}", libcdept::vacask::build_point(project, &ready, &tb.setup, &set, &point, &title, &netlist)?.text);
+                return Ok(());
+            }
+            let lines = tech.models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?;
+            print!("{}", sim::build_deck(&tb.setup, &point, &title, &lines, &netlist));
             Ok(())
         }
         SimCommand::Run { library, cell, view, corners, jobs, runs, mode, seed, no_mc, no_store } => {
@@ -124,10 +130,11 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             let tb = sim::open(project, &library, &cell, &view)?;
             let simulator = sim::Simulator::for_setup(&tb.setup).ok_or_else(|| {
                 eyre!(
-                    "the simulator '{}' was not found: put it on PATH or set {} (ngspice) or {} (Xyce)",
+                    "the simulator '{}' was not found: put it on PATH or set {} (ngspice), {} (Xyce) or {} (VACASK)",
                     tb.setup.simulator,
                     sim::run::NGSPICE_ENV,
-                    libcdept::batch::xyce::XYCE_ENV
+                    libcdept::batch::xyce::XYCE_ENV,
+                    libcdept::batch::vacask::VACASK_ENV
                 )
             })?;
             // One line per point as it starts and ends (the events come from worker threads).

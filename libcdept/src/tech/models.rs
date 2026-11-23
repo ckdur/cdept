@@ -113,6 +113,11 @@ pub struct ModelSet {
     /// Simulator plugins (Xyce `.so`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub plugins: Vec<TechPath>,
+    /// Set when CDePT made this set from another one (`[models.vacask]` from the
+    /// ngspice models) rather than finding it in the PDK: how, and the hash of its
+    /// sources. A generated set is made again when the sources change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated: Option<String>,
     /// Nominal temperature of the models in °C, when stated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tnom: Option<f64>,
