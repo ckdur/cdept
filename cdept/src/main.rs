@@ -1,16 +1,16 @@
 //! `cdept`: opens the GUI by default; subcommands run headless.
 
+mod cmd_batch;
 mod cmd_calc;
 mod cmd_cell;
 mod cmd_find;
 mod cmd_import;
-mod cmd_qucs;
 mod cmd_lib;
 mod cmd_ls;
-mod cmd_ngspice;
 mod cmd_magic;
+mod cmd_ngspice;
 mod cmd_pdk;
-mod cmd_batch;
+mod cmd_qucs;
 mod cmd_sim;
 mod cmd_status;
 mod cmd_tech;
@@ -551,7 +551,7 @@ fn layout_check_nets(
         }
         None => verify::work_dir_named(project, library, cell, "nets")?,
     };
-    let stream = verify::export_stream(project, &file, &dir.join(format!("{cell}.gds")))?;
+    let stream = verify::export_stream(project, &file, cell, &dir.join(format!("{cell}.gds")))?;
     if !stream.missing.is_empty() {
         tracing::warn!(
             "cells not found, checked as empty: {} (see `cdept layout refs`)",
@@ -715,7 +715,7 @@ fn layout_check(
         }
         None => verify::work_dir(project, library, cell, check)?,
     };
-    let stream = verify::export_stream(project, &file, &dir.join(format!("{cell}.gds")))?;
+    let stream = verify::export_stream(project, &file, cell, &dir.join(format!("{cell}.gds")))?;
     if !stream.missing.is_empty() {
         tracing::warn!(
             "cells not found, checked as empty: {} (see `cdept layout refs`)",

@@ -1,0 +1,14 @@
+# DRC on a cell of a PDK reference library whose GDS holds many cells (SYMBI-60): the
+# check works on the cell shown, not on the first top cell of the file. Needs the PDK
+# and KLayout:
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs PDK=ihp-sg13g2 CDEPT_EXAMPLE=ihp-inv \
+#       cdept-gui/scripts/run.sh cdept-gui/scripts/layout-checks-ref.script
+
+open sg13g2_stdcell sg13g2_inv_1 layout
+wait_frame
+
+layout_check drc
+expect_check DRC clean
+
+quit

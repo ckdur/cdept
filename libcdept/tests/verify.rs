@@ -72,7 +72,8 @@ fn drc_of_the_pdk_inverter_and_of_a_narrow_wire() {
     let dir = tmp.path().join("drc");
     std::fs::create_dir_all(&dir).unwrap();
     let stream =
-        verify::export_stream(&project, &layout_file(&project), &dir.join("inv.gds")).unwrap();
+        verify::export_stream(&project, &layout_file(&project), CELL, &dir.join("inv.gds"))
+            .unwrap();
     assert_eq!(stream.top, CELL);
     assert!(stream.missing.is_empty());
     let run = verify::run_drc(&project, &deck, &stream, &dir, &[]).unwrap();
@@ -122,7 +123,8 @@ fn lvs_of_the_pdk_inverter() {
     let dir = tmp.path().join("lvs");
     std::fs::create_dir_all(&dir).unwrap();
     let stream =
-        verify::export_stream(&project, &layout_file(&project), &dir.join("inv.gds")).unwrap();
+        verify::export_stream(&project, &layout_file(&project), CELL, &dir.join("inv.gds"))
+            .unwrap();
     let netlist = case.join(format!("netlist/{CELL}.cdl"));
 
     let run = verify::run_lvs(&project, &deck, &stream, &netlist, &dir, &[]).unwrap();

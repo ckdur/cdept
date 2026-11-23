@@ -699,9 +699,10 @@ pub struct Stream {
     pub missing: Vec<String>,
 }
 
-/// Write the layout file `layout` with every reference filled in to `out` (a `.gds`),
-/// through a KLayout helper of its own.
-pub fn export_stream(project: &Project, layout: &Path, out: &Path) -> Result<Stream> {
+/// Write the layout file `layout` of the cell `cell` with every reference filled in to
+/// `out` (a `.gds`), through a KLayout helper of its own. The top cell of the stream is
+/// [`expected_top`] of `layout` and `cell`.
+pub fn export_stream(project: &Project, layout: &Path, cell: &str, out: &Path) -> Result<Stream> {
     let refs = crate::layout::refs::resolve(project, layout);
     let options = EngineOptions::for_project(project);
     let mut params = options.open_params(&refs, false);
@@ -712,7 +713,7 @@ pub fn export_stream(project: &Project, layout: &Path, out: &Path) -> Result<Str
     let value = engine.call(method::EXPORT, params);
     let _ = engine.shutdown();
     let value = value?;
-    Ok(stream_of(out, &value, &fallback_top(layout)))
+    Ok(stream_of(out, &value, &expected_top(layout, cell)))
 }
 
 /// What the helper's answer to `export` (`{file, missing}`) says about `out`.
@@ -744,6 +745,21 @@ pub fn fallback_top(layout: &Path) -> String {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     name.split('.').next().unwrap_or_default().to_string()
+}
+
+/// The top cell a check of the cell `cell` whose layout is `layout` works on: the
+/// sidecar's `top`, else `cell` when the GDS file defines a structure of that name (a
+/// cell of a library whose one GDS holds many cells, as the PDK's standard cells do),
+/// else [`fallback_top`].
+pub fn expected_top(layout: &Path, cell: &str) -> String {
+    if let Ok(Some(meta)) = crate::layout::Meta::read_for(layout) {
+        return meta.top;
+    }
+    if !cell.is_empty() && crate::layout::gds::read_structure(layout).is_ok_and(|s| s.defines(cell))
+    {
+        return cell.to_string();
+    }
+    fallback_top(layout)
 }
 
 /// The top cell of the GDS file `file`: `expected` when it is one of its top cells,
@@ -1115,6 +1131,44 @@ mod tests {
     use super::*;
 
     const NESTED: &str = include_str!("testdata/nested.lyrdb");
+
+    /// A GDS stream with the (empty) structures `names`.
+    fn gds_with(names: &[&str]) -> Vec<u8> {
+        fn rec(out: &mut Vec<u8>, kind: u16, data: &[u8]) {
+            out.extend(((data.len() + 4) as u16).to_be_bytes());
+            out.extend(kind.to_be_bytes());
+            out.extend(data);
+        }
+        fn name(s: &str) -> Vec<u8> {
+            let mut v = s.as_bytes().to_vec();
+            if v.len() % 2 == 1 {
+                v.push(0);
+            }
+            v
+        }
+        let mut out = Vec::new();
+        rec(&mut out, 0x0002, &600i16.to_be_bytes());
+        rec(&mut out, 0x0102, &[0u8; 24]);
+        rec(&mut out, 0x0206, &name("LIB"));
+        for n in names {
+            rec(&mut out, 0x0502, &[0u8; 24]);
+            rec(&mut out, 0x0606, &name(n));
+            rec(&mut out, 0x0700, &[]);
+        }
+        rec(&mut out, 0x0400, &[]);
+        out
+    }
+
+    #[test]
+    fn the_top_is_the_cell_checked_in_a_file_of_many_cells() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("stdcells.gds");
+        std::fs::write(&file, gds_with(&["a21o_1", "inv_1", "nand2_1"])).unwrap();
+        assert_eq!(expected_top(&file, "inv_1"), "inv_1");
+        assert_eq!(expected_top(&file, "nand2_1"), "nand2_1");
+        // A name the file does not define: the file's own name, as before.
+        assert_eq!(expected_top(&file, "other"), "stdcells");
+    }
 
     #[test]
     fn categories_and_items_of_a_nested_report() {

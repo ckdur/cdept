@@ -77,7 +77,8 @@ fn check(project: &Project, cell: &str, work: &Path) -> link::nets::NetRun {
     let file = libcdept::klayout::cell_layout(project.library("cells").unwrap(), cell).unwrap();
     let dir = work.join(cell);
     std::fs::create_dir_all(&dir).unwrap();
-    let stream = verify::export_stream(project, &file, &dir.join(format!("{cell}.gds"))).unwrap();
+    let stream =
+        verify::export_stream(project, &file, cell, &dir.join(format!("{cell}.gds"))).unwrap();
     let pins = libcdept::layout::Meta::read_for(&file)
         .unwrap()
         .map(|m| m.pins)
@@ -273,7 +274,7 @@ fn pins_are_in_the_sidecar_the_stream_and_the_checks() {
     moved.write_for(&file).unwrap();
     let stream_dir = work.path().join("moved");
     std::fs::create_dir_all(&stream_dir).unwrap();
-    let stream = verify::export_stream(&project, &file, &stream_dir.join("inv.gds")).unwrap();
+    let stream = verify::export_stream(&project, &file, "inv", &stream_dir.join("inv.gds")).unwrap();
     let (source_view, schematic) = link::schematic_view(&project, "cells", "inv", None).unwrap();
     let run = link::nets::run(
         &project,
@@ -292,7 +293,7 @@ fn pins_are_in_the_sidecar_the_stream_and_the_checks() {
     let deck = verify::find_deck(&project, verify::Check::Lvs).unwrap();
     let lvs_dir = work.path().join("lvs");
     std::fs::create_dir_all(&lvs_dir).unwrap();
-    let stream = verify::export_stream(&project, &file, &lvs_dir.join("inv.gds")).unwrap();
+    let stream = verify::export_stream(&project, &file, "inv", &lvs_dir.join("inv.gds")).unwrap();
     let netlist = lvs_dir.join("inv.spice");
     verify::schematic_netlist(&project, &schematic, &netlist).unwrap();
     let lvs = verify::run_lvs(&project, &deck, &stream, &netlist, &lvs_dir, &[]).unwrap();

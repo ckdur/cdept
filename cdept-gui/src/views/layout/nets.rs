@@ -433,12 +433,15 @@ impl LayoutView {
                 }
                 Some(Ok(answer)) => {
                     let value: Value = serde_json::from_str(&answer).unwrap_or(Value::Null);
-                    let top = self
-                        .cells
-                        .as_ref()
-                        .map(|c| c.top.clone())
-                        .filter(|t| !t.is_empty())
-                        .unwrap_or_else(|| verify::fallback_top(&self.file));
+                    let top = if self.doc.cell.is_empty() {
+                        self.cells
+                            .as_ref()
+                            .map(|c| c.top.clone())
+                            .filter(|t| !t.is_empty())
+                            .unwrap_or_else(|| verify::fallback_top(&self.file))
+                    } else {
+                        verify::expected_top(&self.file, &self.doc.cell)
+                    };
                     let stream = verify::stream_of(&out, &value, &top);
                     let project = self.project.clone();
                     let recorded = nets::recorded_parallel(&self.file);

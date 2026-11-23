@@ -61,11 +61,12 @@ mkdir libs/cells/$C/schematic
 sed 's/^w=1.5u/w=1.12u/' libs/cells/inv/schematic/inv.sch > libs/cells/$C/schematic/$C.sch
 ```
 
-```{warning}
-Do not check the cell in place, as `cdept layout drc sg13g2_stdcell sg13g2_inv_1`.
-CLI: KLayout fails with "Cell name sg13g2_stdcell not found" (the top cell is taken from
-the file name). GUI: Run DRC and Run LVS run on the first top cell of the file
-(`sg13g2_a21o_1`), not on the cell shown, so a "clean" result is for another cell.
+```{note}
+DRC can be run on the cell in place (`cdept layout drc sg13g2_stdcell sg13g2_inv_1`, or
+Run DRC on the cell's layout): the check works on the cell named, not on the first cell of
+the library's GDS file. LVS needs a schematic of the cell, which the PDK does not have
+for the standard cells (symbols only), so for LVS copy the cell into a library of the
+project as above.
 ```
 
 ## What is taken from the technology
@@ -279,8 +280,8 @@ with status 1.
 
 Checks that fail for reasons other than the layout:
 
-- "Cell name X not found in input layout", or a GUI check of another cell: the cell is
-  checked in place in a multi-cell PDK library, see the warning above.
+- "Cell name X not found in input layout": the cell is not in the GDS file; check the
+  name of the cell and of the view.
 - An LVS where the schematic side is empty (`schematic ` with no name): the netlist has no
   matching `.subckt`, or its devices are subcircuit calls the deck cannot read; use `M`
   lines.
