@@ -862,6 +862,9 @@ Options:
           - c:    With capacitances
           
           [default: none]
+
+      --timeout <TIMEOUT>
+          Stop Magic after this long: 90s, 10m, 1h; 0 for no limit (default: [magic] timeout in cdept.toml, else 15m)
 ```
 
 #### cdept magic drc
@@ -883,6 +886,9 @@ Arguments:
 Options:
       --style <STYLE>
           DRC style, e.g. `drc(full)` (default: the technology's)
+
+      --timeout <TIMEOUT>
+          Stop Magic after this long: 90s, 10m, 1h; 0 for no limit (default: [magic] timeout in cdept.toml, else 15m)
 ```
 
 #### cdept magic lef
@@ -898,6 +904,7 @@ Arguments:
 
 Options:
       --hide               Hide the inside of the cell (`lef write -hide`)
+      --timeout <TIMEOUT>  Stop Magic after this long: 90s, 10m, 1h; 0 for no limit (default: [magic] timeout in cdept.toml, else 15m)
 ```
 
 ### cdept sim
@@ -957,6 +964,11 @@ Options:
 
       --no-store
           Do not write result.json / results.db
+
+      --backend <BACKEND>
+          ngspice as a process per point (`ngspice -b`) or in-process through libngspice ($CDEPT_LIBNGSPICE). Default: the setup's simulator_backend, else process
+          
+          [possible values: inproc, process]
 ```
 
 #### cdept sim results

@@ -201,7 +201,9 @@ Original to-do (kept for the record):
 - **Magic:** `magic -dnull -noconsole` with Tcl over a pipe for batch (ext, LEF, DRC). For the
   GUI, source a Tcl socket-server script.
 - **ngspice:** in-process via `libngspice` (shared API: `ngSpice_Init`, `ngSpice_Command`,
-  callbacks for live vectors). Bind through `bindgen` or an existing crate.
+  callbacks for live vectors). *Done:* hand-written bindings loaded with dlopen, and the
+  testbench backend `simulator_backend = "inproc"` with progress and cancel
+  ([NGSPICE.md](NGSPICE.md)); cancel of Xyce runs and a Magic time limit ([JOBS.md](JOBS.md)).
 - **KLayout extras:** `klive` (salt package, JSON on port 8082) already reloads a GDS in a
   running KLayout. Use it as the first "open layout" path before our own bridge exists.
   The productivity suite and xsection are detected as salt packages too.

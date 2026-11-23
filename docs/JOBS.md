@@ -28,6 +28,15 @@ their runs on a `Queue` instead of spawning processes themselves.
 Jobs start in submission order. Only the direct child is killed on cancel (a script that
 forks leaves grandchildren; use `exec` or have the tool clean up).
 
+`JobCtx::cancel_flag()` hands the flag to code that polls it itself:
+`batch::Job::run_watched(&Watch { cancel, timeout })` kills a batch program when the
+flag is set or the time is up (Xyce runs of `sim` use it, so cancelling a Xyce point kills
+Xyce); `Magic::in_job(ctx)` does the same for Magic, which also has a time limit
+(`[magic] timeout` in `cdept.toml`, default 15 minutes; the error has Magic's last lines);
+the in-process ngspice backend halts the simulation with `bg_halt`
+([NGSPICE.md](NGSPICE.md#the-in-process-backend)). `jobs::parse_duration` reads the
+durations (`90s`, `10m`, `1h30m`).
+
 ## Use by simulation
 
 `sim::run_testbench` makes one job per run point and runs them in parallel
@@ -35,7 +44,8 @@ forks leaves grandchildren; use `exec` or have the tool clean up).
 an event listener). Results come back in point order. Each point directory gets a
 `job.log` (the simulator's stdout/stderr) next to ngspice's own `out.log`.
 `cdept sim run --jobs N` (`-j`) sets it and prints a line per point on stderr
-as it starts and ends.
+as it starts and ends. With the in-process backend the points share one libngspice and
+run one at a time; their progress is the simulator's own percentage.
 
 ## Not done yet
 

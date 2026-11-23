@@ -167,6 +167,11 @@ impl JobCtx {
     pub fn is_cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
     }
+    /// The flag [`JobCtx::is_cancelled`] reads, for code that polls it on its own (a
+    /// batch program, Magic, the in-process ngspice).
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        self.cancel.clone()
+    }
     /// The job's log file, if it has one.
     pub fn log_path(&self) -> Option<&Path> {
         self.log_path.as_deref()
@@ -212,6 +217,60 @@ impl JobCtx {
             std::thread::sleep(Duration::from_millis(5));
         }
     }
+}
+
+/// A duration as written in a settings file or on the command line: `90s`, `10m`,
+/// `1h30m`, `2h`, `500ms`, or a plain number of seconds. `0` is zero (callers read it
+/// as "no limit").
+pub fn parse_duration(text: &str) -> Result<Duration> {
+    let t = text.trim();
+    if t.is_empty() {
+        return Err(eyre!("an empty duration"));
+    }
+    if let Ok(secs) = t.parse::<f64>() {
+        if !(secs.is_finite() && secs >= 0.0) {
+            return Err(eyre!("'{text}' is not a duration"));
+        }
+        return Ok(Duration::from_secs_f64(secs));
+    }
+    let mut total = Duration::ZERO;
+    let mut rest = t;
+    while !rest.is_empty() {
+        let n_end = rest.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(rest.len());
+        let unit_end = rest[n_end..].find(|c: char| c.is_ascii_digit()).map_or(rest.len(), |i| n_end + i);
+        let (number, unit) = (&rest[..n_end], rest[n_end..unit_end].trim());
+        let value: f64 = number.parse().map_err(|_| eyre!("'{text}' is not a duration (like 90s, 10m, 1h30m)"))?;
+        let scale = match unit {
+            "ms" => 0.001,
+            "s" | "sec" => 1.0,
+            "m" | "min" => 60.0,
+            "h" => 3600.0,
+            _ => return Err(eyre!("'{text}' is not a duration (units: ms, s, m, h)")),
+        };
+        total += Duration::from_secs_f64(value * scale);
+        rest = rest[unit_end..].trim_start();
+    }
+    Ok(total)
+}
+
+/// A duration the way [`parse_duration`] reads it (`15m`, `1h30m`, `45s`).
+pub fn format_duration(d: Duration) -> String {
+    let s = d.as_secs();
+    if d.subsec_millis() != 0 && s < 60 {
+        return format!("{}ms", d.as_millis());
+    }
+    let (h, m, s) = (s / 3600, (s / 60) % 60, s % 60);
+    let mut out = String::new();
+    if h > 0 {
+        out.push_str(&format!("{h}h"));
+    }
+    if m > 0 {
+        out.push_str(&format!("{m}m"));
+    }
+    if s > 0 || out.is_empty() {
+        out.push_str(&format!("{s}s"));
+    }
+    out
 }
 
 struct Rec {
@@ -544,6 +603,22 @@ mod tests {
         assert_eq!(q.info(running).unwrap().state, JobState::Cancelled);
         assert_eq!(q.info(queued).unwrap().state, JobState::Cancelled);
         assert!(std::fs::read_to_string(dir.path().join("s.log")).unwrap().contains("started"));
+    }
+
+    #[test]
+    fn durations() {
+        assert_eq!(parse_duration("90").unwrap(), Duration::from_secs(90));
+        assert_eq!(parse_duration("10m").unwrap(), Duration::from_secs(600));
+        assert_eq!(parse_duration("1h30m").unwrap(), Duration::from_secs(5400));
+        assert_eq!(parse_duration(" 2h 5s ").unwrap(), Duration::from_secs(7205));
+        assert_eq!(parse_duration("250ms").unwrap(), Duration::from_millis(250));
+        assert_eq!(parse_duration("0").unwrap(), Duration::ZERO);
+        for bad in ["", "ten", "5x", "-3", "m"] {
+            assert!(parse_duration(bad).is_err(), "{bad}");
+        }
+        assert_eq!(format_duration(Duration::from_secs(900)), "15m");
+        assert_eq!(format_duration(Duration::from_secs(5405)), "1h30m5s");
+        assert_eq!(format_duration(Duration::from_millis(300)), "300ms");
     }
 
     #[test]

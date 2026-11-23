@@ -11,9 +11,12 @@ pub mod parse;
 pub mod tcl;
 
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use eyre::{Result, WrapErr, bail, eyre};
 use serde::{Deserialize, Serialize};
@@ -27,6 +30,9 @@ pub const MAGIC_ENV: &str = "CDEPT_MAGIC";
 
 /// Lines of Magic's output kept in an error.
 const TAIL: usize = 25;
+
+/// How long a batch run may take unless `[magic] timeout` or `--timeout` says otherwise.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// What Magic reads the cell from.
 #[derive(Debug, Clone, PartialEq)]
@@ -154,6 +160,10 @@ pub struct Magic {
     /// The PDK's start-up file (`-rcfile`).
     pub rc: Option<PathBuf>,
     pub env: Vec<(OsString, OsString)>,
+    /// A run that takes longer is killed ([`DEFAULT_TIMEOUT`]; `None`: no limit).
+    pub timeout: Option<Duration>,
+    /// Set to kill the running Magic (a job's [`crate::jobs::JobCtx::cancel_flag`]).
+    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Magic {
@@ -170,27 +180,44 @@ impl Magic {
             program,
             rc: None,
             env: Vec::new(),
+            timeout: Some(DEFAULT_TIMEOUT),
+            cancel: None,
         }
     }
 
+    /// This Magic with another time limit (zero: none).
+    pub fn with_timeout(mut self, limit: Duration) -> Magic {
+        self.timeout = (!limit.is_zero()).then_some(limit);
+        self
+    }
+
+    /// This Magic, killed when the job is cancelled. Run from a job of the queue.
+    pub fn in_job(mut self, ctx: &crate::jobs::JobCtx) -> Magic {
+        self.cancel = Some(ctx.cancel_flag());
+        self
+    }
+
     /// Magic for `project`: the program found by [`Magic::find`], the start-up file of
-    /// the snapshot's `[magic]` section (else `$PDK_ROOT/$PDK/libs.tech/magic/$PDK.magicrc`)
-    /// and the PDK environment.
+    /// the snapshot's `[magic]` section (else `$PDK_ROOT/$PDK/libs.tech/magic/$PDK.magicrc`),
+    /// the PDK environment and the time limit of `[magic] timeout` in `cdept.toml`.
     pub fn for_project(project: &Project) -> Result<Magic> {
         let program = Magic::find().ok_or_else(|| {
             eyre!("magic not found: put it on PATH or set {MAGIC_ENV}")
         })?;
         Ok(Magic {
-            program,
             rc: rc_file(project),
             env: project.tool_env(),
-        })
+            ..Magic::new(program)
+        }
+        .with_timeout(project.magic.timeout.unwrap_or(DEFAULT_TIMEOUT)))
     }
 
     /// Run `script` in `dir` and return Magic's output (both streams). Errors: the
-    /// program does not start, it fails, it reports a Tcl error or it ends before the
-    /// script does; each one carries the end of the output.
+    /// program does not start, it fails, it reports a Tcl error, it ends before the
+    /// script does, it runs out of time ([`Magic::timeout`]) or it is cancelled
+    /// ([`Magic::cancel`]; then it is killed); each one carries the end of the output.
     pub fn run(&self, script: &str, dir: &Path) -> Result<String> {
+        use crate::batch::{Watch, Waited};
         std::fs::create_dir_all(dir)?;
         let mut cmd = Command::new(&self.program);
         cmd.args(["-dnull", "-noconsole"]);
@@ -211,17 +238,41 @@ impl Magic {
         let writer = std::thread::spawn(move || {
             let _ = stdin.write_all(script.as_bytes());
         });
-        let output = child.wait_with_output()?;
-        let _ = writer.join();
-        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        // Read on threads too, so that the output so far is there when Magic is stopped.
+        let (out, out_reader) = collect(child.stdout.take());
+        let (err, err_reader) = collect(child.stderr.take());
+        let watch = Watch { cancel: self.cancel.clone(), timeout: self.timeout };
+        let waited = watch.wait(&mut child)?;
+        // After a kill, a process Magic started may keep the pipes open: do not wait
+        // for it.
+        if matches!(waited, Waited::Exited(_)) {
+            let _ = writer.join();
+            let _ = out_reader.join();
+            let _ = err_reader.join();
+        }
+        let mut text = String::from_utf8_lossy(&out.lock().unwrap()).into_owned();
+        text.push_str(&String::from_utf8_lossy(&err.lock().unwrap()));
+        let status = match waited {
+            Waited::Exited(status) => status,
+            Waited::Cancelled => {
+                return Err(eyre!("magic was cancelled and stopped\n{}", parse::tail(&text, TAIL)));
+            }
+            Waited::TimedOut(limit) => {
+                return Err(eyre!(
+                    "magic did not finish within {} and was stopped \
+                     (raise [magic] timeout in cdept.toml, or --timeout)\n{}",
+                    crate::jobs::format_duration(limit),
+                    parse::tail(&text, TAIL)
+                ));
+            }
+        };
         if let Some(err) = parse::script_error(&text) {
             bail!("magic: {err}\n{}", parse::tail(&text, TAIL));
         }
-        if !output.status.success() || !parse::finished(&text) {
+        if !status.success() || !parse::finished(&text) {
             bail!(
                 "magic stopped before the end of the script ({})\n{}",
-                output.status,
+                status,
                 parse::tail(&text, TAIL)
             );
         }
@@ -291,6 +342,23 @@ impl Magic {
             .collect();
         Ok(Import { cells, log })
     }
+}
+
+/// Read a pipe to its end on a thread, into a buffer that can be looked at meanwhile.
+fn collect(pipe: Option<impl Read + Send + 'static>) -> (Arc<Mutex<Vec<u8>>>, std::thread::JoinHandle<()>) {
+    let buf = Arc::new(Mutex::new(Vec::new()));
+    let b = buf.clone();
+    let handle = std::thread::spawn(move || {
+        let Some(mut pipe) = pipe else { return };
+        let mut chunk = [0u8; 8192];
+        while let Ok(n) = pipe.read(&mut chunk) {
+            if n == 0 {
+                break;
+            }
+            b.lock().unwrap().extend_from_slice(&chunk[..n]);
+        }
+    });
+    (buf, handle)
 }
 
 /// The start-up file for the project's PDK.
@@ -387,6 +455,54 @@ mod tests {
         assert_eq!(r.count(), 3);
         assert!(!r.is_clean());
         assert_eq!(r.by_rule(), [("a.1".to_string(), 2), ("B".to_string(), 1)]);
+    }
+
+    #[cfg(unix)]
+    fn fake_magic(dir: &Path, body: &str) -> Magic {
+        Magic::new(crate::batch::testutil::fake(dir, "fake-magic", body))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_magic_is_stopped_with_its_last_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let magic = fake_magic(dir.path(), "echo 'Magic 8.3 starting'\necho 'Loading cell inv'\nexec sleep 30")
+            .with_timeout(Duration::from_millis(400));
+        let t = std::time::Instant::now();
+        let msg = format!("{}", magic.run("puts hi\n", dir.path()).unwrap_err());
+        assert!(t.elapsed() < Duration::from_secs(10), "killed, not waited for");
+        assert!(msg.contains("did not finish within 400ms") && msg.contains("Loading cell inv"), "{msg}");
+        // A Magic that ends in time is not affected.
+        let ok = fake_magic(dir.path(), "cat >/dev/null\necho 'CDEPT: done'").with_timeout(Duration::from_secs(30));
+        assert!(ok.run("puts hi\n", dir.path()).unwrap().contains("CDEPT: done"));
+        assert_eq!(Magic::new("m".into()).timeout, Some(DEFAULT_TIMEOUT));
+        assert_eq!(Magic::new("m".into()).with_timeout(Duration::ZERO).timeout, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_job_kills_magic() {
+        use crate::jobs::{JobSpec, JobState, Queue};
+        let dir = tempfile::tempdir().unwrap();
+        let magic = fake_magic(dir.path(), "echo 'Magic 8.3 starting'\nexec sleep 30");
+        let q = Queue::new(1);
+        let error = Arc::new(Mutex::new(String::new()));
+        let (e, d) = (error.clone(), dir.path().to_path_buf());
+        let id = q.submit(JobSpec::func("drc", move |ctx| {
+            let r = magic.in_job(ctx).run("drc check\n", &d);
+            *e.lock().unwrap() = format!("{:#}", r.as_ref().unwrap_err());
+            r.map(|_| ())
+        }));
+        let t = std::time::Instant::now();
+        while q.info(id).unwrap().state != JobState::Running {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        q.cancel(id);
+        assert_eq!(q.wait(id).unwrap().state, JobState::Cancelled);
+        assert!(t.elapsed() < Duration::from_secs(10), "killed, not waited for");
+        let msg = error.lock().unwrap().clone();
+        assert!(msg.contains("cancelled") && msg.contains("Magic 8.3 starting"), "{msg}");
     }
 
     // -- against a real Magic and PDK, when they are installed ------------------------

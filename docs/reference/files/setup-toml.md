@@ -33,6 +33,7 @@ max = 3e-10
 | `schematic_view` | string | first xschem schematic of the cell | Which schematic view when the cell has several. |
 | `schematic_kind` | `"xschem"` or `"qucs"` | the named view's own kind, else the cell's xschem schematic, else its Qucs-S one | Which tool's schematic is netlisted ([QUCS.md](../../QUCS.md)). |
 | `simulator` | `"ngspice"`, `"xyce"`, `"vacask"` | `ngspice` | The engine. Any other value is an error. See [Other simulators](../../howto/other-simulators.md). |
+| `simulator_backend` | `"process"` or `"inproc"` | `process` | How ngspice runs: `process` starts `ngspice -b` for every run point; `inproc` runs the points in CDePT through libngspice, one at a time, with live progress and cancel ([NGSPICE.md](../../NGSPICE.md#the-in-process-backend)). The files and numbers are the same. `inproc` is for ngspice only and is an error when libngspice cannot be loaded (no fallback). `cdept sim run --backend` overrides it. |
 | `models` | string | the technology's default set; `xyce` for `simulator = "xyce"`, `vacask` for `"vacask"` | The model set of `[models]` in [tech.toml](tech-toml.md). |
 | `corners` | array of strings | the technology's default corner | Corner sets of the model set; one run per corner. |
 | `temperatures` | array of numbers (deg C) | the simulator's own (27) | One run per temperature. |

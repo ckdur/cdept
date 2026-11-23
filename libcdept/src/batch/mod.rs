@@ -17,7 +17,10 @@ pub mod yosys;
 use std::ffi::OsString;
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use eyre::{Result, WrapErr, bail};
 
@@ -110,6 +113,13 @@ impl Job {
     /// Run it and wait. The exit status is in the result whatever it is; an error is
     /// only for a program that cannot be started or a log that cannot be made.
     pub fn run_unchecked(&self) -> Result<Output> {
+        self.run_watched(&Watch::default())
+    }
+
+    /// [`Job::run_unchecked`], stopped early: when `watch.cancel` is set (a job's
+    /// [`crate::jobs::JobCtx::cancel_flag`]) or `watch.timeout` passes, the program is
+    /// killed and the result is an error (for a timeout, with the end of the log).
+    pub fn run_watched(&self, watch: &Watch) -> Result<Output> {
         std::fs::create_dir_all(&self.dir)
             .wrap_err_with(|| format!("cannot create {}", self.dir.display()))?;
         let log = self.log_path();
@@ -132,8 +142,8 @@ impl Job {
         // A program that was written a moment ago may still be open for writing in a
         // process forked meanwhile (ETXTBSY, os error 26): try again shortly.
         let mut tries = 0;
-        let status = loop {
-            match cmd.status() {
+        let mut child = loop {
+            match cmd.spawn() {
                 Err(e) if e.raw_os_error() == Some(26) && tries < 20 => {
                     tries += 1;
                     std::thread::sleep(std::time::Duration::from_millis(25));
@@ -142,9 +152,76 @@ impl Job {
             }
         }
         .wrap_err_with(|| format!("cannot start {} ({})", self.name, self.program.display()))?;
-        let text = String::from_utf8_lossy(&std::fs::read(&log).unwrap_or_default()).into_owned();
-        Ok(Output { name: self.name.clone(), status, log, text })
+        let read_log = || String::from_utf8_lossy(&std::fs::read(&log).unwrap_or_default()).into_owned();
+        let status = match watch.wait(&mut child)? {
+            Waited::Exited(status) => status,
+            Waited::Cancelled => return Err(eyre::eyre!("{} cancelled", self.name)),
+            Waited::TimedOut(limit) => return Err(eyre::eyre!(
+                "{} timed out after {} and was stopped\nlog: {}\n{}",
+                self.name,
+                crate::jobs::format_duration(limit),
+                log.display(),
+                tail(&read_log(), 12)
+            )),
+        };
+        Ok(Output { name: self.name.clone(), status, log: log.clone(), text: read_log() })
     }
+}
+
+/// What stops a running program early ([`Job::run_watched`]): a cancel flag, polled,
+/// and a time limit. The default stops nothing.
+#[derive(Debug, Clone, Default)]
+pub struct Watch {
+    pub cancel: Option<Arc<AtomicBool>>,
+    pub timeout: Option<Duration>,
+}
+
+/// How [`Watch::wait`] ended.
+#[derive(Debug)]
+pub enum Waited {
+    Exited(ExitStatus),
+    /// Killed: the cancel flag was set.
+    Cancelled,
+    /// Killed: it ran longer than this.
+    TimedOut(Duration),
+}
+
+impl Watch {
+    pub fn cancel(flag: Arc<AtomicBool>) -> Watch {
+        Watch { cancel: Some(flag), timeout: None }
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel.as_ref().is_some_and(|c| c.load(Ordering::SeqCst))
+    }
+
+    /// Wait for `child`, killing it (only it, not what it started) when cancelled or
+    /// out of time.
+    pub fn wait(&self, child: &mut Child) -> Result<Waited> {
+        if self.cancel.is_none() && self.timeout.is_none() {
+            return Ok(Waited::Exited(child.wait()?));
+        }
+        let start = Instant::now();
+        loop {
+            if let Some(status) = child.try_wait()? {
+                return Ok(Waited::Exited(status));
+            }
+            let stop = if self.cancelled() {
+                Some(Waited::Cancelled)
+            } else {
+                self.timeout.filter(|t| start.elapsed() >= *t).map(Waited::TimedOut)
+            };
+            if let Some(why) = stop {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(why);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+impl Job {
 
     /// Run it; an error when it exits with a failure status. The end of the log is in
     /// the message.
@@ -240,5 +317,29 @@ mod tests {
         let msg = format!("{err}");
         assert!(msg.contains("boom") && msg.contains("exit status: 3"), "{msg}");
         assert!(Job::new("none", &dir.path().join("missing"), dir.path(), "m.log").run().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_watched_run_is_killed_on_cancel_or_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let slow = testutil::fake(dir.path(), "slow", "echo working; exec sleep 30");
+        let job = Job::new("slow", &slow, dir.path(), "slow.log");
+        let t = Instant::now();
+        let watch = Watch { timeout: Some(Duration::from_millis(300)), ..Default::default() };
+        let msg = format!("{}", job.run_watched(&watch).unwrap_err());
+        assert!(msg.contains("timed out after 300ms") && msg.contains("working"), "{msg}");
+        let flag = Arc::new(AtomicBool::new(false));
+        let f = flag.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            f.store(true, Ordering::SeqCst);
+        });
+        let msg = format!("{}", job.run_watched(&Watch::cancel(flag)).unwrap_err());
+        assert!(msg.contains("cancelled"), "{msg}");
+        assert!(t.elapsed() < Duration::from_secs(10), "killed, not waited for");
+        let quick = testutil::fake(dir.path(), "quick", "echo fine");
+        let out = Job::new("quick", &quick, dir.path(), "q.log").run_watched(&watch).unwrap();
+        assert!(out.status.success() && out.text.contains("fine"));
     }
 }

@@ -106,6 +106,9 @@ pub struct RunOptions {
     pub queue: Option<std::sync::Arc<crate::jobs::Queue>>,
     /// Set to stop the run: checked after the netlist, before each point is queued.
     pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// ngspice as a process or in-process (`--backend`); default: the setup's
+    /// `simulator_backend`, else the process.
+    pub backend: Option<run::Backend>,
 }
 
 /// Netlist the testbench's schematic (once) and run every point (or only `only`,
@@ -145,6 +148,7 @@ pub fn run_testbench_with(
     } else {
         models.default.clone().ok_or_else(|| eyre!("the technology names no default model set"))?
     };
+    let backend = run::Backend::choose(options.backend, &tb.setup)?;
     let default_corner = models
         .corner
         .clone()
@@ -207,6 +211,8 @@ pub fn run_testbench_with(
     let title = format!("{}/{}/{}", tb.library, tb.cell, tb.view);
     let env = project.tool_env();
     let workers = if options.jobs > 0 { options.jobs } else { Queue::default_workers().min(points.len()) };
+    // One libngspice runs one point at a time: more workers would only wait for it.
+    let workers = if backend == run::Backend::Inproc { 1 } else { workers };
     let own;
     let queue: &Queue = match &options.queue {
         Some(q) => q,
@@ -263,7 +269,10 @@ pub fn run_testbench_with(
         let spec = JobSpec::func(point.name(), move |ctx| {
             let started = chrono::Local::now().to_rfc3339();
             let clock = std::time::Instant::now();
-            let outcome = run::run_in_job(&simulator, &text, &dir, &env, ctx);
+            let outcome = match backend {
+                run::Backend::Process => run::run_in_job(&simulator, &text, &dir, &env, ctx),
+                run::Backend::Inproc => crate::ngspice::backend::run_in_job(&text, &dir, &env, ctx),
+            };
             let verdict = match &outcome {
                 Ok(_) => Ok(()),
                 Err(e) => Err(eyre!("{e:#}")),

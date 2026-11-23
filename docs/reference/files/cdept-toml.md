@@ -44,6 +44,7 @@ bench = "libs/bench"
 | `[suffixes]` | table | empty | What a file suffix means in this project. |
 | `[xschem]` | table | none | Start-up file of the embedded xschem. |
 | `[klayout]` | table | none | Settings of the embedded KLayout. |
+| `[magic]` | table | none | Batch runs of Magic. |
 
 An empty string for `name`, `description` or `technology` counts as not set. A value of
 the wrong type for `name`, `description`, `technology` or `pdk_root` makes the project
@@ -193,6 +194,21 @@ A folder or file that does not exist is left out with a warning, and then the va
 An unknown key or a value of the wrong kind in this table is a warning. What the
 settings do: [LINKING.md](../../LINKING.md) section 8.
 
+## `[magic]`
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `timeout` | string or number | `"15m"` | How long a batch run of Magic (`cdept magic extract`, `drc`, `lef`) may take before it is stopped. A duration such as `"90s"`, `"10m"`, `"1h30m"`, or a number of seconds; `0` is no limit. `--timeout` on the command overrides it. |
+
+```toml
+[magic]
+timeout = "30m"
+```
+
+A Magic that is stopped (out of time, or its job cancelled) is killed, and the error
+carries the last lines it printed. A value that is not a duration is a warning, and the
+default applies. See [MAGIC.md](../../MAGIC.md).
+
 ## Where the PDK comes from
 
 `$PDK` and `$PDK_ROOT` in library paths and in the environment of every tool are worked
@@ -237,7 +253,7 @@ additional variable `$CDEPT_PROJECT` is the project folder.
 `cdept init [DIR]` writes `cdept.toml` from a commented template; `--name`,
 `--technology` and `--pdk-root` fill in the first keys (the last one goes to the local
 file). The GUI's New Project wizard does the same. The commented template documents
-`[libraries]`, `[suffixes]`, `[xschem]` and `[klayout]` as above.
+`[libraries]`, `[suffixes]`, `[xschem]`, `[klayout]` and `[magic]` as above.
 
 ## See also
 

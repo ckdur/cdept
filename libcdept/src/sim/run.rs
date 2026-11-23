@@ -34,6 +34,44 @@ impl SimKind {
     }
 }
 
+/// How an ngspice run point is simulated: `ngspice -b` as a process of its own (the
+/// default), or in this process through libngspice ([`crate::ngspice::backend`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Backend {
+    #[default]
+    Process,
+    Inproc,
+}
+
+impl Backend {
+    /// `setup.toml`'s `simulator_backend` / `--backend` (empty: the process).
+    pub fn of(name: &str) -> Option<Backend> {
+        match name {
+            "" | "process" => Some(Backend::Process),
+            "inproc" => Some(Backend::Inproc),
+            _ => None,
+        }
+    }
+
+    /// The backend of a run: `chosen` (`--backend`), else the setup's. In-process is
+    /// for ngspice only and needs libngspice: an error otherwise (never a silent fall
+    /// back to the process).
+    pub fn choose(chosen: Option<Backend>, setup: &super::setup::Setup) -> Result<Backend> {
+        let backend = match chosen {
+            Some(b) => b,
+            None => Backend::of(&setup.simulator_backend)
+                .ok_or_else(|| eyre::eyre!("simulator_backend '{}' is not process or inproc", setup.simulator_backend))?,
+        };
+        if backend == Backend::Inproc {
+            if SimKind::of(&setup.simulator) != Some(SimKind::Ngspice) {
+                bail!("the in-process backend runs ngspice only, not '{}'", setup.simulator);
+            }
+            crate::ngspice::backend::check()?;
+        }
+        Ok(backend)
+    }
+}
+
 /// A simulator program, run in batch mode.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Simulator {
@@ -62,8 +100,13 @@ impl Simulator {
     }
 
     /// The simulator a testbench asks for (`simulator = "xyce"`; ngspice when empty).
+    /// A testbench run in-process needs no ngspice program: then a missing one is
+    /// `ngspice` (unused).
     pub fn for_setup(setup: &super::setup::Setup) -> Option<Simulator> {
-        Self::find_kind(SimKind::of(&setup.simulator)?)
+        let kind = SimKind::of(&setup.simulator)?;
+        Self::find_kind(kind).or_else(|| {
+            (kind == SimKind::Ngspice && setup.simulator_backend == "inproc").then(|| Simulator::ngspice("ngspice".into()))
+        })
     }
 
     pub fn ngspice(program: PathBuf) -> Simulator {
@@ -90,14 +133,14 @@ pub fn run(
     dir: &Path,
     env: &[(std::ffi::OsString, std::ffi::OsString)],
 ) -> Result<Outcome> {
-    run_with(simulator, deck, dir, env, |cmd| {
+    run_with(simulator, deck, dir, env, None, |cmd| {
         let output = cmd.output().wrap_err_with(|| format!("cannot start {}", simulator.program.display()))?;
         Ok((output.status, String::from_utf8_lossy(&output.stderr).into_owned()))
     })
 }
 
-/// [`run`] as part of a job: the simulator's stdout/stderr go to the job log and
-/// cancelling the job kills it.
+/// [`run`] as part of a job: the simulator's stdout/stderr go to the job log (Xyce's
+/// to `xyce.stdout`) and cancelling the job kills it.
 pub fn run_in_job(
     simulator: &Simulator,
     deck: &str,
@@ -105,7 +148,7 @@ pub fn run_in_job(
     env: &[(std::ffi::OsString, std::ffi::OsString)],
     ctx: &crate::jobs::JobCtx,
 ) -> Result<Outcome> {
-    run_with(simulator, deck, dir, env, |cmd| Ok((ctx.run_command(cmd)?, String::new())))
+    run_with(simulator, deck, dir, env, Some(ctx.cancel_flag()), |cmd| Ok((ctx.run_command(cmd)?, String::new())))
 }
 
 fn run_with(
@@ -113,11 +156,12 @@ fn run_with(
     deck: &str,
     dir: &Path,
     env: &[(std::ffi::OsString, std::ffi::OsString)],
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     exec: impl FnOnce(&mut Command) -> Result<(std::process::ExitStatus, String)>,
 ) -> Result<Outcome> {
-    // Xyce goes through the batch layer; it is not killed when a job is cancelled yet.
+    // Xyce goes through the batch layer, killed like the others when the job is cancelled.
     if simulator.kind == SimKind::Xyce {
-        return run_xyce(simulator, deck, dir, env);
+        return run_xyce(simulator, deck, dir, env, cancel);
     }
     if simulator.kind == SimKind::Vacask {
         return crate::vacask::run_vacask(&simulator.program, deck, dir, env);
@@ -149,12 +193,14 @@ fn run_with(
     Ok(Outcome { deck: deck_file, raw, log, measures: parse_measures(&text) })
 }
 
-/// Xyce: `Xyce -r out.raw -l out.log deck.cir` ([`crate::batch::xyce`]).
+/// Xyce: `Xyce -r out.raw -l out.log deck.cir` ([`crate::batch::xyce`]), killed when
+/// `cancel` is set.
 fn run_xyce(
     simulator: &Simulator,
     deck: &str,
     dir: &Path,
     env: &[(std::ffi::OsString, std::ffi::OsString)],
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<Outcome> {
     std::fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     let name = "deck.cir";
@@ -173,7 +219,7 @@ fn run_xyce(
         let at = job.args.len().saturating_sub(1);
         job.args.splice(at..at, extra);
     }
-    let out = job.run_unchecked()?;
+    let out = job.run_watched(&crate::batch::Watch { cancel, timeout: None })?;
     let text = std::fs::read_to_string(&log).unwrap_or_default();
     if !out.status.success() || !raw.is_file() {
         bail!(
@@ -285,6 +331,45 @@ mod tests {
         std::fs::set_permissions(&broken, std::fs::Permissions::from_mode(0o755)).unwrap();
         let err = run(&Simulator { kind: SimKind::Xyce, program: broken }, ".end\n", &dir.path().join("r2"), &[]).unwrap_err();
         assert!(format!("{err}").contains("invalid MEASURE"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_job_kills_xyce() {
+        use crate::jobs::{JobSpec, JobState, Queue};
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("slow-xyce");
+        std::fs::write(&fake, "#!/bin/sh\necho 'Xyce starting'\nexec sleep 30\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let sim = Simulator { kind: SimKind::Xyce, program: fake };
+        let q = Queue::new(1);
+        let run_dir = dir.path().join("run");
+        let d = run_dir.clone();
+        let id = q.submit(JobSpec::func("xyce", move |ctx| run_in_job(&sim, ".end\n", &d, &[], ctx).map(|_| ())));
+        let t = std::time::Instant::now();
+        while !std::fs::read_to_string(run_dir.join("xyce.stdout")).is_ok_and(|s| s.contains("starting")) {
+            assert!(t.elapsed() < std::time::Duration::from_secs(10), "the fake Xyce did not start");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        q.cancel(id);
+        let info = q.wait(id).unwrap();
+        assert_eq!(info.state, JobState::Cancelled);
+        assert!(t.elapsed() < std::time::Duration::from_secs(10), "Xyce was killed, not waited for");
+    }
+
+    #[test]
+    fn backends() {
+        assert_eq!(Backend::of(""), Some(Backend::Process));
+        assert_eq!(Backend::of("inproc"), Some(Backend::Inproc));
+        assert_eq!(Backend::of("process"), Some(Backend::Process));
+        assert_eq!(Backend::of("shared"), None);
+        let tb = |text: &str| super::super::setup::Setup::parse(text).unwrap();
+        assert_eq!(Backend::choose(None, &tb("")).unwrap(), Backend::Process);
+        assert_eq!(Backend::choose(Some(Backend::Process), &tb("simulator_backend = \"inproc\"")).unwrap(), Backend::Process);
+        let err = Backend::choose(None, &tb("simulator = \"xyce\"\nsimulator_backend = \"inproc\"")).unwrap_err();
+        assert!(format!("{err}").contains("ngspice only"), "{err}");
+        assert!(super::super::setup::Setup::parse("simulator_backend = \"threads\"").is_err());
     }
 
     #[test]
