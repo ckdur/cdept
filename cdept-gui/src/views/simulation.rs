@@ -1026,6 +1026,10 @@ impl SimulationView {
             .map(|s| s.specs)
             .unwrap_or_default();
         self.stats_ui(ui);
+        if let Some(t) = &self.target {
+            let ok = self.results.iter().filter(|r| r.error.is_none()).map(|r| r.name.as_str());
+            crate::uberwave::results_ui(ui, project, (&t.library, &t.cell, &t.view), ok);
+        }
         let many = self.results.len() > 6;
         egui::CollapsingHeader::new(format!("Points ({})", self.results.len())).default_open(!many).show(ui, |ui| {
         for row in &self.results {

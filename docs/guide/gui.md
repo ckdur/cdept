@@ -235,7 +235,10 @@ its [`setup.toml`](../reference/files/setup-toml.md) as a form and, below it, th
 
 Each point of the Results list has **Open in UberWave**, which starts the separate UberWave
 viewer on the point's raw file ([View waveforms](../howto/view-waveforms.md)); CDePT has no
-waveform viewer of its own.
+waveform viewer of its own. With a viewer that has IPC, **Open family in UberWave** shows all
+the points in one window, and the expression line under it (a calculator expression, a point
+or all points, **Send**) pushes the result into the running viewer as traces; scalar results
+and errors appear under the line. Typing the start of a function name offers it as a button.
 
 Details of the model are in [Simulation](../concepts/simulation.md).
 

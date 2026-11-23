@@ -1368,6 +1368,10 @@ Options:
       --analysis <ANALYSIS>  The analysis to preselect (`tran`, `ac`, `dc`, `noise`, `op`; a PSF analysis name). Default: the transient one when the file has several
       --view <VIEW>          The testbench view. Default: the only view of the cell that has results
       --point <POINT>        The run point (a folder of simulations/<lib>/<cell>/<view>/). Default: the only one
+      --family               Open all the run points of the view in one viewer (tags = point names). Needs a viewer with IPC for more than the first; an older one opens the first and the other files are listed
+      --points <POINTS>      Open these run points (comma separated) in one viewer, as `--family` does for all
+      --calc <CALC>          Evaluate a calculator expression on the point (or on every point with `--family` / `--points`) and send waveform results to the viewer as traces (started when it is not running; needs a viewer with IPC). Scalar results are printed, as a table for several points. A complex waveform is sent as `<name> (mag dB)` and `<name> (phase)`
+      --name <NAME>          The name of the trace sent by `--calc` (default: the expression); with several points `<name> @ <point>`
       --list                 Do not start the viewer: for a file, print its analyses and signal counts (CDePT's own reader); for a cell, the raw files of all its run points
 ```
 

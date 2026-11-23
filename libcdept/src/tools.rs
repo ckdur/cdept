@@ -520,8 +520,8 @@ pub fn detect_all() -> Vec<ToolInfo> {
 }
 
 pub fn detect(spec: &ToolSpec) -> ToolInfo {
-    // UberWave: `$CDEPT_UBERWAVE`, PATH, a sibling build; no version flag (a probe
-    // would open a window), so the file's date.
+    // UberWave: `$CDEPT_UBERWAVE`, PATH, a sibling build; `--version` when the viewer
+    // has one (probed without a display, killed after 2 s), else the file's date.
     if spec.name == "UberWave" {
         let path = crate::wave::locate(None);
         let version = path.as_deref().and_then(crate::wave::describe);

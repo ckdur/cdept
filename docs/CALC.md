@@ -144,6 +144,13 @@ cdept calc --raw out.raw --list            # plots and vectors
 cdept calc 'v("out", analysis="tran")' --raw out.raw --dump    # x y per line
 ```
 
+## Sending a result to UberWave
+
+`cdept wave <lib> <cell> --view V [--point P | --family | --points a,b] --calc 'EXPR' [--name N]`
+evaluates the expression on the raw file of each chosen point and pushes waveform results
+to [UberWave](howto/view-waveforms.md) as traces (a viewer with IPC is needed). The Simulation
+tab has the same in the Results area. Scalars are printed (a table per point for a family).
+
 ## 6. Tests
 
 Unit tests use synthetic waveforms: sine with a 1 % third harmonic (THD -40 dB, SFDR 40

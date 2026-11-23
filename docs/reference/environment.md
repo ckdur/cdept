@@ -26,7 +26,7 @@ described in [External tools](../tools.md).
 | `CDEPT_OPENROAD` | The OpenROAD program. | `openroad` on `PATH` | `cdept openroad` |
 | `CDEPT_QUCS` | The Qucs-S program. | `qucs-s` on `PATH` | `cdept qucs` |
 | `CDEPT_QUCS_SPAR` | The Qucs-S S-parameter viewer. | `qucs-sspar-viewer` on `PATH` | `cdept qucs spar` |
-| `CDEPT_UBERWAVE` | The UberWave waveform viewer (`UberWaveViewer`). | `UberWaveViewer` or `uberwave` on `PATH`, then `../uberwave/build*/wp5-viewer/UberWaveViewer` next to the project or the CDePT repository | `cdept wave`, Open in UberWave |
+| `CDEPT_UBERWAVE` | The UberWave waveform viewer (`UberWaveViewer`). | `UberWaveViewer` or `uberwave` on `PATH`, then `../uberwave/build*/wp5-viewer/UberWaveViewer` next to the project or the CDePT repository | `cdept wave`, Open in UberWave (also the viewer whose `--version` is asked for) |
 | `CDEPT_PYTHON` | The Python interpreter used to detect and run Python tools. | `python3`, else `python`, on `PATH` | `cdept tools`, KLayout Python probe |
 | `KLAYOUT_HOME`, `KLAYOUT_PATH` | KLayout's own folders; read to find KLayout salt packages (`klive`, ...). `KLAYOUT_PATH` is also extended with the PDK's `libs.tech/klayout` for the helper. | KLayout's usual places | `cdept tools`, embedded KLayout |
 | `PATH` | Searched for every program that has no override. | | everywhere |
