@@ -72,6 +72,25 @@ Job queue / process supervisor: `libcdept::jobs` ([JOBS.md](JOBS.md)); `sim::run
 - [x] In-process ngspice backend (SYMBI-71): `simulator_backend = "inproc"` / `cdept sim run --backend inproc`, one worker thread owns libngspice, points are queue jobs, progress from the status callback, cancel = `bg_halt`; same `tpd` as the process to 1e-12 (tt and Monte Carlo). See NGSPICE.md.
 - [x] Cancelling a Xyce point kills Xyce (`batch::Job::run_watched`); Magic batch runs have a time limit (`[magic] timeout`, `--timeout`, default 15m) and `Magic::in_job` for the queue (SYMBI-71).
 
+Milestone (SYMBI-72, 2026-11-23, [TESTS.md](TESTS.md) §6): corner sweep of an OTA from the GUI.
+- [x] `examples/ihp-inv/libs/cells/ota5t`: 5-transistor OTA (PMOS pair, NMOS mirror, PMOS
+      tail, 20 uA), testbench schematics `tb_ota5t` (open loop through 1 TH / 1 F) and
+      `tb_ota5t_step` (unity gain); views `ac_open`, `tran_step`, `dc_op` (all six
+      saturated, from PSP's `vdss`), `power`, `psrr`, `cmrr`, `ac_cload`, `suite` (90 runs
+      over tt/ff/ss/fs/sf x -40/27/125 C, all pass). tt 27 C: 35.8 dB, UGBW 145 MHz, PM 59 deg.
+- [x] Real examples for `psrr_cmrr` (the OTA) and `inl_dnl` (`cells/flash3`, a behavioural
+      3-bit flash ADC: DNL 0.082 / INL 0.049 LSB, as computed from the ladder).
+- [x] Templates declare `[[sweep]]` and `[montecarlo]` from their parameters (setup.toml's
+      tables win); project template `examples/ihp-inv/templates/ac_load.toml`.
+- [x] `startup_settle`: `settle_time` subtracted `t_step` twice (negative times); fixed.
+- [x] Tests: `libcdept/tests/real_ota.rs`, GUI `cdept-gui/scripts/ota.script`, screenshot
+      `docs/_static/screenshots/ota-suite.png` (`docs/screenshots/ota-suite.script`).
+- [ ] `psrr_cmrr` takes the differential gain as a constant (`adm_db`), not from the
+      `ac_response` test of the same suite.
+- [ ] ngspice runs slowly when many run at once on a loaded machine (the PSP OSDI models:
+      a 1 us transient took 3 s alone, 67 s under a load average of 300).
+- [ ] No layout of the OTA.
+
 ### Batch adapters (2026-11-23, [BATCH.md](BATCH.md))
 `libcdept/src/batch/`: Job/Adapter layer, Xyce (also `simulator = "xyce"` in testbenches),
 netgen LVS, Yosys synth, OpenROAD scripts; `cdept netgen|yosys|openroad`. Tested against the real

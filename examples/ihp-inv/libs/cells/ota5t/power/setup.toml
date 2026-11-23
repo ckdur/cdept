@@ -1,0 +1,25 @@
+# Supply current and power of the OTA in unity gain over one full period of the step
+# (up at 10 ns, down at 500 ns, 1 us period), bias branch included. From the test template
+# power (docs/TESTS.md). Run it with
+#   cdept sim run cells ota5t --view power
+template = "power"
+schematic = "cells/tb_ota5t_step"
+corners = ["tt", "ff", "ss", "fs", "sf"]
+temperatures = [-40, 27, 125]
+
+[template_args]
+supply = "vdd"
+step = "200p"
+stop = "1u"
+t_from = "0"
+t_to = "1u"
+period = "1u"
+i_avg_max = "50u"
+p_avg_max = "60u"
+
+[variables]
+vlo = "0.32"
+vhi = "0.52"
+ibias = "20u"
+cl = "100f"
+ac_vdd = "0"

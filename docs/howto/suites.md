@@ -44,6 +44,29 @@ The exit status is non-zero when a test cannot run (an `ERROR` row: not a testbe
 template or net error, simulator missing), a run fails or errors, or a spec fails or is
 missing. A failing test does not stop the others.
 
+## The OTA example
+
+`examples/ihp-inv/libs/cells/ota5t/suite` runs the six tests of a 5-transistor OTA (open-loop
+AC, unity-gain step, operating point, power, PSRR, CMRR) over five corners and three
+temperatures, 90 runs:
+
+```bash
+cdept sim suite cells ota5t
+```
+
+```text
+test             point   result       gain_db          ugbw            pm   settle_time  ...
+ota5t/ac_open    tt_27   PASS        3.5759e1      1.4513e8      5.9378e1             -  ...
+ota5t/tran_step  tt_27   PASS               -             -             -     9.1910e-9  ...
+...
+suite cells/ota5t/suite: 6 test(s), 90 run(s): 90 pass, 0 fail, 0 error; specs: 0 failing, 0 missing
+SUITE PASS
+```
+
+The same in the Simulation tab (double-click the `suite` view of `ota5t`, **Run suite**):
+
+![The OTA suite in the Simulation tab: one row per test and corner point, PASS in green](../_static/screenshots/ota-suite.png)
+
 ## Stored report
 
 The runs of each test are stored as usual. The suite adds

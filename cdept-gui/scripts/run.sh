@@ -17,9 +17,9 @@ for script in "$@"; do
   scratch=$(mktemp -d)
   cp -r "$root/examples/${CDEPT_EXAMPLE:-buffer}" "$scratch/project"
   mkdir "$scratch/home" "$scratch/data"
-  # A script that hangs must not hang the run.
+  # A script that hangs must not hang the run (CDEPT_SCRIPT_TIMEOUT seconds, default 180).
   if HOME="$scratch/home" XDG_DATA_HOME="$scratch/data" \
-      timeout 180 "$cdept" -p "$scratch/project" gui --script "$script" >"$scratch/log" 2>&1; then
+      timeout "${CDEPT_SCRIPT_TIMEOUT:-180}" "$cdept" -p "$scratch/project" gui --script "$script" >"$scratch/log" 2>&1; then
     echo "ok      $(basename "$script")"
   else
     status=1

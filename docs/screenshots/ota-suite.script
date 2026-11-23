@@ -1,0 +1,16 @@
+# Screenshot of the Simulation tab on examples/ihp-inv after the OTA's suite has run
+# (cells/ota5t/suite: 6 tests over 5 corners x 3 temperatures, the combined spec table).
+# Needs PDK_ROOT, CDEPT_NGSPICE, CDEPT_XSCHEM. Writes ota-suite.png.
+# Run: scripts/gen-doc-screenshots.sh docs/screenshots/ota-suite.script
+window 1600 1000
+panel Library Manager
+wait 0.3
+open cells ota5t suite
+sim expect_target cells/ota5t/suite
+sim suite_run
+sim suite_wait
+sim suite_expect pass
+sim suite_expect_rows 90
+wait 0.5
+screenshot @SHOTS@/ota-suite.png
+quit

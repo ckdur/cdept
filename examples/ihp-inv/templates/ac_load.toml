@@ -1,0 +1,107 @@
+# A project test template (docs/reference/files/test-template.md): the open-loop AC
+# response of an amplifier against its load capacitance, as a sweep of the design
+# variable that the testbench's load uses, and optionally Monte Carlo runs. The sweep and
+# Monte Carlo come from the parameters; a setup.toml that names this template can still
+# add or replace them ([[sweep]] by variable, [montecarlo] as a whole).
+name = "ac_load"
+description = "Open-loop gain, unity-gain frequency and phase margin against the load capacitance (a sweep), optionally with Monte Carlo runs."
+requires_nets = ["${in}", "${out}"]
+plot = ['db20(-v("${out}") / v("${in}"))', 'phase(-v("${out}") / v("${in}"))']
+
+[[param]]
+name = "in"
+type = "net"
+default = "in"
+doc = "The input net (carries `ac 1`); the response is taken as -out/in (inverting input)."
+
+[[param]]
+name = "out"
+type = "net"
+default = "out"
+doc = "The output net."
+
+[[param]]
+name = "load"
+type = "string"
+default = "cl"
+doc = "The design variable of the load capacitance."
+
+[[param]]
+name = "loads"
+type = "string"
+default = "50f, 100f, 200f, 500f"
+unit = "F"
+doc = "The load capacitances, separated by commas or spaces."
+
+[[param]]
+name = "fstop"
+type = "number"
+default = "10G"
+unit = "Hz"
+doc = "Last frequency."
+
+[[param]]
+name = "mc_runs"
+type = "int"
+optional = true
+doc = "Monte Carlo runs at every load (process variation); unset: the corner grid."
+
+[[param]]
+name = "mc_seed"
+type = "int"
+default = "1"
+doc = "Base seed of the Monte Carlo runs."
+
+[[param]]
+name = "pm_min"
+type = "number"
+optional = true
+unit = "deg"
+doc = "Spec: smallest allowed phase margin (at every load)."
+
+[[param]]
+name = "ugbw_min"
+type = "number"
+optional = true
+unit = "Hz"
+doc = "Spec: smallest allowed unity-gain frequency (at every load)."
+
+[[sweep]]
+variable = "${load}"
+values = "${loads}"
+
+[montecarlo]
+when = "mc_runs"
+runs = "${mc_runs}"
+seed = "${mc_seed}"
+
+[setup]
+[[setup.analysis]]
+kind = "ac"
+sweep = "dec"
+points = 20
+start = "1"
+stop = "${fstop}"
+
+[[setup.output]]
+name = "gain_db"
+expr = 'db20(value_at(-v("${out}") / v("${in}"), 1))'
+plot = "ac"
+
+[[setup.output]]
+name = "ugbw"
+expr = 'ugbw(-v("${out}") / v("${in}"))'
+plot = "ac"
+
+[[setup.output]]
+name = "pm"
+expr = 'phase_margin(-v("${out}") / v("${in}"))'
+plot = "ac"
+
+[[setup.spec]]
+name = "pm"
+min = "${pm_min}"
+
+[[setup.spec]]
+name = "ugbw"
+min = "${ugbw_min}"
