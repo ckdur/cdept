@@ -63,6 +63,14 @@ pub const KNOWN_TOOLS: &[ToolSpec] = &[
         note: None,
     },
     ToolSpec {
+        name: "Qucs-S S-param viewer",
+        role: "S-parameters",
+        phase: Some(3),
+        locate: Locate::Bin(&["qucs-sspar-viewer"]),
+        version_args: &[],
+        note: Some("opens Touchstone files (.s2p, .snp)"),
+    },
+    ToolSpec {
         name: "XCircuit",
         role: "Schematic",
         phase: None,

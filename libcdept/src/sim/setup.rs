@@ -17,6 +17,10 @@ pub struct Setup {
     pub schematic: String,
     /// The schematic view when the cell has several. Empty: the first xschem one.
     pub schematic_view: String,
+    /// `xschem` or `qucs`: which tool's schematic is netlisted (Qucs-S: `qucs-s -n`, see
+    /// docs/QUCS.md). Empty: the named view's own kind, else the cell's xschem
+    /// schematic, else its Qucs-S one.
+    pub schematic_kind: String,
     /// The simulator: `ngspice` (also when empty) or `xyce`. With Xyce one analysis is
     /// run (plus `op`), options are written `package.name` (`timeint.reltol`; a bare
     /// name goes to `device`) and the model set is the technology's `xyce` one unless

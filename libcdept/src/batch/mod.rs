@@ -8,6 +8,7 @@
 
 pub mod netgen;
 pub mod openroad;
+pub mod qucs;
 pub mod xyce;
 pub mod yosys;
 

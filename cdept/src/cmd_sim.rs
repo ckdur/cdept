@@ -100,7 +100,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             let point = sim::deck::points(&tb.setup, &corner).remove(0);
             let lines = tech.models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?;
             let file = std::env::temp_dir().join(format!("cdept-deck-{}.spice", std::process::id()));
-            sim::netlist(project, &tb.schematic, &file)?;
+            sim::netlist_for(project, &tb.schematic, &file, &tb.setup.simulator)?;
             let netlist = std::fs::read_to_string(&file)?;
             let _ = std::fs::remove_file(&file);
             print!("{}", sim::build_deck(&tb.setup, &point, &format!("{library}/{cell}/{view}"), &lines, &netlist));

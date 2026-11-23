@@ -66,7 +66,7 @@ Not tested: Yosys with a real Liberty file, OpenROAD with a design.
 
 ## Open
 
-- VACASK and Qucs-S adapters (they are detected, not run).
+- VACASK adapter (detected, not run). Qucs-S: schematic to netlist only, see docs/QUCS.md.
 - Xyce: AC, noise and DC decks are written but only a transient was run; plugins
   (`-plugin` from `[models.xyce] plugins`) and the OSDI options of the model set are not
   passed; `.step` for several temperatures in one run is not used (one run per point).

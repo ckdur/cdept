@@ -1,0 +1,22 @@
+# Testbench of a Qucs-S schematic: the RC low-pass next to it (1k, 159n: 1 kHz corner),
+# netlisted by `qucs-s -n` (docs/QUCS.md). The schematic's own AC component is dropped;
+# the analysis is the one below. Run it with
+#   cdept sim run cells rc_lowpass
+schematic_kind = "qucs"
+temperatures = [27]
+save = ["v(in)", "v(out)"]
+measures = [
+  "ac vout_1k find vm(out) at=1000",
+]
+
+[[analysis]]
+kind = "ac"
+sweep = "dec"
+points = 20
+start = "10"
+stop = "100k"
+
+[[spec]]
+name = "vout_1k"
+min = 0.69
+max = 0.72

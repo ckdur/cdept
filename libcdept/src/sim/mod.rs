@@ -58,7 +58,8 @@ pub fn open(project: &Project, library: &str, cell: &str, view: &str) -> Result<
         None => return Err(eyre!("schematic '{}' is not library/cell", setup.schematic)),
     };
     let view_name = (!setup.schematic_view.is_empty()).then_some(setup.schematic_view.as_str());
-    let schematic = crate::klayout::verify::schematic_file(project, &sch_lib, &sch_cell, view_name)?;
+    let schematic =
+        crate::batch::qucs::schematic_for(project, &sch_lib, &sch_cell, view_name, &setup.schematic_kind)?;
     Ok(Testbench { library: library.into(), cell: cell.into(), view: view.into(), setup, schematic })
 }
 
@@ -173,7 +174,7 @@ pub fn run_testbench_with(
     }
     let base = runs_dir(project, &tb.library, &tb.cell, &tb.view);
     let netlist_file = base.join("netlist.spice");
-    netlist(project, &tb.schematic, &netlist_file)?;
+    netlist_for(project, &tb.schematic, &netlist_file, &tb.setup.simulator)?;
     let netlist = std::fs::read_to_string(&netlist_file)
         .wrap_err_with(|| format!("cannot read {}", netlist_file.display()))?;
     let (_, model_set) = models.set(&set).ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
@@ -270,6 +271,16 @@ pub fn run_testbench_with(
         results.push(PointResult { point, outcome, specs, started, duration_ms, record, run: rec });
     }
     Ok(results)
+}
+
+/// [`netlist`] for the testbench's simulator: a Qucs-S schematic goes through
+/// `qucs-s -n` (its own analysis dropped), anything else through xschem.
+pub fn netlist_for(project: &Project, file: &Path, out: &Path, simulator: &str) -> Result<()> {
+    if crate::batch::qucs::is_qucs_schematic(file) {
+        crate::batch::qucs::netlist_for_sim(project, file, out, simulator)
+    } else {
+        netlist(project, file, out)
+    }
 }
 
 /// Netlist the schematic `file` for simulation (SPICE, not the LVS flavour).

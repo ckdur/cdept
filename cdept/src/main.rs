@@ -3,6 +3,7 @@
 mod cmd_cell;
 mod cmd_find;
 mod cmd_import;
+mod cmd_qucs;
 mod cmd_lib;
 mod cmd_ls;
 mod cmd_ngspice;
@@ -142,6 +143,9 @@ enum Command {
     /// Run OpenROAD scripts (batch).
     #[command(subcommand)]
     Openroad(cmd_batch::OpenroadCommand),
+    /// Qucs-S: schematic to SPICE netlist (headless), open in Qucs-S, S-parameter viewer.
+    #[command(subcommand)]
+    Qucs(cmd_qucs::QucsCommand),
     /// The project's technology snapshot (tech.toml): scan the PDK, show, refresh.
     #[command(subcommand)]
     Tech(cmd_tech::TechCommand),
@@ -1193,6 +1197,14 @@ fn main() -> Result<()> {
         Command::Openroad(command) => {
             init_tracing(cli.verbose, None);
             cmd_batch::openroad(command, &open_project(cli.project)?)
+        }
+        Command::Qucs(command) => {
+            init_tracing(cli.verbose, None);
+            let project = match project_root(cli.project) {
+                Some(root) => Some(Project::load(&root)?),
+                None => None,
+            };
+            cmd_qucs::run(command, project.as_ref())
         }
         Command::Info => {
             init_tracing(cli.verbose, None);

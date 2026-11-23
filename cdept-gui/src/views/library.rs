@@ -267,6 +267,13 @@ fn view_items(
             &entry.name,
         )));
     }
+    if entry.format == Some(libcdept::entry::Format::QucsSchematic)
+        && let Some(file) = &entry.main_file
+        && ui.button("Open in Qucs-S").on_hover_text("Start the Qucs-S window on this schematic").clicked()
+        && let Err(e) = libcdept::batch::qucs::launch(None, Some(file))
+    {
+        tracing::warn!("Open in Qucs-S: {e:#}");
+    }
     if super::simulation::is_testbench(entry) {
         let selection = Selection::view(&lib.name, &cell.name, &entry.name);
         if ui.button("Simulation").on_hover_text("Edit the setup and see the results").clicked() {
