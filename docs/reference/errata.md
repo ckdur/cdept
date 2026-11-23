@@ -61,7 +61,7 @@ Monte Carlo and sweeps from a template
 
 Xyce, Monte Carlo and mismatch
 : Xyce does process variation only (the PDK's Xyce models have no mismatch sections),
-  and a Xyce run cannot be cancelled once started. Its random draws are not the same
+  and its random draws are not the same
   as ngspice's for the same seed: the two simulators give different, equally valid
   samples. See [other simulators](../howto/other-simulators.md).
 

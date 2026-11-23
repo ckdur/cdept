@@ -116,6 +116,11 @@ name = ""
 #   line = "dashed"     # solid, dashed, dotted, dash-dotted
 #   opacity = 80        # percent
 #   live = true         # follow the edits
+
+# Magic in batch mode (cdept magic extract|drc|lef): a run that takes longer is stopped
+# (default 15m; "0" is no limit):
+#   [magic]
+#   timeout = "10m"
 "#;
 
 /// Options for [`Project::add_library`].
@@ -153,6 +158,8 @@ pub struct Project {
     pub xschem_rc: Vec<PathBuf>,
     /// Settings of the embedded KLayout, from `[klayout]`.
     pub klayout: KlayoutSettings,
+    /// `[magic]`: the batch runs of Magic.
+    pub magic: MagicSettings,
     /// The technology snapshot (`tech.toml` next to the project file), when the
     /// project has one. See [`crate::tech`].
     pub tech: Option<Tech>,
@@ -189,6 +196,14 @@ pub struct KlayoutSettings {
     /// `[klayout.flylines]`: how flylines look in this project (on top of the user's
     /// settings), docs/LINKING.md §8.
     pub flylines: crate::link::nets::FlylineOverride,
+}
+
+/// `[magic]` in the project file (docs/MAGIC.md).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MagicSettings {
+    /// `timeout = "10m"`: a batch run that takes longer is stopped. `None`: not set
+    /// (the default of [`crate::magic::DEFAULT_TIMEOUT`]); zero: no limit.
+    pub timeout: Option<std::time::Duration>,
 }
 
 /// The environment lookup of a project (not part of what makes two projects equal).
@@ -378,6 +393,7 @@ impl Project {
             pdk,
             xschem_rc: Vec::new(),
             klayout: KlayoutSettings::default(),
+            magic: MagicSettings::default(),
             tech,
             tech_in_use: false,
             root,
@@ -389,6 +405,7 @@ impl Project {
         project.check_snapshot();
         project.load_xschem_rc(&doc);
         project.load_klayout(&doc);
+        project.load_magic(&doc);
         project.apply_snapshot();
         let mut seen = HashSet::from([file.clone()]);
         project.load_definitions(&file, &doc, &mut seen)?;
@@ -665,6 +682,24 @@ impl Project {
         }
         self.warnings.extend(warnings);
         self.klayout.flylines = out;
+    }
+
+    /// `[magic]`: `timeout`, a duration (`"10m"`, `"90s"`, a number of seconds). A value
+    /// that cannot be read is left out, with a warning.
+    fn load_magic(&mut self, doc: &DocumentMut) {
+        let Some(item) = doc.get("magic").and_then(|t| t.get("timeout")) else {
+            return;
+        };
+        let parsed = match (item.as_str(), item.as_integer(), item.as_float()) {
+            (Some(text), _, _) => crate::jobs::parse_duration(text).map_err(|e| format!("{e}")),
+            (_, Some(n), _) if n >= 0 => Ok(std::time::Duration::from_secs(n as u64)),
+            (_, _, Some(f)) if f >= 0.0 && f.is_finite() => Ok(std::time::Duration::from_secs_f64(f)),
+            _ => Err("it must be a duration such as \"10m\"".to_string()),
+        };
+        match parsed {
+            Ok(d) => self.magic.timeout = Some(d),
+            Err(e) => self.warnings.push(format!("[magic] timeout: {e}")),
+        }
     }
 
     fn load_klayout(&mut self, doc: &DocumentMut) {
@@ -1577,6 +1612,24 @@ mod tests {
         assert_eq!(expand("a~b$", env).unwrap(), "a~b$");
         assert!(expand("$NOPE/x", env).unwrap_err().contains("NOPE"));
         assert!(expand("${PDK_ROOT", env).is_err());
+    }
+
+    #[test]
+    fn magic_timeout() {
+        let _env = crate::testutil::hermetic_env();
+        let tmp = tempfile::tempdir().unwrap();
+        let load = |text: &str| {
+            std::fs::write(tmp.path().join(PROJECT_FILE), text).unwrap();
+            Project::load(tmp.path()).unwrap()
+        };
+        assert_eq!(load("name = \"p\"\n").magic.timeout, None);
+        let d = |s| Some(std::time::Duration::from_secs(s));
+        assert_eq!(load("[magic]\ntimeout = \"10m\"\n").magic.timeout, d(600));
+        assert_eq!(load("[magic]\ntimeout = 90\n").magic.timeout, d(90));
+        assert_eq!(load("[magic]\ntimeout = \"0\"\n").magic.timeout, d(0));
+        let bad = load("[magic]\ntimeout = \"soon\"\n");
+        assert_eq!(bad.magic.timeout, None);
+        assert!(bad.warnings.iter().any(|w| w.starts_with("[magic] timeout")), "{:?}", bad.warnings);
     }
 
     #[test]

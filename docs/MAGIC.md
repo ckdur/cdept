@@ -16,6 +16,12 @@ with `Project::tool_env()` (`PDK_ROOT`, `PDK`, `PDKPATH`, local `[env]`).
   the end prints `CDEPT: done`. Results are other `CDEPT:` lines. A run without
   `done`, a failing exit status or an error is a Rust error that carries the last 25
   lines of Magic's output.
+- Time limit: a run that takes longer than `[magic] timeout` of `cdept.toml` (default
+  `15m`; `0` is none; `--timeout` on `extract`, `drc` and `lef` overrides it) is killed,
+  and the error says so and has the last 25 lines of output (`Magic::timeout`,
+  `Magic::with_timeout`). From a job of the queue, `Magic::in_job(ctx)` kills Magic when
+  the job is cancelled (`Magic::cancel`), with the same kind of error. The output is read
+  while Magic runs, so the lines printed before a hang are kept.
 - Input (`magic::Source`): the `.mag` view of the cell (its folder joins the search
   path), else a cell of a GDS view (`gds read`, then `load`). A cell that is not in
   the GDS is an error.
@@ -45,4 +51,4 @@ otherwise.
 - Resistive extraction (`extresist`, RC), hierarchical or per-subcell options.
 - LVS (netgen) and the Magic-based `--style` choice from the snapshot's `drc` list.
 - DRC results do not yet go to the GUI or link back to layout markers.
-- No timeout on a hung Magic; `import_gds` has no CLI command.
+- `import_gds` has no CLI command.

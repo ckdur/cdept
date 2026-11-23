@@ -69,6 +69,8 @@ Technology snapshot (`tech.toml` + `tech.catalog.json`, design in [TECH.md](TECH
 SIMULATION.md §4 (GUI, job queue, sweeps, results DB). `libcdept/tests/real_sim.rs` needs
 `CDEPT_XSCHEM` and `CDEPT_NGSPICE` set to run (else it skips).
 Job queue / process supervisor: `libcdept::jobs` ([JOBS.md](JOBS.md)); `sim::run_testbench` runs points in parallel, `cdept sim run --jobs N`. Open: SLURM/ssh, results DB, process-group kill.
+- [x] In-process ngspice backend (SYMBI-71): `simulator_backend = "inproc"` / `cdept sim run --backend inproc`, one worker thread owns libngspice, points are queue jobs, progress from the status callback, cancel = `bg_halt`; same `tpd` as the process to 1e-12 (tt and Monte Carlo). See NGSPICE.md.
+- [x] Cancelling a Xyce point kills Xyce (`batch::Job::run_watched`); Magic batch runs have a time limit (`[magic] timeout`, `--timeout`, default 15m) and `Magic::in_job` for the queue (SYMBI-71).
 
 ### Batch adapters (2026-11-23, [BATCH.md](BATCH.md))
 `libcdept/src/batch/`: Job/Adapter layer, Xyce (also `simulator = "xyce"` in testbenches),
@@ -487,7 +489,7 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
 See ROADMAP §4: per-tool IPC (Phase 3), PDK heterogeneity, large waveforms, scope creep.
 
 ### 2.7 ngspice in-process (2026-11-23)
-`libcdept::ngspice` loads libngspice with dlopen (`$CDEPT_LIBNGSPICE`), one Session at a time; `cdept ngspice live`; `run_deck` is Outcome-compatible but not wired into sim yet. See [NGSPICE.md](NGSPICE.md).
+`libcdept::ngspice` loads libngspice with dlopen (`$CDEPT_LIBNGSPICE`), one Session at a time; `cdept ngspice live`; the testbench backend `simulator_backend = "inproc"` (`ngspice::backend`, SYMBI-71) runs points on one worker thread that owns the library. It changes the process working directory during a point and keeps ngspice settings between points; a library crash takes CDePT down. See [NGSPICE.md](NGSPICE.md).
 - Magic batch adapter (`libcdept/src/magic/`, `cdept magic extract|drc|lef`, docs/MAGIC.md): extraction, DRC, LEF, GDS import through Tcl on stdin; real tests need Magic and a PDK in /opt/ext and skip otherwise.
 - Sweeps, Monte Carlo and results store (`libcdept/src/sim/results.rs`, docs/SIMULATION.md 4-6): `[[sweep]]` variables cross with corners x temperatures, `[montecarlo]` makes seeded `mc` points (seed via `setseed`+`reset` in the control block; `.spiceinit` rndseed does not work), `result.json` per run and `simulations/results.db` (rusqlite bundled); `cdept sim results`.
 - Simulation tab (`cdept-gui/src/views/simulation.rs`, 2026-11-23): setup.toml form + Run/Cancel on `sim::RunOptions { queue, cancel }` + jobs list + results table; one tab, one testbench at a time; Jobs panel still a placeholder. See SIMULATION.md §5, `scripts/simulation.script`.

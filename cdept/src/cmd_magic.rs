@@ -1,5 +1,7 @@
 //! `cdept magic extract|drc|lef …`: Magic in batch mode (docs/MAGIC.md).
 
+use std::time::Duration;
+
 use clap::{Subcommand, ValueEnum};
 use eyre::{Result, WrapErr, eyre};
 use libcdept::Project;
@@ -28,6 +30,10 @@ pub enum MagicCommand {
         /// Parasitics to extract.
         #[arg(long, value_enum, default_value = "none")]
         pex: Pex,
+        /// Stop Magic after this long: 90s, 10m, 1h; 0 for no limit (default: [magic]
+        /// timeout in cdept.toml, else 15m).
+        #[arg(long, value_parser = parse_timeout)]
+        timeout: Option<Duration>,
     },
     /// Check a layout against the PDK's DRC rules; prints the rules violated.
     ///
@@ -38,6 +44,10 @@ pub enum MagicCommand {
         /// DRC style, e.g. `drc(full)` (default: the technology's).
         #[arg(long)]
         style: Option<String>,
+        /// Stop Magic after this long: 90s, 10m, 1h; 0 for no limit (default: [magic]
+        /// timeout in cdept.toml, else 15m).
+        #[arg(long, value_parser = parse_timeout)]
+        timeout: Option<Duration>,
     },
     /// Write the LEF abstract of a layout.
     Lef {
@@ -46,16 +56,27 @@ pub enum MagicCommand {
         /// Hide the inside of the cell (`lef write -hide`).
         #[arg(long)]
         hide: bool,
+        /// Stop Magic after this long: 90s, 10m, 1h; 0 for no limit (default: [magic]
+        /// timeout in cdept.toml, else 15m).
+        #[arg(long, value_parser = parse_timeout)]
+        timeout: Option<Duration>,
     },
 }
 
+fn parse_timeout(text: &str) -> Result<Duration, String> {
+    libcdept::jobs::parse_duration(text).map_err(|e| format!("{e}"))
+}
+
 pub fn run(command: MagicCommand, project: &Project) -> Result<()> {
-    let magic = Magic::for_project(project)?;
-    let (library, cell) = match &command {
-        MagicCommand::Extract { library, cell, .. }
-        | MagicCommand::Drc { library, cell, .. }
-        | MagicCommand::Lef { library, cell, .. } => (library.clone(), cell.clone()),
+    let mut magic = Magic::for_project(project)?;
+    let (library, cell, timeout) = match &command {
+        MagicCommand::Extract { library, cell, timeout, .. }
+        | MagicCommand::Drc { library, cell, timeout, .. }
+        | MagicCommand::Lef { library, cell, timeout, .. } => (library.clone(), cell.clone(), *timeout),
     };
+    if let Some(limit) = timeout {
+        magic = magic.with_timeout(limit);
+    }
     let src = Source::of_cell(project, &library, &cell)?;
     let dir = magic::out_dir(project, &library, &cell);
     match command {

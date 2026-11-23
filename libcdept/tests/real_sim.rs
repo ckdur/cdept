@@ -276,3 +276,34 @@ fn calculator_outputs_match_the_meas() {
     assert_eq!(rec.calc, r.run.calc);
     assert!(results::format_table(&[rec]).contains("tpd_calc*"));
 }
+
+/// The in-process backend (libngspice) gives the numbers of the process backend
+/// (`ngspice -b`) for the same deck: the tt corner of tb_inv, and seeded Monte Carlo
+/// runs, to 1e-12 relative. Skipped without libngspice.
+#[test]
+fn inproc_backend_matches_the_process() {
+    if libcdept::ngspice::backend::check().is_err() {
+        eprintln!("skipped: no libngspice");
+        return;
+    }
+    let Some((_dir, project, simulator)) = open_example() else { return };
+    let close = |a: &[f64], b: &[f64]| {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() <= x.abs().max(y.abs()) * 1e-12)
+    };
+    let tb = sim::open(&project, "cells", "tb_inv", "testbench").unwrap();
+    let tt = ["tt".to_string()];
+    let with = |backend| RunOptions { backend: Some(backend), no_store: true, ..Default::default() };
+    let process = sim::run_testbench_with(&project, &tb, &simulator, &tt, &with(sim::run::Backend::Process)).unwrap();
+    let inproc = sim::run_testbench_with(&project, &tb, &simulator, &tt, &with(sim::run::Backend::Inproc)).unwrap();
+    let (p, i) = (tpds(&process), tpds(&inproc));
+    assert!(close(&p, &i), "process {p:?} inproc {i:?}");
+    let out = inproc[0].outcome.as_ref().unwrap();
+    assert!(out.raw.metadata().unwrap().len() > 1000 && out.log.is_file());
+    assert_eq!(inproc[0].specs[0].verdict, Verdict::Pass);
+
+    let mc = sim::open(&project, "cells", "tb_inv", "montecarlo").unwrap();
+    let with_mc = |backend| RunOptions { mc_runs: Some(3), ..with(backend) };
+    let p = tpds(&sim::run_testbench_with(&project, &mc, &simulator, &[], &with_mc(sim::run::Backend::Process)).unwrap());
+    let i = tpds(&sim::run_testbench_with(&project, &mc, &simulator, &[], &with_mc(sim::run::Backend::Inproc)).unwrap());
+    assert!(close(&p, &i), "Monte Carlo: process {p:?} inproc {i:?}");
+}

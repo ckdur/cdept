@@ -15,7 +15,7 @@ described in [External tools](../tools.md).
 | `CDEPT_KLAYOUT_HELPER` | Folder that holds the `cdept_klayout/` Python helper run by KLayout. | `<prefix>/share/cdept-klayout`, else the source tree | embedded KLayout |
 | `CDEPT_KLAYOUT_HOME` | KLayout home folder given to the helper (`KLAYOUT_HOME`), so the user's `~/.klayout` does not run in it. | `$XDG_CACHE_HOME/cdept/klayout-home`, else `~/.cache/cdept/klayout-home` | embedded KLayout |
 | `CDEPT_NGSPICE` | The `ngspice` program for testbench runs. | `ngspice` on `PATH` | `cdept sim`, GUI Simulation tab |
-| `CDEPT_LIBNGSPICE` | The `libngspice` shared library loaded in-process. When set it is the only candidate. | `libngspice.so.0`, `libngspice.so`, then `../lib` of the `ngspice` on `PATH` | `cdept ngspice`, in-process runs |
+| `CDEPT_LIBNGSPICE` | The `libngspice` shared library loaded in-process. When set it is the only candidate. | `libngspice.so.0`, `libngspice.so`, then `../lib` of the `ngspice` on `PATH` | `cdept ngspice`, `simulator_backend = "inproc"`, `cdept sim run --backend inproc` |
 | `CDEPT_XYCE` | The Xyce program. | `Xyce` or `xyce` on `PATH` | `simulator = "xyce"` |
 | `CDEPT_VACASK` | The VACASK program. | `vacask` on `PATH` | `simulator = "vacask"` |
 | `CDEPT_VACASK_PYTHON` | VACASK's Python folder (the one holding `ng2vclib`), used to convert ngspice models. | `<prefix>/lib/vacask/python` of the VACASK program, else what `vacask -dp` prints | `cdept vacask models` |

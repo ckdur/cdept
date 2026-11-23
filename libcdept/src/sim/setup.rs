@@ -26,6 +26,11 @@ pub struct Setup {
     /// name goes to `device`) and the model set is the technology's `xyce` one unless
     /// `models` names another.
     pub simulator: String,
+    /// How ngspice runs: `process` (also when empty: `ngspice -b`, one process per run
+    /// point) or `inproc` (libngspice loaded in CDePT, docs/NGSPICE.md).
+    /// `cdept sim run --backend` overrides it.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub simulator_backend: String,
     /// The model set of `[models]` in tech.toml. Empty: the technology's default.
     pub models: String,
     /// The corner sets to run. Empty: the technology's default corner.
@@ -329,6 +334,9 @@ impl Setup {
     fn check(&self) -> Result<()> {
         if !matches!(self.simulator.as_str(), "" | "ngspice" | "xyce" | "vacask") {
             bail!("simulator '{}' is not supported yet (ngspice, xyce and vacask are)", self.simulator);
+        }
+        if super::run::Backend::of(&self.simulator_backend).is_none() {
+            bail!("simulator_backend '{}' is not process or inproc", self.simulator_backend);
         }
         if self.simulator == "xyce" && self.analyses.iter().filter(|a| !matches!(a, Analysis::Op)).count() > 1 {
             bail!("Xyce runs one analysis per deck (op may come with it); split the testbench");

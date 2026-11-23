@@ -43,6 +43,10 @@ pub enum SimCommand {
         /// Do not write result.json / results.db.
         #[arg(long)]
         no_store: bool,
+        /// ngspice as a process per point (`ngspice -b`) or in-process through libngspice
+        /// ($CDEPT_LIBNGSPICE). Default: the setup's simulator_backend, else process.
+        #[arg(long, value_parser = ["inproc", "process"])]
+        backend: Option<String>,
     },
     /// Show the stored results of a testbench: the latest run of every point and, over
     /// them, pass/fail counts and min/max/mean/std of every measurement.
@@ -255,9 +259,14 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             print!("{}", sim::build_deck(&tb.setup, &point, &title, &lines, &netlist));
             Ok(())
         }
-        SimCommand::Run { library, cell, view, corners, jobs, runs, mode, seed, no_mc, no_store } => {
+        SimCommand::Run { library, cell, view, corners, jobs, runs, mode, seed, no_mc, no_store, backend } => {
             let view = view_of(project, &library, &cell, view)?;
-            let tb = sim::open(project, &library, &cell, &view)?;
+            let mut tb = sim::open(project, &library, &cell, &view)?;
+            let backend = backend.as_deref().and_then(sim::run::Backend::of);
+            if backend == Some(sim::run::Backend::Inproc) {
+                // No ngspice program is needed then.
+                tb.setup.simulator_backend = "inproc".into();
+            }
             let simulator = sim::Simulator::for_setup(&tb.setup).ok_or_else(|| {
                 eyre!(
                     "the simulator '{}' was not found: put it on PATH or set {} (ngspice), {} (Xyce) or {} (VACASK)",
@@ -267,11 +276,14 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                     libcdept::batch::vacask::VACASK_ENV
                 )
             })?;
-            // One line per point as it starts and ends (the events come from worker threads).
-            let on_event: Listener = Arc::new(|e| {
+            // One line per point as it starts and ends (the events come from worker threads;
+            // progress events of a running point are not printed).
+            let started = std::sync::Mutex::new(std::collections::HashSet::new());
+            let on_event: Listener = Arc::new(move |e| {
                 let i = &e.info;
                 match i.state {
                     JobState::Queued => {}
+                    JobState::Running if !started.lock().unwrap().insert(i.id) => {}
                     JobState::Running => eprintln!("{:<10} running", i.name),
                     JobState::Done => eprintln!("{:<10} done     {:.1}s", i.name, i.elapsed.as_secs_f32()),
                     JobState::Failed => eprintln!("{:<10} failed   {:.1}s", i.name, i.elapsed.as_secs_f32()),
@@ -286,6 +298,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                 mc_mode: mode,
                 no_mc,
                 no_store,
+                backend,
                 ..Default::default()
             };
             let results = sim::run_testbench_with(project, &tb, &simulator, &corners, &options)?;

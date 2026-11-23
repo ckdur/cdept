@@ -9,7 +9,10 @@
 //! one set of callbacks. [`Session`] holds a process-wide lock, so only one exists
 //! at a time ([`Session::open`] waits, [`Session::try_open`] does not). Never use
 //! another copy of libngspice in the same process. Details: docs/NGSPICE.md.
+//!
+//! [`backend`] runs testbench points through it (`simulator_backend = "inproc"`).
 
+pub mod backend;
 mod sys;
 
 use std::collections::BTreeMap;
