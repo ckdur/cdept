@@ -164,7 +164,7 @@ fn run_with(
         return run_xyce(simulator, deck, dir, env, cancel);
     }
     if simulator.kind == SimKind::Vacask {
-        return crate::vacask::run_vacask(&simulator.program, deck, dir, env);
+        return crate::vacask::run_vacask_watched(&simulator.program, deck, dir, env, cancel);
     }
     std::fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     let deck_file = dir.join("deck.sp");
@@ -356,6 +356,31 @@ mod tests {
         let info = q.wait(id).unwrap();
         assert_eq!(info.state, JobState::Cancelled);
         assert!(t.elapsed() < std::time::Duration::from_secs(10), "Xyce was killed, not waited for");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_job_kills_vacask() {
+        use crate::jobs::{JobSpec, JobState, Queue};
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("slow-vacask");
+        std::fs::write(&fake, "#!/bin/sh\necho 'VACASK starting'\nexec sleep 30\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let sim = Simulator { kind: SimKind::Vacask, program: fake };
+        let q = Queue::new(1);
+        let run_dir = dir.path().join("run");
+        let d = run_dir.clone();
+        let id = q.submit(JobSpec::func("vacask", move |ctx| run_in_job(&sim, "ground 0\n", &d, &[], ctx).map(|_| ())));
+        let t = std::time::Instant::now();
+        while !std::fs::read_to_string(run_dir.join("vacask.stdout")).is_ok_and(|s| s.contains("starting")) {
+            assert!(t.elapsed() < std::time::Duration::from_secs(10), "the fake VACASK did not start");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        q.cancel(id);
+        let info = q.wait(id).unwrap();
+        assert_eq!(info.state, JobState::Cancelled);
+        assert!(t.elapsed() < std::time::Duration::from_secs(10), "VACASK was killed, not waited for");
     }
 
     #[test]

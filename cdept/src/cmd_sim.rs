@@ -47,6 +47,9 @@ pub enum SimCommand {
         /// ($CDEPT_LIBNGSPICE). Default: the setup's simulator_backend, else process.
         #[arg(long, value_parser = ["inproc", "process"])]
         backend: Option<String>,
+        /// Run with this simulator instead of the setup's (`simulator` of setup.toml).
+        #[arg(long, value_parser = ["ngspice", "xyce", "vacask"])]
+        simulator: Option<String>,
     },
     /// Show the stored results of a testbench: the latest run of every point and, over
     /// them, pass/fail counts and min/max/mean/std of every measurement.
@@ -116,6 +119,10 @@ pub enum SimCommand {
         /// Print the report as JSON.
         #[arg(long)]
         json: bool,
+        /// Run every test with this simulator instead of the tests' (and the suite's
+        /// `simulator`).
+        #[arg(long, value_parser = ["ngspice", "xyce", "vacask"])]
+        simulator: Option<String>,
     },
     /// Print the deck of the first run without starting the simulator.
     Deck {
@@ -123,6 +130,9 @@ pub enum SimCommand {
         cell: String,
         #[arg(long)]
         view: Option<String>,
+        /// The deck for this simulator instead of the setup's.
+        #[arg(long, value_parser = ["ngspice", "xyce", "vacask"])]
+        simulator: Option<String>,
     },
 }
 
@@ -203,7 +213,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             println!("run it with: cdept sim run {library} {cell} --view {view}");
             Ok(())
         }
-        SimCommand::Suite { library, cell, view, jobs, all_columns, no_store, json } => {
+        SimCommand::Suite { library, cell, view, jobs, all_columns, no_store, json, simulator } => {
             let view = suite_view_of(project, &library, &cell, view)?;
             let on_event: Listener = Arc::new(|e| {
                 let i = &e.info;
@@ -214,7 +224,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                 }
             });
             let options =
-                sim::suite::SuiteOptions { jobs: jobs.unwrap_or(0), on_event: Some(on_event), no_store, ..Default::default() };
+                sim::suite::SuiteOptions { jobs: jobs.unwrap_or(0), on_event: Some(on_event), no_store, simulator, ..Default::default() };
             let report = sim::suite::run(project, &library, &cell, &view, &options)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
@@ -234,9 +244,12 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             }
             Ok(())
         }
-        SimCommand::Deck { library, cell, view } => {
+        SimCommand::Deck { library, cell, view, simulator } => {
             let view = view_of(project, &library, &cell, view)?;
-            let tb = sim::open(project, &library, &cell, &view)?;
+            let mut tb = sim::open(project, &library, &cell, &view)?;
+            if let Some(name) = &simulator {
+                tb.setup.set_simulator(name)?;
+            }
             let tech = project.tech.as_ref().ok_or_else(|| eyre!("no technology snapshot"))?;
             let set = if tb.setup.models.is_empty() {
                 tech.models.default.clone().unwrap_or_default()
@@ -259,9 +272,12 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             print!("{}", sim::build_deck(&tb.setup, &point, &title, &lines, &netlist));
             Ok(())
         }
-        SimCommand::Run { library, cell, view, corners, jobs, runs, mode, seed, no_mc, no_store, backend } => {
+        SimCommand::Run { library, cell, view, corners, jobs, runs, mode, seed, no_mc, no_store, backend, simulator } => {
             let view = view_of(project, &library, &cell, view)?;
             let mut tb = sim::open(project, &library, &cell, &view)?;
+            if let Some(name) = &simulator {
+                tb.setup.set_simulator(name)?;
+            }
             let backend = backend.as_deref().and_then(sim::run::Backend::of);
             if backend == Some(sim::run::Backend::Inproc) {
                 // No ngspice program is needed then.

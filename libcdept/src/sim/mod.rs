@@ -9,6 +9,7 @@
 //! [`run::run`] starts the simulator on it, and [`spec::check`] compares the
 //! measurements with the specs. Format and design: docs/SIMULATION.md.
 
+pub mod caps;
 pub mod deck;
 pub mod mc;
 pub mod results;
@@ -166,9 +167,6 @@ pub fn run_testbench_with(
             })
         }
     };
-    if mc.is_some() && tb.setup.simulator == "vacask" {
-        return Err(eyre!("Monte Carlo is run with ngspice or Xyce only (the statistical models are not converted for VACASK)"));
-    }
     // The corner sets (and switches) the Monte Carlo mode draws from.
     let mc_plan = match &mc {
         Some(mc) => {

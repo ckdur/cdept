@@ -41,6 +41,9 @@ pub struct Suite {
     pub corners: Vec<String>,
     /// Replaces the temperatures of every test when not empty.
     pub temperatures: Vec<f64>,
+    /// Runs every test with this simulator (`ngspice`, `xyce`, `vacask`) when not empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub simulator: String,
     #[serde(rename = "test")]
     pub tests: Vec<TestRef>,
     /// The CACE datasheet the suite came from (`cdept cace import`): its header and the
@@ -220,6 +223,8 @@ pub struct SuiteOptions {
     /// Use this queue (a UI's) instead of a private one.
     pub queue: Option<Arc<crate::jobs::Queue>>,
     pub cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Run every test with this simulator (`--simulator`); wins over the suite's.
+    pub simulator: Option<String>,
 }
 
 /// Where the report goes: `<project>/simulations/<lib>/<cell>/<suite view>/suite.json`.
@@ -261,7 +266,8 @@ pub fn run(project: &Project, library: &str, cell: &str, view: &str, options: &S
                 let label = if t.name.is_empty() { format!("{c}/{v}") } else { t.name.clone() };
                 let run_options = run_options.clone();
                 let suite = &suite;
-                scope.spawn(move || run_test(project, suite, (&l, &c, &v), label, &run_options))
+                let sim = options.simulator.as_deref();
+                scope.spawn(move || run_test(project, suite, (&l, &c, &v), label, &run_options, sim))
             })
             .collect();
         handles.into_iter().map(|h| h.join().expect("a suite test panicked")).collect()
@@ -289,6 +295,7 @@ fn run_test(
     (library, cell, view): (&str, &str, &str),
     label: String,
     options: &super::RunOptions,
+    simulator: Option<&str>,
 ) -> TestReport {
     let mut report = TestReport { id: format!("{library}/{cell}/{view}"), label, ..Default::default() };
     let outcome = (|| -> Result<Vec<RunRecord>> {
@@ -299,6 +306,10 @@ fn run_test(
         }
         if !suite.temperatures.is_empty() {
             tb.setup.temperatures = suite.temperatures.clone();
+        }
+        let chosen = simulator.map(str::to_string).or_else(|| Some(suite.simulator.clone()).filter(|s| !s.is_empty()));
+        if let Some(name) = chosen {
+            tb.setup.set_simulator(&name)?;
         }
         let simulator = super::Simulator::for_setup(&tb.setup)
             .ok_or_else(|| eyre!("the simulator '{}' was not found", tb.setup.simulator))?;
