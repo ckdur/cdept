@@ -234,13 +234,10 @@ impl RunPlan {
 
 // --- Monte Carlo -----------------------------------------------------------------------
 
-/// The reason Monte Carlo cannot run as the form has it, or None. For VACASK it is the
-/// schema's own message; otherwise the mode's corner sets are looked up in the model
-/// set (the text of `cdept sim run`: `needs the corner set 'tt_mm' in the models …`).
+/// The reason Monte Carlo cannot run as the form has it, or None: the mode's corner sets
+/// are looked up in the model set (the text of `cdept sim run`: `needs the corner set
+/// 'tt_mm' in the models …`). What each simulator can draw is `SimKind::capabilities()`.
 pub(super) fn mc_note(form: &Form, project: &Project) -> Option<String> {
-    if form.simulator == "vacask" && form.has_mc() {
-        return Some("Monte Carlo is run with ngspice or Xyce only (the statistical models are not converted for VACASK)".into());
-    }
     let setup = form.setup().ok()?;
     let mc = setup.montecarlo.as_ref()?;
     let tech = project.tech.as_ref()?;
@@ -743,7 +740,7 @@ temperatures = [27]
         assert!(f.to_text().unwrap_err().contains("runs must be 1..100000"));
         f.mc_runs = "5".into();
         f.simulator = "vacask".into();
-        assert!(f.to_text().unwrap_err().contains("VACASK"));
+        assert!(f.to_text().is_ok(), "VACASK draws Monte Carlo like ngspice");
         f.simulator = "xyce".into();
         assert!(f.to_text().is_ok());
         // a form that has them round-trips

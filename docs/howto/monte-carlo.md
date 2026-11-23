@@ -29,8 +29,8 @@ or `both`) and the corner set of each kind of draw, chosen from the model set's 
 (empty: the defaults of the table below). The same text as `cdept sim run` appears under
 the section when the mode cannot run, for instance when the model set has no `tt_mm`
 corner set for `mismatch`. With Xyce the `mismatch` and `both` draws stay disabled until
-their corner set is named, and with VACASK the form says that Monte Carlo is refused. The
-line under the toolbar counts the points: temperatures x sweep points x runs.
+their corner set is named; VACASK draws all three modes (CDePT makes the draws, see
+below). The line under the toolbar counts the points: temperatures x sweep points x runs.
 
 ![Sweeps and Monte Carlo in the Simulation tab](../_static/screenshots/sim-sweeps.png)
 
