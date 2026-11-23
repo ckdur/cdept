@@ -71,7 +71,9 @@ fn model_line(line: &str) -> Result<String> {
             // `.lib "file with spaces" section` or `.lib file section`.
             let rest = rest.trim();
             let (file, section) = if let Some(r) = rest.strip_prefix('"') {
-                let (f, s) = r.split_once('"').ok_or_else(|| eyre::eyre!("unclosed quote in '{t}'"))?;
+                let (f, s) = r
+                    .split_once('"')
+                    .ok_or_else(|| eyre::eyre!("unclosed quote in '{t}'"))?;
                 (f.to_string(), s.trim().to_string())
             } else {
                 let (f, s) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
@@ -116,22 +118,41 @@ fn instance_name(netlist: &str, source: &str) -> String {
 /// so that is what ngspice's `dc` sweep replaces and what is swept here.
 fn sweep_parameter(netlist: &str, source: &str) -> Result<&'static str> {
     let want = name(source);
-    let line = netlist.lines().find(|l| l.split_whitespace().next().is_some_and(|n| n.eq_ignore_ascii_case(&want)));
+    let line = netlist.lines().find(|l| {
+        l.split_whitespace()
+            .next()
+            .is_some_and(|n| n.eq_ignore_ascii_case(&want))
+    });
     let Some(line) = line else {
-        return Err(eyre::eyre!("the DC sweep names '{source}', which is not a source of the testbench netlist"));
+        return Err(eyre::eyre!(
+            "the DC sweep names '{source}', which is not a source of the testbench netlist"
+        ));
     };
-    Ok(match line.split("type=\"").nth(1).and_then(|r| r.split('"').next()) {
-        None => "dc",
-        Some("pulse" | "exp") => "val0",
-        Some("sine") => "sinedc",
-        Some(other) => return Err(eyre::eyre!("a DC sweep of '{source}', a '{other}' source, is not supported with VACASK")),
-    })
+    Ok(
+        match line
+            .split("type=\"")
+            .nth(1)
+            .and_then(|r| r.split('"').next())
+        {
+            None => "dc",
+            Some("pulse" | "exp") => "val0",
+            Some("sine") => "sinedc",
+            Some(other) => {
+                return Err(eyre::eyre!(
+                    "a DC sweep of '{source}', a '{other}' source, is not supported with VACASK"
+                ));
+            }
+        },
+    )
 }
 
 /// A sweep end: `to` plus a millionth of a step, so that a float sum that falls just
 /// short of it (1.15 + 0.05) still reaches it (ngspice includes the end point).
 fn sweep_end(stop: &str, step: &str) -> Result<String> {
-    let (s, d) = (expr(stop).map_err(|m| eyre::eyre!(m))?, expr(step).map_err(|m| eyre::eyre!(m))?);
+    let (s, d) = (
+        expr(stop).map_err(|m| eyre::eyre!(m))?,
+        expr(step).map_err(|m| eyre::eyre!(m))?,
+    );
     match (s.parse::<f64>(), d.parse::<f64>()) {
         (Ok(s), Ok(d)) => Ok(format!("{:e}", s + d.abs() * 1e-6)),
         _ => Ok(s),
@@ -145,7 +166,9 @@ fn analysis(a: &Analysis, n: usize, netlist: &str, out: &mut Vec<String>) -> Res
             "dec" => Ok("dec"),
             "oct" => Ok("oct"),
             "lin" => Ok("lin"),
-            other => Err(eyre::eyre!("sweep '{other}' is not supported with VACASK (dec, oct, lin)")),
+            other => Err(eyre::eyre!(
+                "sweep '{other}' is not supported with VACASK (dec, oct, lin)"
+            )),
         }
     };
     Ok(match a {
@@ -154,7 +177,12 @@ fn analysis(a: &Analysis, n: usize, netlist: &str, out: &mut Vec<String>) -> Res
             out.push(format!("  analysis {name} op"));
             AnalysisName { name, kind: "op" }
         }
-        Analysis::Dc { source, start, stop, step } => {
+        Analysis::Dc {
+            source,
+            start,
+            stop,
+            step,
+        } => {
             let name = format!("dc{n}");
             out.push(format!(
                 "  sweep {name}_sweep instance=\"{}\" parameter=\"{}\" from={} to={} step={}",
@@ -167,7 +195,12 @@ fn analysis(a: &Analysis, n: usize, netlist: &str, out: &mut Vec<String>) -> Res
             out.push(format!("  analysis {name} op"));
             AnalysisName { name, kind: "dc" }
         }
-        Analysis::Ac { sweep, points, start, stop } => {
+        Analysis::Ac {
+            sweep,
+            points,
+            start,
+            stop,
+        } => {
             let name = format!("ac{n}");
             out.push(format!(
                 "  analysis {name} ac from={} to={} mode=\"{}\" points={points}",
@@ -179,13 +212,26 @@ fn analysis(a: &Analysis, n: usize, netlist: &str, out: &mut Vec<String>) -> Res
         }
         Analysis::Tran { step, stop, start } => {
             if !start.is_empty() && e(start)?.parse::<f64>() != Ok(0.0) {
-                bail!("a transient that saves from a start time ({start}) is not supported with VACASK; use start 0");
+                bail!(
+                    "a transient that saves from a start time ({start}) is not supported with VACASK; use start 0"
+                );
             }
             let name = format!("tran{n}");
-            out.push(format!("  analysis {name} tran step={} stop={}", e(step)?, e(stop)?));
+            out.push(format!(
+                "  analysis {name} tran step={} stop={}",
+                e(step)?,
+                e(stop)?
+            ));
             AnalysisName { name, kind: "tran" }
         }
-        Analysis::Noise { output, source, sweep, points, start, stop } => {
+        Analysis::Noise {
+            output,
+            source,
+            sweep,
+            points,
+            start,
+            stop,
+        } => {
             let name = format!("noise{n}");
             out.push(format!(
                 "  analysis {name} noise out=\"{}\" in=\"{}\" from={} to={} mode=\"{}\" points={points}",
@@ -195,7 +241,10 @@ fn analysis(a: &Analysis, n: usize, netlist: &str, out: &mut Vec<String>) -> Res
                 e(stop)?,
                 mode(sweep)?
             ));
-            AnalysisName { name, kind: "noise" }
+            AnalysisName {
+                name,
+                kind: "noise",
+            }
         }
     })
 }
@@ -223,9 +272,16 @@ pub struct Inputs<'a> {
 /// the technology's converted files (`defined`) or in VACASK's builtins. The error
 /// names the technology and the device and says why the technology has no such model.
 pub fn check_devices(t: &Translation, i: &Inputs) -> Result<()> {
-    let Some(defined) = i.defined else { return Ok(()) };
+    let Some(defined) = i.defined else {
+        return Ok(());
+    };
     let why = |dev: &str, inst: &str| {
-        let notes: Vec<&str> = i.notes.iter().filter(|n| n.starts_with("vacask:")).map(String::as_str).collect();
+        let notes: Vec<&str> = i
+            .notes
+            .iter()
+            .filter(|n| n.starts_with("vacask:"))
+            .map(String::as_str)
+            .collect();
         let mut m = format!(
             "the technology '{}' has no VACASK model for '{dev}' (instance {inst}): no converted model file defines it",
             i.pdk
@@ -252,24 +308,42 @@ pub fn check_devices(t: &Translation, i: &Inputs) -> Result<()> {
 /// The netlist without the `.include` lines of PDK model files that the technology's
 /// converted set has (by file name, in the folder of its converted corner files), and the
 /// model lines that bring the converted files instead.
-fn adopt_includes(netlist: &str, mm: Option<&super::stat::MmInfo>, models: &[String]) -> (String, Vec<String>) {
-    let Some(mm) = mm else { return (netlist.to_string(), vec![]) };
+fn adopt_includes(
+    netlist: &str,
+    mm: Option<&super::stat::MmInfo>,
+    models: &[String],
+) -> (String, Vec<String>) {
+    let Some(mm) = mm else {
+        return (netlist.to_string(), vec![]);
+    };
     let dir = models.iter().find_map(|l| {
         let path = l.split_whitespace().nth(1)?.trim_matches('"');
         let p = std::path::Path::new(path);
-        mm.files.contains_key(p.file_name()?.to_str()?).then(|| p.parent().map(|d| d.to_path_buf())).flatten()
+        mm.files
+            .contains_key(p.file_name()?.to_str()?)
+            .then(|| p.parent().map(|d| d.to_path_buf()))
+            .flatten()
     });
-    let Some(dir) = dir else { return (netlist.to_string(), vec![]) };
+    let Some(dir) = dir else {
+        return (netlist.to_string(), vec![]);
+    };
     let mut out = String::new();
     let mut brought: Vec<String> = vec![];
     for l in netlist.lines() {
         let mut w = l.split_whitespace();
-        let adopted = (w.next().is_some_and(|c| c.eq_ignore_ascii_case(".include") || c.eq_ignore_ascii_case(".inc")))
-            .then(|| w.next())
-            .flatten()
-            .map(|f| f.trim_matches(['"', '\'']))
-            .and_then(|f| std::path::Path::new(f).file_name()?.to_str().map(str::to_string))
-            .filter(|name| mm.files.contains_key(name) && dir.join(name).is_file());
+        let adopted = (w
+            .next()
+            .is_some_and(|c| c.eq_ignore_ascii_case(".include") || c.eq_ignore_ascii_case(".inc")))
+        .then(|| w.next())
+        .flatten()
+        .map(|f| f.trim_matches(['"', '\'']))
+        .and_then(|f| {
+            std::path::Path::new(f)
+                .file_name()?
+                .to_str()
+                .map(str::to_string)
+        })
+        .filter(|name| mm.files.contains_key(name) && dir.join(name).is_file());
         match adopted {
             Some(name) => {
                 let line = format!(".include {}", dir.join(&name).display());
@@ -311,7 +385,11 @@ pub fn build(i: &Inputs) -> Result<Deck> {
         (t.text, leaves) = super::stat::instrument(&t.text, &r.masters);
     }
     let mut out = String::new();
-    out.push_str(&format!("// CDePT testbench {}, run {} (VACASK)\n", i.title, i.point.name()));
+    out.push_str(&format!(
+        "// CDePT testbench {}, run {} (VACASK)\n",
+        i.title,
+        i.point.name()
+    ));
     out.push_str("ground 0\ninclude \"builtins.inc\"\n");
     let mut loaded = BTreeSet::new();
     let mut body = vec![];
@@ -353,7 +431,10 @@ pub fn build(i: &Inputs) -> Result<Deck> {
     if !variables.is_empty() {
         out.push_str("// design variables\n");
         for (n, v) in &variables {
-            out.push_str(&format!("parameters {n}={}\n", expr(v).map_err(|m| eyre::eyre!(m))?));
+            out.push_str(&format!(
+                "parameters {n}={}\n",
+                expr(v).map_err(|m| eyre::eyre!(m))?
+            ));
         }
     }
     out.push_str("// netlist\n");
@@ -370,17 +451,25 @@ pub fn build(i: &Inputs) -> Result<Deck> {
         out.push_str(&format!("  options {}\n", options.join(" ")));
     }
     // `@n.xdut.xm1.nsg13_lv_pmos[vds]` names devices inside the models: look them up.
-    let structure = i.setup.save.iter().any(|s| s.trim_start().starts_with('@')).then(|| {
-        let mut texts = vec![t.text.clone()];
-        for l in model_lines {
-            texts.extend(model_texts(l));
-        }
-        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
-        super::stat::structure(&refs)
-    });
+    let structure = i
+        .setup
+        .save
+        .iter()
+        .any(|s| s.trim_start().starts_with('@'))
+        .then(|| {
+            let mut texts = vec![t.text.clone()];
+            for l in model_lines {
+                texts.extend(model_texts(l));
+            }
+            let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+            super::stat::structure(&refs)
+        });
     for s in &i.setup.save {
         match (&structure, s.trim_start().starts_with('@')) {
-            (Some(st), true) => out.push_str(&format!("  save {}\n", super::stat::device_save(s, st).map_err(|e| eyre::eyre!(e))?)),
+            (Some(st), true) => out.push_str(&format!(
+                "  save {}\n",
+                super::stat::device_save(s, st).map_err(|e| eyre::eyre!(e))?
+            )),
             _ => out.push_str(&format!("  save {}\n", save_item(s)?)),
         }
     }
@@ -412,9 +501,17 @@ pub fn build(i: &Inputs) -> Result<Deck> {
         out.push_str(&format!("{}{} {}\n", super::MARK_ANALYSIS, a.name, a.kind));
     }
     for m in &i.setup.measures {
-        out.push_str(&format!("{}{}\n", super::MARK_MEASURE, m.split_whitespace().collect::<Vec<_>>().join(" ")));
+        out.push_str(&format!(
+            "{}{}\n",
+            super::MARK_MEASURE,
+            m.split_whitespace().collect::<Vec<_>>().join(" ")
+        ));
     }
-    Ok(Deck { text: out, analyses, warnings: t.warnings })
+    Ok(Deck {
+        text: out,
+        analyses,
+        warnings: t.warnings,
+    })
 }
 
 /// The text of the converted files a model line brings in (`.include`, `.lib` with the
@@ -424,14 +521,23 @@ fn model_texts(line: &str) -> Vec<String> {
     let (card, rest) = t.split_once(char::is_whitespace).unwrap_or((t, ""));
     let rest = rest.trim();
     match card.to_lowercase().as_str() {
-        ".include" | ".inc" => std::fs::read_to_string(rest.trim_matches('"')).into_iter().collect(),
+        ".include" | ".inc" => std::fs::read_to_string(rest.trim_matches('"'))
+            .into_iter()
+            .collect(),
         ".lib" => {
             let (file, section) = match rest.strip_prefix('"').and_then(|r| r.split_once('"')) {
                 Some((f, s)) => (f, s.trim()),
-                None => rest.split_once(char::is_whitespace).map_or((rest, ""), |(f, s)| (f, s.trim())),
+                None => rest
+                    .split_once(char::is_whitespace)
+                    .map_or((rest, ""), |(f, s)| (f, s.trim())),
             };
-            let Ok(text) = std::fs::read_to_string(file) else { return vec![] };
-            let dir = std::path::Path::new(file).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+            let Ok(text) = std::fs::read_to_string(file) else {
+                return vec![];
+            };
+            let dir = std::path::Path::new(file)
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_default();
             super::stat::section_includes(&text, section)
                 .iter()
                 .filter_map(|f| std::fs::read_to_string(dir.join(f)).ok())
@@ -491,7 +597,11 @@ mod tests {
     #[test]
     fn writes_loads_models_netlist_and_analyses() {
         let s = setup("");
-        let point = RunPoint { corner: "tt".into(), temperature: Some(27.0), ..Default::default() };
+        let point = RunPoint {
+            corner: "tt".into(),
+            temperature: Some(27.0),
+            ..Default::default()
+        };
         let models = vec![
             ".osdi /p/psp103.osdi".to_string(),
             ".vcline parameters swsoa=0".to_string(),
@@ -499,17 +609,41 @@ mod tests {
             ".include /p/extra.lib".to_string(),
         ];
         let defined: BTreeSet<String> = ["pm", "nm"].iter().map(|s| s.to_string()).collect();
-        let i = Inputs { setup: &s, point: &point, title: "t", models: &models, netlist: NET, defined: Some(&defined), mm: None, pdk: "x", notes: &[] };
+        let i = Inputs {
+            setup: &s,
+            point: &point,
+            title: "t",
+            models: &models,
+            netlist: NET,
+            defined: Some(&defined),
+            mm: None,
+            pdk: "x",
+            notes: &[],
+        };
         let d = build(&i).unwrap();
         let t = &d.text;
         assert!(t.contains("ground 0\ninclude \"builtins.inc\"\n"), "{t}");
-        assert!(t.contains("load \"/p/psp103.osdi\"\nparameters swsoa=0\n"), "{t}");
+        assert!(
+            t.contains("load \"/p/psp103.osdi\"\nparameters swsoa=0\n"),
+            "{t}"
+        );
         assert!(t.contains("load \"spice/capacitor.osdi\"\n"), "{t}");
-        assert!(t.contains("include \"/p/cornerMOSlv.lib\" section=mos_tt\ninclude \"/p/extra.lib\"\n"), "{t}");
-        assert!(t.find("load \"/p/psp103.osdi\"").unwrap() < t.find("include \"/p/corner").unwrap());
+        assert!(
+            t.contains("include \"/p/cornerMOSlv.lib\" section=mos_tt\ninclude \"/p/extra.lib\"\n"),
+            "{t}"
+        );
+        assert!(
+            t.find("load \"/p/psp103.osdi\"").unwrap() < t.find("include \"/p/corner").unwrap()
+        );
         assert!(t.contains("parameters vdd=1.2\n"), "{t}");
         assert!(t.contains("control\n  options temp=27\n  save v(in)\n  save v(out)\n  save Vdd:flow(br)\n  analysis tran1 tran step=5e-12 stop=1.2e-9\nendc\n// cdept-analysis: tran1 tran\n"), "{t}");
-        assert_eq!(d.analyses, [AnalysisName { name: "tran1".into(), kind: "tran" }]);
+        assert_eq!(
+            d.analyses,
+            [AnalysisName {
+                name: "tran1".into(),
+                kind: "tran"
+            }]
+        );
     }
 
     #[test]
@@ -520,8 +654,21 @@ mod tests {
 [[analysis]]\nkind=\"noise\"\noutput=\"v(out)\"\nsource=\"V1\"\nsweep=\"dec\"\npoints=5\nstart=\"1\"\nstop=\"1k\"\n",
         )
         .unwrap();
-        let point = RunPoint { corner: "tt".into(), ..Default::default() };
-        let i = Inputs { setup: &s, point: &point, title: "t", models: &[], netlist: "t\nV1 out 0 dc 1 ac 1\nR1 out 0 1k\n", defined: None, mm: None, pdk: "x", notes: &[] };
+        let point = RunPoint {
+            corner: "tt".into(),
+            ..Default::default()
+        };
+        let i = Inputs {
+            setup: &s,
+            point: &point,
+            title: "t",
+            models: &[],
+            netlist: "t\nV1 out 0 dc 1 ac 1\nR1 out 0 1k\n",
+            defined: None,
+            mm: None,
+            pdk: "x",
+            notes: &[],
+        };
         let d = build(&i).unwrap();
         for want in [
             "analysis op1 op",
@@ -531,21 +678,51 @@ mod tests {
         ] {
             assert!(d.text.contains(want), "{want}\n{}", d.text);
         }
-        assert_eq!(d.analyses.iter().map(|a| a.kind).collect::<Vec<_>>(), ["op", "dc", "ac", "noise"]);
+        assert_eq!(
+            d.analyses.iter().map(|a| a.kind).collect::<Vec<_>>(),
+            ["op", "dc", "ac", "noise"]
+        );
     }
 
     #[test]
     fn a_device_the_technology_cannot_give_is_an_error_naming_it() {
         let s = setup("");
-        let point = RunPoint { corner: "tt".into(), ..Default::default() };
+        let point = RunPoint {
+            corner: "tt".into(),
+            ..Default::default()
+        };
         let defined: BTreeSet<String> = ["pm"].iter().map(|s| s.to_string()).collect();
-        let notes = vec!["vacask: cornerHBT.lib could not be converted: vbic".to_string(), "other note".to_string()];
-        let i = Inputs { setup: &s, point: &point, title: "t", models: &[], netlist: NET, defined: Some(&defined), mm: None, pdk: "ihp-sg13g2", notes: &notes };
+        let notes = vec![
+            "vacask: cornerHBT.lib could not be converted: vbic".to_string(),
+            "other note".to_string(),
+        ];
+        let i = Inputs {
+            setup: &s,
+            point: &point,
+            title: "t",
+            models: &[],
+            netlist: NET,
+            defined: Some(&defined),
+            mm: None,
+            pdk: "ihp-sg13g2",
+            notes: &notes,
+        };
         let e = format!("{:#}", build(&i).unwrap_err());
-        assert!(e.contains("'ihp-sg13g2'") && e.contains("'nm'") && e.contains("XM1"), "{e}");
-        assert!(e.contains("cornerHBT.lib could not be converted") && !e.contains("other note"), "{e}");
+        assert!(
+            e.contains("'ihp-sg13g2'") && e.contains("'nm'") && e.contains("XM1"),
+            "{e}"
+        );
+        assert!(
+            e.contains("cornerHBT.lib could not be converted") && !e.contains("other note"),
+            "{e}"
+        );
         let text = build_or_comment(&i);
-        assert!(text.starts_with("// CDePT: this testbench cannot be written for VACASK\n// the technology"), "{text}");
+        assert!(
+            text.starts_with(
+                "// CDePT: this testbench cannot be written for VACASK\n// the technology"
+            ),
+            "{text}"
+        );
     }
 
     #[test]
@@ -553,30 +730,62 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("pad.lib"), "subckt bondpad (PAD)\nends\n").unwrap();
         let mut mm = super::super::stat::MmInfo::default();
-        mm.files.insert("pad.lib".into(), super::super::stat::FileInfo { defs: vec!["bondpad".into()], ..Default::default() });
+        mm.files.insert(
+            "pad.lib".into(),
+            super::super::stat::FileInfo {
+                defs: vec!["bondpad".into()],
+                ..Default::default()
+            },
+        );
         mm.files.insert("corner.lib".into(), Default::default());
         let models = vec![format!(".lib {}/corner.lib tt", dir.path().display())];
         let net = "t\n.include /elsewhere/models/pad.lib\n.include /elsewhere/other.lib\nXB1 a bondpad\n.end\n";
         let (out, brought) = adopt_includes(net, Some(&mm), &models);
-        assert_eq!(brought, [format!(".include {}/pad.lib", dir.path().display())]);
-        assert!(out.contains("* .include /elsewhere/models/pad.lib\n") && out.contains("\n.include /elsewhere/other.lib\n"), "{out}");
+        assert_eq!(
+            brought,
+            [format!(".include {}/pad.lib", dir.path().display())]
+        );
+        assert!(
+            out.contains("* .include /elsewhere/models/pad.lib\n")
+                && out.contains("\n.include /elsewhere/other.lib\n"),
+            "{out}"
+        );
         // Without a converted set the netlist stays.
-        assert_eq!(adopt_includes(net, None, &models), (net.to_string(), vec![]));
+        assert_eq!(
+            adopt_includes(net, None, &models),
+            (net.to_string(), vec![])
+        );
     }
 
     #[test]
     fn refuses_what_vacask_cannot_do() {
         // The setup is refused when it loads (sim::caps); a deck built from a setup that
         // got around that is refused too.
-        let point = RunPoint { corner: "tt".into(), ..Default::default() };
+        let point = RunPoint {
+            corner: "tt".into(),
+            ..Default::default()
+        };
         let text = "simulator=\"vacask\"\n[[analysis]]\nkind=\"tran\"\nstep=\"1n\"\nstop=\"1u\"\nstart=\"0.5u\"\n";
         assert!(format!("{:#}", Setup::parse(text).unwrap_err()).contains("start time"));
         let s = Setup::parse(&text.replace("vacask", "ngspice")).unwrap();
-        let i = Inputs { setup: &s, point: &point, title: "t", models: &[], netlist: "t\nR1 a 0 1\n", defined: None, mm: None, pdk: "x", notes: &[] };
+        let i = Inputs {
+            setup: &s,
+            point: &point,
+            title: "t",
+            models: &[],
+            netlist: "t\nR1 a 0 1\n",
+            defined: None,
+            mm: None,
+            pdk: "x",
+            notes: &[],
+        };
         assert!(format!("{:#}", build(&i).unwrap_err()).contains("start time"));
         let e = model_line(".lib /x/a.lib").unwrap_err();
         assert!(format!("{e}").contains("section"));
-        assert_eq!(model_line(".lib \"/x y/a.lib\" tt").unwrap(), "include \"/x y/a.lib\" section=tt");
+        assert_eq!(
+            model_line(".lib \"/x y/a.lib\" tt").unwrap(),
+            "include \"/x y/a.lib\" section=tt"
+        );
         assert!(model_line(".bogus x").is_err());
     }
 }

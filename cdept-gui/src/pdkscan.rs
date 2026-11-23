@@ -368,7 +368,14 @@ pub fn poll(app: &mut AppCtx, ctx: &egui::Context) {
     finish(app, &root, &job.pdk, &tech, &catalog, elapsed);
 }
 
-fn finish(app: &mut AppCtx, root: &std::path::Path, pdk: &PdkDir, tech: &Tech, catalog: &Catalog, elapsed: f32) {
+fn finish(
+    app: &mut AppCtx,
+    root: &std::path::Path,
+    pdk: &PdkDir,
+    tech: &Tech,
+    catalog: &Catalog,
+    elapsed: f32,
+) {
     let outcome = apply(app, root, pdk, tech, catalog);
     match &outcome {
         Ok(name) => tracing::info!(
@@ -409,20 +416,25 @@ pub fn replace_ui(ctx: &egui::Context, app: &mut AppCtx) {
         ui.label(tech::file::replace_warning());
         ui.add_space(6.0);
         if r.changes.is_empty() {
-            ui.label(format!("Nothing differs from the current {}.", tech::TECH_FILE));
+            ui.label(format!(
+                "Nothing differs from the current {}.",
+                tech::TECH_FILE
+            ));
         } else {
             ui.label(
                 "Differences between the file and the PDK now (changes made by hand are \
                  among them; `-` lines are what the file has and would be lost):",
             );
-            egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                for line in r.changes.iter().take(200) {
-                    ui.monospace(line);
-                }
-                if r.changes.len() > 200 {
-                    ui.weak(format!("… and {} more", r.changes.len() - 200));
-                }
-            });
+            egui::ScrollArea::vertical()
+                .max_height(260.0)
+                .show(ui, |ui| {
+                    for line in r.changes.iter().take(200) {
+                        ui.monospace(line);
+                    }
+                    if r.changes.len() > 200 {
+                        ui.weak(format!("… and {} more", r.changes.len() - 200));
+                    }
+                });
         }
         ui.add_space(10.0);
         ui.horizontal(|ui| {

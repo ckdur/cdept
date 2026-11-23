@@ -66,7 +66,14 @@ fn split(s: &str) -> Result<(String, String)> {
 
 pub fn run(command: CaceCommand, project: &Project) -> Result<()> {
     match command {
-        CaceCommand::Import { datasheet, into, view_prefix, schematic, overwrite, write } => {
+        CaceCommand::Import {
+            datasheet,
+            into,
+            view_prefix,
+            schematic,
+            overwrite,
+            write,
+        } => {
             let (library, cell) = split(&into)?;
             let options = import::ImportOptions {
                 library,
@@ -84,18 +91,39 @@ pub fn run(command: CaceCommand, project: &Project) -> Result<()> {
                 bail!("cannot import: {}", plan.blockers.join("; "));
             }
             if !write {
-                eprintln!("\nNothing written. --write makes the views; --view-prefix, --schematic and --overwrite change them.");
+                eprintln!(
+                    "\nNothing written. --write makes the views; --view-prefix, --schematic and --overwrite change them."
+                );
                 return Ok(());
             }
             let written = import::apply(&plan)?;
-            eprintln!("\nWrote {} file(s) into {}/{}.", written.len(), plan.library, plan.cell);
+            eprintln!(
+                "\nWrote {} file(s) into {}/{}.",
+                written.len(),
+                plan.library,
+                plan.cell
+            );
         }
-        CaceCommand::Export { cell, view, output, no_results } => {
+        CaceCommand::Export {
+            cell,
+            view,
+            output,
+            no_results,
+        } => {
             let (library, cell) = split(&cell)?;
-            let out = export::export(project, &library, &cell, &export::ExportOptions { view, results: !no_results })?;
+            let out = export::export(
+                project,
+                &library,
+                &cell,
+                &export::ExportOptions {
+                    view,
+                    results: !no_results,
+                },
+            )?;
             match &output {
                 Some(file) => {
-                    std::fs::write(file, &out.text).map_err(|e| eyre!("cannot write {}: {e}", file.display()))?;
+                    std::fs::write(file, &out.text)
+                        .map_err(|e| eyre!("cannot write {}: {e}", file.display()))?;
                     eprintln!(
                         "Wrote {} ({} parameter(s) of {library}/{cell}/{}).",
                         file.display(),

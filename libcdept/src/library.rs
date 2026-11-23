@@ -911,7 +911,9 @@ fn assemble(
                     let (main, member) = view
                         .files
                         .iter()
-                        .min_by_key(|(f, member)| main_file_rank(&f.path, member.is_some(), preferred))
+                        .min_by_key(|(f, member)| {
+                            main_file_rank(&f.path, member.is_some(), preferred)
+                        })
                         .expect("a view has a file");
                     Entry {
                         name: view.name,
@@ -1623,8 +1625,7 @@ mod tests {
             "set ::env(CELL_LIBS) [dict create]\n\
              dict set ::env(CELL_LIBS) \"*_tt\" \"$::env(PDK_ROOT)/$::env(PDK)/libs.ref/std/lib/std_tt_1p8V_25C.lib\"\n",
         );
-        lib.preferred
-            .insert(root.join("lib/std_ff_1p8V_25C.lib"));
+        lib.preferred.insert(root.join("lib/std_ff_1p8V_25C.lib"));
         lib.scan_with(&Cache::off());
         assert_eq!(main(&lib), "std_ff_1p8V_25C.lib");
     }

@@ -161,8 +161,22 @@ impl RunRecord {
             })
             .collect();
         let (status, error, measures, deck_f, raw, log) = match outcome {
-            Ok(o) => (Status::Ok, None, o.measures.clone(), Some(o.deck.clone()), Some(o.raw.clone()), Some(o.log.clone())),
-            Err(e) => (Status::Error, Some(format!("{e:#}")), BTreeMap::new(), None, None, None),
+            Ok(o) => (
+                Status::Ok,
+                None,
+                o.measures.clone(),
+                Some(o.deck.clone()),
+                Some(o.raw.clone()),
+                Some(o.log.clone()),
+            ),
+            Err(e) => (
+                Status::Error,
+                Some(format!("{e:#}")),
+                BTreeMap::new(),
+                None,
+                None,
+                None,
+            ),
         };
         RunRecord {
             schema: SCHEMA,
@@ -172,7 +186,11 @@ impl RunRecord {
             view: view.into(),
             setup_hash: hash_text(&serde_json::to_string(setup).unwrap_or_default()),
             deck_hash: hash_text(deck),
-            simulator: if setup.simulator.is_empty() { "ngspice".into() } else { setup.simulator.clone() },
+            simulator: if setup.simulator.is_empty() {
+                "ngspice".into()
+            } else {
+                setup.simulator.clone()
+            },
             point: point.into(),
             status,
             error,
@@ -198,8 +216,10 @@ impl RunRecord {
     }
 
     pub fn read(file: &Path) -> Result<RunRecord> {
-        let text = std::fs::read_to_string(file).wrap_err_with(|| format!("cannot read {}", file.display()))?;
-        serde_json::from_str(&text).wrap_err_with(|| format!("{} is not a run record", file.display()))
+        let text = std::fs::read_to_string(file)
+            .wrap_err_with(|| format!("cannot read {}", file.display()))?;
+        serde_json::from_str(&text)
+            .wrap_err_with(|| format!("{} is not a run record", file.display()))
     }
 }
 
@@ -260,7 +280,10 @@ pub struct Aggregate {
 /// Pass/fail counts and min/max/mean/std of every measurement over `records`
 /// (runs that errored count as errors and have no measurements).
 pub fn aggregate(records: &[RunRecord]) -> Aggregate {
-    let mut agg = Aggregate { runs: records.len(), ..Default::default() };
+    let mut agg = Aggregate {
+        runs: records.len(),
+        ..Default::default()
+    };
     let mut values: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
     for r in records {
         match r.overall() {
@@ -272,7 +295,10 @@ pub fn aggregate(records: &[RunRecord]) -> Aggregate {
             values.entry(k).or_default().push(*v);
         }
     }
-    agg.measures = values.into_iter().filter_map(|(k, v)| Some((k.to_string(), Stats::of(&v)?))).collect();
+    agg.measures = values
+        .into_iter()
+        .filter_map(|(k, v)| Some((k.to_string(), Stats::of(&v)?)))
+        .collect();
     agg
 }
 
@@ -302,16 +328,29 @@ pub fn format_table(records: &[RunRecord]) -> String {
         }
         set.into_iter().collect()
     };
-    let width = records.iter().map(|r| r.point.name.len()).max().unwrap_or(5).max(5);
+    let width = records
+        .iter()
+        .map(|r| r.point.name.len())
+        .max()
+        .unwrap_or(5)
+        .max(5);
     let mut out = format!("{:<width$}  {:<6}", "point", "result");
     let is_calc = |n: &str| records.iter().any(|r| r.calc.iter().any(|c| c == n));
     for n in &names {
-        let label = if is_calc(n) { format!("{n}*") } else { n.to_string() };
+        let label = if is_calc(n) {
+            format!("{n}*")
+        } else {
+            n.to_string()
+        };
         out.push_str(&format!("  {label:>12}"));
     }
     out.push('\n');
     for r in records {
-        out.push_str(&format!("{:<width$}  {:<6}", r.point.name, r.overall().word().to_uppercase()));
+        out.push_str(&format!(
+            "{:<width$}  {:<6}",
+            r.point.name,
+            r.overall().word().to_uppercase()
+        ));
         for n in &names {
             match r.measures.get(*n) {
                 Some(v) => out.push_str(&format!("  {:>12}", num(*v))),
@@ -319,7 +358,15 @@ pub fn format_table(records: &[RunRecord]) -> String {
             }
         }
         for s in r.specs.iter().filter(|s| s.verdict != Verdict::Pass) {
-            out.push_str(&format!("   [{} {}]", s.name, if s.verdict == Verdict::Fail { "FAIL" } else { "MISSING" }));
+            out.push_str(&format!(
+                "   [{} {}]",
+                s.name,
+                if s.verdict == Verdict::Fail {
+                    "FAIL"
+                } else {
+                    "MISSING"
+                }
+            ));
         }
         if let Some(e) = &r.error {
             out.push_str(&format!("   {}", e.lines().next().unwrap_or("")));
@@ -337,9 +384,15 @@ pub fn format_table(records: &[RunRecord]) -> String {
 
 /// The counts and the statistics of an [`Aggregate`].
 pub fn format_aggregate(agg: &Aggregate) -> String {
-    let mut out = format!("{} run(s): {} pass, {} fail, {} error\n", agg.runs, agg.pass, agg.fail, agg.error);
+    let mut out = format!(
+        "{} run(s): {} pass, {} fail, {} error\n",
+        agg.runs, agg.pass, agg.fail, agg.error
+    );
     if !agg.measures.is_empty() {
-        out.push_str(&format!("{:<16} {:>5} {:>12} {:>12} {:>12} {:>12}\n", "measure", "n", "min", "max", "mean", "std"));
+        out.push_str(&format!(
+            "{:<16} {:>5} {:>12} {:>12} {:>12} {:>12}\n",
+            "measure", "n", "min", "max", "mean", "std"
+        ));
         for (k, s) in &agg.measures {
             out.push_str(&format!(
                 "{k:<16} {:>5} {:>12} {:>12} {:>12} {:>12}\n",
@@ -375,7 +428,8 @@ impl Store {
     }
 
     pub fn open_file(file: &Path) -> Result<Store> {
-        let conn = Connection::open(file).wrap_err_with(|| format!("cannot open {}", file.display()))?;
+        let conn =
+            Connection::open(file).wrap_err_with(|| format!("cannot open {}", file.display()))?;
         Self::init(conn)
     }
 
@@ -469,7 +523,9 @@ impl Store {
 
     fn query(&self, sql: &str, args: &[&dyn rusqlite::ToSql]) -> Result<Vec<RunRecord>> {
         let mut stmt = self.conn.prepare(sql)?;
-        let rows = stmt.query_map(args, |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
+        let rows = stmt.query_map(args, |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
         let mut out = vec![];
         for row in rows {
             let (id, json) = row?;
@@ -500,7 +556,13 @@ impl Store {
     }
 
     /// The runs of a testbench with this setup hash, latest per point.
-    pub fn latest_of_setup(&self, library: &str, cell: &str, view: &str, setup_hash: &str) -> Result<Vec<RunRecord>> {
+    pub fn latest_of_setup(
+        &self,
+        library: &str,
+        cell: &str,
+        view: &str,
+        setup_hash: &str,
+    ) -> Result<Vec<RunRecord>> {
         let all = self.query(
             "SELECT id, record FROM runs WHERE library=?1 AND cell=?2 AND view=?3 AND setup_hash=?4 ORDER BY id",
             &[&library, &cell, &view, &setup_hash],
@@ -514,11 +576,21 @@ impl Store {
     }
 
     /// One measurement over the latest runs of a testbench: `(point name, value)`.
-    pub fn series(&self, library: &str, cell: &str, view: &str, measure: &str) -> Result<Vec<(String, f64)>> {
+    pub fn series(
+        &self,
+        library: &str,
+        cell: &str,
+        view: &str,
+        measure: &str,
+    ) -> Result<Vec<(String, f64)>> {
         Ok(self
             .latest(library, cell, view)?
             .into_iter()
-            .filter_map(|r| r.measures.get(&measure.to_lowercase()).map(|v| (r.point.name, *v)))
+            .filter_map(|r| {
+                r.measures
+                    .get(&measure.to_lowercase())
+                    .map(|v| (r.point.name, *v))
+            })
             .collect())
     }
 
@@ -528,7 +600,8 @@ impl Store {
         let mut found = vec![];
         collect_records(&project_root.join("simulations"), 0, &mut found);
         found.sort_by(|a, b| a.started.cmp(&b.started));
-        self.conn.execute_batch("DELETE FROM measures; DELETE FROM runs;")?;
+        self.conn
+            .execute_batch("DELETE FROM measures; DELETE FROM runs;")?;
         for r in &found {
             self.insert(r)?;
         }
@@ -537,7 +610,9 @@ impl Store {
 }
 
 fn collect_records(dir: &Path, depth: usize, out: &mut Vec<RunRecord>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() && depth < 6 {
@@ -555,7 +630,8 @@ mod tests {
     use super::*;
 
     fn rec(name: &str, started: &str, tpd: Option<f64>, max: f64) -> RunRecord {
-        let measures: BTreeMap<String, f64> = tpd.into_iter().map(|v| ("tpd".to_string(), v)).collect();
+        let measures: BTreeMap<String, f64> =
+            tpd.into_iter().map(|v| ("tpd".to_string(), v)).collect();
         let verdict = match tpd {
             None => Verdict::Missing,
             Some(v) if v > max => Verdict::Fail,
@@ -582,7 +658,13 @@ mod tests {
             measures,
             calc: vec![],
             calc_errors: BTreeMap::new(),
-            specs: vec![SpecRecord { name: "tpd".into(), value: tpd, min: None, max: Some(max), verdict }],
+            specs: vec![SpecRecord {
+                name: "tpd".into(),
+                value: tpd,
+                min: None,
+                max: Some(max),
+                verdict,
+            }],
             started: started.into(),
             duration_ms: 12,
             dir: "/tmp/x".into(),
@@ -606,13 +688,24 @@ mod tests {
         let mut err = rec("c", "3", None, 1.0);
         err.status = Status::Error;
         err.error = Some("boom\nmore".into());
-        let rs = vec![rec("a", "1", Some(1.0), 2.0), rec("b", "2", Some(3.0), 2.0), err, rec("d", "4", None, 2.0)];
+        let rs = vec![
+            rec("a", "1", Some(1.0), 2.0),
+            rec("b", "2", Some(3.0), 2.0),
+            err,
+            rec("d", "4", None, 2.0),
+        ];
         let agg = aggregate(&rs);
         assert_eq!((agg.runs, agg.pass, agg.fail, agg.error), (4, 1, 2, 1));
         assert_eq!(agg.measures["tpd"].count, 2);
         assert_eq!(agg.measures["tpd"].mean, 2.0);
         let table = format_table(&rs);
-        assert!(table.contains("FAIL") && table.contains("ERROR") && table.contains("boom") && table.contains("[tpd MISSING]"), "{table}");
+        assert!(
+            table.contains("FAIL")
+                && table.contains("ERROR")
+                && table.contains("boom")
+                && table.contains("[tpd MISSING]"),
+            "{table}"
+        );
         assert!(format_aggregate(&agg).contains("1 pass, 2 fail, 1 error"));
     }
 
@@ -644,9 +737,24 @@ mod tests {
         let agg = db.stats("cells", "tb", "testbench").unwrap();
         assert_eq!((agg.runs, agg.pass, agg.fail), (2, 1, 1));
         assert_eq!(agg.measures["tpd"].max, 3.0);
-        assert_eq!(db.series("cells", "tb", "testbench", "TPD").unwrap(), [("a".to_string(), 1.5), ("b".to_string(), 3.0)]);
-        assert_eq!(db.latest_of_setup("cells", "tb", "testbench", "nope").unwrap().len(), 0);
-        let n: i64 = db.conn.query_row("SELECT COUNT(*) FROM measures WHERE verdict='fail'", [], |r| r.get(0)).unwrap();
+        assert_eq!(
+            db.series("cells", "tb", "testbench", "TPD").unwrap(),
+            [("a".to_string(), 1.5), ("b".to_string(), 3.0)]
+        );
+        assert_eq!(
+            db.latest_of_setup("cells", "tb", "testbench", "nope")
+                .unwrap()
+                .len(),
+            0
+        );
+        let n: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM measures WHERE verdict='fail'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(n, 2); // b, and z of the other view
     }
 

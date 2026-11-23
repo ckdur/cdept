@@ -96,25 +96,36 @@ fn scratch_vars(scratch: &Path) -> Vars {
 
 /// Wait for the environment of kind `key`, then set it with `vars` (`None` unsets).
 fn acquire(key: &str, shared: bool, vars: Vars) -> EnvGuard {
-    let mut state = STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut state = STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     loop {
         match state.as_mut() {
             None => break,
             Some(active) if shared && active.shared && active.key == key => {
                 active.users += 1;
-                return EnvGuard { scratch: active.scratch.clone() };
+                return EnvGuard {
+                    scratch: active.scratch.clone(),
+                };
             }
             Some(_) => {
-                state = FREE.wait(state).unwrap_or_else(|poisoned| poisoned.into_inner());
+                state = FREE
+                    .wait(state)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
             }
         }
     }
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let scratch = std::env::temp_dir().join(format!("cdept-testenv-{}-{n}", std::process::id()));
-    std::fs::create_dir_all(scratch.join("home")).expect("a scratch folder for the test environment");
+    std::fs::create_dir_all(scratch.join("home"))
+        .expect("a scratch folder for the test environment");
     let mut saved: Vec<(String, Option<OsString>)> = Vec::new();
     let pdk_vars: Vars = PDK_VARS.iter().map(|n| (n.to_string(), None)).collect();
-    for (name, value) in pdk_vars.into_iter().chain(scratch_vars(&scratch)).chain(vars) {
+    for (name, value) in pdk_vars
+        .into_iter()
+        .chain(scratch_vars(&scratch))
+        .chain(vars)
+    {
         if !saved.iter().any(|(n, _)| *n == name) {
             saved.push((name.clone(), std::env::var_os(&name)));
         }
@@ -127,7 +138,13 @@ fn acquire(key: &str, shared: bool, vars: Vars) -> EnvGuard {
             }
         }
     }
-    *state = Some(Active { key: key.into(), shared, users: 1, saved, scratch: scratch.clone() });
+    *state = Some(Active {
+        key: key.into(),
+        shared,
+        users: 1,
+        saved,
+        scratch: scratch.clone(),
+    });
     EnvGuard { scratch }
 }
 
@@ -141,7 +158,9 @@ impl EnvGuard {
 
 impl Drop for EnvGuard {
     fn drop(&mut self) {
-        let mut state = STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some(active) = state.as_mut() else { return };
         active.users -= 1;
         if active.users > 0 {
@@ -173,14 +192,21 @@ pub fn hermetic_env() -> EnvGuard {
 /// [`hermetic_env`] and the `CDEPT_*` variables that name the tools (xschem, KLayout,
 /// ngspice, ...) unset too, for tests of what happens when a tool is absent.
 pub fn hermetic_env_without_tools() -> EnvGuard {
-    acquire("hermetic-without-tools", true, TOOL_VARS.iter().map(|n| (n.to_string(), None)).collect())
+    acquire(
+        "hermetic-without-tools",
+        true,
+        TOOL_VARS.iter().map(|n| (n.to_string(), None)).collect(),
+    )
 }
 
 /// [`hermetic_env`] with more variables set (`Some`) or unset (`None`); the guard is alone
 /// while it lives.
 pub fn hermetic_env_with(vars: &[(&str, Option<&OsStr>)]) -> EnvGuard {
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let vars = vars.iter().map(|(k, v)| (k.to_string(), v.map(OsString::from))).collect();
+    let vars = vars
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.map(OsString::from)))
+        .collect();
     acquire(&format!("custom-{n}"), false, vars)
 }
 
@@ -210,7 +236,10 @@ pub fn real_pdk(name: &str) -> Option<RealPdk> {
     let root = test_pdk_root();
     let dir = root.join(name);
     if !dir.is_dir() {
-        eprintln!("skipped: {name} not installed (looked in {})", root.display());
+        eprintln!(
+            "skipped: {name} not installed (looked in {})",
+            root.display()
+        );
         return None;
     }
     let vars = vec![
@@ -219,5 +248,10 @@ pub fn real_pdk(name: &str) -> Option<RealPdk> {
         ("PDKPATH".to_string(), Some(dir.clone().into_os_string())),
     ];
     let env = acquire(&format!("real-{name}"), true, vars);
-    Some(RealPdk { name: name.to_string(), root, dir, _env: env })
+    Some(RealPdk {
+        name: name.to_string(),
+        root,
+        dir,
+        _env: env,
+    })
 }

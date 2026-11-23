@@ -357,7 +357,12 @@ static FUNCS: &[Func] = &[
             lookup_vector(
                 env,
                 b,
-                &[format!("i({n})"), format!("{n}#branch"), format!("{n}:flow(br)"), n.clone()],
+                &[
+                    format!("i({n})"),
+                    format!("{n}#branch"),
+                    format!("{n}:flow(br)"),
+                    n.clone(),
+                ],
             )
         },
     },
@@ -586,7 +591,13 @@ static FUNCS: &[Func] = &[
         names: &["coherent"],
         params: &["fin", "fs", "n"],
         doc: "Coherent-sampling tone: the frequency nearest `fin` that fits a whole, odd number of cycles (coprime with n) in n samples at fs, i.e. m*fs/n.",
-        run: |_, b| num(measure::coherent_frequency(b.num("fin")?, b.num("fs")?, b.num("n")?)?),
+        run: |_, b| {
+            num(measure::coherent_frequency(
+                b.num("fin")?,
+                b.num("fs")?,
+                b.num("n")?,
+            )?)
+        },
     },
     Func {
         names: &["resample"],

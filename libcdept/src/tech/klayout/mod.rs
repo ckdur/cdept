@@ -726,7 +726,11 @@ mod tests {
         .unwrap();
         let scanned = scan(&ScanContext::new(pdk).files_only());
         assert_eq!(
-            scanned.section.lvs_variables.get("scale").map(String::as_str),
+            scanned
+                .section
+                .lvs_variables
+                .get("scale")
+                .map(String::as_str),
             Some("true")
         );
         let text = toml::to_string(&scanned.section).unwrap();

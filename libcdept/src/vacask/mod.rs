@@ -69,10 +69,18 @@ pub fn build_point(
     title: &str,
     netlist: &str,
 ) -> Result<deck::Deck> {
-    let (_, model_set) =
-        ready.tech.models.set(set).ok_or_else(|| eyre::eyre!("the technology has no models '{set}'"))?;
-    let corner = ready.tech.models.lines(set, &point.corner, |n| project.var(n)).map_err(|e| eyre::eyre!(e))?;
-    let lines = deck::model_lines(model_set, corner, |n| project.var(n)).map_err(|e| eyre::eyre!(e))?;
+    let (_, model_set) = ready
+        .tech
+        .models
+        .set(set)
+        .ok_or_else(|| eyre::eyre!("the technology has no models '{set}'"))?;
+    let corner = ready
+        .tech
+        .models
+        .lines(set, &point.corner, |n| project.var(n))
+        .map_err(|e| eyre::eyre!(e))?;
+    let lines =
+        deck::model_lines(model_set, corner, |n| project.var(n)).map_err(|e| eyre::eyre!(e))?;
     deck::build(&deck::Inputs {
         setup,
         point,
@@ -98,7 +106,12 @@ pub const MARK_MEASURE: &str = "// cdept-measure: ";
 /// `out.raw`; every analysis also keeps its own `<name>.raw`. VACASK's own output is
 /// `out.log` (with `vacask.stdout`). A failed analysis is an error even though VACASK
 /// exits with 0.
-pub fn run_vacask(program: &Path, deck: &str, dir: &Path, env: &[(OsString, OsString)]) -> Result<Outcome> {
+pub fn run_vacask(
+    program: &Path,
+    deck: &str,
+    dir: &Path,
+    env: &[(OsString, OsString)],
+) -> Result<Outcome> {
     run_vacask_watched(program, deck, dir, env, None)
 }
 
@@ -112,12 +125,20 @@ pub fn run_vacask_watched(
 ) -> Result<Outcome> {
     std::fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     if deck.starts_with("// CDePT: this testbench cannot be written for VACASK") {
-        bail!("{}", deck.lines().skip(1).map(|l| l.trim_start_matches("// ")).collect::<Vec<_>>().join("\n"));
+        bail!(
+            "{}",
+            deck.lines()
+                .skip(1)
+                .map(|l| l.trim_start_matches("// "))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
     }
     let deck_file = dir.join("deck.sim");
     let raw = dir.join("out.raw");
     let log = dir.join("out.log");
-    std::fs::write(&deck_file, deck).wrap_err_with(|| format!("cannot write {}", deck_file.display()))?;
+    std::fs::write(&deck_file, deck)
+        .wrap_err_with(|| format!("cannot write {}", deck_file.display()))?;
     if let Ok(entries) = std::fs::read_dir(dir) {
         for e in entries.flatten() {
             if e.path().extension().is_some_and(|x| x == "raw") {
@@ -133,7 +154,10 @@ pub fn run_vacask_watched(
         .map(|(n, k)| (n.to_string(), k.trim().to_string()))
         .collect();
     let job = crate::batch::vacask::job(program, "deck.sim", dir, env);
-    let out = job.run_watched(&crate::batch::Watch { cancel, timeout: None })?;
+    let out = job.run_watched(&crate::batch::Watch {
+        cancel,
+        timeout: None,
+    })?;
     let _ = std::fs::copy(&out.log, &log);
     let problems = crate::batch::vacask::problems(&out.text);
     let missing: Vec<&str> = analyses
@@ -145,19 +169,38 @@ pub fn run_vacask_watched(
         bail!(
             "VACASK failed ({}){}\n{}\nlog: {}",
             out.status,
-            if missing.is_empty() { String::new() } else { format!(", no raw file for {}", missing.join(", ")) },
-            if problems.is_empty() { crate::batch::tail(&out.text, 12) } else { format!("{}\n{}", problems.join("\n"), crate::batch::tail(&out.text, 6)) },
+            if missing.is_empty() {
+                String::new()
+            } else {
+                format!(", no raw file for {}", missing.join(", "))
+            },
+            if problems.is_empty() {
+                crate::batch::tail(&out.text, 12)
+            } else {
+                format!(
+                    "{}\n{}",
+                    problems.join("\n"),
+                    crate::batch::tail(&out.text, 6)
+                )
+            },
             log.display()
         );
     }
-    let main = analyses.iter().find(|(_, k)| k != "op").or(analyses.first());
+    let main = analyses
+        .iter()
+        .find(|(_, k)| k != "op")
+        .or(analyses.first());
     if let Some((n, kind)) = main {
         let file = dir.join(format!("{n}.raw"));
         if kind == "noise" {
             // The test templates read ngspice's noise spectra: add them to the copy.
             let plots = raw::read(&file)?;
-            let first = plots.into_iter().next().ok_or_else(|| eyre::eyre!("empty raw file of '{n}'"))?;
-            std::fs::write(&raw, raw::write_real(&raw::with_noise_spectra(first))).wrap_err("cannot write the raw file")?;
+            let first = plots
+                .into_iter()
+                .next()
+                .ok_or_else(|| eyre::eyre!("empty raw file of '{n}'"))?;
+            std::fs::write(&raw, raw::write_real(&raw::with_noise_spectra(first)))
+                .wrap_err("cannot write the raw file")?;
         } else {
             std::fs::copy(&file, &raw).wrap_err("cannot copy the raw file")?;
         }
@@ -169,14 +212,23 @@ pub fn run_vacask_watched(
             bail!("measurement '{m}': the testbench has no {kind} analysis");
         };
         let plots = raw::read(&dir.join(format!("{name}.raw")))?;
-        let plot = plots.first().ok_or_else(|| eyre::eyre!("empty raw file of '{name}'"))?;
-        if let (Some(value), Some(n)) = (meas::evaluate(m, plot).wrap_err_with(|| format!("measurement '{m}'"))?, meas::name_of(m))
-            && value.is_finite()
+        let plot = plots
+            .first()
+            .ok_or_else(|| eyre::eyre!("empty raw file of '{name}'"))?;
+        if let (Some(value), Some(n)) = (
+            meas::evaluate(m, plot).wrap_err_with(|| format!("measurement '{m}'"))?,
+            meas::name_of(m),
+        ) && value.is_finite()
         {
             measures.insert(n, value);
         }
     }
-    Ok(Outcome { deck: deck_file, raw, log, measures })
+    Ok(Outcome {
+        deck: deck_file,
+        raw,
+        log,
+        measures,
+    })
 }
 
 #[cfg(all(test, unix))]
@@ -190,7 +242,11 @@ mod tests {
         let vout: Vec<f64> = t.iter().map(|t| t / 10.0).collect();
         let raw = raw::tests::binary(&["time", "out"], &[t, vout]);
         std::fs::write(dir.path().join("canned.raw"), raw).unwrap();
-        let fake = crate::batch::testutil::fake(dir.path(), "vacask", "cp ../canned.raw tran1.raw; echo 'Running analysis tran1'");
+        let fake = crate::batch::testutil::fake(
+            dir.path(),
+            "vacask",
+            "cp ../canned.raw tran1.raw; echo 'Running analysis tran1'",
+        );
         let run = dir.path().join("run");
         let deck = format!(
             "ground 0\ncontrol\nendc\n{MARK_ANALYSIS}tran1 tran\n{MARK_MEASURE}tran half trig v(out) val=0.2 rise=1 targ v(out) val=0.7 rise=1\n"
@@ -199,10 +255,23 @@ mod tests {
         assert!((o.measures["half"] - 5.0).abs() < 1e-9, "{:?}", o.measures);
         assert!(o.raw.is_file() && o.deck.ends_with("deck.sim") && o.log.is_file());
         // An aborted analysis is an error although the exit status is 0.
-        let bad = crate::batch::testutil::fake(dir.path(), "vacask2", "echo \"Sweep needs to specify values, mode, or step.\"; echo \"Analysis 'ac1' aborted.\"");
-        let err = run_vacask(&bad, &format!("{MARK_ANALYSIS}ac1 ac\n"), &dir.path().join("r2"), &[]).unwrap_err();
+        let bad = crate::batch::testutil::fake(
+            dir.path(),
+            "vacask2",
+            "echo \"Sweep needs to specify values, mode, or step.\"; echo \"Analysis 'ac1' aborted.\"",
+        );
+        let err = run_vacask(
+            &bad,
+            &format!("{MARK_ANALYSIS}ac1 ac\n"),
+            &dir.path().join("r2"),
+            &[],
+        )
+        .unwrap_err();
         let text = format!("{err}");
-        assert!(text.contains("aborted") && text.contains("no raw file for ac1"), "{text}");
+        assert!(
+            text.contains("aborted") && text.contains("no raw file for ac1"),
+            "{text}"
+        );
         // A deck the builder could not write is refused, with its message.
         let err = run_vacask(&fake, "// CDePT: this testbench cannot be written for VACASK\n// the technology 'x' has no VACASK model for 'nm'\n", &dir.path().join("r3"), &[]).unwrap_err();
         assert!(format!("{err}").contains("'nm'"), "{err}");
@@ -215,7 +284,12 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("lib")).unwrap();
         let env = tool_env_for(&dir.path().join("bin/vacask"));
         assert_eq!(env.len(), 1);
-        assert!(env[0].1.to_string_lossy().starts_with(&format!("{}/lib:", dir.path().display())));
+        assert!(
+            env[0]
+                .1
+                .to_string_lossy()
+                .starts_with(&format!("{}/lib:", dir.path().display()))
+        );
         assert!(tool_env_for(Path::new("/nonexistent/bin/vacask")).is_empty());
     }
 }

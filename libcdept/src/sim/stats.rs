@@ -27,7 +27,11 @@ impl Histogram {
         let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         let mut counts = vec![0; bins];
         for v in values {
-            let at = if max > min { (((v - min) / (max - min)) * bins as f64) as usize } else { 0 };
+            let at = if max > min {
+                (((v - min) / (max - min)) * bins as f64) as usize
+            } else {
+                0
+            };
             counts[at.min(bins - 1)] += 1;
         }
         Some(Histogram { min, max, counts })
@@ -53,7 +57,10 @@ pub fn normal_cdf(z: f64) -> f64 {
     // Abramowitz and Stegun 7.1.26 (erf, error below 1.5e-7).
     let x = z.abs() / std::f64::consts::SQRT_2;
     let t = 1.0 / (1.0 + 0.327_591_1 * x);
-    let poly = t * (0.254_829_592 + t * (-0.284_496_736 + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
+    let poly = t
+        * (0.254_829_592
+            + t * (-0.284_496_736
+                + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
     let erf = 1.0 - poly * (-x * x).exp();
     0.5 * (1.0 + if z < 0.0 { -erf } else { erf })
 }
@@ -86,7 +93,11 @@ pub struct SpecYield {
 
 impl SpecYield {
     pub fn fraction(&self) -> f64 {
-        if self.total == 0 { 0.0 } else { self.pass as f64 / self.total as f64 }
+        if self.total == 0 {
+            0.0
+        } else {
+            self.pass as f64 / self.total as f64
+        }
     }
 }
 
@@ -103,15 +114,26 @@ pub struct Report {
 
 impl Report {
     pub fn fraction(&self) -> f64 {
-        if self.runs == 0 { 0.0 } else { self.pass as f64 / self.runs as f64 }
+        if self.runs == 0 {
+            0.0
+        } else {
+            self.pass as f64 / self.runs as f64
+        }
     }
 }
 
 /// Analyse `records` (one per point; use [`super::results::latest_per_point`] for a
 /// store): `bins` histogram bins, `k` sigmas for the yield estimate.
 pub fn analyze(records: &[RunRecord], bins: usize, k: f64) -> Report {
-    let mut report = Report { runs: records.len(), k, ..Default::default() };
-    report.pass = records.iter().filter(|r| r.overall() == Overall::Pass).count();
+    let mut report = Report {
+        runs: records.len(),
+        k,
+        ..Default::default()
+    };
+    report.pass = records
+        .iter()
+        .filter(|r| r.overall() == Overall::Pass)
+        .count();
     let mut values: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
     for r in records {
         for (name, v) in &r.measures {
@@ -120,11 +142,19 @@ pub fn analyze(records: &[RunRecord], bins: usize, k: f64) -> Report {
     }
     for (name, mut v) in values {
         let Some(stats) = Stats::of(&v) else { continue };
-        let Some(histogram) = Histogram::of(&v, bins) else { continue };
+        let Some(histogram) = Histogram::of(&v, bins) else {
+            continue;
+        };
         v.sort_by(|a, b| a.total_cmp(b));
         report.measures.insert(
             name.to_string(),
-            Detail { p5: percentile(&v, 5.0), p50: percentile(&v, 50.0), p95: percentile(&v, 95.0), stats, histogram },
+            Detail {
+                p5: percentile(&v, 5.0),
+                p50: percentile(&v, 50.0),
+                p95: percentile(&v, 95.0),
+                stats,
+                histogram,
+            },
         );
     }
     // Specs in the order they appear in the records.
@@ -139,7 +169,11 @@ pub fn analyze(records: &[RunRecord], bins: usize, k: f64) -> Report {
     for (name, min, max) in order {
         let pass = records
             .iter()
-            .filter(|r| r.specs.iter().any(|s| s.name == name && s.verdict == Verdict::Pass))
+            .filter(|r| {
+                r.specs
+                    .iter()
+                    .any(|s| s.name == name && s.verdict == Verdict::Pass)
+            })
             .count();
         let detail = report.measures.get(&name).filter(|d| d.stats.count > 1);
         let gaussian = detail.map(|d| {
@@ -153,9 +187,18 @@ pub fn analyze(records: &[RunRecord], bins: usize, k: f64) -> Report {
             (upper - lower).clamp(0.0, 1.0)
         });
         let within = detail.map(|d| {
-            min.is_none_or(|m| d.stats.mean - k * d.stats.std >= m) && max.is_none_or(|m| d.stats.mean + k * d.stats.std <= m)
+            min.is_none_or(|m| d.stats.mean - k * d.stats.std >= m)
+                && max.is_none_or(|m| d.stats.mean + k * d.stats.std <= m)
         });
-        report.specs.push(SpecYield { name, min, max, pass, total: records.len(), gaussian, within_k_sigma: within });
+        report.specs.push(SpecYield {
+            name,
+            min,
+            max,
+            pass,
+            total: records.len(),
+            gaussian,
+            within_k_sigma: within,
+        });
     }
     report
 }
@@ -175,7 +218,16 @@ fn bound(min: Option<f64>, max: Option<f64>) -> String {
 
 /// A text bar of `n` in a scale where `full` fills `width` cells.
 pub fn bar(n: usize, full: usize, width: usize) -> String {
-    if full == 0 { String::new() } else { "#".repeat((n * width).div_ceil(full).min(width).max(usize::from(n > 0))) }
+    if full == 0 {
+        String::new()
+    } else {
+        "#".repeat(
+            (n * width)
+                .div_ceil(full)
+                .min(width)
+                .max(usize::from(n > 0)),
+        )
+    }
 }
 
 /// The percentile table, a text histogram per measurement and the yield table.
@@ -204,14 +256,25 @@ pub fn format_report(report: &Report) -> String {
             let full = d.histogram.counts.iter().copied().max().unwrap_or(0);
             for (i, n) in d.histogram.counts.iter().enumerate() {
                 let (lo, hi) = d.histogram.edges(i);
-                out.push_str(&format!("  {:>12} .. {:>12} {:>5}  {}\n", num(lo), num(hi), n, bar(*n, full, 40)));
+                out.push_str(&format!(
+                    "  {:>12} .. {:>12} {:>5}  {}\n",
+                    num(lo),
+                    num(hi),
+                    n,
+                    bar(*n, full, 40)
+                ));
             }
         }
     }
     if !report.specs.is_empty() || report.runs > 0 {
         out.push_str(&format!(
             "\n{:<16} {:<28} {:>9} {:>8} {:>10} {:>12}\n",
-            "yield", "spec", "pass", "yield", "gaussian", format!("mean+-{}s", fmt_k(report.k))
+            "yield",
+            "spec",
+            "pass",
+            "yield",
+            "gaussian",
+            format!("mean+-{}s", fmt_k(report.k))
         ));
         for s in &report.specs {
             out.push_str(&format!(
@@ -220,7 +283,8 @@ pub fn format_report(report: &Report) -> String {
                 bound(s.min, s.max),
                 format!("{}/{}", s.pass, s.total),
                 s.fraction() * 100.0,
-                s.gaussian.map_or("-".into(), |g| format!("{:.2}%", g * 100.0)),
+                s.gaussian
+                    .map_or("-".into(), |g| format!("{:.2}%", g * 100.0)),
                 match s.within_k_sigma {
                     Some(true) => "inside",
                     Some(false) => "outside",
@@ -240,7 +304,11 @@ pub fn format_report(report: &Report) -> String {
 }
 
 fn fmt_k(k: f64) -> String {
-    if k.fract() == 0.0 { format!("{}", k as i64) } else { format!("{k}") }
+    if k.fract() == 0.0 {
+        format!("{}", k as i64)
+    } else {
+        format!("{k}")
+    }
 }
 
 #[cfg(test)]
@@ -302,17 +370,30 @@ mod tests {
         assert_eq!((s.pass, s.total), (8, 10));
         assert!((s.fraction() - 0.8).abs() < 1e-12);
         // z = (8 - 5.5) / 3.0277 = 0.826: about 79.7 %.
-        assert!((s.gaussian.unwrap() - 0.7956).abs() < 0.005, "{:?}", s.gaussian);
+        assert!(
+            (s.gaussian.unwrap() - 0.7956).abs() < 0.005,
+            "{:?}",
+            s.gaussian
+        );
         assert_eq!(s.within_k_sigma, Some(false));
         let d = &r.measures["tpd"];
         assert_eq!((d.p50, d.stats.count), (5.5, 10));
         let text = format_report(&r);
-        assert!(text.contains("p95") && text.contains("8/10") && text.contains("80.0%") && text.contains('#'), "{text}");
+        assert!(
+            text.contains("p95")
+                && text.contains("8/10")
+                && text.contains("80.0%")
+                && text.contains('#'),
+            "{text}"
+        );
         // Wide margins: inside k sigma.
         let wide = analyze(&records, 5, 0.5);
         assert!(wide.specs[0].within_k_sigma == Some(true));
         // A spec nobody meets, a single run, no records.
-        assert_eq!(analyze(&[record(0, 9.0, 8.0)], 4, 3.0).specs[0].gaussian, None);
+        assert_eq!(
+            analyze(&[record(0, 9.0, 8.0)], 4, 3.0).specs[0].gaussian,
+            None
+        );
         assert_eq!(analyze(&[], 4, 3.0).runs, 0);
     }
 }

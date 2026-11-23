@@ -609,11 +609,15 @@ pub fn integrate_noise(w: &Waveform, squared: bool) -> Result<f64> {
 /// nearest to `fin * n / fs` (and coprime with `n`), so `n` samples hold exactly `m`
 /// cycles and no window is needed.
 pub fn coherent_frequency(fin: f64, fs: f64, n: f64) -> Result<f64> {
-    if !(fin > 0.0 && fs > 0.0 && n >= 4.0) || !(fin.is_finite() && fs.is_finite() && n.is_finite()) {
+    if !(fin > 0.0 && fs > 0.0 && n >= 4.0) || !(fin.is_finite() && fs.is_finite() && n.is_finite())
+    {
         eyre::bail!("coherent needs fin > 0, fs > 0 and n >= 4 (got {fin}, {fs}, {n})");
     }
     if fin >= fs / 2.0 {
-        eyre::bail!("coherent: the tone {fin} Hz is not below fs/2 = {} Hz", fs / 2.0);
+        eyre::bail!(
+            "coherent: the tone {fin} Hz is not below fs/2 = {} Hz",
+            fs / 2.0
+        );
     }
     let n = n.round() as u64;
     let gcd = |mut a: u64, mut b: u64| {

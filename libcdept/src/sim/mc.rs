@@ -37,14 +37,24 @@ pub fn plan(
     has: impl Fn(&str) -> bool,
     mentions: impl Fn(&str, &str) -> bool,
 ) -> Result<Plan> {
-    let process = if mc.corner.is_empty() { "mc" } else { mc.corner.as_str() };
+    let process = if mc.corner.is_empty() {
+        "mc"
+    } else {
+        mc.corner.as_str()
+    };
     let need = |corner: &str, what: &str| -> Result<()> {
         if has(corner) {
             return Ok(());
         }
-        bail!("Monte Carlo ({what}) needs the corner set '{corner}' in the models '{set}'; name another in [montecarlo]");
+        bail!(
+            "Monte Carlo ({what}) needs the corner set '{corner}' in the models '{set}'; name another in [montecarlo]"
+        );
     };
-    let single = |corner: &str| Plan { label: corner.to_string(), corners: vec![corner.to_string()], extra: vec![] };
+    let single = |corner: &str| Plan {
+        label: corner.to_string(),
+        corners: vec![corner.to_string()],
+        extra: vec![],
+    };
     match mc.mode {
         McMode::Process => {
             need(process, "process")?;
@@ -57,7 +67,11 @@ pub fn plan(
                      have no mismatch sections for the transistors (their `tt_mm` only covers the MOS capacitor)"
                 );
             }
-            let corner = if mc.mismatch_corner.is_empty() { "tt_mm" } else { mc.mismatch_corner.as_str() };
+            let corner = if mc.mismatch_corner.is_empty() {
+                "tt_mm"
+            } else {
+                mc.mismatch_corner.as_str()
+            };
             need(corner, "mismatch")?;
             Ok(single(corner))
         }
@@ -67,7 +81,9 @@ pub fn plan(
                 return Ok(single(&mc.both_corner));
             }
             if xyce {
-                bail!("process + mismatch Monte Carlo with Xyce needs `both_corner` in [montecarlo] (the PDK's Xyce models have no transistor mismatch)");
+                bail!(
+                    "process + mismatch Monte Carlo with Xyce needs `both_corner` in [montecarlo] (the PDK's Xyce models have no transistor mismatch)"
+                );
             }
             if has("mc_mm") {
                 return Ok(single("mc_mm"));
@@ -92,7 +108,10 @@ mod tests {
     use super::*;
 
     fn mc(mode: McMode) -> MonteCarlo {
-        MonteCarlo { mode, ..Default::default() }
+        MonteCarlo {
+            mode,
+            ..Default::default()
+        }
     }
     const IHP: &[&str] = &["mc", "tt", "tt_mm"];
 
@@ -100,13 +119,34 @@ mod tests {
     fn modes_pick_their_corners() {
         let has = |c: &str| IHP.contains(&c);
         let no = |_: &str, _: &str| false;
-        assert_eq!(plan(&mc(McMode::Process), "ngspice", false, has, no).unwrap(), Plan { label: "mc".into(), corners: vec!["mc".into()], extra: vec![] });
-        assert_eq!(plan(&mc(McMode::Mismatch), "ngspice", false, has, no).unwrap().corners, ["tt_mm"]);
+        assert_eq!(
+            plan(&mc(McMode::Process), "ngspice", false, has, no).unwrap(),
+            Plan {
+                label: "mc".into(),
+                corners: vec!["mc".into()],
+                extra: vec![]
+            }
+        );
+        assert_eq!(
+            plan(&mc(McMode::Mismatch), "ngspice", false, has, no)
+                .unwrap()
+                .corners,
+            ["tt_mm"]
+        );
         // IHP: no corner with both, unless the snapshot adds mc_mm.
         assert!(plan(&mc(McMode::Both), "ngspice", false, has, no).is_err());
         let with = |c: &str| has(c) || c == "mc_mm";
-        assert_eq!(plan(&mc(McMode::Both), "ngspice", false, with, no).unwrap().label, "mc_mm");
-        let m = MonteCarlo { mode: McMode::Both, both_corner: "x".into(), ..Default::default() };
+        assert_eq!(
+            plan(&mc(McMode::Both), "ngspice", false, with, no)
+                .unwrap()
+                .label,
+            "mc_mm"
+        );
+        let m = MonteCarlo {
+            mode: McMode::Both,
+            both_corner: "x".into(),
+            ..Default::default()
+        };
         assert!(plan(&m, "ngspice", false, has, no).is_err());
     }
 
@@ -115,7 +155,13 @@ mod tests {
         let has = |c: &str| IHP.contains(&c);
         let yes = |_: &str, w: &str| w == MISMATCH_SWITCH;
         let p = plan(&mc(McMode::Both), "ngspice", false, has, yes).unwrap();
-        assert_eq!((p.corners, p.extra), (vec!["mc".to_string()], vec![".param mc_mm_switch=1".to_string()]));
+        assert_eq!(
+            (p.corners, p.extra),
+            (
+                vec!["mc".to_string()],
+                vec![".param mc_mm_switch=1".to_string()]
+            )
+        );
     }
 
     #[test]
@@ -123,7 +169,11 @@ mod tests {
         let has = |c: &str| IHP.contains(&c);
         let no = |_: &str, _: &str| false;
         assert!(plan(&mc(McMode::Mismatch), "xyce", true, has, no).is_err());
-        let m = MonteCarlo { mode: McMode::Mismatch, mismatch_corner: "tt_mm".into(), ..Default::default() };
+        let m = MonteCarlo {
+            mode: McMode::Mismatch,
+            mismatch_corner: "tt_mm".into(),
+            ..Default::default()
+        };
         assert!(plan(&m, "xyce", true, has, no).is_ok());
         assert!(plan(&mc(McMode::Process), "xyce", true, has, no).is_ok());
     }

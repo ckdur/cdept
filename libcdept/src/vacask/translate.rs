@@ -76,7 +76,8 @@ pub fn expr(s: &str) -> Result<String, String> {
     while i < chars.len() {
         let c = chars[i];
         let prev_ident = i > 0 && (is_ident_char(chars[i - 1]) || chars[i - 1] == '$');
-        let starts_number = c.is_ascii_digit() || (c == '.' && chars.get(i + 1).is_some_and(|d| d.is_ascii_digit()));
+        let starts_number = c.is_ascii_digit()
+            || (c == '.' && chars.get(i + 1).is_some_and(|d| d.is_ascii_digit()));
         if starts_number && !prev_ident {
             let start = i;
             while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
@@ -96,7 +97,10 @@ pub fn expr(s: &str) -> Result<String, String> {
                     }
                     let digits: String = chars[k..j].iter().collect();
                     let sign = if chars[i + 1] == '-' { -1 } else { 1 };
-                    exp = sign * digits.parse::<i32>().map_err(|e| format!("bad exponent in '{s}': {e}"))?;
+                    exp = sign
+                        * digits
+                            .parse::<i32>()
+                            .map_err(|e| format!("bad exponent in '{s}': {e}"))?;
                     i = j;
                 }
             }
@@ -104,7 +108,10 @@ pub fn expr(s: &str) -> Result<String, String> {
             while i < chars.len() && chars[i].is_ascii_alphabetic() {
                 i += 1;
             }
-            let suffix: String = chars[suffix_start..i].iter().collect::<String>().to_lowercase();
+            let suffix: String = chars[suffix_start..i]
+                .iter()
+                .collect::<String>()
+                .to_lowercase();
             if suffix.starts_with("mil") {
                 out.push_str(&format!("({mant}e{exp}*25.4e-6)"));
                 continue;
@@ -195,13 +202,17 @@ pub fn words(line: &str) -> Vec<String> {
 fn assign(w: &str) -> Option<(&str, &str)> {
     let (n, v) = w.split_once('=')?;
     let ok = !n.is_empty()
-        && n.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && n.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && n.chars().all(|c| is_ident_char(c) || c == '.' || c == '$');
     ok.then_some((n, v))
 }
 
 fn value_like(w: &str) -> bool {
-    w.chars().next().is_some_and(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | '{' | '\'' | '('))
+    w.chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | '{' | '\'' | '('))
 }
 
 /// Logical lines of a netlist: continuation lines joined, comments removed. The first
@@ -275,20 +286,35 @@ impl Ctx {
     }
 
     fn use_model(&mut self, model: &str, inst: &str) {
-        self.t.models_used.entry(model.to_string()).or_insert_with(|| inst.to_string());
+        self.t
+            .models_used
+            .entry(model.to_string())
+            .or_insert_with(|| inst.to_string());
     }
 }
 
 /// Params of an instance as `name=value` text: `m` is `$mfactor`, names lower case.
-fn device_params(cx: &Ctx, kv: &[(String, String)], drop: &[&str], warn: &mut Vec<String>, inst: &str) -> Result<String> {
+fn device_params(
+    cx: &Ctx,
+    kv: &[(String, String)],
+    drop: &[&str],
+    warn: &mut Vec<String>,
+    inst: &str,
+) -> Result<String> {
     let mut out = String::new();
     for (k, v) in kv {
         let k = k.to_lowercase();
         if drop.contains(&k.as_str()) {
-            warn.push(format!("{inst}: '{k}' dropped (VACASK sets initial conditions another way)"));
+            warn.push(format!(
+                "{inst}: '{k}' dropped (VACASK sets initial conditions another way)"
+            ));
             continue;
         }
-        let key = if k == "m" || k == "_mfactor" { "$mfactor".to_string() } else { k };
+        let key = if k == "m" || k == "_mfactor" {
+            "$mfactor".to_string()
+        } else {
+            k
+        };
         out.push_str(&format!(" {key}={}", cx.e(v)?));
     }
     Ok(out)
@@ -345,12 +371,20 @@ fn source(cx: &mut Ctx, w: &[String], line: &str) -> Result<String> {
     if w.len() < 3 {
         return cx.fail(format!("source '{}' needs two nodes", w[0]));
     }
-    let master = if w[0].to_lowercase().starts_with('v') { "vsource" } else { "isource" };
+    let master = if w[0].to_lowercase().starts_with('v') {
+        "vsource"
+    } else {
+        "isource"
+    };
     let nodes = format!("{} {}", name(&w[1]), name(&w[2]));
     // Everything after the nodes.
     let mut rest = line.trim_start().to_string();
     for _ in 0..3 {
-        rest = rest.trim_start().split_once(char::is_whitespace).map(|x| x.1.to_string()).unwrap_or_default();
+        rest = rest
+            .trim_start()
+            .split_once(char::is_whitespace)
+            .map(|x| x.1.to_string())
+            .unwrap_or_default();
     }
     let mut params: Vec<(String, String)> = vec![];
     let (func, others) = match source_function(&rest) {
@@ -394,7 +428,10 @@ fn source(cx: &mut Ctx, w: &[String], line: &str) -> Result<String> {
         } else if value_like(&tokens[i]) && dc.is_none() {
             dc = Some(cx.e(&tokens[i])?);
         } else {
-            return cx.fail(format!("cannot read '{}' in the source '{}'", tokens[i], w[0]));
+            return cx.fail(format!(
+                "cannot read '{}' in the source '{}'",
+                tokens[i], w[0]
+            ));
         }
         i += 1;
     }
@@ -402,9 +439,16 @@ fn source(cx: &mut Ctx, w: &[String], line: &str) -> Result<String> {
     if let Some((kw, args)) = func {
         let a: Vec<String> = args.iter().map(|x| cx.e(x)).collect::<Result<_>>()?;
         let get = |i: usize, default: Option<&str>| -> Result<String> {
-            a.get(i).cloned().or_else(|| default.map(String::from)).ok_or_else(|| {
-                eyre::eyre!("netlist line {}: {kw}(...) needs at least {} values", cx.line, i + 1)
-            })
+            a.get(i)
+                .cloned()
+                .or_else(|| default.map(String::from))
+                .ok_or_else(|| {
+                    eyre::eyre!(
+                        "netlist line {}: {kw}(...) needs at least {} values",
+                        cx.line,
+                        i + 1
+                    )
+                })
         };
         match kw.as_str() {
             "pulse" => {
@@ -480,7 +524,10 @@ fn source(cx: &mut Ctx, w: &[String], line: &str) -> Result<String> {
 }
 
 /// SPICE model types to VACASK modules.
-fn model_module(kind: &str, level: Option<f64>) -> Option<(&'static str, &'static str, Option<&'static str>)> {
+fn model_module(
+    kind: &str,
+    level: Option<f64>,
+) -> Option<(&'static str, &'static str, Option<&'static str>)> {
     // (osdi file, module, type parameter)
     Some(match (kind, level.map(|l| l as i64)) {
         ("d", _) => ("spice/diode.osdi", "sp_diode", None),
@@ -532,7 +579,15 @@ fn model_card(cx: &mut Ctx, line: &str) -> Result<()> {
         params.push_str(&format!(" {k}={}", cx.e(v)?));
     }
     cx.t.models_defined.insert(mname.clone());
-    cx.models.push(format!("model {} {module}{}", name(&mname), if params.is_empty() { String::new() } else { format!(" ( {} )", params.trim_start()) }));
+    cx.models.push(format!(
+        "model {} {module}{}",
+        name(&mname),
+        if params.is_empty() {
+            String::new()
+        } else {
+            format!(" ( {} )", params.trim_start())
+        }
+    ));
     Ok(())
 }
 
@@ -600,11 +655,25 @@ fn element(cx: &mut Ctx, line: &str) -> Result<()> {
         }
         'e' | 'g' => {
             need(6, cx)?;
-            let (master, p) = if first == 'e' { ("vcvs", "gain") } else { ("vccs", "gm") };
+            let (master, p) = if first == 'e' {
+                ("vcvs", "gain")
+            } else {
+                ("vccs", "gm")
+            };
             if w[5].contains('=') || !value_like(&w[5]) {
-                return cx.fail(format!("'{}': only the linear form (four nodes and a gain) is supported", w[0]));
+                return cx.fail(format!(
+                    "'{}': only the linear form (four nodes and a gain) is supported",
+                    w[0]
+                ));
             }
-            format!("{inst} ({} {} {} {}) {master} {p}={}", name(&w[1]), name(&w[2]), name(&w[3]), name(&w[4]), cx.e(&w[5])?)
+            format!(
+                "{inst} ({} {} {} {}) {master} {p}={}",
+                name(&w[1]),
+                name(&w[2]),
+                name(&w[3]),
+                name(&w[4]),
+                cx.e(&w[5])?
+            )
         }
         'd' => {
             need(4, cx)?;
@@ -639,7 +708,9 @@ fn element(cx: &mut Ctx, line: &str) -> Result<()> {
             // c b e [s] model [area]
             let (nodes, model, area): (Vec<String>, String, Option<String>) = match pos.len() {
                 4 => (pos[..3].to_vec(), pos[3].clone(), None),
-                5 if value_like(&pos[4]) => (pos[..3].to_vec(), pos[3].clone(), Some(pos[4].clone())),
+                5 if value_like(&pos[4]) => {
+                    (pos[..3].to_vec(), pos[3].clone(), Some(pos[4].clone()))
+                }
                 5 => (pos[..4].to_vec(), pos[4].clone(), None),
                 6 => (pos[..4].to_vec(), pos[4].clone(), Some(pos[5].clone())),
                 _ => return cx.fail(format!("cannot read the nodes of '{}'", w[0])),
@@ -668,7 +739,9 @@ fn element(cx: &mut Ctx, line: &str) -> Result<()> {
             let nodes: Vec<String> = nodes.iter().map(|n| name(n)).collect();
             let mut text = format!("{inst} ({}) {}", nodes.join(" "), name(sub));
             if first == 'x' {
-                cx.t.subckts_used.entry(sub.clone()).or_insert_with(|| w[0].clone());
+                cx.t.subckts_used
+                    .entry(sub.clone())
+                    .or_insert_with(|| w[0].clone());
                 for (k, v) in &kv {
                     text.push_str(&format!(" {k}={}", cx.e(v)?));
                 }
@@ -680,7 +753,9 @@ fn element(cx: &mut Ctx, line: &str) -> Result<()> {
         }
         other => {
             let why = match other {
-                'b' => " (a behavioural source has no VACASK equivalent; run this testbench with ngspice)",
+                'b' => {
+                    " (a behavioural source has no VACASK equivalent; run this testbench with ngspice)"
+                }
                 'f' | 'h' => " (current-controlled sources are not translated)",
                 _ => "",
             };
@@ -709,7 +784,10 @@ fn dot_card(cx: &mut Ctx, line: &str, control: &mut bool) -> Result<bool> {
         ".end" => return Ok(true),
         ".control" => {
             *control = true;
-            cx.t.warnings.push(format!("line {}: a .control block is not run by VACASK and is dropped", cx.line));
+            cx.t.warnings.push(format!(
+                "line {}: a .control block is not run by VACASK and is dropped",
+                cx.line
+            ));
         }
         ".subckt" => {
             if cx.sub.is_some() {
@@ -730,7 +808,8 @@ fn dot_card(cx: &mut Ctx, line: &str, control: &mut bool) -> Result<bool> {
                 }
             }
             cx.t.subckts_defined.insert(w[1].clone());
-            cx.subckts.push(format!("subckt {} ({})", name(&w[1]), pins.join(" ")));
+            cx.subckts
+                .push(format!("subckt {} ({})", name(&w[1]), pins.join(" ")));
             for (n, v) in params {
                 let v = cx.e(&v)?;
                 cx.subckts.push(format!("  parameters {n}={v}"));
@@ -771,14 +850,23 @@ fn dot_card(cx: &mut Ctx, line: &str, control: &mut bool) -> Result<bool> {
             ));
         }
         ".ic" | ".nodeset" => {
-            return cx.fail(format!("{card} is not supported by the VACASK translator yet"));
+            return cx.fail(format!(
+                "{card} is not supported by the VACASK translator yet"
+            ));
         }
-        ".tran" | ".ac" | ".dc" | ".op" | ".noise" | ".tf" | ".pz" | ".sens" | ".disto" | ".meas" | ".measure"
-        | ".save" | ".print" | ".plot" | ".probe" | ".four" | ".options" | ".option" | ".temp" | ".title" | ".width"
-        | ".csparam" | ".endc" => {
-            cx.t.warnings.push(format!("line {}: {card} is not translated (the testbench setup says what to run)", cx.line));
+        ".tran" | ".ac" | ".dc" | ".op" | ".noise" | ".tf" | ".pz" | ".sens" | ".disto"
+        | ".meas" | ".measure" | ".save" | ".print" | ".plot" | ".probe" | ".four" | ".options"
+        | ".option" | ".temp" | ".title" | ".width" | ".csparam" | ".endc" => {
+            cx.t.warnings.push(format!(
+                "line {}: {card} is not translated (the testbench setup says what to run)",
+                cx.line
+            ));
         }
-        other => return cx.fail(format!("'{other}' is not supported by the VACASK translator")),
+        other => {
+            return cx.fail(format!(
+                "'{other}' is not supported by the VACASK translator"
+            ));
+        }
     }
     Ok(false)
 }
@@ -865,8 +953,14 @@ mod tests {
 
     #[test]
     fn words_keep_groups_and_join_equals() {
-        assert_eq!(words("m1 a b w = 1u l= 0.13u x={a + b}"), ["m1", "a", "b", "w=1u", "l=0.13u", "x={a + b}"]);
-        assert_eq!(words("v1 a 0 pulse(0 1 1n)"), ["v1", "a", "0", "pulse(0 1 1n)"]);
+        assert_eq!(
+            words("m1 a b w = 1u l= 0.13u x={a + b}"),
+            ["m1", "a", "b", "w=1u", "l=0.13u", "x={a + b}"]
+        );
+        assert_eq!(
+            words("v1 a 0 pulse(0 1 1n)"),
+            ["v1", "a", "0", "pulse(0 1 1n)"]
+        );
     }
 
     const TB: &str = "** sch_path: /x/tb.sch\n**.subckt tb_inv\nx1 in out VDD 0 inv\nVdd VDD 0 {vdd}\n\
@@ -879,7 +973,10 @@ XM2 VDD A Y VDD sg13_lv_pmos w=1.5u l=0.13u ng=1 m=1 mm_ok=1\nXM1 Y A VSS VSS sg
         let text = &t.text;
         assert!(text.contains("global VDD\n"), "{text}");
         assert!(text.contains("subckt inv (A Y VDD VSS)\n"), "{text}");
-        assert!(text.contains("  XM2 (VDD A Y VDD) sg13_lv_pmos w=1.5e-6 l=0.13e-6 ng=1 m=1 mm_ok=1\n"), "{text}");
+        assert!(
+            text.contains("  XM2 (VDD A Y VDD) sg13_lv_pmos w=1.5e-6 l=0.13e-6 ng=1 m=1 mm_ok=1\n"),
+            "{text}"
+        );
         assert!(text.contains("\nx1 (in out VDD 0) inv\n"), "{text}");
         assert!(text.contains("Vdd (VDD 0) vsource dc=vdd\n"), "{text}");
         assert!(
@@ -889,7 +986,10 @@ XM2 VDD A Y VDD sg13_lv_pmos w=1.5u l=0.13u ng=1 m=1 mm_ok=1\nXM1 Y A VSS VSS sg
         assert!(text.contains("C1 (out 0) cdept_c c=10e-15\n"), "{text}");
         assert!(text.contains("model cdept_c sp_capacitor\n"), "{text}");
         assert!(t.loads.contains("spice/capacitor.osdi"));
-        assert_eq!(t.subckts_used.keys().cloned().collect::<Vec<_>>(), ["inv", "sg13_lv_nmos", "sg13_lv_pmos"]);
+        assert_eq!(
+            t.subckts_used.keys().cloned().collect::<Vec<_>>(),
+            ["inv", "sg13_lv_nmos", "sg13_lv_pmos"]
+        );
         assert!(t.subckts_defined.contains("inv"));
         // The subcircuit comes before the instance that uses it.
         assert!(text.find("subckt inv").unwrap() < text.find("x1 (").unwrap());
@@ -906,20 +1006,38 @@ Q1 c b e npn1\n.param w1=1u w2={w1*2}\n.model npn1 npn (bf=100)\n.end\n";
         assert!(x.contains("R1 (a b) cdept_r r=1e3\n"), "{x}");
         assert!(x.contains("R2 (a b) rmod w=1e-6 l=2e-6\n"), "{x}");
         assert!(x.contains("L1 (a b) cdept_l l=10e-9\n"), "{x}");
-        assert!(t.warnings.iter().any(|w| w.contains("'ic' dropped")), "{:?}", t.warnings);
+        assert!(
+            t.warnings.iter().any(|w| w.contains("'ic' dropped")),
+            "{:?}",
+            t.warnings
+        );
         assert!(x.contains("C2 (a 0) cdept_c c=c0 $mfactor=2\n"), "{x}");
-        assert!(x.contains("V1 (a 0) vsource dc=1 mag=1 type=\"sine\" sinedc=0 ampl=1 freq=1e6\n"), "{x}");
-        assert!(x.contains("I1 (a 0) isource dc=0 type=\"pwl\" wave=[0 0 1e-9 1e-3 2e-9 0]\n"), "{x}");
+        assert!(
+            x.contains("V1 (a 0) vsource dc=1 mag=1 type=\"sine\" sinedc=0 ampl=1 freq=1e6\n"),
+            "{x}"
+        );
+        assert!(
+            x.contains("I1 (a 0) isource dc=0 type=\"pwl\" wave=[0 0 1e-9 1e-3 2e-9 0]\n"),
+            "{x}"
+        );
         assert!(x.contains("E1 (o 0 a 0) vcvs gain=2\n"), "{x}");
         assert!(x.contains("model dm sp_diode ( is=1e-14 rs=10 )\n"), "{x}");
-        assert!(x.contains("model nm sp_mos1 ( type=1 vto=0.5 kp=1e-4 )\n"), "{x}");
+        assert!(
+            x.contains("model nm sp_mos1 ( type=1 vto=0.5 kp=1e-4 )\n"),
+            "{x}"
+        );
         assert!(x.contains("D1 (a b) dm area=2\n"), "{x}");
         assert!(x.contains("M1 (d g s b) nm w=10e-6 l=1e-6\n"), "{x}");
         assert!(x.contains("Q1 (c b e 0) npn1\n"), "{x}");
         assert!(x.contains("parameters w2=w1*2\n"), "{x}");
         // npn1 is defined (after its use); rmod is not.
         assert_eq!(t.models_used.keys().cloned().collect::<Vec<_>>(), ["rmod"]);
-        for f in ["spice/diode.osdi", "spice/mos1.osdi", "spice/bjt.osdi", "spice/inductor.osdi"] {
+        for f in [
+            "spice/diode.osdi",
+            "spice/mos1.osdi",
+            "spice/bjt.osdi",
+            "spice/inductor.osdi",
+        ] {
             assert!(t.loads.contains(f), "{f}");
         }
     }

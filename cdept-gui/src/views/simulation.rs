@@ -50,7 +50,11 @@ pub(crate) fn testbench_of(project: &Project, selection: &Selection) -> Option<T
         Some(_) => return None,
         None => cell.entries.iter().find(|e| is_testbench(e))?.name.clone(),
     };
-    Some(Target { library: library.name.clone(), cell: cell.name.clone(), view })
+    Some(Target {
+        library: library.name.clone(),
+        cell: cell.name.clone(),
+        view,
+    })
 }
 
 /// Is this view a testbench (has a `setup.toml`)?
@@ -82,7 +86,10 @@ struct AnalysisForm {
 
 impl AnalysisForm {
     fn get(&self, name: &str) -> &str {
-        self.fields.iter().find(|(n, _)| n == name).map_or("", |(_, v)| v.as_str())
+        self.fields
+            .iter()
+            .find(|(n, _)| n == name)
+            .map_or("", |(_, v)| v.as_str())
     }
 
     fn set(&mut self, name: &str, value: String) {
@@ -126,12 +133,20 @@ pub(super) struct Form {
 }
 
 fn lines(text: &str) -> Vec<String> {
-    text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect()
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 fn number(value: &str) -> String {
     let n: f64 = value.parse().unwrap_or(0.0);
-    if n.fract() == 0.0 && n.abs() < 1e15 { format!("{}", n as i64) } else { format!("{n}") }
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{}", n as i64)
+    } else {
+        format!("{n}")
+    }
 }
 
 impl Form {
@@ -148,7 +163,12 @@ impl Form {
             match table.get(k) {
                 Some(toml::Value::Table(t)) => t
                     .iter()
-                    .map(|(n, v)| (n.clone(), v.as_str().map_or_else(|| v.to_string(), String::from)))
+                    .map(|(n, v)| {
+                        (
+                            n.clone(),
+                            v.as_str().map_or_else(|| v.to_string(), String::from),
+                        )
+                    })
                     .collect(),
                 _ => Vec::new(),
             }
@@ -170,12 +190,21 @@ impl Form {
         let inherited = sweeps::inherited(&setup.template, &setup.template_args);
         Ok(Form {
             base: setup.clone(),
-            simulator: if setup.simulator.is_empty() { "ngspice".into() } else { setup.simulator.clone() },
+            simulator: if setup.simulator.is_empty() {
+                "ngspice".into()
+            } else {
+                setup.simulator.clone()
+            },
             models: setup.models.clone(),
             schematic: setup.schematic.clone(),
             schematic_view: setup.schematic_view.clone(),
             corners: setup.corners.clone(),
-            temperatures: setup.temperatures.iter().map(|t| number(&t.to_string())).collect::<Vec<_>>().join(", "),
+            temperatures: setup
+                .temperatures
+                .iter()
+                .map(|t| number(&t.to_string()))
+                .collect::<Vec<_>>()
+                .join(", "),
             variables: pairs("variables"),
             options: pairs("options"),
             save: setup.save.join("\n"),
@@ -195,12 +224,33 @@ impl Form {
             sweeps: sweeps::own_rows(&setup.sweeps, &inherited),
             mc: setup.montecarlo.is_some() && setup.montecarlo != inherited.mc,
             inherited,
-            mc_runs: setup.montecarlo.as_ref().map_or("10".into(), |m| m.runs.to_string()),
-            mc_seed: setup.montecarlo.as_ref().map_or("1".into(), |m| m.seed.to_string()),
-            mc_mode: setup.montecarlo.as_ref().map_or(McMode::Process, |m| m.mode),
-            mc_corner: setup.montecarlo.as_ref().map(|m| m.corner.clone()).unwrap_or_default(),
-            mc_mismatch_corner: setup.montecarlo.as_ref().map(|m| m.mismatch_corner.clone()).unwrap_or_default(),
-            mc_both_corner: setup.montecarlo.as_ref().map(|m| m.both_corner.clone()).unwrap_or_default(),
+            mc_runs: setup
+                .montecarlo
+                .as_ref()
+                .map_or("10".into(), |m| m.runs.to_string()),
+            mc_seed: setup
+                .montecarlo
+                .as_ref()
+                .map_or("1".into(), |m| m.seed.to_string()),
+            mc_mode: setup
+                .montecarlo
+                .as_ref()
+                .map_or(McMode::Process, |m| m.mode),
+            mc_corner: setup
+                .montecarlo
+                .as_ref()
+                .map(|m| m.corner.clone())
+                .unwrap_or_default(),
+            mc_mismatch_corner: setup
+                .montecarlo
+                .as_ref()
+                .map(|m| m.mismatch_corner.clone())
+                .unwrap_or_default(),
+            mc_both_corner: setup
+                .montecarlo
+                .as_ref()
+                .map(|m| m.both_corner.clone())
+                .unwrap_or_default(),
         })
     }
 
@@ -212,14 +262,30 @@ impl Form {
             table.insert(key.to_string(), value);
         };
         let string = |s: &str| Value::String(s.trim().to_string());
-        set("simulator", string(if self.simulator == "ngspice" { "" } else { &self.simulator }));
+        set(
+            "simulator",
+            string(if self.simulator == "ngspice" {
+                ""
+            } else {
+                &self.simulator
+            }),
+        );
         set("models", string(&self.models));
         set("schematic", string(&self.schematic));
         set("schematic_view", string(&self.schematic_view));
-        set("corners", Value::Array(self.corners.iter().map(|c| string(c)).collect()));
+        set(
+            "corners",
+            Value::Array(self.corners.iter().map(|c| string(c)).collect()),
+        );
         let mut temps = Vec::new();
-        for word in self.temperatures.split([',', ' ']).filter(|w| !w.is_empty()) {
-            let t: f64 = word.parse().map_err(|_| format!("temperature '{word}' is not a number"))?;
+        for word in self
+            .temperatures
+            .split([',', ' '])
+            .filter(|w| !w.is_empty())
+        {
+            let t: f64 = word
+                .parse()
+                .map_err(|_| format!("temperature '{word}' is not a number"))?;
             temps.push(Value::Float(t));
         }
         set("temperatures", Value::Array(temps));
@@ -234,8 +300,19 @@ impl Form {
         };
         set("variables", map(&self.variables));
         set("options", map(&self.options));
-        set("save", Value::Array(lines(&self.save).into_iter().map(Value::String).collect()));
-        set("measures", Value::Array(lines(&self.measures).into_iter().map(Value::String).collect()));
+        set(
+            "save",
+            Value::Array(lines(&self.save).into_iter().map(Value::String).collect()),
+        );
+        set(
+            "measures",
+            Value::Array(
+                lines(&self.measures)
+                    .into_iter()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
         let mut analyses = Vec::new();
         for a in &self.analyses {
             let mut t = toml::Table::new();
@@ -246,7 +323,11 @@ impl Form {
                     continue;
                 }
                 let v = if name == "points" {
-                    Value::Integer(value.parse().map_err(|_| format!("points '{value}' is not a whole number"))?)
+                    Value::Integer(
+                        value
+                            .parse()
+                            .map_err(|_| format!("points '{value}' is not a whole number"))?,
+                    )
                 } else {
                     Value::String(value.to_string())
                 };
@@ -262,7 +343,9 @@ impl Form {
             for (key, value) in [("min", min), ("max", max)] {
                 let value = value.trim();
                 if !value.is_empty() {
-                    let v: f64 = value.parse().map_err(|_| format!("spec '{name}': '{value}' is not a number"))?;
+                    let v: f64 = value
+                        .parse()
+                        .map_err(|_| format!("spec '{name}': '{value}' is not a number"))?;
                     t.insert(key.into(), Value::Float(v));
                 }
             }
@@ -271,7 +354,10 @@ impl Form {
         set("spec", Value::Array(specs));
         let own = sweeps::own_sweeps(&self.sweeps)?;
         let all = sweeps::overlay(&self.inherited.sweeps, &own);
-        set("sweep", Value::Array(all.iter().map(sweeps::sweep_value).collect()));
+        set(
+            "sweep",
+            Value::Array(all.iter().map(sweeps::sweep_value).collect()),
+        );
         match self.mc_table()? {
             Some(t) => set("montecarlo", Value::Table(t)),
             None => {
@@ -404,7 +490,10 @@ pub struct SimulationView {
 
 impl SimulationView {
     fn path(project: &Project, target: &Target) -> Option<PathBuf> {
-        let entry = project.library(&target.library)?.cell(&target.cell)?.entry(&target.view)?;
+        let entry = project
+            .library(&target.library)?
+            .cell(&target.cell)?
+            .entry(&target.view)?;
         Some(entry.path.join(sim::setup::SETUP_FILE))
     }
 
@@ -429,7 +518,8 @@ impl SimulationView {
         let loaded = Self::path(project, &target)
             .ok_or_else(|| format!("{} is not a view of the project", target.text()))
             .and_then(|file| {
-                let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+                let text = std::fs::read_to_string(&file)
+                    .map_err(|e| format!("{}: {e}", file.display()))?;
                 let setup = super::testlib::parse(&text).map_err(|e| format!("{e:#}"))?;
                 Ok((text, Form::of(&setup)?))
             });
@@ -447,7 +537,12 @@ impl SimulationView {
 
     /// The N of the "Run N MC" box, when it is a number above 0.
     fn now_runs_value(&self) -> Result<usize, ()> {
-        self.now_runs.trim().parse::<usize>().ok().filter(|n| *n > 0).ok_or(())
+        self.now_runs
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|n| *n > 0)
+            .ok_or(())
     }
 
     pub(crate) fn target(&self) -> Option<&Target> {
@@ -489,7 +584,9 @@ impl SimulationView {
             (Some(t), Some(f)) => (t.clone(), f),
             _ => return Err("no testbench is open".into()),
         };
-        let text = form.to_text().inspect_err(|e| self.problem = Some(e.clone()))?;
+        let text = form
+            .to_text()
+            .inspect_err(|e| self.problem = Some(e.clone()))?;
         let file = Self::path(project, &target).ok_or("the view is gone")?;
         // The file as it is, with only the keys the form changed: comments stay.
         let out = match std::fs::read_to_string(&file) {
@@ -535,7 +632,12 @@ impl SimulationView {
     }
 
     /// [`Self::start`] with Monte Carlo overrides ([`Now`]).
-    pub(crate) fn start_with(&mut self, project: &Project, only: Vec<String>, now: Now) -> Result<(), String> {
+    pub(crate) fn start_with(
+        &mut self,
+        project: &Project,
+        only: Vec<String>,
+        now: Now,
+    ) -> Result<(), String> {
         if self.state() == RunState::Running {
             return Err("a simulation is running".into());
         }
@@ -543,7 +645,11 @@ impl SimulationView {
             self.save(project)?;
         }
         let target = self.target.clone().ok_or("no testbench is open")?;
-        let setup = self.form.as_ref().ok_or("the setup is not valid")?.setup()?;
+        let setup = self
+            .form
+            .as_ref()
+            .ok_or("the setup is not valid")?
+            .setup()?;
         let queue = self.queue();
         self.results.clear();
         self.stats = None;
@@ -635,7 +741,11 @@ fn tally(rows: &[PointRow]) -> (usize, usize) {
     for r in rows {
         bad += r.error.is_some() as usize;
         for s in &r.specs {
-            if s.verdict == Verdict::Pass { pass += 1 } else { bad += 1 }
+            if s.verdict == Verdict::Pass {
+                pass += 1
+            } else {
+                bad += 1
+            }
         }
     }
     (pass, bad)
@@ -651,9 +761,13 @@ fn run_target(
     queue: Arc<Queue>,
     cancel: Arc<AtomicBool>,
 ) -> Result<Vec<PointRow>, String> {
-    let tb = sim::open(project, &target.library, &target.cell, &target.view).map_err(|e| format!("{e:#}"))?;
+    let tb = sim::open(project, &target.library, &target.cell, &target.view)
+        .map_err(|e| format!("{e:#}"))?;
     // What the form says, which is what was just saved.
-    let tb = sim::Testbench { setup: setup.clone(), ..tb };
+    let tb = sim::Testbench {
+        setup: setup.clone(),
+        ..tb
+    };
     let simulator = Simulator::for_setup(&tb.setup).ok_or_else(|| {
         format!(
             "the simulator '{}' was not found: put it on PATH or set CDEPT_NGSPICE / CDEPT_XYCE",
@@ -667,7 +781,8 @@ fn run_target(
         no_mc: now.no_mc,
         ..Default::default()
     };
-    let results = sim::run_testbench_with(project, &tb, &simulator, only, &options).map_err(|e| format!("{e:#}"))?;
+    let results = sim::run_testbench_with(project, &tb, &simulator, only, &options)
+        .map_err(|e| format!("{e:#}"))?;
     let base = sim::runs_dir(project, &target.library, &target.cell, &target.view);
     Ok(results
         .into_iter()
@@ -675,7 +790,11 @@ fn run_target(
             name: r.point.name(),
             dir: base.join(r.point.name()),
             error: r.outcome.as_ref().err().map(|e| format!("{e:#}")),
-            measures: r.outcome.as_ref().map(|o| o.measures.iter().map(|(k, v)| (k.clone(), *v)).collect()).unwrap_or_default(),
+            measures: r
+                .outcome
+                .as_ref()
+                .map(|o| o.measures.iter().map(|(k, v)| (k.clone(), *v)).collect())
+                .unwrap_or_default(),
             specs: r.specs,
             record: r.run,
         })
@@ -733,7 +852,10 @@ fn state_word(s: JobState) -> &'static str {
 fn tail(file: &Path, n: usize) -> Vec<String> {
     let text = std::fs::read_to_string(file).unwrap_or_default();
     let all: Vec<&str> = text.lines().collect();
-    all[all.len().saturating_sub(n)..].iter().map(|l| l.to_string()).collect()
+    all[all.len().saturating_sub(n)..]
+        .iter()
+        .map(|l| l.to_string())
+        .collect()
 }
 
 fn engineering(v: f64) -> String {
@@ -753,8 +875,16 @@ fn list_editor(ui: &mut Ui, id: &str, rows: &mut Vec<(String, String)>, names: (
     let mut remove = None;
     Grid::new(id).num_columns(3).show(ui, |ui| {
         for (i, (n, v)) in rows.iter_mut().enumerate() {
-            ui.add(TextEdit::singleline(n).desired_width(120.0).hint_text(names.0));
-            ui.add(TextEdit::singleline(v).desired_width(160.0).hint_text(names.1));
+            ui.add(
+                TextEdit::singleline(n)
+                    .desired_width(120.0)
+                    .hint_text(names.0),
+            );
+            ui.add(
+                TextEdit::singleline(v)
+                    .desired_width(160.0)
+                    .hint_text(names.1),
+            );
             if ui.small_button("✖").on_hover_text("Remove").clicked() {
                 remove = Some(i);
             }
@@ -782,63 +912,100 @@ impl SimulationView {
             .and_then(|m| m.sets.get(&set_name))
             .map(|s| s.corners.keys().cloned().collect())
             .unwrap_or_default();
-        let sets: Vec<String> = tech.map(|m| m.sets.keys().cloned().collect()).unwrap_or_default();
+        let sets: Vec<String> = tech
+            .map(|m| m.sets.keys().cloned().collect())
+            .unwrap_or_default();
 
-        Grid::new("sim-general").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-            ui.label("Simulator");
-            ComboBox::from_id_salt("sim-simulator").selected_text(&form.simulator).show_ui(ui, |ui| {
-                for name in ["ngspice", "xyce", "vacask"] {
-                    ui.selectable_value(&mut form.simulator, name.to_string(), name);
-                }
-            });
-            ui.end_row();
-            ui.label("Model set");
-            ComboBox::from_id_salt("sim-models")
-                .selected_text(if form.models.is_empty() { format!("{set_name} (default)") } else { form.models.clone() })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut form.models, String::new(), "technology default");
-                    for name in &sets {
-                        ui.selectable_value(&mut form.models, name.clone(), name);
-                    }
+        Grid::new("sim-general")
+            .num_columns(2)
+            .spacing([8.0, 4.0])
+            .show(ui, |ui| {
+                ui.label("Simulator");
+                ComboBox::from_id_salt("sim-simulator")
+                    .selected_text(&form.simulator)
+                    .show_ui(ui, |ui| {
+                        for name in ["ngspice", "xyce", "vacask"] {
+                            ui.selectable_value(&mut form.simulator, name.to_string(), name);
+                        }
+                    });
+                ui.end_row();
+                ui.label("Model set");
+                ComboBox::from_id_salt("sim-models")
+                    .selected_text(if form.models.is_empty() {
+                        format!("{set_name} (default)")
+                    } else {
+                        form.models.clone()
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut form.models, String::new(), "technology default");
+                        for name in &sets {
+                            ui.selectable_value(&mut form.models, name.clone(), name);
+                        }
+                    });
+                ui.end_row();
+                ui.label("Schematic");
+                ui.horizontal(|ui| {
+                    ui.add(
+                        TextEdit::singleline(&mut form.schematic)
+                            .desired_width(160.0)
+                            .hint_text("this cell"),
+                    );
+                    ui.add(
+                        TextEdit::singleline(&mut form.schematic_view)
+                            .desired_width(100.0)
+                            .hint_text("view"),
+                    );
                 });
-            ui.end_row();
-            ui.label("Schematic");
-            ui.horizontal(|ui| {
-                ui.add(TextEdit::singleline(&mut form.schematic).desired_width(160.0).hint_text("this cell"));
-                ui.add(TextEdit::singleline(&mut form.schematic_view).desired_width(100.0).hint_text("view"));
-            });
-            ui.end_row();
-            ui.label("Corners").on_hover_text("From the technology snapshot (tech.toml)");
-            ui.horizontal_wrapped(|ui| {
-                if available.is_empty() {
-                    ui.weak("the technology snapshot has no corners for this model set");
-                }
-                for corner in &available {
-                    let mut on = form.corners.contains(corner);
-                    if ui.checkbox(&mut on, corner).changed() {
-                        if on {
-                            form.corners.push(corner.clone());
-                            form.corners.sort_by_key(|c| available.iter().position(|a| a == c).unwrap_or(usize::MAX));
-                        } else {
-                            form.corners.retain(|c| c != corner);
+                ui.end_row();
+                ui.label("Corners")
+                    .on_hover_text("From the technology snapshot (tech.toml)");
+                ui.horizontal_wrapped(|ui| {
+                    if available.is_empty() {
+                        ui.weak("the technology snapshot has no corners for this model set");
+                    }
+                    for corner in &available {
+                        let mut on = form.corners.contains(corner);
+                        if ui.checkbox(&mut on, corner).changed() {
+                            if on {
+                                form.corners.push(corner.clone());
+                                form.corners.sort_by_key(|c| {
+                                    available.iter().position(|a| a == c).unwrap_or(usize::MAX)
+                                });
+                            } else {
+                                form.corners.retain(|c| c != corner);
+                            }
                         }
                     }
-                }
-                // A corner the technology does not have: shown so it can be removed.
-                let unknown: Vec<String> = form.corners.iter().filter(|c| !available.contains(c)).cloned().collect();
-                for corner in unknown {
-                    let mut on = true;
-                    let text = RichText::new(format!("{corner} ?")).color(ui.visuals().warn_fg_color);
-                    if ui.checkbox(&mut on, text).on_hover_text("Not a corner of this model set").changed() {
-                        form.corners.retain(|c| c != &corner);
+                    // A corner the technology does not have: shown so it can be removed.
+                    let unknown: Vec<String> = form
+                        .corners
+                        .iter()
+                        .filter(|c| !available.contains(c))
+                        .cloned()
+                        .collect();
+                    for corner in unknown {
+                        let mut on = true;
+                        let text =
+                            RichText::new(format!("{corner} ?")).color(ui.visuals().warn_fg_color);
+                        if ui
+                            .checkbox(&mut on, text)
+                            .on_hover_text("Not a corner of this model set")
+                            .changed()
+                        {
+                            form.corners.retain(|c| c != &corner);
+                        }
                     }
-                }
+                });
+                ui.end_row();
+                ui.label("Temperatures")
+                    .on_hover_text("°C, one run each; empty: the simulator's own");
+                ui.add(
+                    TextEdit::singleline(&mut form.temperatures)
+                        .desired_width(200.0)
+                        .hint_text("-40, 27, 125"),
+                );
+                ui.end_row();
             });
-            ui.end_row();
-            ui.label("Temperatures").on_hover_text("°C, one run each; empty: the simulator's own");
-            ui.add(TextEdit::singleline(&mut form.temperatures).desired_width(200.0).hint_text("-40, 27, 125"));
-            ui.end_row();
-        });
 
         ui.add_space(4.0);
         ui.strong("Variables  (.param)");
@@ -852,18 +1019,27 @@ impl SimulationView {
         for (i, a) in form.analyses.iter_mut().enumerate() {
             ui.horizontal_wrapped(|ui| {
                 let before = a.kind.clone();
-                ComboBox::from_id_salt(("sim-an", i)).width(70.0).selected_text(&a.kind).show_ui(ui, |ui| {
-                    for kind in ANALYSIS_KINDS {
-                        ui.selectable_value(&mut a.kind, kind.to_string(), kind);
-                    }
-                });
+                ComboBox::from_id_salt(("sim-an", i))
+                    .width(70.0)
+                    .selected_text(&a.kind)
+                    .show_ui(ui, |ui| {
+                        for kind in ANALYSIS_KINDS {
+                            ui.selectable_value(&mut a.kind, kind.to_string(), kind);
+                        }
+                    });
                 if a.kind != before {
-                    a.fields = analysis_fields(&a.kind).iter().map(|f| (f.to_string(), String::new())).collect();
+                    a.fields = analysis_fields(&a.kind)
+                        .iter()
+                        .map(|f| (f.to_string(), String::new()))
+                        .collect();
                 }
                 for field in analysis_fields(&a.kind) {
                     let mut value = a.get(field).to_string();
                     ui.label(*field);
-                    if ui.add(TextEdit::singleline(&mut value).desired_width(70.0)).changed() {
+                    if ui
+                        .add(TextEdit::singleline(&mut value).desired_width(70.0))
+                        .changed()
+                    {
                         a.set(field, value);
                     }
                 }
@@ -878,24 +1054,49 @@ impl SimulationView {
         if ui.small_button("＋ Add analysis").clicked() {
             form.analyses.push(AnalysisForm {
                 kind: "tran".into(),
-                fields: analysis_fields("tran").iter().map(|f| (f.to_string(), String::new())).collect(),
+                fields: analysis_fields("tran")
+                    .iter()
+                    .map(|f| (f.to_string(), String::new()))
+                    .collect(),
             });
         }
 
         ui.add_space(4.0);
         ui.strong("Measures  (.meas, one per line, without the .meas)");
-        ui.add(TextEdit::multiline(&mut form.measures).desired_rows(2).desired_width(f32::INFINITY).code_editor());
+        ui.add(
+            TextEdit::multiline(&mut form.measures)
+                .desired_rows(2)
+                .desired_width(f32::INFINITY)
+                .code_editor(),
+        );
         ui.strong("Save  (.save, one per line; empty: everything)");
-        ui.add(TextEdit::multiline(&mut form.save).desired_rows(1).desired_width(f32::INFINITY).code_editor());
+        ui.add(
+            TextEdit::multiline(&mut form.save)
+                .desired_rows(1)
+                .desired_width(f32::INFINITY)
+                .code_editor(),
+        );
 
         ui.add_space(4.0);
         ui.strong("Specs");
         let mut remove = None;
         Grid::new("sim-specs").num_columns(4).show(ui, |ui| {
             for (i, (n, min, max)) in form.specs.iter_mut().enumerate() {
-                ui.add(TextEdit::singleline(n).desired_width(120.0).hint_text("measure"));
-                ui.add(TextEdit::singleline(min).desired_width(90.0).hint_text("min"));
-                ui.add(TextEdit::singleline(max).desired_width(90.0).hint_text("max"));
+                ui.add(
+                    TextEdit::singleline(n)
+                        .desired_width(120.0)
+                        .hint_text("measure"),
+                );
+                ui.add(
+                    TextEdit::singleline(min)
+                        .desired_width(90.0)
+                        .hint_text("min"),
+                );
+                ui.add(
+                    TextEdit::singleline(max)
+                        .desired_width(90.0)
+                        .hint_text("max"),
+                );
                 if ui.small_button("✖").on_hover_text("Remove").clicked() {
                     remove = Some(i);
                 }
@@ -906,7 +1107,8 @@ impl SimulationView {
             form.specs.remove(i);
         }
         if ui.small_button("＋ Add spec").clicked() {
-            form.specs.push((String::new(), String::new(), String::new()));
+            form.specs
+                .push((String::new(), String::new(), String::new()));
         }
 
         ui.add_space(4.0);
@@ -923,63 +1125,108 @@ impl SimulationView {
         if report.measures.is_empty() && report.specs.is_empty() {
             return;
         }
-        egui::CollapsingHeader::new(format!("Statistics ({} runs)", report.runs)).default_open(true).show(ui, |ui| {
-            if !report.measures.is_empty() {
-                Grid::new("sim-stats").striped(true).num_columns(8).show(ui, |ui| {
-                    for h in ["measure", "p5", "p50", "p95", "min", "max", "mean", "std"] {
-                        ui.strong(h);
+        egui::CollapsingHeader::new(format!("Statistics ({} runs)", report.runs))
+            .default_open(true)
+            .show(ui, |ui| {
+                if !report.measures.is_empty() {
+                    Grid::new("sim-stats")
+                        .striped(true)
+                        .num_columns(8)
+                        .show(ui, |ui| {
+                            for h in ["measure", "p5", "p50", "p95", "min", "max", "mean", "std"] {
+                                ui.strong(h);
+                            }
+                            ui.end_row();
+                            for (name, d) in &report.measures {
+                                ui.label(name);
+                                for v in [
+                                    d.p5,
+                                    d.p50,
+                                    d.p95,
+                                    d.stats.min,
+                                    d.stats.max,
+                                    d.stats.mean,
+                                    d.stats.std,
+                                ] {
+                                    ui.label(engineering(v));
+                                }
+                                ui.end_row();
+                            }
+                        });
+                }
+                for (name, d) in &report.measures {
+                    ui.add_space(2.0);
+                    ui.weak(name);
+                    let full = d.histogram.counts.iter().copied().max().unwrap_or(0);
+                    let mut text = String::new();
+                    for (i, n) in d.histogram.counts.iter().enumerate() {
+                        let (lo, hi) = d.histogram.edges(i);
+                        text.push_str(&format!(
+                            "{:>10} .. {:>10} {:>4} {}\n",
+                            engineering(lo),
+                            engineering(hi),
+                            n,
+                            sim::stats::bar(*n, full, 30)
+                        ));
                     }
-                    ui.end_row();
-                    for (name, d) in &report.measures {
-                        ui.label(name);
-                        for v in [d.p5, d.p50, d.p95, d.stats.min, d.stats.max, d.stats.mean, d.stats.std] {
-                            ui.label(engineering(v));
-                        }
-                        ui.end_row();
-                    }
-                });
-            }
-            for (name, d) in &report.measures {
-                ui.add_space(2.0);
-                ui.weak(name);
-                let full = d.histogram.counts.iter().copied().max().unwrap_or(0);
-                let mut text = String::new();
-                for (i, n) in d.histogram.counts.iter().enumerate() {
-                    let (lo, hi) = d.histogram.edges(i);
-                    text.push_str(&format!(
-                        "{:>10} .. {:>10} {:>4} {}\n",
-                        engineering(lo),
-                        engineering(hi),
-                        n,
-                        sim::stats::bar(*n, full, 30)
+                    ui.label(RichText::new(text.trim_end()).monospace().small());
+                }
+                if !report.specs.is_empty() {
+                    ui.add_space(2.0);
+                    Grid::new("sim-yield")
+                        .striped(true)
+                        .num_columns(5)
+                        .show(ui, |ui| {
+                            for h in [
+                                "spec",
+                                "pass",
+                                "yield",
+                                "gaussian",
+                                &format!("mean±{}σ", report.k),
+                            ] {
+                                ui.strong(h);
+                            }
+                            ui.end_row();
+                            for s in &report.specs {
+                                let verdict = if s.pass == s.total {
+                                    Verdict::Pass
+                                } else {
+                                    Verdict::Fail
+                                };
+                                ui.label(format!(
+                                    "{} {}",
+                                    s.name,
+                                    bound(&sim::Spec {
+                                        name: s.name.clone(),
+                                        min: s.min,
+                                        max: s.max
+                                    })
+                                ));
+                                ui.label(
+                                    RichText::new(format!("{}/{}", s.pass, s.total))
+                                        .color(verdict_color(ui, verdict)),
+                                );
+                                ui.label(format!("{:.1} %", s.fraction() * 100.0));
+                                ui.label(
+                                    s.gaussian
+                                        .map_or("—".into(), |g| format!("{:.2} %", g * 100.0)),
+                                );
+                                ui.label(match s.within_k_sigma {
+                                    Some(true) => "inside",
+                                    Some(false) => "outside",
+                                    None => "—",
+                                });
+                                ui.end_row();
+                            }
+                        });
+                    ui.label(format!(
+                        "all specs: {}/{} runs ({:.1} %)",
+                        report.pass,
+                        report.runs,
+                        report.fraction() * 100.0
                     ));
                 }
-                ui.label(RichText::new(text.trim_end()).monospace().small());
-            }
-            if !report.specs.is_empty() {
-                ui.add_space(2.0);
-                Grid::new("sim-yield").striped(true).num_columns(5).show(ui, |ui| {
-                    for h in ["spec", "pass", "yield", "gaussian", &format!("mean±{}σ", report.k)] {
-                        ui.strong(h);
-                    }
-                    ui.end_row();
-                    for s in &report.specs {
-                        let verdict = if s.pass == s.total { Verdict::Pass } else { Verdict::Fail };
-                        ui.label(format!("{} {}", s.name, bound(&sim::Spec { name: s.name.clone(), min: s.min, max: s.max })));
-                        ui.label(RichText::new(format!("{}/{}", s.pass, s.total)).color(verdict_color(ui, verdict)));
-                        ui.label(format!("{:.1} %", s.fraction() * 100.0));
-                        ui.label(s.gaussian.map_or("—".into(), |g| format!("{:.2} %", g * 100.0)));
-                        ui.label(match s.within_k_sigma {
-                            Some(true) => "inside",
-                            Some(false) => "outside",
-                            None => "—",
-                        });
-                        ui.end_row();
-                    }
-                });
-                ui.label(format!("all specs: {}/{} runs ({:.1} %)", report.pass, report.runs, report.fraction() * 100.0));
-            }
-        });
+            });
     }
 
     fn jobs_ui(&mut self, ui: &mut Ui) {
@@ -988,30 +1235,51 @@ impl SimulationView {
             return;
         }
         ui.strong("Jobs");
-        Grid::new("sim-jobs").striped(true).num_columns(5).show(ui, |ui| {
-            for job in &jobs {
-                ui.label(&job.name);
-                ui.colored_label(state_color(ui, job.state), state_word(job.state));
-                ui.add(egui::ProgressBar::new(if job.state.is_final() { 1.0 } else { job.progress }).desired_width(90.0));
-                ui.label(format!("{:.1} s", job.elapsed.as_secs_f32()));
-                let last = job.log.as_deref().map(|f| tail(f, 1)).and_then(|l| l.into_iter().next()).unwrap_or_default();
-                let label = ui.label(RichText::new(last).weak().small());
-                if let Some(log) = &job.log {
-                    label.on_hover_text(tail(log, 12).join("\n"));
-                }
-                ui.end_row();
-                if let Some(error) = &job.error {
-                    ui.label("");
-                    ui.colored_label(verdict_color(ui, Verdict::Fail), error.lines().next().unwrap_or(""));
+        Grid::new("sim-jobs")
+            .striped(true)
+            .num_columns(5)
+            .show(ui, |ui| {
+                for job in &jobs {
+                    ui.label(&job.name);
+                    ui.colored_label(state_color(ui, job.state), state_word(job.state));
+                    ui.add(
+                        egui::ProgressBar::new(if job.state.is_final() {
+                            1.0
+                        } else {
+                            job.progress
+                        })
+                        .desired_width(90.0),
+                    );
+                    ui.label(format!("{:.1} s", job.elapsed.as_secs_f32()));
+                    let last = job
+                        .log
+                        .as_deref()
+                        .map(|f| tail(f, 1))
+                        .and_then(|l| l.into_iter().next())
+                        .unwrap_or_default();
+                    let label = ui.label(RichText::new(last).weak().small());
+                    if let Some(log) = &job.log {
+                        label.on_hover_text(tail(log, 12).join("\n"));
+                    }
                     ui.end_row();
+                    if let Some(error) = &job.error {
+                        ui.label("");
+                        ui.colored_label(
+                            verdict_color(ui, Verdict::Fail),
+                            error.lines().next().unwrap_or(""),
+                        );
+                        ui.end_row();
+                    }
                 }
-            }
-        });
+            });
     }
 
     fn results_ui(&mut self, ui: &mut Ui, project: &Project) {
         if let Some(e) = &self.run_error {
-            ui.colored_label(verdict_color(ui, Verdict::Fail), e.lines().next().unwrap_or(""));
+            ui.colored_label(
+                verdict_color(ui, Verdict::Fail),
+                e.lines().next().unwrap_or(""),
+            );
         }
         if self.results.is_empty() {
             return;
@@ -1027,57 +1295,86 @@ impl SimulationView {
             .unwrap_or_default();
         self.stats_ui(ui);
         if let Some(t) = &self.target {
-            let ok = self.results.iter().filter(|r| r.error.is_none()).map(|r| r.name.as_str());
+            let ok = self
+                .results
+                .iter()
+                .filter(|r| r.error.is_none())
+                .map(|r| r.name.as_str());
             crate::uberwave::results_ui(ui, project, (&t.library, &t.cell, &t.view), ok);
         }
         let many = self.results.len() > 6;
-        egui::CollapsingHeader::new(format!("Points ({})", self.results.len())).default_open(!many).show(ui, |ui| {
-        for row in &self.results {
-            ui.horizontal(|ui| {
-                ui.strong(&row.name);
-                if ui.small_button("Open folder").clicked() {
-                    super::technology::open_outside(&row.dir);
-                }
-                if row.error.is_none()
-                    && ui
-                        .small_button("Open in UberWave")
-                        .on_hover_text("Open this point's out.raw in the UberWave waveform viewer")
-                        .clicked()
-                {
-                    crate::uberwave::open_run_dir(project, &row.dir);
-                }
-                if ui.small_button("Open log").clicked() {
-                    let log = ["out.log", "job.log"].iter().map(|f| row.dir.join(f)).find(|f| f.is_file());
-                    match log {
-                        Some(log) => super::technology::open_outside(&log),
-                        None => tracing::warn!(target: "cdept::sim", "{} has no log", row.name),
+        egui::CollapsingHeader::new(format!("Points ({})", self.results.len()))
+            .default_open(!many)
+            .show(ui, |ui| {
+                for row in &self.results {
+                    ui.horizontal(|ui| {
+                        ui.strong(&row.name);
+                        if ui.small_button("Open folder").clicked() {
+                            super::technology::open_outside(&row.dir);
+                        }
+                        if row.error.is_none()
+                            && ui
+                                .small_button("Open in UberWave")
+                                .on_hover_text(
+                                    "Open this point's out.raw in the UberWave waveform viewer",
+                                )
+                                .clicked()
+                        {
+                            crate::uberwave::open_run_dir(project, &row.dir);
+                        }
+                        if ui.small_button("Open log").clicked() {
+                            let log = ["out.log", "job.log"]
+                                .iter()
+                                .map(|f| row.dir.join(f))
+                                .find(|f| f.is_file());
+                            match log {
+                                Some(log) => super::technology::open_outside(&log),
+                                None => {
+                                    tracing::warn!(target: "cdept::sim", "{} has no log", row.name)
+                                }
+                            }
+                        }
+                    });
+                    if let Some(e) = &row.error {
+                        ui.colored_label(
+                            verdict_color(ui, Verdict::Fail),
+                            e.lines().take(6).collect::<Vec<_>>().join("\n"),
+                        );
+                        continue;
                     }
+                    Grid::new(("sim-res", &row.name))
+                        .striped(true)
+                        .num_columns(4)
+                        .show(ui, |ui| {
+                            for s in &row.specs {
+                                ui.label(&s.name);
+                                ui.label(s.value.map(engineering).unwrap_or_else(|| "—".into()));
+                                ui.label(
+                                    specs
+                                        .iter()
+                                        .find(|x| x.name == s.name)
+                                        .map(bound)
+                                        .unwrap_or_default(),
+                                );
+                                ui.label(
+                                    RichText::new(verdict_word(s.verdict))
+                                        .color(verdict_color(ui, s.verdict))
+                                        .strong(),
+                                );
+                                ui.end_row();
+                            }
+                            for (name, value) in &row.measures {
+                                if !row.specs.iter().any(|s| s.name.eq_ignore_ascii_case(name)) {
+                                    ui.weak(name);
+                                    ui.weak(engineering(*value));
+                                    ui.weak("");
+                                    ui.weak("");
+                                    ui.end_row();
+                                }
+                            }
+                        });
                 }
             });
-            if let Some(e) = &row.error {
-                ui.colored_label(verdict_color(ui, Verdict::Fail), e.lines().take(6).collect::<Vec<_>>().join("\n"));
-                continue;
-            }
-            Grid::new(("sim-res", &row.name)).striped(true).num_columns(4).show(ui, |ui| {
-                for s in &row.specs {
-                    ui.label(&s.name);
-                    ui.label(s.value.map(engineering).unwrap_or_else(|| "—".into()));
-                    ui.label(specs.iter().find(|x| x.name == s.name).map(bound).unwrap_or_default());
-                    ui.label(RichText::new(verdict_word(s.verdict)).color(verdict_color(ui, s.verdict)).strong());
-                    ui.end_row();
-                }
-                for (name, value) in &row.measures {
-                    if !row.specs.iter().any(|s| s.name.eq_ignore_ascii_case(name)) {
-                        ui.weak(name);
-                        ui.weak(engineering(*value));
-                        ui.weak("");
-                        ui.weak("");
-                        ui.end_row();
-                    }
-                }
-            });
-        }
-        });
     }
 }
 
@@ -1101,7 +1398,9 @@ impl View for SimulationView {
             empty_state(
                 ui,
                 "No testbench is open.",
-                Some("Double-click a testbench view (one with a setup.toml) in the Library Manager."),
+                Some(
+                    "Double-click a testbench view (one with a setup.toml) in the Library Manager.",
+                ),
             );
             return;
         };
@@ -1121,7 +1420,11 @@ impl View for SimulationView {
                 ui.weak("(changed)");
             }
             // CACE datasheet of this testbench with its latest results (cace.rs).
-            if ui.small_button("Export CACE…").on_hover_text("Write this testbench as a CACE datasheet").clicked() {
+            if ui
+                .small_button("Export CACE…")
+                .on_hover_text("Write this testbench as a CACE datasheet")
+                .clicked()
+            {
                 let e = crate::cace::CaceExport::new(&target.library, &target.cell, &target.view);
                 ctx.open_dialog(crate::dialogs::Dialog::CaceExport(e));
             }
@@ -1184,14 +1487,31 @@ impl View for SimulationView {
             }
             Some("run_mc") => match self.now_runs.trim().parse::<u32>() {
                 Ok(n) if n > 0 => {
-                    if let Err(e) = self.start_with(&project, Vec::new(), Now { mc_runs: Some(n), no_mc: false }) {
+                    if let Err(e) = self.start_with(
+                        &project,
+                        Vec::new(),
+                        Now {
+                            mc_runs: Some(n),
+                            no_mc: false,
+                        },
+                    ) {
                         self.problem = Some(e);
                     }
                 }
-                _ => self.problem = Some("N is the number of Monte Carlo runs (a whole number above 0)".into()),
+                _ => {
+                    self.problem =
+                        Some("N is the number of Monte Carlo runs (a whole number above 0)".into())
+                }
             },
             Some("run_grid") => {
-                if let Err(e) = self.start_with(&project, Vec::new(), Now { mc_runs: None, no_mc: true }) {
+                if let Err(e) = self.start_with(
+                    &project,
+                    Vec::new(),
+                    Now {
+                        mc_runs: None,
+                        no_mc: true,
+                    },
+                ) {
                     self.problem = Some(e);
                 }
             }
@@ -1199,34 +1519,49 @@ impl View for SimulationView {
             _ => {}
         }
         if let Some(problem) = &self.problem {
-            ui.colored_label(verdict_color(ui, Verdict::Fail), problem.lines().next().unwrap_or(""));
+            ui.colored_label(
+                verdict_color(ui, Verdict::Fail),
+                problem.lines().next().unwrap_or(""),
+            );
         } else if let Some(form) = &self.form
             && let Err(e) = form.to_text()
         {
-            ui.colored_label(verdict_color(ui, Verdict::Fail), e.lines().next().unwrap_or(""));
+            ui.colored_label(
+                verdict_color(ui, Verdict::Fail),
+                e.lines().next().unwrap_or(""),
+            );
         }
         ui.separator();
-        ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            let template = self.form.as_ref().map(|f| (f.base.template.clone(), f.base.template_args.clone()));
-            if let Some((name, args)) = template {
-                let mut change = None;
-                egui::CollapsingHeader::new("Test template").default_open(!name.is_empty()).show(ui, |ui| {
-                    change = self.tests.template_ui(ui, (&name, &args));
-                });
-                if let Some(change) = change
-                    && let Err(e) = self.apply_template(change)
-                {
-                    self.problem = Some(e);
+        ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let template = self
+                    .form
+                    .as_ref()
+                    .map(|f| (f.base.template.clone(), f.base.template_args.clone()));
+                if let Some((name, args)) = template {
+                    let mut change = None;
+                    egui::CollapsingHeader::new("Test template")
+                        .default_open(!name.is_empty())
+                        .show(ui, |ui| {
+                            change = self.tests.template_ui(ui, (&name, &args));
+                        });
+                    if let Some(change) = change
+                        && let Err(e) = self.apply_template(change)
+                    {
+                        self.problem = Some(e);
+                    }
                 }
-            }
-            if self.form.is_some() {
-                egui::CollapsingHeader::new("Setup").default_open(true).show(ui, |ui| self.editor(ui, &project));
-            }
-            ui.add_space(6.0);
-            self.jobs_ui(ui);
-            ui.add_space(6.0);
-            self.results_ui(ui, &project);
-        });
+                if self.form.is_some() {
+                    egui::CollapsingHeader::new("Setup")
+                        .default_open(true)
+                        .show(ui, |ui| self.editor(ui, &project));
+                }
+                ui.add_space(6.0);
+                self.jobs_ui(ui);
+                ui.add_space(6.0);
+                self.results_ui(ui, &project);
+            });
     }
 }
 
@@ -1238,7 +1573,11 @@ pub(crate) fn script(
 ) -> Result<(), String> {
     let project = app.project.clone().ok_or("no project is open")?;
     view.poll();
-    let arg = |i: usize| args.get(i).map(String::as_str).ok_or_else(|| "missing argument".to_string());
+    let arg = |i: usize| {
+        args.get(i)
+            .map(String::as_str)
+            .ok_or_else(|| "missing argument".to_string())
+    };
     if super::testlib::is_command(arg(0)?) {
         return super::testlib::script(view, app, args);
     }
@@ -1247,7 +1586,9 @@ pub(crate) fn script(
     }
     let yes = |s: &str| matches!(s, "yes" | "on" | "true");
     fn form(view: &mut SimulationView) -> Result<&mut Form, String> {
-        view.form.as_mut().ok_or_else(|| "no testbench is open".to_string())
+        view.form
+            .as_mut()
+            .ok_or_else(|| "no testbench is open".to_string())
     }
     match arg(0)? {
         "open" => {
@@ -1263,7 +1604,10 @@ pub(crate) fn script(
                 3 => Selection::cell(arg(1)?, arg(2)?),
                 _ => Selection::view(arg(1)?, arg(2)?, arg(3)?),
             };
-            app.request(Action::OpenSimulation { selection, run: args[0] == "menu_run" });
+            app.request(Action::OpenSimulation {
+                selection,
+                run: args[0] == "menu_run",
+            });
             Ok(())
         }
         "save" => view.save(&project),
@@ -1275,9 +1619,23 @@ pub(crate) fn script(
         // run_mc <n>: n Monte Carlo runs now, the file untouched; run_grid: no Monte Carlo.
         "run_mc" => {
             let n: u32 = arg(1)?.parse().map_err(|_| "not a number")?;
-            view.start_with(&project, Vec::new(), Now { mc_runs: Some(n), no_mc: false })
+            view.start_with(
+                &project,
+                Vec::new(),
+                Now {
+                    mc_runs: Some(n),
+                    no_mc: false,
+                },
+            )
         }
-        "run_grid" => view.start_with(&project, Vec::new(), Now { mc_runs: None, no_mc: true }),
+        "run_grid" => view.start_with(
+            &project,
+            Vec::new(),
+            Now {
+                mc_runs: None,
+                no_mc: true,
+            },
+        ),
         // mc <on|off|runs|seed|mode|corner|mismatch_corner|both_corner> [value]
         "mc" => {
             let f = form(view)?;
@@ -1297,10 +1655,21 @@ pub(crate) fn script(
         }
         // expect_yield <spec> <pass>/<total>: the statistics' yield of a spec.
         "expect_yield" => {
-            let report = view.stats.as_ref().ok_or("no statistics (one run, or none yet)")?;
-            let s = report.specs.iter().find(|s| s.name == arg(1).unwrap_or("")).ok_or("no such spec in the statistics")?;
+            let report = view
+                .stats
+                .as_ref()
+                .ok_or("no statistics (one run, or none yet)")?;
+            let s = report
+                .specs
+                .iter()
+                .find(|s| s.name == arg(1).unwrap_or(""))
+                .ok_or("no such spec in the statistics")?;
             let have = format!("{}/{}", s.pass, s.total);
-            if have == arg(2)? { Ok(()) } else { Err(format!("yield {have}")) }
+            if have == arg(2)? {
+                Ok(())
+            } else {
+                Err(format!("yield {have}"))
+            }
         }
         // expect_stats <runs> <measure>: statistics over this many runs, with a histogram
         // whose counts add up and p5 <= p50 <= p95 for the measurement.
@@ -1314,7 +1683,11 @@ pub(crate) fn script(
                 && d.p5 <= d.p50
                 && d.p50 <= d.p95
                 && d.p95 <= d.stats.max;
-            if ok { Ok(()) } else { Err(format!("{} runs, {:?}", report.runs, d)) }
+            if ok {
+                Ok(())
+            } else {
+                Err(format!("{} runs, {:?}", report.runs, d))
+            }
         }
         "cancel" => {
             view.cancel();
@@ -1331,10 +1704,18 @@ pub(crate) fn script(
                 "finished" => RunState::Finished,
                 other => return Err(format!("unknown state '{other}'")),
             };
-            if view.state() == want { Ok(()) } else { Err(format!("the simulation is {:?}", view.state())) }
+            if view.state() == want {
+                Ok(())
+            } else {
+                Err(format!("the simulation is {:?}", view.state()))
+            }
         }
         "expect_dirty" => {
-            if view.dirty() == yes(arg(1)?) { Ok(()) } else { Err(format!("changed is {}", view.dirty())) }
+            if view.dirty() == yes(arg(1)?) {
+                Ok(())
+            } else {
+                Err(format!("changed is {}", view.dirty()))
+            }
         }
         "expect_problem" => {
             let wanted = args[1..].join(" ");
@@ -1349,7 +1730,11 @@ pub(crate) fn script(
         },
         "expect_target" => {
             let text = view.target().map(Target::text).unwrap_or_default();
-            if text == arg(1)? { Ok(()) } else { Err(format!("the tab shows '{text}'")) }
+            if text == arg(1)? {
+                Ok(())
+            } else {
+                Err(format!("the tab shows '{text}'"))
+            }
         }
         // Fields of the form: simulator, models, schematic, corners (words),
         // temperatures (words).
@@ -1373,13 +1758,21 @@ pub(crate) fn script(
         }
         "add_spec" => {
             let f = form(view)?;
-            f.specs.push((arg(1)?.into(), arg(2).unwrap_or("").replace('-', ""), arg(3).unwrap_or("").replace('-', "")));
+            f.specs.push((
+                arg(1)?.into(),
+                arg(2).unwrap_or("").replace('-', ""),
+                arg(3).unwrap_or("").replace('-', ""),
+            ));
             Ok(())
         }
         "set_spec" => {
             // set_spec <name> <min|max> <value>
             let f = form(view)?;
-            let row = f.specs.iter_mut().find(|s| s.0 == arg(1).unwrap_or("")).ok_or("no such spec")?;
+            let row = f
+                .specs
+                .iter_mut()
+                .find(|s| s.0 == arg(1).unwrap_or(""))
+                .ok_or("no such spec")?;
             match arg(2)? {
                 "min" => row.1 = arg(3)?.into(),
                 "max" => row.2 = arg(3)?.into(),
@@ -1391,23 +1784,51 @@ pub(crate) fn script(
         "expect_corners" => {
             let tech = project.tech.as_ref().ok_or("no technology snapshot")?;
             let f = view.form.as_ref().ok_or("no testbench is open")?;
-            let set = if f.models.is_empty() { tech.models.default.clone().unwrap_or_default() } else { f.models.clone() };
-            let have: Vec<String> =
-                tech.models.sets.get(&set).map(|s| s.corners.keys().cloned().collect()).unwrap_or_default();
+            let set = if f.models.is_empty() {
+                tech.models.default.clone().unwrap_or_default()
+            } else {
+                f.models.clone()
+            };
+            let have: Vec<String> = tech
+                .models
+                .sets
+                .get(&set)
+                .map(|s| s.corners.keys().cloned().collect())
+                .unwrap_or_default();
             let want: Vec<&str> = args[1..].iter().map(String::as_str).collect();
-            if want.iter().all(|w| have.iter().any(|h| h == w)) { Ok(()) } else { Err(format!("offered: {have:?}")) }
+            if want.iter().all(|w| have.iter().any(|h| h == w)) {
+                Ok(())
+            } else {
+                Err(format!("offered: {have:?}"))
+            }
         }
         // expect_rows <n> <PASS|FAIL|MISSING>: spec rows of the results with a verdict.
         "expect_rows" => {
             let n: usize = arg(1)?.parse().map_err(|_| "not a number")?;
             let v = verdict_of(arg(2)?).ok_or("PASS, FAIL or MISSING")?;
-            let have = view.results.iter().flat_map(|r| &r.specs).filter(|s| s.verdict == v).count();
-            if have == n { Ok(()) } else { Err(format!("{have} {} rows, expected {n}", arg(2).unwrap_or(""))) }
+            let have = view
+                .results
+                .iter()
+                .flat_map(|r| &r.specs)
+                .filter(|s| s.verdict == v)
+                .count();
+            if have == n {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{have} {} rows, expected {n}",
+                    arg(2).unwrap_or("")
+                ))
+            }
         }
         // expect_points <n>: run points with results.
         "expect_points" => {
             let n: usize = arg(1)?.parse().map_err(|_| "not a number")?;
-            if view.results.len() == n { Ok(()) } else { Err(format!("{} points", view.results.len())) }
+            if view.results.len() == n {
+                Ok(())
+            } else {
+                Err(format!("{} points", view.results.len()))
+            }
         }
         // expect_jobs <n> [state]
         "expect_jobs" => {
@@ -1417,13 +1838,25 @@ pub(crate) fn script(
                 Some(s) => jobs.iter().filter(|j| state_word(j.state) == s).count(),
                 None => jobs.len(),
             };
-            if have == n { Ok(()) } else { Err(format!("{have} jobs ({jobs:?})")) }
+            if have == n {
+                Ok(())
+            } else {
+                Err(format!("{have} jobs ({jobs:?})"))
+            }
         }
         // expect_file <point> <name>: a file of a run point's folder exists.
         "expect_file" => {
-            let row = view.results.iter().find(|r| r.name == arg(1).unwrap_or("")).ok_or("no such point")?;
+            let row = view
+                .results
+                .iter()
+                .find(|r| r.name == arg(1).unwrap_or(""))
+                .ok_or("no such point")?;
             let file = row.dir.join(arg(2)?);
-            if file.is_file() { Ok(()) } else { Err(format!("{} is not there", file.display())) }
+            if file.is_file() {
+                Ok(())
+            } else {
+                Err(format!("{} is not there", file.display()))
+            }
         }
         other => Err(format!("unknown sim command '{other}'")),
     }
@@ -1433,7 +1866,19 @@ pub(crate) fn script(
 pub(crate) fn patient(args: &[String]) -> bool {
     matches!(
         args.first().map(String::as_str),
-        Some("wait" | "suite_wait" | "suite_expect" | "suite_expect_rows" | "expect_state" | "expect_rows" | "expect_points" | "expect_jobs" | "expect_file" | "expect_yield" | "expect_stats")
+        Some(
+            "wait"
+                | "suite_wait"
+                | "suite_expect"
+                | "suite_expect_rows"
+                | "expect_state"
+                | "expect_rows"
+                | "expect_points"
+                | "expect_jobs"
+                | "expect_file"
+                | "expect_yield"
+                | "expect_stats"
+        )
     )
 }
 
@@ -1470,9 +1915,15 @@ max = 3e-10
         assert!(form.to_text().unwrap_err().contains("not a number"));
         form.specs[0].2 = "1e-9".into();
         form.specs.push(("gain".into(), "40".into(), "30".into()));
-        assert!(form.to_text().unwrap_err().contains("above max"), "min above max is the schema's");
+        assert!(
+            form.to_text().unwrap_err().contains("above max"),
+            "min above max is the schema's"
+        );
         form.specs.pop();
-        form.analyses.push(AnalysisForm { kind: "ac".into(), fields: vec![("points".into(), "10".into())] });
+        form.analyses.push(AnalysisForm {
+            kind: "ac".into(),
+            fields: vec![("points".into(), "10".into())],
+        });
         form.analyses.pop();
         form.corners = vec!["ss".into()];
         form.simulator = "ngspice".into();
@@ -1493,7 +1944,13 @@ max = 3e-10
         let setup = Setup::parse(&text).unwrap();
         let mut form = Form::of(&setup).unwrap();
         assert_eq!(form.setup().unwrap(), setup);
-        assert_eq!((form.sweeps[0].values.as_str(), form.sweeps[1].values.as_str()), ("1.0, 1.2", "1:3:1"));
+        assert_eq!(
+            (
+                form.sweeps[0].values.as_str(),
+                form.sweeps[1].values.as_str()
+            ),
+            ("1.0, 1.2", "1:3:1")
+        );
         assert!(form.mc && form.mc_mode == McMode::Both && form.mc_runs == "7");
         form.mc_runs = "12".into();
         form.mc_mode = McMode::Mismatch;
@@ -1505,7 +1962,10 @@ max = 3e-10
         assert_eq!(back.sweeps.len(), 1);
         assert_eq!(back.sweeps[0].values, ["0.9", "1.1", "1.3"]);
         let mc = back.montecarlo.unwrap();
-        assert_eq!((mc.runs, mc.seed, mc.mode, mc.both_corner.as_str()), (12, 3, McMode::Mismatch, "mc_mm"));
+        assert_eq!(
+            (mc.runs, mc.seed, mc.mode, mc.both_corner.as_str()),
+            (12, 3, McMode::Mismatch, "mc_mm")
+        );
         form.mc_runs = "many".into();
         assert!(form.to_text().unwrap_err().contains("whole number"));
         form.mc = false;

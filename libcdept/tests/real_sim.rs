@@ -6,9 +6,9 @@
 use std::path::Path;
 
 use libcdept::Project;
-use libcdept::testutil::{RealPdk, real_pdk};
 use libcdept::sim::results::{self, RunRecord, Store};
 use libcdept::sim::{self, RunOptions, Simulator, spec::Verdict};
+use libcdept::testutil::{RealPdk, real_pdk};
 
 fn copy_dir(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
@@ -51,21 +51,30 @@ fn open_example() -> Option<(Scratch, Project, Simulator)> {
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/ihp-inv");
     let dir = tempfile::tempdir().unwrap();
     copy_dir(&example, dir.path());
-    std::fs::write(dir.path().join("cdept.local.toml"), format!("pdk_root = \"{root}\"\n")).unwrap();
+    std::fs::write(
+        dir.path().join("cdept.local.toml"),
+        format!("pdk_root = \"{root}\"\n"),
+    )
+    .unwrap();
     let project = Project::load(dir.path()).unwrap();
     Some((Scratch { dir, _pdk: pdk }, project, simulator))
 }
 
 #[test]
 fn inverter_testbench_runs_at_three_corners() {
-    let Some((_dir, project, simulator)) = open_example() else { return };
+    let Some((_dir, project, simulator)) = open_example() else {
+        return;
+    };
     let tb = sim::open(&project, "cells", "tb_inv", "testbench").unwrap();
     let results = sim::run_testbench(&project, &tb, &simulator, &[]).unwrap();
     let names: Vec<String> = results.iter().map(|r| r.point.name()).collect();
     assert_eq!(names, ["tt_27", "ff_27", "ss_27"]);
     let mut tpd = vec![];
     for r in &results {
-        let out = r.outcome.as_ref().unwrap_or_else(|e| panic!("{}: {e:#}", r.point.name()));
+        let out = r
+            .outcome
+            .as_ref()
+            .unwrap_or_else(|e| panic!("{}: {e:#}", r.point.name()));
         assert!(out.raw.metadata().unwrap().len() > 1000);
         assert_eq!(r.specs[0].verdict, Verdict::Pass, "{:?}", r.specs);
         tpd.push(out.measures["tpd"]);
@@ -89,17 +98,28 @@ fn inverter_testbench_runs_at_three_corners() {
 
 #[test]
 fn supply_sweep_over_corners_and_temperatures() {
-    let Some((_dir, project, simulator)) = open_example() else { return };
+    let Some((_dir, project, simulator)) = open_example() else {
+        return;
+    };
     let tb = sim::open(&project, "cells", "tb_inv", "sweep").unwrap();
     let results = sim::run_testbench(&project, &tb, &simulator, &[]).unwrap();
     assert_eq!(results.len(), 20);
     assert_eq!(results[0].point.name(), "tt_27_vdd1");
     assert_eq!(results[1].point.variables["vdd"], "1.1");
-    let tpd = |i: usize| results[i].outcome.as_ref().unwrap_or_else(|e| panic!("{i}: {e:#}")).measures["tpd"];
+    let tpd = |i: usize| {
+        results[i]
+            .outcome
+            .as_ref()
+            .unwrap_or_else(|e| panic!("{i}: {e:#}"))
+            .measures["tpd"]
+    };
     // A higher supply is faster, at each corner and temperature.
     for group in 0..4 {
         for k in 0..4 {
-            assert!(tpd(group * 5 + k + 1) < tpd(group * 5 + k), "group {group} step {k}");
+            assert!(
+                tpd(group * 5 + k + 1) < tpd(group * 5 + k),
+                "group {group} step {k}"
+            );
         }
     }
     let db = Store::open(&project.root).unwrap();
@@ -111,28 +131,51 @@ fn supply_sweep_over_corners_and_temperatures() {
     // The variables are in the stored point.
     let rec = &db.latest("cells", "tb_inv", "sweep").unwrap()[7];
     assert_eq!(rec.point.variables["vdd"], "1.2");
-    assert_eq!(db.series("cells", "tb_inv", "sweep", "tpd").unwrap().len(), 20);
+    assert_eq!(
+        db.series("cells", "tb_inv", "sweep", "tpd").unwrap().len(),
+        20
+    );
 }
 
 #[test]
 fn montecarlo_runs_are_independent_and_repeatable() {
-    let Some((_dir, project, simulator)) = open_example() else { return };
+    let Some((_dir, project, simulator)) = open_example() else {
+        return;
+    };
     let tb = sim::open(&project, "cells", "tb_inv", "montecarlo").unwrap();
-    let options = RunOptions { mc_runs: Some(5), ..Default::default() };
+    let options = RunOptions {
+        mc_runs: Some(5),
+        ..Default::default()
+    };
     let results = sim::run_testbench_with(&project, &tb, &simulator, &[], &options).unwrap();
     assert_eq!(results.len(), 5);
     let values = |rs: &[sim::PointResult]| -> Vec<f64> {
-        rs.iter().map(|r| r.outcome.as_ref().unwrap_or_else(|e| panic!("{e:#}")).measures["tpd"]).collect()
+        rs.iter()
+            .map(|r| {
+                r.outcome
+                    .as_ref()
+                    .unwrap_or_else(|e| panic!("{e:#}"))
+                    .measures["tpd"]
+            })
+            .collect()
     };
     let first = values(&results);
     let mut distinct = first.clone();
     distinct.dedup();
     assert_eq!(distinct.len(), 5, "the runs sample differently: {first:?}");
-    assert!(results.iter().all(|r| r.point.seed.is_some() && r.specs[0].verdict == Verdict::Pass));
+    assert!(
+        results
+            .iter()
+            .all(|r| r.point.seed.is_some() && r.specs[0].verdict == Verdict::Pass)
+    );
     // The same base seed gives the same samples, another one other samples.
     let again = sim::run_testbench_with(&project, &tb, &simulator, &[], &options).unwrap();
     assert_eq!(values(&again), first);
-    let other = RunOptions { mc_runs: Some(5), mc_seed: Some(99), ..Default::default() };
+    let other = RunOptions {
+        mc_runs: Some(5),
+        mc_seed: Some(99),
+        ..Default::default()
+    };
     let other = sim::run_testbench_with(&project, &tb, &simulator, &[], &other).unwrap();
     assert_ne!(values(&other), first);
     // Statistics over the latest run of each point; the history keeps all 15.
@@ -142,16 +185,30 @@ fn montecarlo_runs_are_independent_and_repeatable() {
     assert_eq!((agg.runs, agg.pass), (5, 5));
     assert!(agg.measures["tpd"].std > 0.0);
     let v = values(&other);
-    assert_eq!(agg.measures["tpd"].max, v.iter().copied().fold(f64::MIN, f64::max));
+    assert_eq!(
+        agg.measures["tpd"].max,
+        v.iter().copied().fold(f64::MIN, f64::max)
+    );
     // The grid still runs when asked for.
-    let grid = RunOptions { no_mc: true, no_store: true, ..Default::default() };
+    let grid = RunOptions {
+        no_mc: true,
+        no_store: true,
+        ..Default::default()
+    };
     let grid = sim::run_testbench_with(&project, &tb, &simulator, &[], &grid).unwrap();
     assert_eq!(grid.len(), 1);
     assert!(grid[0].record.is_none());
 }
 
 fn tpds(rs: &[sim::PointResult]) -> Vec<f64> {
-    rs.iter().map(|r| r.outcome.as_ref().unwrap_or_else(|e| panic!("{}: {e:#}", r.point.name())).measures["tpd"]).collect()
+    rs.iter()
+        .map(|r| {
+            r.outcome
+                .as_ref()
+                .unwrap_or_else(|e| panic!("{}: {e:#}", r.point.name()))
+                .measures["tpd"]
+        })
+        .collect()
 }
 
 /// Mismatch (tt_mm: per-device agauss) and process + mismatch (mc_mm) draw per run
@@ -160,10 +217,18 @@ fn tpds(rs: &[sim::PointResult]) -> Vec<f64> {
 #[test]
 fn mismatch_and_combined_monte_carlo_follow_the_seed() {
     use libcdept::sim::setup::McMode;
-    let Some((_dir, project, simulator)) = open_example() else { return };
+    let Some((_dir, project, simulator)) = open_example() else {
+        return;
+    };
     let tb = sim::open(&project, "cells", "tb_inv", "mismatch").unwrap();
     let run = |mode: McMode, seed: u64| {
-        let o = RunOptions { mc_runs: Some(4), mc_mode: Some(mode), mc_seed: Some(seed), no_store: true, ..Default::default() };
+        let o = RunOptions {
+            mc_runs: Some(4),
+            mc_mode: Some(mode),
+            mc_seed: Some(seed),
+            no_store: true,
+            ..Default::default()
+        };
         sim::run_testbench_with(&project, &tb, &simulator, &[], &o).unwrap()
     };
     let mm = run(McMode::Mismatch, 1);
@@ -188,17 +253,31 @@ fn mismatch_and_combined_monte_carlo_follow_the_seed() {
             set.corners.remove("mc_mm");
         }
     }
-    let o = RunOptions { mc_runs: Some(2), mc_mode: Some(McMode::Both), no_store: true, ..Default::default() };
-    let err = sim::run_testbench_with(&project2, &tb, &simulator, &[], &o).err().map(|e| format!("{e:#}")).unwrap_or_default();
+    let o = RunOptions {
+        mc_runs: Some(2),
+        mc_mode: Some(McMode::Both),
+        no_store: true,
+        ..Default::default()
+    };
+    let err = sim::run_testbench_with(&project2, &tb, &simulator, &[], &o)
+        .err()
+        .map(|e| format!("{e:#}"))
+        .unwrap_or_default();
     assert!(err.contains("both_corner"), "{err}");
 }
 
 /// Statistics over a Monte Carlo run: percentiles, histogram, yield.
 #[test]
 fn statistics_of_a_montecarlo_run() {
-    let Some((_dir, project, simulator)) = open_example() else { return };
+    let Some((_dir, project, simulator)) = open_example() else {
+        return;
+    };
     let mut tb = sim::open(&project, "cells", "tb_inv", "montecarlo").unwrap();
-    let o = RunOptions { mc_runs: Some(12), no_store: true, ..Default::default() };
+    let o = RunOptions {
+        mc_runs: Some(12),
+        no_store: true,
+        ..Default::default()
+    };
     let probe = tpds(&sim::run_testbench_with(&project, &tb, &simulator, &[], &o).unwrap());
     let mut sorted = probe.clone();
     sorted.sort_by(|a, b| a.total_cmp(b));
@@ -217,7 +296,10 @@ fn statistics_of_a_montecarlo_run() {
     assert_eq!(d.histogram.counts.iter().sum::<usize>(), 12);
     assert!(d.stats.min <= d.p5 && d.p5 <= d.p50 && d.p50 <= d.p95 && d.p95 <= d.stats.max);
     let text = sim::stats::format_report(&report);
-    assert!(text.contains("6/12") && text.contains("50.0%") && text.contains('#'), "{text}");
+    assert!(
+        text.contains("6/12") && text.contains("50.0%") && text.contains('#'),
+        "{text}"
+    );
 }
 
 /// Xyce Monte Carlo: one `.SAMPLING` sample per run with `-randseed`. Skipped without
@@ -228,10 +310,17 @@ fn xyce_montecarlo_follows_the_seed() {
         eprintln!("skipped: Xyce not found");
         return;
     };
-    let Some((_dir, project, _)) = open_example() else { return };
+    let Some((_dir, project, _)) = open_example() else {
+        return;
+    };
     let tb = sim::open(&project, "cells", "tb_inv", "xyce_mc").unwrap();
     let run = |seed: u64| {
-        let o = RunOptions { mc_runs: Some(3), mc_seed: Some(seed), no_store: true, ..Default::default() };
+        let o = RunOptions {
+            mc_runs: Some(3),
+            mc_seed: Some(seed),
+            no_store: true,
+            ..Default::default()
+        };
         sim::run_testbench_with(&project, &tb, &xyce, &[], &o).unwrap()
     };
     let a = tpds(&run(1));
@@ -241,8 +330,16 @@ fn xyce_montecarlo_follows_the_seed() {
     assert_eq!(tpds(&run(1)), a);
     assert_ne!(tpds(&run(2)), a);
     // Mismatch needs a corner of its own: the PDK's Xyce models have none for the MOS.
-    let o = RunOptions { mc_runs: Some(2), mc_mode: Some(sim::setup::McMode::Mismatch), no_store: true, ..Default::default() };
-    let err = sim::run_testbench_with(&project, &tb, &xyce, &[], &o).err().map(|e| format!("{e:#}")).unwrap_or_default();
+    let o = RunOptions {
+        mc_runs: Some(2),
+        mc_mode: Some(sim::setup::McMode::Mismatch),
+        no_store: true,
+        ..Default::default()
+    };
+    let err = sim::run_testbench_with(&project, &tb, &xyce, &[], &o)
+        .err()
+        .map(|e| format!("{e:#}"))
+        .unwrap_or_default();
     assert!(err.contains("mismatch_corner"), "{err}");
 }
 
@@ -251,7 +348,9 @@ fn xyce_montecarlo_follows_the_seed() {
 /// where it came from.
 #[test]
 fn calculator_outputs_match_the_meas() {
-    let Some((dir, project, simulator)) = open_example() else { return };
+    let Some((dir, project, simulator)) = open_example() else {
+        return;
+    };
     let file = dir.path().join("libs/cells/tb_inv/testbench/setup.toml");
     let mut text = std::fs::read_to_string(&file).unwrap();
     text.push_str(
@@ -267,11 +366,25 @@ fn calculator_outputs_match_the_meas() {
     let out = r.outcome.as_ref().unwrap_or_else(|e| panic!("{e:#}"));
     let (tpd, calc) = (out.measures["tpd"], out.measures["tpd_calc"]);
     assert!((tpd - calc).abs() < tpd * 1e-3, "meas {tpd} vs calc {calc}");
-    assert!((out.measures["swing"] - 1.0).abs() < 0.15, "{:?}", out.measures);
+    assert!(
+        (out.measures["swing"] - 1.0).abs() < 0.15,
+        "{:?}",
+        out.measures
+    );
     assert!(!out.measures.contains_key("broken"));
     assert_eq!(r.run.calc, ["tpd_calc", "swing"]);
-    assert!(r.run.calc_errors["broken"].contains("no vector"), "{:?}", r.run.calc_errors);
-    assert!(r.specs.iter().any(|s| s.name == "tpd_calc" && s.verdict == Verdict::Pass), "{:?}", r.specs);
+    assert!(
+        r.run.calc_errors["broken"].contains("no vector"),
+        "{:?}",
+        r.run.calc_errors
+    );
+    assert!(
+        r.specs
+            .iter()
+            .any(|s| s.name == "tpd_calc" && s.verdict == Verdict::Pass),
+        "{:?}",
+        r.specs
+    );
     let rec = RunRecord::read(r.record.as_ref().unwrap()).unwrap();
     assert_eq!(rec.calc, r.run.calc);
     assert!(results::format_table(&[rec]).contains("tpd_calc*"));
@@ -286,15 +399,38 @@ fn inproc_backend_matches_the_process() {
         eprintln!("skipped: no libngspice");
         return;
     }
-    let Some((_dir, project, simulator)) = open_example() else { return };
+    let Some((_dir, project, simulator)) = open_example() else {
+        return;
+    };
     let close = |a: &[f64], b: &[f64]| {
-        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() <= x.abs().max(y.abs()) * 1e-12)
+        a.len() == b.len()
+            && a.iter()
+                .zip(b)
+                .all(|(x, y)| (x - y).abs() <= x.abs().max(y.abs()) * 1e-12)
     };
     let tb = sim::open(&project, "cells", "tb_inv", "testbench").unwrap();
     let tt = ["tt".to_string()];
-    let with = |backend| RunOptions { backend: Some(backend), no_store: true, ..Default::default() };
-    let process = sim::run_testbench_with(&project, &tb, &simulator, &tt, &with(sim::run::Backend::Process)).unwrap();
-    let inproc = sim::run_testbench_with(&project, &tb, &simulator, &tt, &with(sim::run::Backend::Inproc)).unwrap();
+    let with = |backend| RunOptions {
+        backend: Some(backend),
+        no_store: true,
+        ..Default::default()
+    };
+    let process = sim::run_testbench_with(
+        &project,
+        &tb,
+        &simulator,
+        &tt,
+        &with(sim::run::Backend::Process),
+    )
+    .unwrap();
+    let inproc = sim::run_testbench_with(
+        &project,
+        &tb,
+        &simulator,
+        &tt,
+        &with(sim::run::Backend::Inproc),
+    )
+    .unwrap();
     let (p, i) = (tpds(&process), tpds(&inproc));
     assert!(close(&p, &i), "process {p:?} inproc {i:?}");
     let out = inproc[0].outcome.as_ref().unwrap();
@@ -302,8 +438,29 @@ fn inproc_backend_matches_the_process() {
     assert_eq!(inproc[0].specs[0].verdict, Verdict::Pass);
 
     let mc = sim::open(&project, "cells", "tb_inv", "montecarlo").unwrap();
-    let with_mc = |backend| RunOptions { mc_runs: Some(3), ..with(backend) };
-    let p = tpds(&sim::run_testbench_with(&project, &mc, &simulator, &[], &with_mc(sim::run::Backend::Process)).unwrap());
-    let i = tpds(&sim::run_testbench_with(&project, &mc, &simulator, &[], &with_mc(sim::run::Backend::Inproc)).unwrap());
+    let with_mc = |backend| RunOptions {
+        mc_runs: Some(3),
+        ..with(backend)
+    };
+    let p = tpds(
+        &sim::run_testbench_with(
+            &project,
+            &mc,
+            &simulator,
+            &[],
+            &with_mc(sim::run::Backend::Process),
+        )
+        .unwrap(),
+    );
+    let i = tpds(
+        &sim::run_testbench_with(
+            &project,
+            &mc,
+            &simulator,
+            &[],
+            &with_mc(sim::run::Backend::Inproc),
+        )
+        .unwrap(),
+    );
     assert!(close(&p, &i), "Monte Carlo: process {p:?} inproc {i:?}");
 }

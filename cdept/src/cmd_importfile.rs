@@ -4,9 +4,9 @@
 use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
-use eyre::{bail, Result};
+use eyre::{Result, bail};
 use libcdept::importer::{self, ImportRequest, OnClash};
-use libcdept::{refactor, Project};
+use libcdept::{Project, refactor};
 
 #[derive(Clone, Copy, ValueEnum)]
 enum Clash {

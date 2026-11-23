@@ -47,7 +47,9 @@ pub enum OpenvafCommand {
 
 pub fn vacask(command: VacaskCommand, project: &Project) -> Result<()> {
     let VacaskCommand::Models { force } = command;
-    let tech = project.snapshot().ok_or_else(|| eyre!("the project has no technology snapshot (cdept tech scan)"))?;
+    let tech = project
+        .snapshot()
+        .ok_or_else(|| eyre!("the project has no technology snapshot (cdept tech scan)"))?;
     let plan = models::Plan::new(project, tech)?;
     if force {
         let dir = plan.dir(project);
@@ -59,8 +61,16 @@ pub fn vacask(command: VacaskCommand, project: &Project) -> Result<()> {
     models::record(project, &g)?;
     println!("technology: {}", g.pdk);
     println!("cache:      {}", plan.dir(project).display());
-    println!("converted:  {} file(s): {}", g.converted.len(), g.converted.join(", "));
-    println!("compiled:   {} library(ies): {}", g.compiled.len(), g.compiled.join(", "));
+    println!(
+        "converted:  {} file(s): {}",
+        g.converted.len(),
+        g.converted.join(", ")
+    );
+    println!(
+        "compiled:   {} library(ies): {}",
+        g.compiled.len(),
+        g.compiled.join(", ")
+    );
     println!("defines:    {} subcircuits and models", g.defined.len());
     let corners: Vec<&str> = g.set.corner_names();
     println!("corners:    {}", corners.join(", "));
@@ -76,7 +86,12 @@ pub fn vacask(command: VacaskCommand, project: &Project) -> Result<()> {
 }
 
 pub fn openvaf(command: OpenvafCommand, project: Option<&Project>) -> Result<()> {
-    let OpenvafCommand::Compile { source, out, defines, includes } = command;
+    let OpenvafCommand::Compile {
+        source,
+        out,
+        defines,
+        includes,
+    } = command;
     let program = openvaf::ADAPTER.require()?;
     if !source.is_file() {
         bail!("{} is not a file", source.display());
@@ -85,15 +100,24 @@ pub fn openvaf(command: OpenvafCommand, project: Option<&Project>) -> Result<()>
         .locate()
         .map(|p| libcdept::vacask::tool_env_for(&p))
         .unwrap_or_default();
-    let mut c = openvaf::Compile { source: source.clone(), out: PathBuf::new(), defines, includes };
+    let mut c = openvaf::Compile {
+        source: source.clone(),
+        out: PathBuf::new(),
+        defines,
+        includes,
+    };
     if let Some(out) = out {
         c.out = out;
         openvaf::compile(&program, &c, &env)?;
         println!("{}", c.out.display());
         return Ok(());
     }
-    let project = project.ok_or_else(|| eyre!("not inside a project: give --out for the OSDI file"))?;
-    let name = project.snapshot().map(|t| t.pdk.name.clone()).unwrap_or_else(|| "project".into());
+    let project =
+        project.ok_or_else(|| eyre!("not inside a project: give --out for the OSDI file"))?;
+    let name = project
+        .snapshot()
+        .map(|t| t.pdk.name.clone())
+        .unwrap_or_else(|| "project".into());
     let hash = openvaf::source_hash(&program, &c)?;
     let dir = openvaf::cache_dir(&project.root, &name, &hash);
     let r = openvaf::compile_cached(&program, &c, &dir, &env)?;

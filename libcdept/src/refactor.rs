@@ -99,7 +99,10 @@ pub enum Operation {
     },
     /// Files from outside the project come into a library as cells and views; the
     /// plan is made by [`crate::importer`].
-    Import { library: String, summary: String },
+    Import {
+        library: String,
+        summary: String,
+    },
 }
 
 impl fmt::Display for Operation {
@@ -490,7 +493,14 @@ impl Transfer {
     /// is copied as a file of its own named `new`, made in the folder `dir` (made
     /// first when `make_dir`). Only layouts in GDSII and SPICE/CDL netlists can be
     /// taken apart: any other view is left out, with a note.
-    fn member(&mut self, entry: &Entry, cell: &str, new: &str, dir: &Path, make_dir: bool) -> Result<()> {
+    fn member(
+        &mut self,
+        entry: &Entry,
+        cell: &str,
+        new: &str,
+        dir: &Path,
+        make_dir: bool,
+    ) -> Result<()> {
         let file = entry.main_file.as_deref().unwrap_or(&entry.path);
         let inside = entry.member_or(cell);
         let name = file_name(file);
@@ -499,8 +509,8 @@ impl Transfer {
             .unwrap_or_default();
         let (bytes, what) = match entry.format {
             Some(Format::Gds) => {
-                let bytes = fs::read(file)
-                    .wrap_err_with(|| format!("cannot read {}", file.display()))?;
+                let bytes =
+                    fs::read(file).wrap_err_with(|| format!("cannot read {}", file.display()))?;
                 if bytes.starts_with(&[0x1f, 0x8b]) {
                     self.notes.push(format!(
                         "view '{}' is in {name}, a compressed file: not copied",
@@ -508,8 +518,10 @@ impl Transfer {
                     ));
                     return Ok(());
                 }
-                let mut out = layout::gds::extract_structure(&bytes, inside)
-                    .wrap_err_with(|| format!("cannot take '{inside}' out of {}", file.display()))?;
+                let mut out =
+                    layout::gds::extract_structure(&bytes, inside).wrap_err_with(|| {
+                        format!("cannot take '{inside}' out of {}", file.display())
+                    })?;
                 if inside != new {
                     let map = BTreeMap::from([(inside.to_string(), new.to_string())]);
                     if let Some(renamed) = layout::gds::rename_bytes(&out, &map)
@@ -529,7 +541,9 @@ impl Transfer {
                 )
                 .into_owned();
                 let out = crate::container::spice::extract_subckt(&text, inside, new)
-                    .wrap_err_with(|| format!("cannot take '{inside}' out of {}", file.display()))?;
+                    .wrap_err_with(|| {
+                        format!("cannot take '{inside}' out of {}", file.display())
+                    })?;
                 (
                     out.into_bytes(),
                     format!("subcircuit '{inside}' and those it places, as '{new}'"),

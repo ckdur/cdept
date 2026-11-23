@@ -32,23 +32,46 @@ pub fn run(command: NgspiceCommand) -> Result<()> {
             println!("available: {}", ngspice::available());
             Ok(())
         }
-        NgspiceCommand::Live { deck, every, halt_after } => live(deck, every.max(1), halt_after),
+        NgspiceCommand::Live {
+            deck,
+            every,
+            halt_after,
+        } => live(deck, every.max(1), halt_after),
     }
 }
 
 fn is_analysis(cmd: &str) -> bool {
-    let word = cmd.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
-    matches!(word.as_str(), "run" | "tran" | "ac" | "dc" | "op" | "noise" | "sens" | "tf" | "pz" | "disto")
+    let word = cmd
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(
+        word.as_str(),
+        "run" | "tran" | "ac" | "dc" | "op" | "noise" | "sens" | "tf" | "pz" | "disto"
+    )
 }
 
-fn follow(session: &Session, every: usize, halt_after: Option<usize>, points: &mut usize, halted: &mut bool) {
+fn follow(
+    session: &Session,
+    every: usize,
+    halt_after: Option<usize>,
+    points: &mut usize,
+    halted: &mut bool,
+) {
     session.wait_background(|ev| match ev {
         Event::Stdout(l) | Event::Stderr(l) => println!("{l}"),
-        Event::InitData { plot, vectors } => println!("[{plot}] {} vectors: {}", vectors.len(), vectors.join(" ")),
+        Event::InitData { plot, vectors } => {
+            println!("[{plot}] {} vectors: {}", vectors.len(), vectors.join(" "))
+        }
         Event::Data { index, values, .. } => {
             *points += 1;
             if (*points).is_multiple_of(every) {
-                let first = values.iter().next().map(|(n, v)| format!("{n}={v:.4e}")).unwrap_or_default();
+                let first = values
+                    .iter()
+                    .next()
+                    .map(|(n, v)| format!("{n}={v:.4e}"))
+                    .unwrap_or_default();
                 println!("point {index} ({} values) {first}", values.len());
             }
             if let Some(n) = halt_after
@@ -59,26 +82,38 @@ fn follow(session: &Session, every: usize, halt_after: Option<usize>, points: &m
                 let _ = session.halt();
             }
         }
-        Event::BackgroundRunning(r) => println!("background {}", if *r { "running" } else { "finished" }),
+        Event::BackgroundRunning(r) => {
+            println!("background {}", if *r { "running" } else { "finished" })
+        }
         Event::Exit { .. } | Event::Status(_) => {}
     });
 }
 
 fn live(deck: PathBuf, every: usize, halt_after: Option<usize>) -> Result<()> {
-    let text = std::fs::read_to_string(&deck).wrap_err_with(|| format!("cannot read {}", deck.display()))?;
-    let dir = deck.canonicalize()?.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let text = std::fs::read_to_string(&deck)
+        .wrap_err_with(|| format!("cannot read {}", deck.display()))?;
+    let dir = deck
+        .canonicalize()?
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
     if !ngspice::available() {
         bail!("libngspice not found; set ${}", ngspice::LIB_ENV);
     }
     let session = Session::open()?;
     std::env::set_current_dir(&dir)?;
     if let Ok(init) = std::fs::read_to_string(dir.join(".spiceinit")) {
-        for line in init.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('*')) {
+        for line in init
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('*'))
+        {
             let _ = session.command(line);
         }
     }
     session.load_deck(&ngspice::strip_control_blocks(&text))?;
-    let (mut points, mut halted, mut ran, mut inside, mut has_control) = (0usize, false, false, false, false);
+    let (mut points, mut halted, mut ran, mut inside, mut has_control) =
+        (0usize, false, false, false, false);
     for line in text.lines() {
         let t = line.trim();
         let lower = t.to_ascii_lowercase();
@@ -104,7 +139,10 @@ fn live(deck: PathBuf, every: usize, halt_after: Option<usize>) -> Result<()> {
         session.run_background()?;
         follow(&session, every, halt_after, &mut points, &mut halted);
     }
-    println!("{points} data points{}", if halted { " (halted)" } else { "" });
+    println!(
+        "{points} data points{}",
+        if halted { " (halted)" } else { "" }
+    );
     for plot in session.plot_names() {
         let names = session.vectors(&plot);
         println!("plot {plot}: {} vectors", names.len());

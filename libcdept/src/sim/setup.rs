@@ -64,7 +64,10 @@ pub struct Setup {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub template: String,
     /// The template's parameters (`out = "out"`, `vdd = 1.2`), kept as text.
-    #[serde(skip_serializing_if = "BTreeMap::is_empty", deserialize_with = "text_map")]
+    #[serde(
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "text_map"
+    )]
     pub template_args: BTreeMap<String, String>,
     /// CACE data this testbench came from (`cdept cace import`): the parameter as CACE
     /// YAML and what CDePT has no field for. Not used to run; `cdept cace export` reads
@@ -140,7 +143,11 @@ fn strings_or_numbers<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Stri
 /// `1.2000000000000002`).
 pub fn fmt_num(v: f64) -> String {
     let r = (v * 1e9).round() / 1e9;
-    if r.fract() == 0.0 && r.abs() < 1e15 { format!("{}", r as i64) } else { format!("{r}") }
+    if r.fract() == 0.0 && r.abs() < 1e15 {
+        format!("{}", r as i64)
+    } else {
+        format!("{r}")
+    }
 }
 
 impl Sweep {
@@ -150,13 +157,19 @@ impl Sweep {
             return Ok(self.values.clone());
         }
         let (Some(start), Some(stop), Some(step)) = (self.start, self.stop, self.step) else {
-            bail!("sweep '{}' needs `values` or start, stop and step", self.variable);
+            bail!(
+                "sweep '{}' needs `values` or start, stop and step",
+                self.variable
+            );
         };
         if !(step.is_finite() && step != 0.0) || !start.is_finite() || !stop.is_finite() {
             bail!("sweep '{}': bad start/stop/step", self.variable);
         }
         if (stop - start) * step < 0.0 {
-            bail!("sweep '{}': step {step} does not lead from {start} to {stop}", self.variable);
+            bail!(
+                "sweep '{}': step {step} does not lead from {start} to {stop}",
+                self.variable
+            );
         }
         let n = ((stop - start) / step + 1e-9).floor() as usize + 1;
         if n > 10_000 {
@@ -196,7 +209,9 @@ impl std::str::FromStr for McMode {
             "process" => Ok(McMode::Process),
             "mismatch" => Ok(McMode::Mismatch),
             "both" => Ok(McMode::Both),
-            other => Err(format!("Monte Carlo mode '{other}' is not process, mismatch or both")),
+            other => Err(format!(
+                "Monte Carlo mode '{other}' is not process, mismatch or both"
+            )),
         }
     }
 }
@@ -311,7 +326,8 @@ impl Setup {
     /// [`Setup::parse`] with a set of test templates to pick from (a project's).
     pub fn parse_with(text: &str, templates: &super::template::TemplateSet) -> Result<Setup> {
         let resolved = super::template::resolve(text, templates)?;
-        let mut setup: Setup = toml::from_str(&resolved.text).wrap_err("not a valid testbench setup")?;
+        let mut setup: Setup =
+            toml::from_str(&resolved.text).wrap_err("not a valid testbench setup")?;
         setup.requires_nets = resolved.requires_nets;
         setup.requires_elements = resolved.requires_elements;
         setup.plot_hints = resolved.plot;
@@ -362,12 +378,25 @@ impl Setup {
 
     fn check(&self) -> Result<()> {
         if !matches!(self.simulator.as_str(), "" | "ngspice" | "xyce" | "vacask") {
-            bail!("simulator '{}' is not supported yet (ngspice, xyce and vacask are)", self.simulator);
+            bail!(
+                "simulator '{}' is not supported yet (ngspice, xyce and vacask are)",
+                self.simulator
+            );
         }
         if super::run::Backend::of(&self.simulator_backend).is_none() {
-            bail!("simulator_backend '{}' is not process or inproc", self.simulator_backend);
+            bail!(
+                "simulator_backend '{}' is not process or inproc",
+                self.simulator_backend
+            );
         }
-        if self.simulator == "xyce" && self.analyses.iter().filter(|a| !matches!(a, Analysis::Op)).count() > 1 {
+        if self.simulator == "xyce"
+            && self
+                .analyses
+                .iter()
+                .filter(|a| !matches!(a, Analysis::Op))
+                .count()
+                > 1
+        {
             bail!("Xyce runs one analysis per deck (op may come with it); split the testbench");
         }
         for sweep in &self.sweeps {
@@ -375,7 +404,13 @@ impl Setup {
             if sweep.variable.is_empty() || sweep.variable.contains(char::is_whitespace) {
                 bail!("'{}' is not a valid sweep variable", sweep.variable);
             }
-            if self.sweeps.iter().filter(|o| o.variable == sweep.variable).count() > 1 {
+            if self
+                .sweeps
+                .iter()
+                .filter(|o| o.variable == sweep.variable)
+                .count()
+                > 1
+            {
                 bail!("variable '{}' is swept twice", sweep.variable);
             }
         }
@@ -405,7 +440,10 @@ impl Setup {
             if !word(&o.name) {
                 bail!("'{}' is not a valid output name", o.name);
             }
-            if self.outputs[..i].iter().any(|p| p.name.eq_ignore_ascii_case(&o.name)) {
+            if self.outputs[..i]
+                .iter()
+                .any(|p| p.name.eq_ignore_ascii_case(&o.name))
+            {
                 bail!("output '{}' is defined twice", o.name);
             }
             if let Err(e) = crate::calc::parse(&o.expr) {
@@ -468,30 +506,69 @@ max = 2e-10
         )
         .unwrap();
         assert_eq!(s.sweeps[0].expand().unwrap(), ["1.0", "1.2", "2"]);
-        assert_eq!(s.sweeps[1].expand().unwrap(), ["0.1", "0.2", "0.3", "0.4", "0.5"]);
-        assert_eq!(s.montecarlo, Some(MonteCarlo { runs: 5, seed: 7, ..Default::default() }));
+        assert_eq!(
+            s.sweeps[1].expand().unwrap(),
+            ["0.1", "0.2", "0.3", "0.4", "0.5"]
+        );
+        assert_eq!(
+            s.montecarlo,
+            Some(MonteCarlo {
+                runs: 5,
+                seed: 7,
+                ..Default::default()
+            })
+        );
         let l = Setup::parse("[[sweep]]\nvariable=\"a\"\nlist=[\"x\"]").unwrap();
         assert_eq!(l.sweeps[0].values, ["x"]);
-        assert_eq!(Sweep { variable: "a".into(), start: Some(3.0), stop: Some(1.0), step: Some(-1.0), ..Default::default() }
-            .expand().unwrap(), ["3", "2", "1"]);
+        assert_eq!(
+            Sweep {
+                variable: "a".into(),
+                start: Some(3.0),
+                stop: Some(1.0),
+                step: Some(-1.0),
+                ..Default::default()
+            }
+            .expand()
+            .unwrap(),
+            ["3", "2", "1"]
+        );
         assert!(Setup::parse("[[sweep]]\nvariable=\"a\"").is_err());
         assert!(Setup::parse("[[sweep]]\nvariable=\"a\"\nstart=1\nstop=2\nstep=-1").is_err());
-        assert!(Setup::parse("[[sweep]]\nvariable=\"a\"\nlist=[\"1\"]\n[[sweep]]\nvariable=\"a\"\nlist=[\"2\"]").is_err());
+        assert!(
+            Setup::parse(
+                "[[sweep]]\nvariable=\"a\"\nlist=[\"1\"]\n[[sweep]]\nvariable=\"a\"\nlist=[\"2\"]"
+            )
+            .is_err()
+        );
         assert!(Setup::parse("[montecarlo]\nruns=0").is_err());
         // Xyce does Monte Carlo through `.sampling`.
         assert!(Setup::parse("simulator=\"xyce\"\n[montecarlo]\nruns=2").is_ok());
-        let m = Setup::parse("[montecarlo]\nmode=\"both\"\nmismatch_corner=\"ss_mm\"").unwrap().montecarlo.unwrap();
-        assert_eq!((m.mode, m.mismatch_corner.as_str()), (McMode::Both, "ss_mm"));
+        let m = Setup::parse("[montecarlo]\nmode=\"both\"\nmismatch_corner=\"ss_mm\"")
+            .unwrap()
+            .montecarlo
+            .unwrap();
+        assert_eq!(
+            (m.mode, m.mismatch_corner.as_str()),
+            (McMode::Both, "ss_mm")
+        );
         assert!(Setup::parse("[montecarlo]\nmode=\"local\"").is_err());
     }
 
     #[test]
     fn outputs_are_checked_when_the_setup_loads() {
-        let s = Setup::parse("[[output]]\nname=\"gain\"\nexpr=\"db20(v(\\\"out\\\"))\"\nplot=\"ac\"").unwrap();
-        assert_eq!((s.outputs[0].name.as_str(), s.outputs[0].plot.as_str()), ("gain", "ac"));
+        let s =
+            Setup::parse("[[output]]\nname=\"gain\"\nexpr=\"db20(v(\\\"out\\\"))\"\nplot=\"ac\"")
+                .unwrap();
+        assert_eq!(
+            (s.outputs[0].name.as_str(), s.outputs[0].plot.as_str()),
+            ("gain", "ac")
+        );
         let e = Setup::parse("[[output]]\nname=\"g\"\nexpr=\"max(\"").unwrap_err();
         assert!(format!("{e:#}").contains("output 'g'"), "{e:#}");
-        assert!(Setup::parse("[[output]]\nname=\"g\"\nexpr=\"1\"\n[[output]]\nname=\"G\"\nexpr=\"2\"").is_err());
+        assert!(
+            Setup::parse("[[output]]\nname=\"g\"\nexpr=\"1\"\n[[output]]\nname=\"G\"\nexpr=\"2\"")
+                .is_err()
+        );
         assert!(Setup::parse("[[output]]\nname=\"a b\"\nexpr=\"1\"").is_err());
         assert!(Setup::parse("[[output]]\nname=\"a\"\nexpr=\"1\"\nbogus=1").is_err());
     }

@@ -462,8 +462,20 @@ pub fn lef(text: &str, names: Names) -> Result<Split> {
                     let name = words.next().unwrap_or("").to_string();
                     open = Some((2, name));
                     current = line.to_string();
-                } else if matches!(key, "LAYER" | "VIA" | "VIARULE" | "NONDEFAULTRULE" | "SITE" | "UNITS" | "PROPERTYDEFINITIONS" | "SPACING" | "BEGINEXT" | "IRDROP" | "ARRAY")
-                {
+                } else if matches!(
+                    key,
+                    "LAYER"
+                        | "VIA"
+                        | "VIARULE"
+                        | "NONDEFAULTRULE"
+                        | "SITE"
+                        | "UNITS"
+                        | "PROPERTYDEFINITIONS"
+                        | "SPACING"
+                        | "BEGINEXT"
+                        | "IRDROP"
+                        | "ARRAY"
+                ) {
                     let end = if key == "BEGINEXT" {
                         "ENDEXT".to_string()
                     } else if LEF_KEYWORD_END.contains(&key) {
@@ -796,7 +808,10 @@ R9 a b 1k\n.tran 1n 10n\n\
         assert!(split.notes[0].contains("3 top-level"), "{:?}", split.notes);
         let inv = String::from_utf8(split.pieces[0].bytes.clone()).unwrap();
         assert!(inv.contains(".param vdd=1.8"), "{inv}");
-        assert!(inv.contains(&format!(".include \"{}", dir.path().display())), "{inv}");
+        assert!(
+            inv.contains(&format!(".include \"{}", dir.path().display())),
+            "{inv}"
+        );
         assert!(!inv.contains("R9") && !inv.contains(".tran") && !inv.contains(".subckt buf"));
         let buf = String::from_utf8(split.pieces[1].bytes.clone()).unwrap();
         assert!(buf.contains(".subckt inv") && buf.contains(".subckt buf"));
@@ -804,7 +819,10 @@ R9 a b 1k\n.tran 1n 10n\n\
         assert_eq!(split.pieces[1].unresolved, ["mystery"]);
         let split = spice(SPICE, dir.path(), &|n| format!("p_{n}")).unwrap();
         let buf = String::from_utf8(split.pieces[1].bytes.clone()).unwrap();
-        assert!(buf.contains(".subckt p_buf A Y") && buf.contains(".ends p_buf"), "{buf}");
+        assert!(
+            buf.contains(".subckt p_buf A Y") && buf.contains(".ends p_buf"),
+            "{buf}"
+        );
     }
 
     const VERILOG: &str = "// lib\n`timescale 1ns/1ps\n\
@@ -851,7 +869,10 @@ MACRO buf\n  CLASS CORE ;\nEND buf\nEND LIBRARY\n";
         assert_eq!(parsed.macros.len(), 1);
         let split = lef(LEF, &|n| format!("z_{n}")).unwrap();
         let inv = String::from_utf8(split.pieces[0].bytes.clone()).unwrap();
-        assert!(inv.contains("MACRO z_inv") && inv.contains("END z_inv"), "{inv}");
+        assert!(
+            inv.contains("MACRO z_inv") && inv.contains("END z_inv"),
+            "{inv}"
+        );
         assert!(inv.contains("END A"));
         // A LEF with no layers has no tech part.
         assert!(lef("MACRO a\nEND a\n", &same).unwrap().tech.is_none());
@@ -868,13 +889,19 @@ MACRO buf\n  CLASS CORE ;\nEND buf\nEND LIBRARY\n";
         let names: Vec<_> = split.pieces.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["inv_1", "buf_1"]);
         let inv = String::from_utf8(split.pieces[0].bytes.clone()).unwrap();
-        assert!(inv.contains("library (\"demo_tt\") {") && inv.contains("time_unit"), "{inv}");
+        assert!(
+            inv.contains("library (\"demo_tt\") {") && inv.contains("time_unit"),
+            "{inv}"
+        );
         assert!(inv.contains("lu_table_template") && inv.contains("cell (\"inv_1\")"));
         assert!(!inv.contains("buf_1"));
         let parsed = crate::container::liberty::parse(inv.as_bytes());
         assert_eq!(parsed.cells.len(), 1);
         let buf = String::from_utf8(split.pieces[1].bytes.clone()).unwrap();
-        assert!(buf.contains("stray brace") && !buf.contains("inv_1"), "{buf}");
+        assert!(
+            buf.contains("stray brace") && !buf.contains("inv_1"),
+            "{buf}"
+        );
         let split = liberty(LIBERTY, &|n| format!("q_{n}")).unwrap();
         let buf = String::from_utf8(split.pieces[1].bytes.clone()).unwrap();
         assert!(buf.contains("cell (q_buf_1)"), "{buf}");

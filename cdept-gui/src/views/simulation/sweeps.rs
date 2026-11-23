@@ -35,12 +35,17 @@ pub(super) struct SweepForm {
 }
 
 fn words(text: &str) -> Vec<&str> {
-    text.split([',', ' ', '\t']).filter(|w| !w.is_empty()).collect()
+    text.split([',', ' ', '\t'])
+        .filter(|w| !w.is_empty())
+        .collect()
 }
 
 impl SweepForm {
     pub(super) fn new(variable: &str, values: &str) -> SweepForm {
-        SweepForm { variable: variable.into(), values: values.into() }
+        SweepForm {
+            variable: variable.into(),
+            values: values.into(),
+        }
     }
 
     pub(super) fn of(s: &Sweep) -> SweepForm {
@@ -51,7 +56,10 @@ impl SweepForm {
         } else {
             String::new()
         };
-        SweepForm { variable: s.variable.clone(), values }
+        SweepForm {
+            variable: s.variable.clone(),
+            values,
+        }
     }
 
     /// The schema's sweep this row stands for, or what is wrong with it (the messages of
@@ -59,7 +67,10 @@ impl SweepForm {
     pub(super) fn to_sweep(&self) -> Result<Sweep, String> {
         let variable = self.variable.trim().to_string();
         let text = self.values.trim();
-        let mut s = Sweep { variable: variable.clone(), ..Default::default() };
+        let mut s = Sweep {
+            variable: variable.clone(),
+            ..Default::default()
+        };
         if text.contains(':') {
             let parts: Vec<&str> = text.split(':').map(str::trim).collect();
             if parts.len() != 3 {
@@ -90,7 +101,9 @@ impl SweepForm {
 
     /// How many values the row has (0 when it is not valid).
     pub(super) fn count(&self) -> usize {
-        self.to_sweep().and_then(|s| s.expand().map_err(|e| e.to_string())).map_or(0, |v| v.len())
+        self.to_sweep()
+            .and_then(|s| s.expand().map_err(|e| e.to_string()))
+            .map_or(0, |v| v.len())
     }
 }
 
@@ -113,7 +126,10 @@ pub(super) fn row_problem(rows: &[SweepForm], i: usize) -> Option<String> {
         return Some(e);
     }
     let v = rows[i].variable.trim();
-    rows[..i].iter().any(|o| o.variable.trim() == v).then(|| format!("variable '{v}' is swept twice"))
+    rows[..i]
+        .iter()
+        .any(|o| o.variable.trim() == v)
+        .then(|| format!("variable '{v}' is swept twice"))
 }
 
 /// The sweeps a setup runs: the template's with the own ones laid over (a sweep of the
@@ -121,7 +137,10 @@ pub(super) fn row_problem(rows: &[SweepForm], i: usize) -> Option<String> {
 pub(super) fn overlay(inherited: &[Sweep], own: &[Sweep]) -> Vec<Sweep> {
     let mut out = inherited.to_vec();
     for s in own {
-        match out.iter().position(|o| o.variable.eq_ignore_ascii_case(&s.variable)) {
+        match out
+            .iter()
+            .position(|o| o.variable.eq_ignore_ascii_case(&s.variable))
+        {
             Some(i) => out[i] = s.clone(),
             None => out.push(s.clone()),
         }
@@ -145,21 +164,33 @@ pub(super) fn inherited(template: &str, args: &BTreeMap<String, String>) -> Inhe
     }
     let text = crate::views::testlib::compose(template, args, &toml::Table::new());
     match crate::views::testlib::parse(&text) {
-        Ok(s) => Inherited { template: template.to_string(), sweeps: s.sweeps, mc: s.montecarlo },
-        Err(_) => Inherited { template: template.to_string(), ..Default::default() },
+        Ok(s) => Inherited {
+            template: template.to_string(),
+            sweeps: s.sweeps,
+            mc: s.montecarlo,
+        },
+        Err(_) => Inherited {
+            template: template.to_string(),
+            ..Default::default()
+        },
     }
 }
 
 impl Inherited {
     /// Is the template's sweep of this variable replaced by an own one?
     pub(super) fn overridden(&self, own: &[SweepForm], variable: &str) -> bool {
-        own.iter().any(|o| o.variable.trim().eq_ignore_ascii_case(variable))
+        own.iter()
+            .any(|o| o.variable.trim().eq_ignore_ascii_case(variable))
     }
 }
 
 /// The rows of `sweeps` that the template does not already declare.
 pub(super) fn own_rows(sweeps: &[Sweep], inherited: &Inherited) -> Vec<SweepForm> {
-    sweeps.iter().filter(|s| !inherited.sweeps.contains(s)).map(SweepForm::of).collect()
+    sweeps
+        .iter()
+        .filter(|s| !inherited.sweeps.contains(s))
+        .map(SweepForm::of)
+        .collect()
 }
 
 /// A sweep as the file writes it.
@@ -208,9 +239,17 @@ impl RunPlan {
             .fold(1usize, usize::saturating_mul);
         let total = match mc_runs {
             Some(r) => temperatures.saturating_mul(sweep_points).saturating_mul(r),
-            None => corners.saturating_mul(temperatures).saturating_mul(sweep_points),
+            None => corners
+                .saturating_mul(temperatures)
+                .saturating_mul(sweep_points),
         };
-        RunPlan { corners, temperatures, sweep_points, mc_runs, total }
+        RunPlan {
+            corners,
+            temperatures,
+            sweep_points,
+            mc_runs,
+            total,
+        }
     }
 
     pub(super) fn many(&self) -> bool {
@@ -218,7 +257,8 @@ impl RunPlan {
     }
 
     pub(super) fn describe(&self) -> String {
-        let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+        let plural =
+            |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
         let t = plural(self.temperatures, "temperature", "temperatures");
         let s = plural(self.sweep_points, "sweep point", "sweep points");
         match self.mc_runs {
@@ -227,7 +267,11 @@ impl RunPlan {
                 self.total,
                 plural(r, "run", "runs")
             ),
-            None => format!("{} run points = {} × {t} × {s}", self.total, plural(self.corners, "corner", "corners")),
+            None => format!(
+                "{} run points = {} × {t} × {s}",
+                self.total,
+                plural(self.corners, "corner", "corners")
+            ),
         }
     }
 }
@@ -241,8 +285,14 @@ pub(super) fn mc_note(form: &Form, project: &Project) -> Option<String> {
     let setup = form.setup().ok()?;
     let mc = setup.montecarlo.as_ref()?;
     let tech = project.tech.as_ref()?;
-    let set = if setup.models.is_empty() { tech.models.default.clone()? } else { setup.models.clone() };
-    sim::monte_carlo_plan(project, &tech.models, &set, &setup.simulator, mc).err().map(|e| format!("{e:#}"))
+    let set = if setup.models.is_empty() {
+        tech.models.default.clone()?
+    } else {
+        setup.models.clone()
+    };
+    sim::monte_carlo_plan(project, &tech.models, &set, &setup.simulator, mc)
+        .err()
+        .map(|e| format!("{e:#}"))
 }
 
 /// Why a mode cannot be picked with Xyce until its corner set is named.
@@ -300,10 +350,17 @@ impl Form {
     pub(super) fn mc_table(&self) -> Result<Option<toml::Table>, String> {
         use toml::Value;
         if !self.mc {
-            return Ok(self.inherited.mc.as_ref().and_then(|m| toml::Table::try_from(m).ok()));
+            return Ok(self
+                .inherited
+                .mc
+                .as_ref()
+                .and_then(|m| toml::Table::try_from(m).ok()));
         }
         let whole = |what: &str, v: &str| -> Result<Value, String> {
-            v.trim().parse::<i64>().map(Value::Integer).map_err(|_| format!("Monte Carlo {what} '{v}' is not a whole number"))
+            v.trim()
+                .parse::<i64>()
+                .map(Value::Integer)
+                .map_err(|_| format!("Monte Carlo {what} '{v}' is not a whole number"))
         };
         let mut t = toml::Table::new();
         t.insert("runs".into(), whole("runs", &self.mc_runs)?);
@@ -347,11 +404,17 @@ pub(super) fn sweeps_ui(ui: &mut Ui, form: &mut Form) {
             let text = format!("{} = {}", s.variable, values);
             if overridden {
                 ui.weak(RichText::new(text).strikethrough());
-                ui.weak(format!("(from template {name}, replaced by your own below)"));
+                ui.weak(format!(
+                    "(from template {name}, replaced by your own below)"
+                ));
             } else {
                 ui.label(RichText::new(text).monospace().weak());
                 ui.weak(format!("from template {name}"));
-                if ui.small_button("Override").on_hover_text("Copy it below and edit it").clicked() {
+                if ui
+                    .small_button("Override")
+                    .on_hover_text("Copy it below and edit it")
+                    .clicked()
+                {
                     override_var = Some(s.variable.clone());
                 }
             }
@@ -361,13 +424,22 @@ pub(super) fn sweeps_ui(ui: &mut Ui, form: &mut Form) {
         let _ = form.override_sweep(&v);
     }
     let mut remove = None;
-    let names: Vec<String> = form.variables.iter().map(|(n, _)| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+    let names: Vec<String> = form
+        .variables
+        .iter()
+        .map(|(n, _)| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .collect();
     for i in 0..form.sweeps.len() {
         let problem = row_problem(&form.sweeps, i);
         let count = form.sweeps[i].count();
         ui.horizontal(|ui| {
             let row = &mut form.sweeps[i];
-            ui.add(TextEdit::singleline(&mut row.variable).desired_width(90.0).hint_text("variable"));
+            ui.add(
+                TextEdit::singleline(&mut row.variable)
+                    .desired_width(90.0)
+                    .hint_text("variable"),
+            );
             if !names.is_empty() {
                 ui.menu_button("…", |ui| {
                     ui.weak("the [variables] of this setup");
@@ -381,10 +453,19 @@ pub(super) fn sweeps_ui(ui: &mut Ui, form: &mut Form) {
                 .response
                 .on_hover_text("Pick one of the setup's variables");
             }
-            ui.add(TextEdit::singleline(&mut row.values).desired_width(220.0).hint_text("1.08, 1.2, 1.32  or  0.9:1.3:0.1"))
-                .on_hover_text("SPICE numbers separated by commas or spaces, or a range start:stop:step");
+            ui.add(
+                TextEdit::singleline(&mut row.values)
+                    .desired_width(220.0)
+                    .hint_text("1.08, 1.2, 1.32  or  0.9:1.3:0.1"),
+            )
+            .on_hover_text(
+                "SPICE numbers separated by commas or spaces, or a range start:stop:step",
+            );
             if problem.is_none() {
-                ui.weak(format!("{count} value{}", if count == 1 { "" } else { "s" }));
+                ui.weak(format!(
+                    "{count} value{}",
+                    if count == 1 { "" } else { "s" }
+                ));
             }
             if ui.small_button("✖").on_hover_text("Remove").clicked() {
                 remove = Some(i);
@@ -415,15 +496,23 @@ pub(super) fn mc_ui(ui: &mut Ui, form: &mut Form, corners: &[String], note: Opti
                     m.seed,
                     m.mode.name()
                 ));
-                if ui.small_button("Override").on_hover_text("Edit your own [montecarlo]: it replaces the template's").clicked() {
+                if ui
+                    .small_button("Override")
+                    .on_hover_text("Edit your own [montecarlo]: it replaces the template's")
+                    .clicked()
+                {
                     form.override_mc();
                 }
             });
         }
         (inherited, _) => {
             ui.horizontal(|ui| {
-                ui.checkbox(&mut form.mc, "Monte Carlo  ([montecarlo]: seeded runs instead of the corner grid)");
-                if inherited.is_some() && form.mc && ui.small_button("Use the template's").clicked() {
+                ui.checkbox(
+                    &mut form.mc,
+                    "Monte Carlo  ([montecarlo]: seeded runs instead of the corner grid)",
+                );
+                if inherited.is_some() && form.mc && ui.small_button("Use the template's").clicked()
+                {
                     form.mc = false;
                 }
             });
@@ -465,7 +554,9 @@ pub(super) fn mc_ui(ui: &mut Ui, form: &mut Form, corners: &[String], note: Opti
             }
         });
         if xyce && form.mc_mode == McMode::Process {
-            ui.weak("Xyce: process variation only, unless a corner set with mismatch is named above");
+            ui.weak(
+                "Xyce: process variation only, unless a corner set with mismatch is named above",
+            );
         }
     }
     if let Some(note) = note {
@@ -474,13 +565,19 @@ pub(super) fn mc_ui(ui: &mut Ui, form: &mut Form, corners: &[String], note: Opti
 }
 
 fn corner_combo(ui: &mut Ui, id: &str, value: &mut String, corners: &[String], default: &str) {
-    let text = if value.is_empty() { format!("{default} (default)") } else { value.clone() };
-    ComboBox::from_id_salt(("sim-mc-corner", id)).selected_text(text).show_ui(ui, |ui| {
-        ui.selectable_value(value, String::new(), format!("{default} (default)"));
-        for c in corners {
-            ui.selectable_value(value, c.clone(), c);
-        }
-    });
+    let text = if value.is_empty() {
+        format!("{default} (default)")
+    } else {
+        value.clone()
+    };
+    ComboBox::from_id_salt(("sim-mc-corner", id))
+        .selected_text(text)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(value, String::new(), format!("{default} (default)"));
+            for c in corners {
+                ui.selectable_value(value, c.clone(), c);
+            }
+        });
 }
 
 /// The line next to the Run buttons: how many points a run makes.
@@ -491,12 +588,18 @@ pub(super) fn plan_ui(ui: &mut Ui, view: &SimulationView) {
     ui.horizontal_wrapped(|ui| {
         ui.label(plan.describe());
         if plan.many() {
-            ui.colored_label(warn(ui), format!("more than {MANY_POINTS} points: this will take a while"));
+            ui.colored_label(
+                warn(ui),
+                format!("more than {MANY_POINTS} points: this will take a while"),
+            );
         }
         if let Ok(n) = view.now_runs_value()
             && setup.montecarlo.is_some()
         {
-            ui.weak(format!("Run N MC: {} points", RunPlan::with_runs(&setup, n).total));
+            ui.weak(format!(
+                "Run N MC: {} points",
+                RunPlan::with_runs(&setup, n).total
+            ));
         }
         if setup.montecarlo.is_some() {
             ui.weak(format!("Grid: {} points", RunPlan::grid(&setup).total));
@@ -507,29 +610,63 @@ pub(super) fn plan_ui(ui: &mut Ui, view: &SimulationView) {
 // --- script verbs ----------------------------------------------------------------------
 
 fn same_values(a: &str, b: &str) -> bool {
-    let norm = |t: &str| if t.contains(':') { t.replace(' ', "") } else { words(t).join(",") };
+    let norm = |t: &str| {
+        if t.contains(':') {
+            t.replace(' ', "")
+        } else {
+            words(t).join(",")
+        }
+    };
     norm(a) == norm(b)
 }
 
 /// The `sim …` verbs of this file: add_sweep, set_sweep, remove_sweep, override_sweep,
 /// set_mc, expect_sweep, expect_inherited, expect_plan, expect_mc_note. `None` when the
 /// verb is not one of them.
-pub(super) fn script(view: &mut SimulationView, project: &Project, args: &[String]) -> Option<Result<(), String>> {
+pub(super) fn script(
+    view: &mut SimulationView,
+    project: &Project,
+    args: &[String],
+) -> Option<Result<(), String>> {
     let verb = args.first()?.as_str();
     if !matches!(
         verb,
-        "add_sweep" | "set_sweep" | "remove_sweep" | "override_sweep" | "set_mc" | "expect_sweep" | "expect_inherited" | "expect_plan" | "expect_mc_note" | "expect_mc"
+        "add_sweep"
+            | "set_sweep"
+            | "remove_sweep"
+            | "override_sweep"
+            | "set_mc"
+            | "expect_sweep"
+            | "expect_inherited"
+            | "expect_plan"
+            | "expect_mc_note"
+            | "expect_mc"
     ) {
         return None;
     }
     Some(run_verb(view, project, verb, &args[1..]))
 }
 
-fn run_verb(view: &mut SimulationView, project: &Project, verb: &str, args: &[String]) -> Result<(), String> {
-    let arg = |i: usize| args.get(i).map(String::as_str).ok_or_else(|| "missing argument".to_string());
+fn run_verb(
+    view: &mut SimulationView,
+    project: &Project,
+    verb: &str,
+    args: &[String],
+) -> Result<(), String> {
+    let arg = |i: usize| {
+        args.get(i)
+            .map(String::as_str)
+            .ok_or_else(|| "missing argument".to_string())
+    };
     let index = |form: &Form, i: usize| -> Result<usize, String> {
-        let n: usize = arg(i)?.parse().map_err(|_| "the index is a number".to_string())?;
-        if n < form.sweeps.len() { Ok(n) } else { Err(format!("there are {} own sweeps", form.sweeps.len())) }
+        let n: usize = arg(i)?
+            .parse()
+            .map_err(|_| "the index is a number".to_string())?;
+        if n < form.sweeps.len() {
+            Ok(n)
+        } else {
+            Err(format!("there are {} own sweeps", form.sweeps.len()))
+        }
     };
     let form = view.form.as_mut().ok_or("no testbench is open")?;
     match verb {
@@ -585,7 +722,10 @@ fn run_verb(view: &mut SimulationView, project: &Project, verb: &str, args: &[St
             let row = &form.sweeps[i];
             let want = args[2.min(args.len())..].join(" ");
             if row.variable.trim() != arg(1)? || !same_values(&row.values, &want) {
-                return Err(format!("sweep {i} is '{}' = '{}'", row.variable, row.values));
+                return Err(format!(
+                    "sweep {i} is '{}' = '{}'",
+                    row.variable, row.values
+                ));
             }
         }
         // expect_inherited <sweeps> <mc|nomc>: what the template brings
@@ -600,7 +740,11 @@ fn run_verb(view: &mut SimulationView, project: &Project, verb: &str, args: &[St
                 return Err(format!(
                     "the template brings {} sweeps and {} Monte Carlo",
                     form.inherited.sweeps.len(),
-                    if form.inherited.mc.is_some() { "a" } else { "no" }
+                    if form.inherited.mc.is_some() {
+                        "a"
+                    } else {
+                        "no"
+                    }
                 ));
             }
         }
@@ -674,19 +818,45 @@ temperatures = [27]
     #[test]
     fn rows_are_validated_like_the_schema() {
         let r = |v: &str, x: &str| SweepForm::new(v, x).to_sweep();
-        assert_eq!(r("vdd", "1.08, 1.2 1.32").unwrap().values, ["1.08", "1.2", "1.32"]);
+        assert_eq!(
+            r("vdd", "1.08, 1.2 1.32").unwrap().values,
+            ["1.08", "1.2", "1.32"]
+        );
         assert_eq!(r("c", "10f,1p").unwrap().values, ["10f", "1p"]);
         let range = r("v", "0.9:1.3:0.1").unwrap();
         assert_eq!(range.expand().unwrap(), ["0.9", "1", "1.1", "1.2", "1.3"]);
-        assert!(r("v", "1,x").unwrap_err().contains("value 'x' is not a number"));
-        assert!(r("v", "a:2:1").unwrap_err().contains("start 'a' is not a number"));
+        assert!(
+            r("v", "1,x")
+                .unwrap_err()
+                .contains("value 'x' is not a number")
+        );
+        assert!(
+            r("v", "a:2:1")
+                .unwrap_err()
+                .contains("start 'a' is not a number")
+        );
         assert!(r("v", "1:2").unwrap_err().contains("start:stop:step"));
-        assert!(r("v", "").unwrap_err().contains("needs `values` or start, stop and step"));
+        assert!(
+            r("v", "")
+                .unwrap_err()
+                .contains("needs `values` or start, stop and step")
+        );
         assert!(r("v", "3:1:1").unwrap_err().contains("does not lead from"));
-        assert!(r("", "1").unwrap_err().contains("is not a valid sweep variable"));
-        assert!(r("a b", "1").unwrap_err().contains("is not a valid sweep variable"));
+        assert!(
+            r("", "1")
+                .unwrap_err()
+                .contains("is not a valid sweep variable")
+        );
+        assert!(
+            r("a b", "1")
+                .unwrap_err()
+                .contains("is not a valid sweep variable")
+        );
         let rows = vec![SweepForm::new("a", "1"), SweepForm::new("a", "2")];
-        assert_eq!(own_sweeps(&rows).unwrap_err(), "variable 'a' is swept twice");
+        assert_eq!(
+            own_sweeps(&rows).unwrap_err(),
+            "variable 'a' is swept twice"
+        );
         assert_eq!(row_problem(&rows, 0), None);
         assert!(row_problem(&rows, 1).unwrap().contains("swept twice"));
         // a row shows what the file had, in both forms
@@ -701,8 +871,19 @@ temperatures = [27]
                     [[sweep]]\nvariable = \"vdd\"\nvalues = [\"1.1\", \"1.2\"]\n\
                     [[sweep]]\nvariable = \"c\"\nvalues = [\"1p\", \"2p\", \"3p\"]\n";
         let grid = RunPlan::of(&s(base));
-        assert_eq!((grid.corners, grid.temperatures, grid.sweep_points, grid.total), (2, 3, 6, 36));
-        assert!(grid.describe().contains("36 run points = 2 corners × 3 temperatures × 6 sweep points"));
+        assert_eq!(
+            (
+                grid.corners,
+                grid.temperatures,
+                grid.sweep_points,
+                grid.total
+            ),
+            (2, 3, 6, 36)
+        );
+        assert!(
+            grid.describe()
+                .contains("36 run points = 2 corners × 3 temperatures × 6 sweep points")
+        );
         let mc = s(&format!("{base}[montecarlo]\nruns = 5\n"));
         let p = RunPlan::of(&mc);
         assert_eq!((p.mc_runs, p.total), (Some(5), 3 * 6 * 5));
@@ -710,7 +891,10 @@ temperatures = [27]
         assert_eq!(RunPlan::with_runs(&mc, 2).total, 36);
         let none = RunPlan::of(&s("schematic = \"x\""));
         assert_eq!(none.total, 1);
-        assert!(none.describe().contains("1 run points = 1 corner × 1 temperature"));
+        assert!(
+            none.describe()
+                .contains("1 run points = 1 corner × 1 temperature")
+        );
         // the warning threshold
         let big = s("[[sweep]]\nvariable = \"a\"\nstart = 1\nstop = 600\nstep = 1\n");
         assert!(RunPlan::of(&big).many());
@@ -727,8 +911,14 @@ temperatures = [27]
         let text = f.to_text().unwrap();
         let back = testlib::parse(&text).unwrap();
         assert_eq!(back.sweeps.len(), 1);
-        assert_eq!(back.montecarlo.as_ref().map(|m| (m.runs, m.mode)), Some((5, McMode::Process)));
-        assert!(!text.contains("mode"), "the default mode is not written: {text}");
+        assert_eq!(
+            back.montecarlo.as_ref().map(|m| (m.runs, m.mode)),
+            Some((5, McMode::Process))
+        );
+        assert!(
+            !text.contains("mode"),
+            "the default mode is not written: {text}"
+        );
         f.mc_mode = McMode::Both;
         f.mc_both_corner = "mc_mm".into();
         assert!(f.to_text().unwrap().contains("both_corner = \"mc_mm\""));
@@ -754,10 +944,20 @@ temperatures = [27]
         testlib::use_templates(TemplateSet::from_texts(&[SWEEPY]).unwrap());
         let f = form("template = \"sweepy\"\n");
         // inherited, read-only: not among the own rows, and not in the file
-        assert_eq!(f.inherited.sweeps.iter().map(|s| s.variable.as_str()).collect::<Vec<_>>(), ["cl", "vdd"]);
+        assert_eq!(
+            f.inherited
+                .sweeps
+                .iter()
+                .map(|s| s.variable.as_str())
+                .collect::<Vec<_>>(),
+            ["cl", "vdd"]
+        );
         assert!(f.sweeps.is_empty() && !f.mc && f.inherited.mc.is_none());
         let text = f.to_text().unwrap();
-        assert!(!text.contains("[[sweep]]") && !text.contains("montecarlo"), "{text}");
+        assert!(
+            !text.contains("[[sweep]]") && !text.contains("montecarlo"),
+            "{text}"
+        );
         assert_eq!(RunPlan::of(&f.setup().unwrap()).sweep_points, 2 * 3);
 
         // own sweep of another variable: added; of the same one: replaces
@@ -768,7 +968,13 @@ temperatures = [27]
         assert!(text.contains("temp") && text.contains("\"1f\""), "{text}");
         assert!(!text.contains("vdd") && !text.contains("100f"), "{text}");
         let s = f.setup().unwrap();
-        assert_eq!(s.sweeps.iter().map(|w| w.variable.as_str()).collect::<Vec<_>>(), ["cl", "vdd", "temp"]);
+        assert_eq!(
+            s.sweeps
+                .iter()
+                .map(|w| w.variable.as_str())
+                .collect::<Vec<_>>(),
+            ["cl", "vdd", "temp"]
+        );
         assert_eq!(RunPlan::of(&s).sweep_points, 3 * 2);
         // loading that file gives the same own rows
         let g = form(&text);
@@ -776,17 +982,29 @@ temperatures = [27]
 
         // Monte Carlo from a template parameter: inherited; overriding writes it whole
         let mut m = form("template = \"sweepy\"\n[template_args]\nmc = true\nruns = 25\n");
-        assert_eq!(m.inherited.mc.as_ref().map(|c| (c.runs, c.seed)), Some((25, 7)));
+        assert_eq!(
+            m.inherited.mc.as_ref().map(|c| (c.runs, c.seed)),
+            Some((25, 7))
+        );
         assert!(!m.mc && m.has_mc());
         assert!(!m.to_text().unwrap().contains("montecarlo"));
         m.override_mc();
         assert!(m.mc && m.mc_runs == "25" && m.mc_mode == McMode::Mismatch);
-        assert!(!m.to_text().unwrap().contains("montecarlo"), "unchanged is not written");
+        assert!(
+            !m.to_text().unwrap().contains("montecarlo"),
+            "unchanged is not written"
+        );
         m.mc_runs = "3".into();
         let text = m.to_text().unwrap();
-        assert!(text.contains("[montecarlo]") && text.contains("runs = 3"), "{text}");
+        assert!(
+            text.contains("[montecarlo]") && text.contains("runs = 3"),
+            "{text}"
+        );
         // the own table replaces the template's as a whole: the seed is written too
-        assert!(text.contains("seed = 7") && text.contains("mismatch"), "{text}");
+        assert!(
+            text.contains("seed = 7") && text.contains("mismatch"),
+            "{text}"
+        );
         assert_eq!(m.setup().unwrap().montecarlo.unwrap().runs, 3);
         let back = form(&text);
         assert!(back.mc && back.mc_runs == "3");

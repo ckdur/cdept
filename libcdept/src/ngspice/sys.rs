@@ -90,7 +90,8 @@ pub struct Api {
 impl Api {
     pub fn load(path: &Path) -> Result<Api> {
         // SAFETY: loading a shared library runs its initialisers; that is what was asked.
-        let lib = unsafe { Library::new(path) }.wrap_err_with(|| format!("cannot load {}", path.display()))?;
+        let lib = unsafe { Library::new(path) }
+            .wrap_err_with(|| format!("cannot load {}", path.display()))?;
         // Never unloaded: the function pointers below must stay valid.
         let lib: &'static Library = Box::leak(Box::new(lib));
         macro_rules! sym {

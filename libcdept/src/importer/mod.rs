@@ -401,11 +401,9 @@ fn destination(library: &Library, cell: &str, c: &Candidate) -> (PathBuf, bool) 
         }
         _ => {
             let to = library.path.join(&file);
-            let taken = library.cell(cell).is_some_and(|k| {
-                k.entries
-                    .iter()
-                    .any(|e| e.name == c.view || e.path == to)
-            });
+            let taken = library
+                .cell(cell)
+                .is_some_and(|k| k.entries.iter().any(|e| e.name == c.view || e.path == to));
             (to.clone(), taken || to.exists())
         }
     }
@@ -499,7 +497,10 @@ fn read_file(
     let mut missing: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for piece in &split.pieces {
         for g in &piece.unresolved {
-            missing.entry(g.clone()).or_default().push(piece.name.clone());
+            missing
+                .entry(g.clone())
+                .or_default()
+                .push(piece.name.clone());
         }
     }
     let what = if format == Format::Gds {
@@ -549,7 +550,10 @@ fn read_file(
 }
 
 /// Plan and apply in one go.
-pub fn run(project: &Project, request: &ImportRequest) -> Result<(Report, crate::refactor::Outcome)> {
+pub fn run(
+    project: &Project,
+    request: &ImportRequest,
+) -> Result<(Report, crate::refactor::Outcome)> {
     let ImportPlan { plan, report } = plan_import_report(project, request)?;
     let outcome = crate::refactor::apply(project, &plan)?;
     Ok((report, outcome))

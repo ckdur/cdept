@@ -29,9 +29,16 @@ pub struct Pin {
 pub fn symbol_pins(text: &str) -> Vec<Pin> {
     let mut pins = vec![];
     for line in text.lines() {
-        let Some(rest) = line.strip_prefix("B 5 ") else { continue };
-        let Some((coords, props)) = rest.split_once('{') else { continue };
-        let n: Vec<f64> = coords.split_whitespace().filter_map(|t| t.parse().ok()).collect();
+        let Some(rest) = line.strip_prefix("B 5 ") else {
+            continue;
+        };
+        let Some((coords, props)) = rest.split_once('{') else {
+            continue;
+        };
+        let n: Vec<f64> = coords
+            .split_whitespace()
+            .filter_map(|t| t.parse().ok())
+            .collect();
         if n.len() != 4 {
             continue;
         }
@@ -45,7 +52,12 @@ pub fn symbol_pins(text: &str) -> Vec<Pin> {
         };
         let name = prop("name");
         if !name.is_empty() {
-            pins.push(Pin { name, dir: prop("dir"), x: (n[0] + n[2]) / 2.0, y: (n[1] + n[3]) / 2.0 });
+            pins.push(Pin {
+                name,
+                dir: prop("dir"),
+                x: (n[0] + n[2]) / 2.0,
+                y: (n[1] + n[3]) / 2.0,
+            });
         }
     }
     pins
@@ -53,12 +65,16 @@ pub fn symbol_pins(text: &str) -> Vec<Pin> {
 
 fn is_supply(name: &str) -> bool {
     let n = name.to_lowercase();
-    ["vdd", "vcc", "avdd", "dvdd", "vpwr", "vdda", "vddd"].iter().any(|p| n == *p || n.starts_with(p))
+    ["vdd", "vcc", "avdd", "dvdd", "vpwr", "vdda", "vddd"]
+        .iter()
+        .any(|p| n == *p || n.starts_with(p))
 }
 
 fn is_ground(name: &str) -> bool {
     let n = name.to_lowercase();
-    ["vss", "gnd", "agnd", "dgnd", "vgnd", "vssa", "vssd"].iter().any(|p| n == *p || n.starts_with(p))
+    ["vss", "gnd", "agnd", "dgnd", "vgnd", "vssa", "vssd"]
+        .iter()
+        .any(|p| n == *p || n.starts_with(p))
 }
 
 /// Escape braces for an xschem property value (`{vdd}` becomes `\{vdd\}`).
@@ -112,7 +128,8 @@ fn pin_net(s: &StarterSpec, pin: &str) -> String {
 
 /// The xschem text of the starter testbench schematic.
 pub fn schematic_text(s: &StarterSpec) -> String {
-    let mut t = String::from("v {xschem version=3.4.5 file_version=1.2\n}\nG {}\nK {}\nV {}\nS {}\nE {}\n");
+    let mut t =
+        String::from("v {xschem version=3.4.5 file_version=1.2\n}\nG {}\nK {}\nV {}\nS {}\nE {}\n");
     t.push_str(&format!("C {{{}}} 0 0 0 0 {{name=x1}}\n", s.symbol_ref));
     let (mut cx, mut cy) = (0.0, 0.0);
     for p in s.pins {
@@ -129,13 +146,31 @@ pub fn schematic_text(s: &StarterSpec) -> String {
         } else {
             (0.0, if p.y >= cy { 60.0 } else { -60.0 })
         };
-        t.push_str(&format!("N {} {} {} {} {{lab={net}}}\n", p.x, p.y, p.x + dx, p.y + dy));
+        t.push_str(&format!(
+            "N {} {} {} {} {{lab={net}}}\n",
+            p.x,
+            p.y,
+            p.x + dx,
+            p.y + dy
+        ));
         if net == "0" {
-            t.push_str(&format!("C {{gnd.sym}} {} {} 0 0 {{name=lg{i} lab=0}}\n", p.x + dx, p.y + dy));
+            t.push_str(&format!(
+                "C {{gnd.sym}} {} {} 0 0 {{name=lg{i} lab=0}}\n",
+                p.x + dx,
+                p.y + dy
+            ));
         } else if net.eq_ignore_ascii_case(s.supply_net) {
-            t.push_str(&format!("C {{vdd.sym}} {} {} 0 0 {{name=lv{i} lab={net}}}\n", p.x + dx, p.y + dy));
+            t.push_str(&format!(
+                "C {{vdd.sym}} {} {} 0 0 {{name=lv{i} lab={net}}}\n",
+                p.x + dx,
+                p.y + dy
+            ));
         } else {
-            t.push_str(&format!("C {{lab_wire.sym}} {} {} 0 0 {{name=ln{i} lab={net}}}\n", p.x + dx, p.y + dy));
+            t.push_str(&format!(
+                "C {{lab_wire.sym}} {} {} 0 0 {{name=ln{i} lab={net}}}\n",
+                p.x + dx,
+                p.y + dy
+            ));
         }
     }
     // Sources and the load, left of the DUT, in the layout of cells/tb_inv.
@@ -144,20 +179,43 @@ pub fn schematic_text(s: &StarterSpec) -> String {
         "C {{vsource.sym}} {x} {y} 0 0 {{name={} value=\"\\{{vdd\\}}\" savecurrent=false}}\n",
         s.supply_source
     ));
-    t.push_str(&format!("C {{vdd.sym}} {x} {} 0 0 {{name=lsv lab={}}}\n", y - 30.0, s.supply_net));
-    t.push_str(&format!("C {{gnd.sym}} {x} {} 0 0 {{name=lsg lab=0}}\n", y + 30.0));
+    t.push_str(&format!(
+        "C {{vdd.sym}} {x} {} 0 0 {{name=lsv lab={}}}\n",
+        y - 30.0,
+        s.supply_net
+    ));
+    t.push_str(&format!(
+        "C {{gnd.sym}} {x} {} 0 0 {{name=lsg lab=0}}\n",
+        y + 30.0
+    ));
     x += 120.0;
     t.push_str(&format!(
         "C {{vsource.sym}} {x} {y} 0 0 {{name={} value=\"{}\" savecurrent=false}}\n",
         s.input_source,
         xschem_value(s.stimulus)
     ));
-    t.push_str(&format!("C {{lab_wire.sym}} {x} {} 0 0 {{name=lsi lab={}}}\n", y - 30.0, s.in_net));
-    t.push_str(&format!("C {{gnd.sym}} {x} {} 0 0 {{name=lig lab=0}}\n", y + 30.0));
+    t.push_str(&format!(
+        "C {{lab_wire.sym}} {x} {} 0 0 {{name=lsi lab={}}}\n",
+        y - 30.0,
+        s.in_net
+    ));
+    t.push_str(&format!(
+        "C {{gnd.sym}} {x} {} 0 0 {{name=lig lab=0}}\n",
+        y + 30.0
+    ));
     x += 120.0;
-    t.push_str(&format!("C {{capa.sym}} {x} {y} 0 0 {{name=CL value=10f m=1}}\n"));
-    t.push_str(&format!("C {{lab_wire.sym}} {x} {} 0 0 {{name=lso lab={}}}\n", y - 30.0, s.out_net));
-    t.push_str(&format!("C {{gnd.sym}} {x} {} 0 0 {{name=lcg lab=0}}\n", y + 30.0));
+    t.push_str(&format!(
+        "C {{capa.sym}} {x} {y} 0 0 {{name=CL value=10f m=1}}\n"
+    ));
+    t.push_str(&format!(
+        "C {{lab_wire.sym}} {x} {} 0 0 {{name=lso lab={}}}\n",
+        y - 30.0,
+        s.out_net
+    ));
+    t.push_str(&format!(
+        "C {{gnd.sym}} {x} {} 0 0 {{name=lcg lab=0}}\n",
+        y + 30.0
+    ));
     t
 }
 
@@ -171,7 +229,11 @@ pub struct Created {
 }
 
 fn param_or(bound: &super::template::Bound, name: &str, default: &str) -> String {
-    bound.get(name).cloned().flatten().unwrap_or_else(|| default.to_string())
+    bound
+        .get(name)
+        .cloned()
+        .flatten()
+        .unwrap_or_else(|| default.to_string())
 }
 
 /// Create the testbench view `library/cell/view` from `template`. With `dut`
@@ -186,14 +248,20 @@ pub fn create_testbench(
     args: &BTreeMap<String, String>,
     dut: Option<&str>,
 ) -> Result<Created> {
-    let lib = project.library(library).ok_or_else(|| eyre!("no library '{library}'"))?;
+    let lib = project
+        .library(library)
+        .ok_or_else(|| eyre!("no library '{library}'"))?;
     if lib.read_only {
         bail!("library '{library}' is read-only");
     }
     if lib.layout != crate::library::LibraryLayout::Cells {
         bail!("library '{library}' is not a cells library (views live in <cell>/<view>/)");
     }
-    if !view.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') || view.is_empty() {
+    if !view
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        || view.is_empty()
+    {
         bail!("'{view}' is not a valid view name");
     }
     let view_dir = lib.path.join(cell).join(view);
@@ -202,13 +270,19 @@ pub fn create_testbench(
     }
     let bound = template.bind(args)?;
     let mut created = Created::default();
-    let has_schematic = lib
-        .cell(cell)
-        .is_some_and(|c| c.entries.iter().any(|e| e.format == Some(Format::XschemSchematic)));
+    let has_schematic = lib.cell(cell).is_some_and(|c| {
+        c.entries
+            .iter()
+            .any(|e| e.format == Some(Format::XschemSchematic))
+    });
     if let Some(dut) = dut {
-        let (dl, dc) = dut.split_once('/').ok_or_else(|| eyre!("--dut is library/cell, not '{dut}'"))?;
+        let (dl, dc) = dut
+            .split_once('/')
+            .ok_or_else(|| eyre!("--dut is library/cell, not '{dut}'"))?;
         if has_schematic {
-            created.notes.push(format!("{library}/{cell} already has a schematic; --dut ignored"));
+            created.notes.push(format!(
+                "{library}/{cell} already has a schematic; --dut ignored"
+            ));
         } else {
             let dcell = project
                 .library(dl)
@@ -219,8 +293,12 @@ pub fn create_testbench(
                 .iter()
                 .find(|e| e.format == Some(Format::XschemSymbol))
                 .ok_or_else(|| eyre!("{dut} has no xschem symbol to instantiate"))?;
-            let file = sym.main_file.clone().ok_or_else(|| eyre!("{dut}: the symbol view has no file"))?;
-            let text = std::fs::read_to_string(&file).wrap_err_with(|| format!("cannot read {}", file.display()))?;
+            let file = sym
+                .main_file
+                .clone()
+                .ok_or_else(|| eyre!("{dut}: the symbol view has no file"))?;
+            let text = std::fs::read_to_string(&file)
+                .wrap_err_with(|| format!("cannot read {}", file.display()))?;
             let pins = symbol_pins(&text);
             if pins.is_empty() {
                 bail!("{dut}: the symbol {} has no pins", file.display());
@@ -234,7 +312,11 @@ pub fn create_testbench(
             let out_net = param_or(&bound, "out", "out");
             let supply_source = param_or(&bound, "supply", "Vdd");
             let input_source = param_or(&bound, "src", "Vin");
-            let stimulus = if template.stimulus.is_empty() { "dc 0" } else { template.stimulus.as_str() };
+            let stimulus = if template.stimulus.is_empty() {
+                "dc 0"
+            } else {
+                template.stimulus.as_str()
+            };
             let spec = StarterSpec {
                 symbol_ref: &symbol_ref,
                 pins: &pins,
@@ -256,7 +338,11 @@ pub fn create_testbench(
                 .iter()
                 .filter(|p| {
                     let n = pin_net(&spec, &p.name);
-                    n.eq_ignore_ascii_case(&p.name) && n != in_net && n != out_net && !is_supply(&n) && !is_ground(&n)
+                    n.eq_ignore_ascii_case(&p.name)
+                        && n != in_net
+                        && n != out_net
+                        && !is_supply(&n)
+                        && !is_ground(&n)
                 })
                 .map(|p| p.name.clone())
                 .collect();
@@ -271,7 +357,11 @@ pub fn create_testbench(
                 "DUT pins: input {}, output {}, supply on {}",
                 i.unwrap_or("(none found)"),
                 o.unwrap_or("(none found)"),
-                pins.iter().filter(|p| is_supply(&p.name)).map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+                pins.iter()
+                    .filter(|p| is_supply(&p.name))
+                    .map(|p| p.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
             created.schematic = Some(sch);
         }
@@ -317,7 +407,15 @@ mod tests {
     fn reads_pins() {
         let pins = symbol_pins(SYM);
         assert_eq!(pins.len(), 4);
-        assert_eq!((pins[0].name.as_str(), pins[0].dir.as_str(), pins[0].x, pins[0].y), ("A", "in", -40.0, 0.0));
+        assert_eq!(
+            (
+                pins[0].name.as_str(),
+                pins[0].dir.as_str(),
+                pins[0].x,
+                pins[0].y
+            ),
+            ("A", "in", -40.0, 0.0)
+        );
         assert_eq!(pins[2].y, -40.0);
     }
 
@@ -334,8 +432,17 @@ mod tests {
             input_source: "Vin",
             stimulus: "pulse(0 {vdd} 200p 50p 50p 400p 1n)",
         });
-        assert!(t.contains("C {cells/inv/symbol/inv.sym} 0 0 0 0 {name=x1}"), "{t}");
-        assert!(t.contains("{lab=VDD}") && t.contains("{lab=0}") && t.contains("{lab=A}") && t.contains("{lab=Y}"), "{t}");
+        assert!(
+            t.contains("C {cells/inv/symbol/inv.sym} 0 0 0 0 {name=x1}"),
+            "{t}"
+        );
+        assert!(
+            t.contains("{lab=VDD}")
+                && t.contains("{lab=0}")
+                && t.contains("{lab=A}")
+                && t.contains("{lab=Y}"),
+            "{t}"
+        );
         assert!(t.contains("value=\"pulse(0 \\{vdd\\} 200p"), "{t}");
     }
 }

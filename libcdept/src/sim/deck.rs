@@ -86,7 +86,11 @@ pub fn sweep_combinations(setup: &Setup) -> Vec<BTreeMap<String, String>> {
 }
 
 fn temperatures(setup: &Setup) -> Vec<Option<f64>> {
-    if setup.temperatures.is_empty() { vec![None] } else { setup.temperatures.iter().map(|t| Some(*t)).collect() }
+    if setup.temperatures.is_empty() {
+        vec![None]
+    } else {
+        setup.temperatures.iter().map(|t| Some(*t)).collect()
+    }
 }
 
 /// Every run of `setup`: corners × temperatures × sweeps. `default_corner` stands in
@@ -102,7 +106,12 @@ pub fn points(setup: &Setup, default_corner: &str) -> Vec<RunPoint> {
     for c in &corners {
         for t in temperatures(setup) {
             for v in &combos {
-                out.push(RunPoint { corner: c.clone(), temperature: t, variables: v.clone(), ..Default::default() });
+                out.push(RunPoint {
+                    corner: c.clone(),
+                    temperature: t,
+                    variables: v.clone(),
+                    ..Default::default()
+                });
             }
         }
     }
@@ -145,8 +154,18 @@ pub fn mc_points(setup: &Setup, corner: &str, runs: u32, seed: u64) -> Vec<RunPo
 fn analysis_command(a: &Analysis) -> (String, &'static str) {
     match a {
         Analysis::Op => ("op".into(), "op"),
-        Analysis::Dc { source, start, stop, step } => (format!("dc {source} {start} {stop} {step}"), "dc"),
-        Analysis::Ac { sweep, points, start, stop } => (format!("ac {sweep} {points} {start} {stop}"), "ac"),
+        Analysis::Dc {
+            source,
+            start,
+            stop,
+            step,
+        } => (format!("dc {source} {start} {stop} {step}"), "dc"),
+        Analysis::Ac {
+            sweep,
+            points,
+            start,
+            stop,
+        } => (format!("ac {sweep} {points} {start} {stop}"), "ac"),
         Analysis::Tran { step, stop, start } => {
             if start.is_empty() {
                 (format!("tran {step} {stop}"), "tran")
@@ -154,9 +173,17 @@ fn analysis_command(a: &Analysis) -> (String, &'static str) {
                 (format!("tran {step} {stop} {start}"), "tran")
             }
         }
-        Analysis::Noise { output, source, sweep, points, start, stop } => {
-            (format!("noise {output} {source} {sweep} {points} {start} {stop}"), "noise")
-        }
+        Analysis::Noise {
+            output,
+            source,
+            sweep,
+            points,
+            start,
+            stop,
+        } => (
+            format!("noise {output} {source} {sweep} {points} {start} {stop}"),
+            "noise",
+        ),
     }
 }
 
@@ -175,7 +202,10 @@ pub fn spiceinit(
         .map(|d| d.resolve(var).map(|p| p.display().to_string()))
         .collect::<Result<Vec<_>, _>>()?;
     if !dirs.is_empty() {
-        out.push_str(&format!("setcs sourcepath = ( $sourcepath {} )\n", dirs.join(" ")));
+        out.push_str(&format!(
+            "setcs sourcepath = ( $sourcepath {} )\n",
+            dirs.join(" ")
+        ));
     }
     for o in &set.osdi {
         out.push_str(&format!("osdi '{}'\n", o.resolve(var)?.display()));
@@ -190,19 +220,40 @@ pub fn spiceinit(
 /// The deck. `models` are the `.lib`/`.include` lines of the corner, `netlist` the
 /// text xschem wrote for the testbench schematic. The netlist's own `.end` is dropped
 /// (the deck ends once, at the end); everything else of it is kept, code blocks too.
-pub fn build(setup: &Setup, point: &RunPoint, title: &str, models: &[String], netlist: &str) -> String {
+pub fn build(
+    setup: &Setup,
+    point: &RunPoint,
+    title: &str,
+    models: &[String],
+    netlist: &str,
+) -> String {
     if setup.simulator == "xyce" {
         return build_xyce(setup, point, title, models, netlist);
     }
     if setup.simulator == "vacask" {
         // The model lines are the SPICE ones; `vacask::build_point` adds the OSDI loads.
-        let inputs = crate::vacask::deck::Inputs { setup, point, title, models, netlist, defined: None, mm: None, pdk: "", notes: &[] };
+        let inputs = crate::vacask::deck::Inputs {
+            setup,
+            point,
+            title,
+            models,
+            netlist,
+            defined: None,
+            mm: None,
+            pdk: "",
+            notes: &[],
+        };
         return crate::vacask::deck::build_or_comment(&inputs);
     }
     let mut out = String::new();
-    out.push_str(&format!("* CDePT testbench {title}, run {}\n", point.name()));
+    out.push_str(&format!(
+        "* CDePT testbench {title}, run {}\n",
+        point.name()
+    ));
     if let Some(seed) = point.seed {
-        out.push_str(&format!("* Monte Carlo seed {seed} (setseed + reset in the control block)\n"));
+        out.push_str(&format!(
+            "* Monte Carlo seed {seed} (setseed + reset in the control block)\n"
+        ));
     }
     out.push_str("* models\n");
     for line in models {
@@ -220,7 +271,11 @@ pub fn build(setup: &Setup, point: &RunPoint, title: &str, models: &[String], ne
         }
     }
     if !setup.options.is_empty() {
-        let items: Vec<String> = setup.options.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        let items: Vec<String> = setup
+            .options
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
         out.push_str(&format!(".options {}\n", items.join(" ")));
     }
     out.push_str("* netlist\n");
@@ -253,11 +308,17 @@ pub fn build(setup: &Setup, point: &RunPoint, title: &str, models: &[String], ne
         if matches!(a, Analysis::Noise { .. }) {
             // ngspice leaves two plots: noise1 (the spectra) and noise2 (the totals), and
             // `write` takes the current one: keep both.
-            out.push_str(&format!("setplot noise1\nwrite {RAW_FILE} all\nsetplot noise2\n"));
+            out.push_str(&format!(
+                "setplot noise1\nwrite {RAW_FILE} all\nsetplot noise2\n"
+            ));
         }
         out.push_str(&format!("write {RAW_FILE} all\n"));
         for (i, m) in setup.measures.iter().enumerate() {
-            if !taken[i] && m.split_whitespace().next().is_some_and(|w| w.eq_ignore_ascii_case(kind)) {
+            if !taken[i]
+                && m.split_whitespace()
+                    .next()
+                    .is_some_and(|w| w.eq_ignore_ascii_case(kind))
+            {
                 taken[i] = true;
                 out.push_str(&format!("meas {m}\n"));
             }
@@ -310,7 +371,10 @@ fn xyce_options(setup: &Setup) -> Vec<String> {
         let (pkg, name) = k.split_once('.').unwrap_or(("device", k));
         by_pkg.entry(pkg).or_default().push(format!("{name}={v}"));
     }
-    by_pkg.into_iter().map(|(p, items)| format!(".options {p} {}", items.join(" "))).collect()
+    by_pkg
+        .into_iter()
+        .map(|(p, items)| format!(".options {p} {}", items.join(" ")))
+        .collect()
 }
 
 /// Xyce reads `TRIG`, `TARG`, `VAL`, `RISE`, … in upper case only; the rest of a
@@ -324,9 +388,18 @@ fn xyce_measure(m: &str) -> String {
 /// raw file given on its command line), in its `.options` packages, in `.print` for
 /// `save` (every voltage with `v(*)` when `save` is empty) and in upper-case `.meas`.
 /// A `.control` … `.endc` block of the netlist is dropped.
-pub fn build_xyce(setup: &Setup, point: &RunPoint, title: &str, models: &[String], netlist: &str) -> String {
+pub fn build_xyce(
+    setup: &Setup,
+    point: &RunPoint,
+    title: &str,
+    models: &[String],
+    netlist: &str,
+) -> String {
     let mut out = String::new();
-    out.push_str(&format!("* CDePT testbench {title}, run {} (Xyce)\n* models\n", point.name()));
+    out.push_str(&format!(
+        "* CDePT testbench {title}, run {} (Xyce)\n* models\n",
+        point.name()
+    ));
     for line in models {
         out.push_str(line);
         out.push('\n');
@@ -339,7 +412,9 @@ pub fn build_xyce(setup: &Setup, point: &RunPoint, title: &str, models: &[String
         // Xyce draws gauss()/agauss() parameters only under `.SAMPLING useExpr=true`
         // (one sample per run; `-randseed` is given on the command line, [`xyce_args`]).
         // The IHP statistical models scale their sigma by `mc_ok`.
-        out.push_str(&format!("* Monte Carlo seed {seed} (-randseed), one .SAMPLING sample\n"));
+        out.push_str(&format!(
+            "* Monte Carlo seed {seed} (-randseed), one .SAMPLING sample\n"
+        ));
         if !variables.contains_key("mc_ok") {
             out.push_str(".param mc_ok=1\n");
         }
@@ -372,7 +447,11 @@ pub fn build_xyce(setup: &Setup, point: &RunPoint, title: &str, models: &[String
             control = false;
         }
     }
-    let vars = if setup.save.is_empty() { "v(*)".to_string() } else { setup.save.join(" ") };
+    let vars = if setup.save.is_empty() {
+        "v(*)".to_string()
+    } else {
+        setup.save.join(" ")
+    };
     let mut taken = vec![false; setup.measures.len()];
     for a in &setup.analyses {
         let (command, kind) = analysis_command(a);
@@ -381,7 +460,11 @@ pub fn build_xyce(setup: &Setup, point: &RunPoint, title: &str, models: &[String
             out.push_str(&format!(".print {kind} {vars}\n"));
         }
         for (i, m) in setup.measures.iter().enumerate() {
-            if !taken[i] && m.split_whitespace().next().is_some_and(|w| w.eq_ignore_ascii_case(kind)) {
+            if !taken[i]
+                && m.split_whitespace()
+                    .next()
+                    .is_some_and(|w| w.eq_ignore_ascii_case(kind))
+            {
                 taken[i] = true;
                 out.push_str(&format!(".meas {}\n", xyce_measure(m)));
             }
@@ -429,7 +512,10 @@ mod tests {
         assert_eq!(names[2], "tt_27_rm1_vdd1p2");
         assert_eq!(names[4], "ff_27_rm1_vdd1p0");
         let deck = build(&s, &p[2], "t", &[], "R1 a b 1k\n");
-        assert!(deck.contains(".param vdd=1.2\n") && !deck.contains("vdd=1.8"), "{deck}");
+        assert!(
+            deck.contains(".param vdd=1.2\n") && !deck.contains("vdd=1.8"),
+            "{deck}"
+        );
         assert!(deck.contains(".param c=1p\n") && deck.contains(".param r=-1\n"));
     }
 
@@ -438,15 +524,34 @@ mod tests {
         let s = Setup::parse("temperatures=[27, 85]").unwrap();
         let p = mc_points(&s, "mc", 3, 42);
         let names: Vec<String> = p.iter().map(RunPoint::name).collect();
-        assert_eq!(names, ["mc_27_r000", "mc_27_r001", "mc_27_r002", "mc_85_r000", "mc_85_r001", "mc_85_r002"]);
+        assert_eq!(
+            names,
+            [
+                "mc_27_r000",
+                "mc_27_r001",
+                "mc_27_r002",
+                "mc_85_r000",
+                "mc_85_r001",
+                "mc_85_r002"
+            ]
+        );
         assert_eq!(p[0].seed, Some(mc_seed(42, 0)));
         assert_eq!(p[0].seed, p[3].seed);
         let seeds: std::collections::BTreeSet<_> = p[..3].iter().map(|x| x.seed).collect();
         assert_eq!(seeds.len(), 3);
-        assert!(p.iter().all(|x| (1..0x7FFF_FFFF).contains(&x.seed.unwrap())));
+        assert!(
+            p.iter()
+                .all(|x| (1..0x7FFF_FFFF).contains(&x.seed.unwrap()))
+        );
         assert_ne!(mc_seed(1, 0), mc_seed(2, 0));
         let deck = build(&s, &p[1], "t", &[], "R1 a b 1k\n");
-        assert!(deck.contains(&format!(".control\nsetseed {}\nreset\nset filetype", p[1].seed.unwrap())), "{deck}");
+        assert!(
+            deck.contains(&format!(
+                ".control\nsetseed {}\nreset\nset filetype",
+                p[1].seed.unwrap()
+            )),
+            "{deck}"
+        );
         assert!(!build(&s, &points(&s, "tt")[0], "t", &[], "R1 a b 1k\n").contains("setseed"));
     }
 
@@ -457,9 +562,22 @@ mod tests {
              [variables]\nvdd=\"1.8\"\n[options]\nreltol=\"1e-4\"\n[[analysis]]\nkind=\"tran\"\nstep=\"1n\"\nstop=\"1u\"",
         )
         .unwrap();
-        let p = RunPoint { corner: "tt".into(), temperature: Some(125.0), ..Default::default() };
-        let deck = build(&s, &p, "bench/tb", &[".lib /m/c.lib mos_tt".into()], "** sch\nR1 a b 1k\n.end\n");
-        let at = |needle: &str| deck.find(needle).unwrap_or_else(|| panic!("no {needle} in\n{deck}"));
+        let p = RunPoint {
+            corner: "tt".into(),
+            temperature: Some(125.0),
+            ..Default::default()
+        };
+        let deck = build(
+            &s,
+            &p,
+            "bench/tb",
+            &[".lib /m/c.lib mos_tt".into()],
+            "** sch\nR1 a b 1k\n.end\n",
+        );
+        let at = |needle: &str| {
+            deck.find(needle)
+                .unwrap_or_else(|| panic!("no {needle} in\n{deck}"))
+        };
         assert!(deck.starts_with("* CDePT testbench bench/tb, run tt_125\n"));
         assert!(at(".lib /m/c.lib mos_tt") < at(".temp 125"));
         assert!(at(".temp 125") < at(".param vdd=1.8"));
@@ -481,20 +599,41 @@ mod tests {
              [[analysis]]\nkind=\"tran\"\nstep=\"1n\"\nstop=\"1u\"",
         )
         .unwrap();
-        let p = RunPoint { corner: "tt".into(), ..Default::default() };
+        let p = RunPoint {
+            corner: "tt".into(),
+            ..Default::default()
+        };
         let net = "** sch\nR1 a b 1k\n.control\nrun\n.endc\n.end\n";
         let deck = build(&s, &p, "b/tb", &[".lib /m/x.lib tt".into()], net);
-        let at = |needle: &str| deck.find(needle).unwrap_or_else(|| panic!("no {needle} in\n{deck}"));
-        assert!(!deck.contains(".control") && !deck.contains("write out.raw") && !deck.contains("\nrun\n"), "{deck}");
+        let at = |needle: &str| {
+            deck.find(needle)
+                .unwrap_or_else(|| panic!("no {needle} in\n{deck}"))
+        };
+        assert!(
+            !deck.contains(".control")
+                && !deck.contains("write out.raw")
+                && !deck.contains("\nrun\n"),
+            "{deck}"
+        );
         assert!(at(".lib /m/x.lib tt") < at(".param vdd=1.8"));
         assert!(at(".param vdd=1.8") < at("R1 a b 1k"));
         assert!(at("R1 a b 1k") < at(".tran 1n 1u"));
         assert!(at(".tran 1n 1u") < at(".print tran v(*)"));
-        assert!(at(".print tran v(*)") < at(".meas TRAN D TRIG V(IN) VAL=1 RISE=1 TARG V(OUT) VAL=1 RISE=1"));
-        assert!(deck.contains(".options device tnom=27") && deck.contains(".options timeint reltol=1e-4"), "{deck}");
+        assert!(
+            at(".print tran v(*)")
+                < at(".meas TRAN D TRIG V(IN) VAL=1 RISE=1 TARG V(OUT) VAL=1 RISE=1")
+        );
+        assert!(
+            deck.contains(".options device tnom=27")
+                && deck.contains(".options timeint reltol=1e-4"),
+            "{deck}"
+        );
         assert_eq!(deck.lines().filter(|l| *l == ".end").count(), 1);
         // With `save`, those are what is printed.
-        let s2 = Setup { save: vec!["v(out)".into()], ..s };
+        let s2 = Setup {
+            save: vec!["v(out)".into()],
+            ..s
+        };
         assert!(build(&s2, &p, "t", &[], "").contains(".print tran v(out)\n"));
     }
 
@@ -502,17 +641,39 @@ mod tests {
     fn xyce_montecarlo_samples_one_seeded_run() {
         let s = Setup::parse("simulator=\"xyce\"\n[[analysis]]\nkind=\"op\"").unwrap();
         let p = mc_points(&s, "mc", 2, 5).remove(1);
-        let deck = build(&s, &p, "t", &[".lib /m/x.lib mos_tt_stat".into()], "R1 a b 1k\n");
-        assert!(deck.contains(&format!("* Monte Carlo seed {} (-randseed)", p.seed.unwrap())), "{deck}");
+        let deck = build(
+            &s,
+            &p,
+            "t",
+            &[".lib /m/x.lib mos_tt_stat".into()],
+            "R1 a b 1k\n",
+        );
+        assert!(
+            deck.contains(&format!(
+                "* Monte Carlo seed {} (-randseed)",
+                p.seed.unwrap()
+            )),
+            "{deck}"
+        );
         assert!(deck.contains(".param mc_ok=1\n"));
-        assert!(deck.contains(".SAMPLING\n+useExpr=true\n.options SAMPLES numsamples=1 SAMPLE_TYPE=MC\n"));
+        assert!(
+            deck.contains(
+                ".SAMPLING\n+useExpr=true\n.options SAMPLES numsamples=1 SAMPLE_TYPE=MC\n"
+            )
+        );
         // The user's own mc_ok wins; a grid point has no sampling.
         let own = Setup::parse("simulator=\"xyce\"\n[variables]\nmc_ok=\"2\"").unwrap();
         assert!(!build(&own, &p, "t", &[], "").contains(".param mc_ok=1"));
         assert!(!build(&s, &points(&s, "tt")[0], "t", &[], "").contains(".SAMPLING"));
         // No plugins and no seed for ngspice; the seed for Xyce.
         let set = crate::tech::models::ModelSet::default();
-        assert_eq!(xyce_args(&Setup::default(), &p, &set, |_| None).unwrap(), None);
-        assert_eq!(xyce_args(&s, &p, &set, |_| None).unwrap().unwrap(), format!("-randseed\n{}", p.seed.unwrap()));
+        assert_eq!(
+            xyce_args(&Setup::default(), &p, &set, |_| None).unwrap(),
+            None
+        );
+        assert_eq!(
+            xyce_args(&s, &p, &set, |_| None).unwrap().unwrap(),
+            format!("-randseed\n{}", p.seed.unwrap())
+        );
     }
 }

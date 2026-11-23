@@ -8,8 +8,8 @@
 
 pub mod netgen;
 pub mod openroad;
-pub mod qucs;
 pub mod openvaf;
+pub mod qucs;
 pub mod vacask;
 pub mod xyce;
 pub mod yosys;
@@ -47,9 +47,13 @@ impl Adapter {
         if let Some(p) = var(self.env_var).filter(|p| !p.is_empty()) {
             return Some(PathBuf::from(p));
         }
-        let spec = crate::tools::KNOWN_TOOLS.iter().find(|s| s.name == self.tool)?;
+        let spec = crate::tools::KNOWN_TOOLS
+            .iter()
+            .find(|s| s.name == self.tool)?;
         match spec.locate {
-            crate::tools::Locate::Bin(names) => names.iter().find_map(|b| crate::tools::find_in_path(b)),
+            crate::tools::Locate::Bin(names) => {
+                names.iter().find_map(|b| crate::tools::find_in_path(b))
+            }
             _ => None,
         }
     }
@@ -57,7 +61,11 @@ impl Adapter {
     /// [`Self::locate`], or an error that says how to point CDePT at the program.
     pub fn require(&self) -> Result<PathBuf> {
         self.locate().ok_or_else(|| {
-            eyre::eyre!("{} not found: put it on PATH or set {}", self.name, self.env_var)
+            eyre::eyre!(
+                "{} not found: put it on PATH or set {}",
+                self.name,
+                self.env_var
+            )
         })
     }
 }
@@ -152,19 +160,27 @@ impl Job {
             }
         }
         .wrap_err_with(|| format!("cannot start {} ({})", self.name, self.program.display()))?;
-        let read_log = || String::from_utf8_lossy(&std::fs::read(&log).unwrap_or_default()).into_owned();
+        let read_log =
+            || String::from_utf8_lossy(&std::fs::read(&log).unwrap_or_default()).into_owned();
         let status = match watch.wait(&mut child)? {
             Waited::Exited(status) => status,
             Waited::Cancelled => return Err(eyre::eyre!("{} cancelled", self.name)),
-            Waited::TimedOut(limit) => return Err(eyre::eyre!(
-                "{} timed out after {} and was stopped\nlog: {}\n{}",
-                self.name,
-                crate::jobs::format_duration(limit),
-                log.display(),
-                tail(&read_log(), 12)
-            )),
+            Waited::TimedOut(limit) => {
+                return Err(eyre::eyre!(
+                    "{} timed out after {} and was stopped\nlog: {}\n{}",
+                    self.name,
+                    crate::jobs::format_duration(limit),
+                    log.display(),
+                    tail(&read_log(), 12)
+                ));
+            }
         };
-        Ok(Output { name: self.name.clone(), status, log: log.clone(), text: read_log() })
+        Ok(Output {
+            name: self.name.clone(),
+            status,
+            log: log.clone(),
+            text: read_log(),
+        })
     }
 }
 
@@ -188,11 +204,16 @@ pub enum Waited {
 
 impl Watch {
     pub fn cancel(flag: Arc<AtomicBool>) -> Watch {
-        Watch { cancel: Some(flag), timeout: None }
+        Watch {
+            cancel: Some(flag),
+            timeout: None,
+        }
     }
 
     fn cancelled(&self) -> bool {
-        self.cancel.as_ref().is_some_and(|c| c.load(Ordering::SeqCst))
+        self.cancel
+            .as_ref()
+            .is_some_and(|c| c.load(Ordering::SeqCst))
     }
 
     /// Wait for `child`, killing it (only it, not what it started) when cancelled or
@@ -209,7 +230,9 @@ impl Watch {
             let stop = if self.cancelled() {
                 Some(Waited::Cancelled)
             } else {
-                self.timeout.filter(|t| start.elapsed() >= *t).map(Waited::TimedOut)
+                self.timeout
+                    .filter(|t| start.elapsed() >= *t)
+                    .map(Waited::TimedOut)
             };
             if let Some(why) = stop {
                 let _ = child.kill();
@@ -222,7 +245,6 @@ impl Watch {
 }
 
 impl Job {
-
     /// Run it; an error when it exits with a failure status. The end of the log is in
     /// the message.
     pub fn run(&self) -> Result<Output> {
@@ -247,7 +269,13 @@ impl Output {
     /// An error with the status and the tail of the log when the program failed.
     pub fn check(&self) -> Result<()> {
         if !self.status.success() {
-            bail!("{} failed ({})\nlog: {}\n{}", self.name, self.status, self.log.display(), tail(&self.text, 12));
+            bail!(
+                "{} failed ({})\nlog: {}\n{}",
+                self.name,
+                self.status,
+                self.log.display(),
+                tail(&self.text, 12)
+            );
         }
         Ok(())
     }
@@ -280,8 +308,15 @@ mod tests {
 
     #[test]
     fn locates_by_variable_first() {
-        let a = Adapter { name: "X", env_var: "CDEPT_X", tool: "no such tool" };
-        assert_eq!(a.locate_with(|_| Some("/opt/x".into())), Some(PathBuf::from("/opt/x")));
+        let a = Adapter {
+            name: "X",
+            env_var: "CDEPT_X",
+            tool: "no such tool",
+        };
+        assert_eq!(
+            a.locate_with(|_| Some("/opt/x".into())),
+            Some(PathBuf::from("/opt/x"))
+        );
         assert_eq!(a.locate_with(|_| Some("".into())), None);
         assert_eq!(a.locate_with(|_| None), None);
         assert!(a.require().is_err() || std::env::var_os("CDEPT_X").is_some());
@@ -289,7 +324,11 @@ mod tests {
 
     #[test]
     fn falls_back_to_the_tool_table() {
-        let a = Adapter { name: "Yosys", env_var: "CDEPT_YOSYS", tool: "Yosys" };
+        let a = Adapter {
+            name: "Yosys",
+            env_var: "CDEPT_YOSYS",
+            tool: "Yosys",
+        };
         // Whatever PATH holds, the lookup goes through the table without panicking.
         let _ = a.locate_with(|_| None);
     }
@@ -304,19 +343,39 @@ mod tests {
     #[test]
     fn runs_logs_and_reports_failure() {
         let dir = tempfile::tempdir().unwrap();
-        let ok = testutil::fake(dir.path(), "ok", "echo \"hello $1 $CDEPT_T $CDEPT_D\"; echo warn >&2");
+        let ok = testutil::fake(
+            dir.path(),
+            "ok",
+            "echo \"hello $1 $CDEPT_T $CDEPT_D\"; echo warn >&2",
+        );
         let mut job = Job::new("fake", &ok, &dir.path().join("w"), "run.log").args(["arg"]);
         job.env = vec![("CDEPT_T".into(), "e".into())];
-        job.env_defaults = vec![("CDEPT_T".into(), "ignored".into()), ("CDEPT_D".into(), "d".into())];
+        job.env_defaults = vec![
+            ("CDEPT_T".into(), "ignored".into()),
+            ("CDEPT_D".into(), "d".into()),
+        ];
         let out = job.run().unwrap();
-        assert!(out.text.contains("hello arg e d") && out.text.contains("warn"), "{}", out.text);
+        assert!(
+            out.text.contains("hello arg e d") && out.text.contains("warn"),
+            "{}",
+            out.text
+        );
         assert!(dir.path().join("w/run.log").is_file());
 
         let bad = testutil::fake(dir.path(), "bad", "echo one; echo boom; exit 3");
-        let err = Job::new("fake", &bad, dir.path(), "bad.log").run().unwrap_err();
+        let err = Job::new("fake", &bad, dir.path(), "bad.log")
+            .run()
+            .unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("boom") && msg.contains("exit status: 3"), "{msg}");
-        assert!(Job::new("none", &dir.path().join("missing"), dir.path(), "m.log").run().is_err());
+        assert!(
+            msg.contains("boom") && msg.contains("exit status: 3"),
+            "{msg}"
+        );
+        assert!(
+            Job::new("none", &dir.path().join("missing"), dir.path(), "m.log")
+                .run()
+                .is_err()
+        );
     }
 
     #[cfg(unix)]
@@ -326,9 +385,15 @@ mod tests {
         let slow = testutil::fake(dir.path(), "slow", "echo working; exec sleep 30");
         let job = Job::new("slow", &slow, dir.path(), "slow.log");
         let t = Instant::now();
-        let watch = Watch { timeout: Some(Duration::from_millis(300)), ..Default::default() };
+        let watch = Watch {
+            timeout: Some(Duration::from_millis(300)),
+            ..Default::default()
+        };
         let msg = format!("{}", job.run_watched(&watch).unwrap_err());
-        assert!(msg.contains("timed out after 300ms") && msg.contains("working"), "{msg}");
+        assert!(
+            msg.contains("timed out after 300ms") && msg.contains("working"),
+            "{msg}"
+        );
         let flag = Arc::new(AtomicBool::new(false));
         let f = flag.clone();
         std::thread::spawn(move || {
@@ -337,9 +402,14 @@ mod tests {
         });
         let msg = format!("{}", job.run_watched(&Watch::cancel(flag)).unwrap_err());
         assert!(msg.contains("cancelled"), "{msg}");
-        assert!(t.elapsed() < Duration::from_secs(10), "killed, not waited for");
+        assert!(
+            t.elapsed() < Duration::from_secs(10),
+            "killed, not waited for"
+        );
         let quick = testutil::fake(dir.path(), "quick", "echo fine");
-        let out = Job::new("quick", &quick, dir.path(), "q.log").run_watched(&watch).unwrap();
+        let out = Job::new("quick", &quick, dir.path(), "q.log")
+            .run_watched(&watch)
+            .unwrap();
         assert!(out.status.success() && out.text.contains("fine"));
     }
 }

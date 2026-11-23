@@ -1011,7 +1011,11 @@ pub fn reference_netlist(
     let models = super::reference::DeviceModels::from_catalog(catalog.as_ref());
     let rewrite = super::reference::device_calls(&text, &models);
     let note = rewrite.note();
-    let notes = if note.is_empty() { Vec::new() } else { vec![note] };
+    let notes = if note.is_empty() {
+        Vec::new()
+    } else {
+        vec![note]
+    };
     if rewrite.converted == 0 {
         return Ok((schematic.to_path_buf(), notes));
     }

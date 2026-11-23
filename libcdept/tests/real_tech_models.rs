@@ -7,8 +7,8 @@
 use std::time::Instant;
 
 use libcdept::link::devices::DeviceMap;
-use libcdept::testutil::{RealPdk, real_pdk};
 use libcdept::tech::{self, Catalog, PdkDir, ScanContext, Tech, devices, models, xschem};
+use libcdept::testutil::{RealPdk, real_pdk};
 
 /// The installed PDK, and the guard that keeps the environment for it.
 fn pdk(name: &str) -> Option<(PdkDir, RealPdk)> {
@@ -121,7 +121,9 @@ fn check_corners(pdk: &PdkDir, tech: &Tech) {
 
 #[test]
 fn ihp_sg13g2() {
-    let Some((pdk, _env)) = pdk("ihp-sg13g2") else { return };
+    let Some((pdk, _env)) = pdk("ihp-sg13g2") else {
+        return;
+    };
     let (tech, catalog) = scan(&pdk, helper());
 
     // xschem
@@ -287,7 +289,9 @@ fn ihp_sg13g2() {
 
 #[test]
 fn sky130a() {
-    let Some((pdk, _env)) = pdk("sky130A") else { return };
+    let Some((pdk, _env)) = pdk("sky130A") else {
+        return;
+    };
     let (tech, catalog) = scan(&pdk, helper());
 
     let x = &tech.xschem;
@@ -396,7 +400,9 @@ fn sky130a() {
 /// The whole scan, every section, round-trips through the two files.
 #[test]
 fn whole_scan_round_trips() {
-    let Some((pdk, _env)) = pdk("ihp-sg13g2") else { return };
+    let Some((pdk, _env)) = pdk("ihp-sg13g2") else {
+        return;
+    };
     // Files only: the helpers are exercised above and by the other sections' tests.
     let (tech, catalog) = tech::scan(&ScanContext::new(pdk).files_only());
     let text = toml::to_string_pretty(&tech).unwrap();

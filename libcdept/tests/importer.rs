@@ -168,17 +168,20 @@ fn clashes_skip_rename_or_overwrite() {
     let planned = importer::plan_import_report(&project, &both).unwrap();
     assert_eq!(planned.report.imported.len(), 2, "{:?}", planned.report);
     assert!(planned.report.imported.iter().all(|i| i.view == "netlist"));
-    assert!(planned
-        .report
-        .skipped
-        .iter()
-        .any(|s| s.contains("inv/layout")));
+    assert!(
+        planned
+            .report
+            .skipped
+            .iter()
+            .any(|s| s.contains("inv/layout"))
+    );
     refactor::apply(&project, &planned.plan).unwrap();
     assert_eq!(fs::read(&inv).unwrap(), before);
-    assert!(tmp
-        .path()
-        .join("p/libs/lib/inv/netlist/inv.spice")
-        .is_file());
+    assert!(
+        tmp.path()
+            .join("p/libs/lib/inv/netlist/inv.spice")
+            .is_file()
+    );
 
     // Rename: the whole cell goes under another name.
     both.on_clash = OnClash::Rename;
@@ -193,15 +196,18 @@ fn clashes_skip_rename_or_overwrite() {
     write(&inv, b"not a stream");
     both.on_clash = OnClash::Overwrite;
     let plan = importer::plan_import(&project, &both).unwrap();
-    assert!(plan
-        .lines(tmp.path())
-        .join("\n")
-        .contains("replaces the existing file"));
+    assert!(
+        plan.lines(tmp.path())
+            .join("\n")
+            .contains("replaces the existing file")
+    );
     let (report, _) = importer::run(&project, &both).unwrap();
-    assert!(report
-        .imported
-        .iter()
-        .any(|i| i.cell == "inv" && i.view == "layout"));
+    assert!(
+        report
+            .imported
+            .iter()
+            .any(|i| i.cell == "inv" && i.view == "layout")
+    );
     assert_eq!(gds::read_structure(&inv).unwrap().top_cells(), ["inv"]);
 }
 
@@ -239,14 +245,18 @@ fn single_files_unknown_files_and_compressed_files() {
     let gz = write(&d.join("old.gds.gz"), [0x1f, 0x8b, 0, 0]);
     let request = ImportRequest::new("lib", vec![sch, sym, mag, vhd, va, oas, unknown, gz]);
     let (report, _) = importer::run(&project, &request).unwrap();
-    assert!(report
-        .problems
-        .iter()
-        .any(|p| p.contains("notes.txt") && p.contains("unknown format")));
-    assert!(report
-        .problems
-        .iter()
-        .any(|p| p.contains("old.gds.gz") && p.contains("compressed")));
+    assert!(
+        report
+            .problems
+            .iter()
+            .any(|p| p.contains("notes.txt") && p.contains("unknown format"))
+    );
+    assert!(
+        report
+            .problems
+            .iter()
+            .any(|p| p.contains("old.gds.gz") && p.contains("compressed"))
+    );
     assert_eq!(views(&project, "amp"), set(&["schematic", "symbol"]));
     for (cell, view) in [
         ("pad", "magic"),
@@ -444,7 +454,8 @@ mod real_pdk {
         let dir = tmp.path().join("drc");
         fs::create_dir_all(&dir).unwrap();
         let layout =
-            libcdept::klayout::cell_layout(project.library("lib").unwrap(), "sg13g2_inv_1").unwrap();
+            libcdept::klayout::cell_layout(project.library("lib").unwrap(), "sg13g2_inv_1")
+                .unwrap();
         let stream =
             verify::export_stream(&project, &layout, "sg13g2_inv_1", &dir.join("inv.gds")).unwrap();
         assert!(stream.missing.is_empty(), "{:?}", stream.missing);

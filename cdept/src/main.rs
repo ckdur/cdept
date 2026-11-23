@@ -13,11 +13,11 @@ mod cmd_magic;
 mod cmd_ngspice;
 mod cmd_pdk;
 mod cmd_qucs;
-mod cmd_wave;
 mod cmd_sim;
 mod cmd_status;
 mod cmd_tech;
 mod cmd_vacask;
+mod cmd_wave;
 
 use std::path::PathBuf;
 

@@ -19,11 +19,11 @@ use std::time::Instant;
 use egui::{Color32, ComboBox, Grid, RichText, ScrollArea, TextEdit, Ui};
 use libcdept::Project;
 use libcdept::jobs::{JobState, Queue};
+use libcdept::sim::Setup;
 use libcdept::sim::results::Overall;
 use libcdept::sim::spec::Verdict;
 use libcdept::sim::suite::{self, SuiteOptions, SuiteReport};
 use libcdept::sim::template::TemplateSet;
-use libcdept::sim::Setup;
 
 use super::simulation::{Form, SimulationView, Target};
 use crate::state::AppCtx;
@@ -54,7 +54,9 @@ pub(super) fn use_templates(set: TemplateSet) {
 }
 
 fn set() -> TemplateSet {
-    TEMPLATES.with(|t| t.borrow().clone()).unwrap_or_else(|| TemplateSet::builtin().clone())
+    TEMPLATES
+        .with(|t| t.borrow().clone())
+        .unwrap_or_else(|| TemplateSet::builtin().clone())
 }
 
 // --- template text <-> form ------------------------------------------------------------
@@ -77,7 +79,9 @@ pub(crate) fn minimize(full: &mut toml::Table, base: &toml::Table) {
             continue;
         }
         match (&v, b) {
-            (Value::Array(va), Value::Array(ba)) if matches!(k.as_str(), "analysis" | "output" | "spec" | "sweep") => {
+            (Value::Array(va), Value::Array(ba))
+                if matches!(k.as_str(), "analysis" | "output" | "spec" | "sweep") =>
+            {
                 let left: Vec<Value> = va.iter().filter(|e| !ba.contains(e)).cloned().collect();
                 if left.is_empty() {
                     full.remove(&k);
@@ -87,7 +91,11 @@ pub(crate) fn minimize(full: &mut toml::Table, base: &toml::Table) {
             }
             // `[montecarlo]` of the setup replaces the template's as a whole: all or nothing.
             (Value::Table(vt), Value::Table(bt)) if k != "montecarlo" => {
-                let left: toml::Table = vt.iter().filter(|(n, x)| bt.get(*n) != Some(*x)).map(|(n, x)| (n.clone(), x.clone())).collect();
+                let left: toml::Table = vt
+                    .iter()
+                    .filter(|(n, x)| bt.get(*n) != Some(*x))
+                    .map(|(n, x)| (n.clone(), x.clone()))
+                    .collect();
                 if left.is_empty() {
                     full.remove(&k);
                 } else {
@@ -108,7 +116,12 @@ thread_local! {
 /// The template alone, as the table of the setup it gives (cached).
 fn baseline(template: &str, args: &BTreeMap<String, String>) -> Option<toml::Table> {
     let key = (template.to_string(), args.clone());
-    if let Some(t) = BASELINE.with(|b| b.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, t)| t.clone())) {
+    if let Some(t) = BASELINE.with(|b| {
+        b.borrow()
+            .as_ref()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, t)| t.clone())
+    }) {
         return Some(t);
     }
     let text = compose(template, args, &toml::Table::new());
@@ -120,7 +133,11 @@ fn baseline(template: &str, args: &BTreeMap<String, String>) -> Option<toml::Tab
 
 /// Called by the form when it makes the file's text: write only what the template does
 /// not already say.
-pub(super) fn minimize_for(table: &mut toml::Table, template: &str, args: &BTreeMap<String, String>) {
+pub(super) fn minimize_for(
+    table: &mut toml::Table,
+    template: &str,
+    args: &BTreeMap<String, String>,
+) {
     if template.is_empty() {
         return;
     }
@@ -130,7 +147,11 @@ pub(super) fn minimize_for(table: &mut toml::Table, template: &str, args: &BTree
 }
 
 /// The text of a setup that picks `template` with `args` and adds `own` fields.
-pub(crate) fn compose(template: &str, args: &BTreeMap<String, String>, own: &toml::Table) -> String {
+pub(crate) fn compose(
+    template: &str,
+    args: &BTreeMap<String, String>,
+    own: &toml::Table,
+) -> String {
     let mut t = own.clone();
     t.insert("template".into(), toml::Value::String(template.into()));
     if args.is_empty() {
@@ -138,15 +159,28 @@ pub(crate) fn compose(template: &str, args: &BTreeMap<String, String>, own: &tom
     } else {
         t.insert(
             "template_args".into(),
-            toml::Value::Table(args.iter().map(|(k, v)| (k.clone(), toml::Value::String(v.clone()))).collect()),
+            toml::Value::Table(
+                args.iter()
+                    .map(|(k, v)| (k.clone(), toml::Value::String(v.clone())))
+                    .collect(),
+            ),
         );
     }
     toml::to_string_pretty(&t).unwrap_or_default()
 }
 
 /// The fields a template change leaves alone.
-const KEEP: [&str; 9] =
-    ["schematic", "schematic_view", "schematic_kind", "simulator", "models", "corners", "temperatures", "options", "variables"];
+const KEEP: [&str; 9] = [
+    "schematic",
+    "schematic_view",
+    "schematic_kind",
+    "simulator",
+    "models",
+    "corners",
+    "temperatures",
+    "options",
+    "variables",
+];
 
 // --- the template picker ---------------------------------------------------------------
 
@@ -170,13 +204,25 @@ pub(super) struct TestsUi {
 }
 
 fn pass_color(ui: &Ui) -> Color32 {
-    if ui.visuals().dark_mode { Color32::from_rgb(110, 200, 110) } else { Color32::from_rgb(20, 130, 40) }
+    if ui.visuals().dark_mode {
+        Color32::from_rgb(110, 200, 110)
+    } else {
+        Color32::from_rgb(20, 130, 40)
+    }
 }
 fn fail_color(ui: &Ui) -> Color32 {
-    if ui.visuals().dark_mode { Color32::from_rgb(240, 100, 100) } else { Color32::from_rgb(190, 30, 30) }
+    if ui.visuals().dark_mode {
+        Color32::from_rgb(240, 100, 100)
+    } else {
+        Color32::from_rgb(190, 30, 30)
+    }
 }
 fn warn_color(ui: &Ui) -> Color32 {
-    if ui.visuals().dark_mode { Color32::from_rgb(230, 170, 60) } else { Color32::from_rgb(170, 100, 0) }
+    if ui.visuals().dark_mode {
+        Color32::from_rgb(230, 170, 60)
+    } else {
+        Color32::from_rgb(170, 100, 0)
+    }
 }
 
 impl TestsUi {
@@ -198,18 +244,27 @@ impl TestsUi {
         ui.horizontal(|ui| {
             ui.label("Template");
             ComboBox::from_id_salt("test-template")
-                .selected_text(if chosen.is_empty() { "(none)".to_string() } else { chosen.clone() })
+                .selected_text(if chosen.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    chosen.clone()
+                })
                 .width(180.0)
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut chosen, String::new(), "(none)");
                     for t in templates.list() {
-                        ui.selectable_value(&mut chosen, t.name.clone(), &t.name).on_hover_text(&t.description);
+                        ui.selectable_value(&mut chosen, t.name.clone(), &t.name)
+                            .on_hover_text(&t.description);
                     }
                 });
         });
         if chosen != cur_name {
             self.args.clear();
-            return Some(Change { template: chosen, args: BTreeMap::new(), switched: true });
+            return Some(Change {
+                template: chosen,
+                args: BTreeMap::new(),
+                switched: true,
+            });
         }
         let Some(template) = templates.get(cur_name) else {
             if !cur_name.is_empty() {
@@ -219,53 +274,91 @@ impl TestsUi {
         };
         ui.label(RichText::new(&template.description).weak());
         let mut edited = false;
-        Grid::new("test-template-params").num_columns(3).spacing([8.0, 4.0]).striped(true).show(ui, |ui| {
-            for p in &template.params {
-                let name = RichText::new(&p.name).strong();
-                ui.label(name).on_hover_text(&p.doc);
-                let mut value = self.args.get(&p.name).cloned().unwrap_or_default();
-                let before = value.clone();
-                let hint = p.default.clone().unwrap_or_else(|| if p.optional { "(unset)".into() } else { "required".into() });
-                match p.kind.as_str() {
-                    "choice" | "bool" => {
-                        let options: Vec<String> =
-                            if p.kind == "bool" { vec!["true".into(), "false".into()] } else { p.choices.clone() };
-                        let shown = if value.is_empty() { format!("{hint} (default)") } else { value.clone() };
-                        ComboBox::from_id_salt(("tp", &p.name)).selected_text(shown).show_ui(ui, |ui| {
-                            ui.selectable_value(&mut value, String::new(), format!("{hint} (default)"));
-                            for o in &options {
-                                ui.selectable_value(&mut value, o.clone(), o);
-                            }
-                        });
+        Grid::new("test-template-params")
+            .num_columns(3)
+            .spacing([8.0, 4.0])
+            .striped(true)
+            .show(ui, |ui| {
+                for p in &template.params {
+                    let name = RichText::new(&p.name).strong();
+                    ui.label(name).on_hover_text(&p.doc);
+                    let mut value = self.args.get(&p.name).cloned().unwrap_or_default();
+                    let before = value.clone();
+                    let hint = p.default.clone().unwrap_or_else(|| {
+                        if p.optional {
+                            "(unset)".into()
+                        } else {
+                            "required".into()
+                        }
+                    });
+                    match p.kind.as_str() {
+                        "choice" | "bool" => {
+                            let options: Vec<String> = if p.kind == "bool" {
+                                vec!["true".into(), "false".into()]
+                            } else {
+                                p.choices.clone()
+                            };
+                            let shown = if value.is_empty() {
+                                format!("{hint} (default)")
+                            } else {
+                                value.clone()
+                            };
+                            ComboBox::from_id_salt(("tp", &p.name))
+                                .selected_text(shown)
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut value,
+                                        String::new(),
+                                        format!("{hint} (default)"),
+                                    );
+                                    for o in &options {
+                                        ui.selectable_value(&mut value, o.clone(), o);
+                                    }
+                                });
+                        }
+                        _ => {
+                            ui.add(
+                                TextEdit::singleline(&mut value)
+                                    .desired_width(150.0)
+                                    .hint_text(hint),
+                            );
+                        }
                     }
-                    _ => {
-                        ui.add(TextEdit::singleline(&mut value).desired_width(150.0).hint_text(hint));
+                    if value != before {
+                        if value.trim().is_empty() {
+                            self.args.remove(&p.name);
+                        } else {
+                            self.args.insert(p.name.clone(), value.trim().to_string());
+                        }
+                        edited = true;
                     }
+                    match template.validate_param(&p.name, &self.args) {
+                        Ok(()) => {
+                            let unit = if p.unit.is_empty() {
+                                String::new()
+                            } else {
+                                format!("[{}]", p.unit)
+                            };
+                            ui.label(RichText::new(unit).weak());
+                        }
+                        Err(e) => {
+                            ui.colored_label(fail_color(ui), e.to_string());
+                        }
+                    }
+                    ui.end_row();
                 }
-                if value != before {
-                    if value.trim().is_empty() {
-                        self.args.remove(&p.name);
-                    } else {
-                        self.args.insert(p.name.clone(), value.trim().to_string());
-                    }
-                    edited = true;
-                }
-                match template.validate_param(&p.name, &self.args) {
-                    Ok(()) => {
-                        let unit = if p.unit.is_empty() { String::new() } else { format!("[{}]", p.unit) };
-                        ui.label(RichText::new(unit).weak());
-                    }
-                    Err(e) => {
-                        ui.colored_label(fail_color(ui), e.to_string());
-                    }
-                }
-                ui.end_row();
-            }
-        });
+            });
         if edited && template.bind(&self.args).is_ok() {
-            change = Some(Change { template: cur_name.to_string(), args: self.args.clone(), switched: false });
+            change = Some(Change {
+                template: cur_name.to_string(),
+                args: self.args.clone(),
+                switched: false,
+            });
         } else if let Err(e) = template.bind(&self.args) {
-            ui.colored_label(fail_color(ui), format!("{e:#}").lines().next().unwrap_or("").to_string());
+            ui.colored_label(
+                fail_color(ui),
+                format!("{e:#}").lines().next().unwrap_or("").to_string(),
+            );
         }
         if !template.analyses().is_empty() {
             ui.label(RichText::new(format!("analyses: {}", template.analyses().join(", "))).weak());
@@ -373,7 +466,11 @@ impl SuiteState {
     }
 
     /// Start the suite on a thread with the tab's own queue.
-    pub(super) fn start(&mut self, project: &Project, egui: Option<egui::Context>) -> Result<(), String> {
+    pub(super) fn start(
+        &mut self,
+        project: &Project,
+        egui: Option<egui::Context>,
+    ) -> Result<(), String> {
         if self.running.is_some() {
             return Err("the suite is running".into());
         }
@@ -397,8 +494,19 @@ impl SuiteState {
         self.problem = None;
         let (project, target) = (project.clone(), self.target.clone());
         std::thread::spawn(move || {
-            let options = SuiteOptions { queue: Some(queue), cancel: Some(cancel), ..Default::default() };
-            let result = suite::run(&project, &target.library, &target.cell, &target.view, &options).map_err(|e| format!("{e:#}"));
+            let options = SuiteOptions {
+                queue: Some(queue),
+                cancel: Some(cancel),
+                ..Default::default()
+            };
+            let result = suite::run(
+                &project,
+                &target.library,
+                &target.cell,
+                &target.view,
+                &options,
+            )
+            .map_err(|e| format!("{e:#}"));
             *slot.lock().unwrap() = Some(result);
             if let Some(c) = egui {
                 c.request_repaint();
@@ -417,7 +525,9 @@ impl SuiteState {
     }
 
     pub(super) fn poll(&mut self) {
-        let Some((_, _, slot)) = &self.running else { return };
+        let Some((_, _, slot)) = &self.running else {
+            return;
+        };
         let done = slot.lock().unwrap().take();
         match done {
             Some(Ok(report)) => {
@@ -440,20 +550,31 @@ impl SuiteState {
         self.poll();
         let running = self.is_running();
         if running {
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(250));
         }
-        ui.heading(format!("Suite {}/{}/{}", self.target.library, self.target.cell, self.target.view));
+        ui.heading(format!(
+            "Suite {}/{}/{}",
+            self.target.library, self.target.cell, self.target.view
+        ));
         if !self.description.is_empty() {
             ui.label(RichText::new(&self.description).weak());
         }
         ui.horizontal(|ui| {
-            if ui.add_enabled(!running, egui::Button::new("▶ Run suite")).on_hover_text("Runs every test of the suite on one job queue").clicked() {
+            if ui
+                .add_enabled(!running, egui::Button::new("▶ Run suite"))
+                .on_hover_text("Runs every test of the suite on one job queue")
+                .clicked()
+            {
                 let ctx = egui.clone().or_else(|| Some(ui.ctx().clone()));
                 if let Err(e) = self.start(project, ctx) {
                     self.problem = Some(e);
                 }
             }
-            if ui.add_enabled(running, egui::Button::new("■ Cancel")).clicked() {
+            if ui
+                .add_enabled(running, egui::Button::new("■ Cancel"))
+                .clicked()
+            {
                 self.cancel();
             }
             ui.checkbox(&mut self.all_columns, "all measurements");
@@ -469,7 +590,10 @@ impl SuiteState {
             let jobs: Vec<_> = q.snapshot().into_iter().skip(self.first_job).collect();
             let done = jobs.iter().filter(|j| j.state.is_final()).count();
             let failed = jobs.iter().filter(|j| j.state == JobState::Failed).count();
-            ui.label(format!("{done} of {} runs finished, {failed} failed", jobs.len()));
+            ui.label(format!(
+                "{done} of {} runs finished, {failed} failed",
+                jobs.len()
+            ));
         }
         ui.separator();
         ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
@@ -573,7 +697,10 @@ impl SuiteState {
 impl SimulationView {
     /// Is the tab showing a suite?
     pub(super) fn suite_active(&self) -> bool {
-        self.tests.suite.is_some() && self.target().is_some_and(|t| self.tests.suite.as_ref().is_some_and(|s| &s.target == t))
+        self.tests.suite.is_some()
+            && self
+                .target()
+                .is_some_and(|t| self.tests.suite.as_ref().is_some_and(|s| &s.target == t))
     }
 
     /// The suite panel, in place of the testbench editor.
@@ -605,13 +732,25 @@ pub(crate) fn is_command(word: &str) -> bool {
     word.starts_with("suite_") || word.starts_with("template_")
 }
 
-pub(super) fn script(view: &mut SimulationView, app: &mut AppCtx, args: &[String]) -> Result<(), String> {
+pub(super) fn script(
+    view: &mut SimulationView,
+    app: &mut AppCtx,
+    args: &[String],
+) -> Result<(), String> {
     let project = app.project.clone().ok_or("no project is open")?;
-    let arg = |i: usize| args.get(i).map(String::as_str).ok_or_else(|| "missing argument".to_string());
+    let arg = |i: usize| {
+        args.get(i)
+            .map(String::as_str)
+            .ok_or_else(|| "missing argument".to_string())
+    };
     match arg(0)? {
         // suite_open <library> <cell> <view>
         "suite_open" => {
-            let target = Target { library: arg(1)?.into(), cell: arg(2)?.into(), view: arg(3)?.into() };
+            let target = Target {
+                library: arg(1)?.into(),
+                cell: arg(2)?.into(),
+                view: arg(3)?.into(),
+            };
             if !is_suite(&project, &target.library, &target.cell, &target.view) {
                 return Err("not a suite view".into());
             }
@@ -621,12 +760,20 @@ pub(super) fn script(view: &mut SimulationView, app: &mut AppCtx, args: &[String
         }
         "suite_run" => {
             let ctx = view.egui_ctx();
-            view.tests.suite.as_mut().ok_or("no suite is open")?.start(&project, ctx)
+            view.tests
+                .suite
+                .as_mut()
+                .ok_or("no suite is open")?
+                .start(&project, ctx)
         }
         "suite_wait" => {
             let s = view.tests.suite.as_mut().ok_or("no suite is open")?;
             s.poll();
-            if s.is_running() { Err("still running".into()) } else { Ok(()) }
+            if s.is_running() {
+                Err("still running".into())
+            } else {
+                Ok(())
+            }
         }
         // suite_expect pass|fail
         "suite_expect" => {
@@ -639,18 +786,29 @@ pub(super) fn script(view: &mut SimulationView, app: &mut AppCtx, args: &[String
             };
             match s.verdict() {
                 Some(v) if v == want => Ok(()),
-                other => Err(format!("the suite verdict is {other:?} (problem: {:?})", s.problem)),
+                other => Err(format!(
+                    "the suite verdict is {other:?} (problem: {:?})",
+                    s.problem
+                )),
             }
         }
         // suite_expect_rows <n>: runs in the combined table
         "suite_expect_rows" => {
             let s = view.tests.suite.as_ref().ok_or("no suite is open")?;
             let n = s.report.as_ref().map_or(0, |r| r.summary().runs);
-            if n.to_string() == arg(1)? { Ok(()) } else { Err(format!("{n} run(s) in the table")) }
+            if n.to_string() == arg(1)? {
+                Ok(())
+            } else {
+                Err(format!("{n} run(s) in the table"))
+            }
         }
         // template_set <name|none> [k=v …]
         "template_set" => {
-            let name = if arg(1)? == "none" { String::new() } else { arg(1)?.to_string() };
+            let name = if arg(1)? == "none" {
+                String::new()
+            } else {
+                arg(1)?.to_string()
+            };
             let mut args_map = BTreeMap::new();
             for kv in &args[2..] {
                 let (k, v) = kv.split_once('=').ok_or("arguments are k=v")?;
@@ -660,7 +818,11 @@ pub(super) fn script(view: &mut SimulationView, app: &mut AppCtx, args: &[String
             if !name.is_empty() {
                 templates.find(&name).map_err(|e| format!("{e:#}"))?;
             }
-            view.apply_template(Change { template: name, args: args_map, switched: true })
+            view.apply_template(Change {
+                template: name,
+                args: args_map,
+                switched: true,
+            })
         }
         // template_arg <k> <v>: one parameter of the form's template
         "template_arg" => {
@@ -682,32 +844,68 @@ pub(super) fn script(view: &mut SimulationView, app: &mut AppCtx, args: &[String
                 view.problem = Some(format!("template '{name}' has no parameter '{}'", arg(1)?));
                 return Ok(());
             }
-            view.apply_template(Change { template: name, args: args_map, switched: false })
+            view.apply_template(Change {
+                template: name,
+                args: args_map,
+                switched: false,
+            })
         }
         // template_expect <name|none> / template_expect_output <name> / template_expect_arg k v
         "template_expect" => {
             let (name, _) = view.template_state().unwrap_or_default();
             let want = if arg(1)? == "none" { "" } else { arg(1)? };
-            if name == want { Ok(()) } else { Err(format!("the template is '{name}'")) }
+            if name == want {
+                Ok(())
+            } else {
+                Err(format!("the template is '{name}'"))
+            }
         }
         "template_expect_output" => {
             let f = view.form.as_ref().ok_or("no testbench is open")?;
-            if f.base.outputs.iter().any(|o| o.name == arg(1).unwrap_or("")) { Ok(()) } else { Err("no such output".into()) }
+            if f.base
+                .outputs
+                .iter()
+                .any(|o| o.name == arg(1).unwrap_or(""))
+            {
+                Ok(())
+            } else {
+                Err("no such output".into())
+            }
         }
         "template_expect_spec" => {
             let f = view.form.as_ref().ok_or("no testbench is open")?;
-            if f.base.specs.iter().any(|o| o.name == arg(1).unwrap_or("")) { Ok(()) } else { Err("no such spec".into()) }
+            if f.base.specs.iter().any(|o| o.name == arg(1).unwrap_or("")) {
+                Ok(())
+            } else {
+                Err("no such spec".into())
+            }
         }
         // template_expect_file <substring>: the text that would be saved
         "template_expect_file" => {
-            let text = view.form.as_ref().ok_or("no testbench is open")?.to_text()?;
+            let text = view
+                .form
+                .as_ref()
+                .ok_or("no testbench is open")?
+                .to_text()?;
             let want = args[1..].join(" ");
-            if text.contains(&want) { Ok(()) } else { Err(format!("the file would be:\n{text}")) }
+            if text.contains(&want) {
+                Ok(())
+            } else {
+                Err(format!("the file would be:\n{text}"))
+            }
         }
         "template_expect_not_file" => {
-            let text = view.form.as_ref().ok_or("no testbench is open")?.to_text()?;
+            let text = view
+                .form
+                .as_ref()
+                .ok_or("no testbench is open")?
+                .to_text()?;
             let want = args[1..].join(" ");
-            if !text.contains(&want) { Ok(()) } else { Err(format!("the file would be:\n{text}")) }
+            if !text.contains(&want) {
+                Ok(())
+            } else {
+                Err(format!("the file would be:\n{text}"))
+            }
         }
         other => Err(format!("unknown command '{other}'")),
     }
@@ -717,10 +915,10 @@ impl SimulationView {
     /// The template of the form and its arguments.
     pub(super) fn template_state(&self) -> Option<(String, BTreeMap<String, String>)> {
         let f = self.form.as_ref()?;
-        (!f.base.template.is_empty()).then(|| (f.base.template.clone(), f.base.template_args.clone()))
+        (!f.base.template.is_empty())
+            .then(|| (f.base.template.clone(), f.base.template_args.clone()))
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -732,7 +930,9 @@ mod tests {
 
     #[test]
     fn minimize_keeps_only_what_the_template_does_not_say() {
-        let base = table("temperatures=[27]\n[variables]\nvdd=\"1.2\"\n[[output]]\nname=\"a\"\nexpr=\"1\"\n[[spec]]\nname=\"a\"\nmax=1.0");
+        let base = table(
+            "temperatures=[27]\n[variables]\nvdd=\"1.2\"\n[[output]]\nname=\"a\"\nexpr=\"1\"\n[[spec]]\nname=\"a\"\nmax=1.0",
+        );
         let mut full = table(
             "template=\"t\"\ntemperatures=[27]\ncorners=[\"tt\",\"ss\"]\n[variables]\nvdd=\"1.2\"\nextra=\"3\"\n\
              [[output]]\nname=\"a\"\nexpr=\"1\"\n[[output]]\nname=\"b\"\nexpr=\"2\"\n[[spec]]\nname=\"a\"\nmax=1.0",
@@ -750,7 +950,14 @@ mod tests {
         let args = BTreeMap::from([("out".to_string(), "y".to_string())]);
         let text = compose("tran_delay", &args, &table("corners=[\"tt\"]"));
         let setup = Setup::parse(&text).unwrap();
-        assert_eq!((setup.template.as_str(), setup.corners.as_slice()), ("tran_delay", ["tt".to_string()].as_slice()));
-        assert!(setup.outputs[0].expr.contains("v(\"y\")"), "{:?}", setup.outputs[0].expr);
+        assert_eq!(
+            (setup.template.as_str(), setup.corners.as_slice()),
+            ("tran_delay", ["tt".to_string()].as_slice())
+        );
+        assert!(
+            setup.outputs[0].expr.contains("v(\"y\")"),
+            "{:?}",
+            setup.outputs[0].expr
+        );
     }
 }

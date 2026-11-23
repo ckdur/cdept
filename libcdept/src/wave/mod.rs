@@ -35,7 +35,9 @@ pub const DOCS: &str = "docs/howto/view-waveforms.md";
 /// Sibling builds of the `uberwave` repository, as a convenience for developers:
 /// `<root>/../uberwave/build/wp5-viewer/UberWaveViewer` and `build*` next to it.
 pub fn sibling_builds(root: &Path) -> Vec<PathBuf> {
-    let Some(parent) = root.parent() else { return vec![] };
+    let Some(parent) = root.parent() else {
+        return vec![];
+    };
     let repo = parent.join("uberwave");
     let mut found = vec![repo.join("build/wp5-viewer/UberWaveViewer")];
     if let Ok(read) = std::fs::read_dir(&repo) {
@@ -73,7 +75,10 @@ pub fn locate_with(
     if let Some(p) = BINARIES.iter().find_map(|b| on_path(b)) {
         return Some(p);
     }
-    roots.iter().flat_map(|r| sibling_builds(r)).find(|p| p.is_file())
+    roots
+        .iter()
+        .flat_map(|r| sibling_builds(r))
+        .find(|p| p.is_file())
 }
 
 /// [`locate`], or an error that says how to get the viewer.
@@ -135,25 +140,38 @@ pub fn analyses(raw: &Path) -> Result<Vec<Analysis>> {
 /// `None` for a single analysis.
 pub fn analysis_arg(found: &[Analysis], asked: Option<&str>) -> Result<Option<String>> {
     if let Some(a) = asked {
-        let hit = found.iter().find(|x| x.kind.eq_ignore_ascii_case(a) || x.name.eq_ignore_ascii_case(a));
+        let hit = found
+            .iter()
+            .find(|x| x.kind.eq_ignore_ascii_case(a) || x.name.eq_ignore_ascii_case(a));
         return match hit {
             Some(x) => Ok(Some(x.kind.clone())),
             None if found.is_empty() => Ok(Some(a.to_string())),
             None => Err(eyre!(
                 "the file has no analysis '{a}' (it has: {})",
-                found.iter().map(|x| x.kind.as_str()).collect::<Vec<_>>().join(", ")
+                found
+                    .iter()
+                    .map(|x| x.kind.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )),
         };
     }
     if found.len() < 2 {
         return Ok(None);
     }
-    Ok(found.iter().find(|a| a.kind == "tran").or(found.first()).map(|a| a.kind.clone()))
+    Ok(found
+        .iter()
+        .find(|a| a.kind == "tran")
+        .or(found.first())
+        .map(|a| a.kind.clone()))
 }
 
 /// The command line: `<program> <raw> [--analysis <name>]`.
 pub fn command_line(program: &Path, raw: &Path, analysis: Option<&str>) -> Vec<OsString> {
-    let mut line = vec![program.as_os_str().to_os_string(), absolute(raw).into_os_string()];
+    let mut line = vec![
+        program.as_os_str().to_os_string(),
+        absolute(raw).into_os_string(),
+    ];
     if let Some(a) = analysis {
         line.push("--analysis".into());
         line.push(a.into());
@@ -173,25 +191,45 @@ pub struct LaunchInfo {
 
 impl LaunchInfo {
     pub fn text(&self) -> String {
-        self.command.iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ")
+        self.command
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
 /// Start the viewer on `raw` and return at once; it keeps running after this process.
 /// Its working folder is the folder of the file. `analysis` as for [`analysis_arg`].
-pub fn open_raw(project: Option<&Project>, raw: &Path, analysis: Option<&str>) -> Result<LaunchInfo> {
+pub fn open_raw(
+    project: Option<&Project>,
+    raw: &Path,
+    analysis: Option<&str>,
+) -> Result<LaunchInfo> {
     if !raw.exists() {
         bail!("{} does not exist", raw.display());
     }
     let program = require(project)?;
-    let found = if raw.is_file() { analyses(raw).unwrap_or_default() } else { vec![] };
+    let found = if raw.is_file() {
+        analyses(raw).unwrap_or_default()
+    } else {
+        vec![]
+    };
     let analysis = analysis_arg(&found, analysis)?;
     let line = command_line(&program, raw, analysis.as_deref());
-    spawn_detached(&line, absolute(raw).parent().filter(|d| d.is_dir()), project)?;
+    spawn_detached(
+        &line,
+        absolute(raw).parent().filter(|d| d.is_dir()),
+        project,
+    )?;
     Ok(LaunchInfo { command: line })
 }
 
-pub(crate) fn spawn_detached(line: &[OsString], dir: Option<&Path>, project: Option<&Project>) -> Result<()> {
+pub(crate) fn spawn_detached(
+    line: &[OsString],
+    dir: Option<&Path>,
+    project: Option<&Project>,
+) -> Result<()> {
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(&line[0]);
     cmd.args(&line[1..]);
@@ -201,14 +239,18 @@ pub(crate) fn spawn_detached(line: &[OsString], dir: Option<&Path>, project: Opt
     if let Some(p) = project {
         cmd.envs(p.tool_env().iter().map(|(k, v)| (k, v)));
     }
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         // Its own process group: a Ctrl-C or the end of this process leaves it running.
         cmd.process_group(0);
     }
-    let child = cmd.spawn().wrap_err_with(|| format!("cannot start {}", line[0].to_string_lossy()))?;
+    let child = cmd
+        .spawn()
+        .wrap_err_with(|| format!("cannot start {}", line[0].to_string_lossy()))?;
     // Not waited for: it outlives us.
     drop(child);
     Ok(())
@@ -246,7 +288,10 @@ fn points_in(dir: &Path) -> Vec<PointRaw> {
         .flatten()
         .flatten()
         .filter(|e| e.path().is_dir())
-        .map(|e| PointRaw { point: e.file_name().to_string_lossy().into_owned(), raw: e.path().join("out.raw") })
+        .map(|e| PointRaw {
+            point: e.file_name().to_string_lossy().into_owned(),
+            raw: e.path().join("out.raw"),
+        })
         .filter(|p| p.raw.is_file())
         .collect();
     points.sort_by(|a, b| a.point.cmp(&b.point));
@@ -254,15 +299,25 @@ fn points_in(dir: &Path) -> Vec<PointRaw> {
 }
 
 /// The view to use: the one named, else the only testbench view with runs.
-pub fn pick_view(project: &Project, library: &str, cell: &str, view: Option<&str>) -> Result<String> {
+pub fn pick_view(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+) -> Result<String> {
     if let Some(v) = view {
         return Ok(v.to_string());
     }
     let mut views = views_with_runs(project, library, cell);
     match views.len() {
-        0 => Err(eyre!("{library}/{cell} has no simulation results (run its testbench first)")),
+        0 => Err(eyre!(
+            "{library}/{cell} has no simulation results (run its testbench first)"
+        )),
         1 => Ok(views.remove(0)),
-        _ => Err(eyre!("{library}/{cell} has results in several views ({}): pass --view", views.join(", "))),
+        _ => Err(eyre!(
+            "{library}/{cell} has results in several views ({}): pass --view",
+            views.join(", ")
+        )),
     }
 }
 
@@ -283,11 +338,17 @@ pub fn pick_point(
             }
             Err(eyre!(
                 "no run point '{p}' with a raw file in {library}/{cell}/{view} (points: {})",
-                if all.is_empty() { "none, run the testbench first".to_string() } else { names(&all) }
+                if all.is_empty() {
+                    "none, run the testbench first".to_string()
+                } else {
+                    names(&all)
+                }
             ))
         }
         None => match all.len() {
-            0 => Err(eyre!("{library}/{cell}/{view} has no run point with a raw file (run the testbench first)")),
+            0 => Err(eyre!(
+                "{library}/{cell}/{view} has no run point with a raw file (run the testbench first)"
+            )),
             1 => Ok(all.into_iter().next().unwrap()),
             n => Err(eyre!(
                 "{library}/{cell}/{view} has {n} run points: pass --point, or --family to open them all in \
@@ -300,15 +361,31 @@ pub fn pick_point(
 
 /// Names of points, comma separated.
 pub fn names(points: &[PointRaw]) -> String {
-    points.iter().map(|p| p.point.as_str()).collect::<Vec<_>>().join(", ")
+    points
+        .iter()
+        .map(|p| p.point.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Open one run point (the GUI's button and script command): in the viewer of the run
 /// when one runs and has IPC, else in a new one.
 #[cfg(unix)]
-pub fn open_point(project: &Project, library: &str, cell: &str, view: &str, point: &str) -> Result<session::Opened> {
+pub fn open_point(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: &str,
+    point: &str,
+) -> Result<session::Opened> {
     let p = pick_point(project, library, cell, view, Some(point))?;
-    session::open_files(Some(project), &session::run_key(library, cell, view), &[(&p).into()], None, session::Mode::Open)
+    session::open_files(
+        Some(project),
+        &session::run_key(library, cell, view),
+        &[(&p).into()],
+        None,
+        session::Mode::Open,
+    )
 }
 
 /// Open the raw file of a point already picked (the viewer of the run is reused).
@@ -321,15 +398,29 @@ pub fn open_point_raw(
     point: &PointRaw,
     analysis: Option<&str>,
 ) -> Result<session::Opened> {
-    session::open_files(Some(project), &session::run_key(library, cell, view), &[point.into()], analysis, session::Mode::Open)
+    session::open_files(
+        Some(project),
+        &session::run_key(library, cell, view),
+        &[point.into()],
+        analysis,
+        session::Mode::Open,
+    )
 }
 
 /// The points of a view to open together: `chosen` (an error for an unknown one), or all
 /// of them when empty.
-pub fn select_points(project: &Project, library: &str, cell: &str, view: &str, chosen: &[String]) -> Result<Vec<PointRaw>> {
+pub fn select_points(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: &str,
+    chosen: &[String],
+) -> Result<Vec<PointRaw>> {
     let all = points(project, library, cell, view);
     if all.is_empty() {
-        return Err(eyre!("{library}/{cell}/{view} has no run point with a raw file (run the testbench first)"));
+        return Err(eyre!(
+            "{library}/{cell}/{view} has no run point with a raw file (run the testbench first)"
+        ));
     }
     if chosen.is_empty() {
         return Ok(all);
@@ -338,7 +429,10 @@ pub fn select_points(project: &Project, library: &str, cell: &str, view: &str, c
         .iter()
         .map(|n| {
             all.iter().find(|p| &p.point == n).cloned().ok_or_else(|| {
-                eyre!("no run point '{n}' with a raw file in {library}/{cell}/{view} (points: {})", names(&all))
+                eyre!(
+                    "no run point '{n}' with a raw file in {library}/{cell}/{view} (points: {})",
+                    names(&all)
+                )
             })
         })
         .collect()
@@ -356,7 +450,13 @@ pub fn open_family(
     analysis: Option<&str>,
 ) -> Result<session::Opened> {
     let files: Vec<session::ViewFile> = chosen.iter().map(Into::into).collect();
-    session::open_files(Some(project), &session::run_key(library, cell, view), &files, analysis, session::Mode::Open)
+    session::open_files(
+        Some(project),
+        &session::run_key(library, cell, view),
+        &files,
+        analysis,
+        session::Mode::Open,
+    )
 }
 
 #[cfg(test)]
@@ -368,7 +468,10 @@ mod tests {
     }
 
     fn fake_build(root: &Path, dir: &str) -> PathBuf {
-        let p = root.join("uberwave").join(dir).join("wp5-viewer/UberWaveViewer");
+        let p = root
+            .join("uberwave")
+            .join(dir)
+            .join("wp5-viewer/UberWaveViewer");
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(&p, "x").unwrap();
         p
@@ -384,13 +487,22 @@ mod tests {
         let env = |n: &str| (n == UBERWAVE_ENV).then(|| OsString::from("/x/viewer"));
         let on_path = |b: &str| (b == "uberwave").then(|| PathBuf::from("/usr/bin/uberwave"));
 
-        assert_eq!(locate_with(env, on_path, &roots), Some(PathBuf::from("/x/viewer")));
-        assert_eq!(locate_with(|_| None, on_path, &roots), Some(PathBuf::from("/usr/bin/uberwave")));
+        assert_eq!(
+            locate_with(env, on_path, &roots),
+            Some(PathBuf::from("/x/viewer"))
+        );
+        assert_eq!(
+            locate_with(|_| None, on_path, &roots),
+            Some(PathBuf::from("/usr/bin/uberwave"))
+        );
         assert_eq!(locate_with(|_| None, none, &roots), Some(sibling.clone()));
         // An empty variable does not count.
         let empty = |n: &str| (n == UBERWAVE_ENV).then(OsString::new);
         assert_eq!(locate_with(empty, none, &roots), Some(sibling));
-        assert_eq!(locate_with(|_| None, none, &[tmp.path().join("nowhere/x")]), None);
+        assert_eq!(
+            locate_with(|_| None, none, &[tmp.path().join("nowhere/x")]),
+            None
+        );
     }
 
     #[test]
@@ -399,33 +511,74 @@ mod tests {
         let proj = tmp.path().join("proj");
         std::fs::create_dir_all(&proj).unwrap();
         let b = fake_build(tmp.path(), "build-release");
-        assert_eq!(locate_with(|_| None, none, std::slice::from_ref(&proj)), Some(b));
+        assert_eq!(
+            locate_with(|_| None, none, std::slice::from_ref(&proj)),
+            Some(b)
+        );
         let plain = fake_build(tmp.path(), "build");
         assert_eq!(locate_with(|_| None, none, &[proj]), Some(plain));
     }
 
     fn an(kind: &str, name: &str) -> Analysis {
-        Analysis { index: 0, kind: kind.into(), name: name.into(), signals: 3, points: 10 }
+        Analysis {
+            index: 0,
+            kind: kind.into(),
+            name: name.into(),
+            signals: 3,
+            points: 10,
+        }
     }
 
     #[test]
     fn analysis_choice() {
-        let two = [an("op", "Operating Point"), an("tran", "Transient Analysis")];
+        let two = [
+            an("op", "Operating Point"),
+            an("tran", "Transient Analysis"),
+        ];
         assert_eq!(analysis_arg(&[an("tran", "T")], None).unwrap(), None);
         assert_eq!(analysis_arg(&two, None).unwrap().as_deref(), Some("tran"));
-        assert_eq!(analysis_arg(&two, Some("op")).unwrap().as_deref(), Some("op"));
-        assert_eq!(analysis_arg(&two, Some("transient analysis")).unwrap().as_deref(), Some("tran"));
-        assert!(analysis_arg(&two, Some("ac")).unwrap_err().to_string().contains("op, tran"));
+        assert_eq!(
+            analysis_arg(&two, Some("op")).unwrap().as_deref(),
+            Some("op")
+        );
+        assert_eq!(
+            analysis_arg(&two, Some("transient analysis"))
+                .unwrap()
+                .as_deref(),
+            Some("tran")
+        );
+        assert!(
+            analysis_arg(&two, Some("ac"))
+                .unwrap_err()
+                .to_string()
+                .contains("op, tran")
+        );
         // A PSF folder is not read by CDePT: the name goes through.
-        assert_eq!(analysis_arg(&[], Some("runTran-tran")).unwrap().as_deref(), Some("runTran-tran"));
+        assert_eq!(
+            analysis_arg(&[], Some("runTran-tran")).unwrap().as_deref(),
+            Some("runTran-tran")
+        );
     }
 
     #[test]
     fn the_command_line() {
-        let line = command_line(Path::new("/b/UberWaveViewer"), Path::new("/p/out.raw"), Some("tran"));
-        let text: Vec<_> = line.iter().map(|a| a.to_string_lossy().into_owned()).collect();
-        assert_eq!(text, ["/b/UberWaveViewer", "/p/out.raw", "--analysis", "tran"]);
-        assert_eq!(command_line(Path::new("v"), Path::new("/p/out.raw"), None).len(), 2);
+        let line = command_line(
+            Path::new("/b/UberWaveViewer"),
+            Path::new("/p/out.raw"),
+            Some("tran"),
+        );
+        let text: Vec<_> = line
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            text,
+            ["/b/UberWaveViewer", "/p/out.raw", "--analysis", "tran"]
+        );
+        assert_eq!(
+            command_line(Path::new("v"), Path::new("/p/out.raw"), None).len(),
+            2
+        );
     }
 
     #[test]
@@ -438,7 +591,10 @@ mod tests {
         }
         std::fs::create_dir_all(base.join("ff_27")).unwrap(); // failed run: no raw
         let got = points_in(&base);
-        assert_eq!(got.iter().map(|p| p.point.as_str()).collect::<Vec<_>>(), ["ss_27", "tt_27"]);
+        assert_eq!(
+            got.iter().map(|p| p.point.as_str()).collect::<Vec<_>>(),
+            ["ss_27", "tt_27"]
+        );
         assert_eq!(names(&got), "ss_27, tt_27");
     }
 }

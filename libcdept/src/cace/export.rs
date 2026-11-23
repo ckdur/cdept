@@ -17,7 +17,10 @@ use eyre::{Result, WrapErr, eyre};
 use super::import::{
     SpecLine, bound_of, known_corners, map_conditions, merged_conditions, result_unit, setup_values,
 };
-use super::{Mapping, Value, mapping, num_text, scalar_text, to_yaml, tool_of, unit_scale, yaml_number, yaml_scalar};
+use super::{
+    Mapping, Value, mapping, num_text, scalar_text, to_yaml, tool_of, unit_scale, yaml_number,
+    yaml_scalar,
+};
 use crate::Project;
 use crate::sim::results::{Overall, RunRecord, Status, Store};
 use crate::sim::setup::SETUP_FILE;
@@ -48,7 +51,10 @@ pub struct ExportOptions {
 
 impl Default for ExportOptions {
     fn default() -> Self {
-        ExportOptions { view: None, results: true }
+        ExportOptions {
+            view: None,
+            results: true,
+        }
     }
 }
 
@@ -58,24 +64,47 @@ fn views_of(project: &Project, library: &str, cell: &str) -> Result<(Vec<String>
         .library(library)
         .and_then(|l| l.cell(cell))
         .ok_or_else(|| eyre!("no cell {library}/{cell}"))?;
-    let suites = c.entries.iter().filter(|e| e.path.join(SUITE_FILE).is_file()).map(|e| e.name.clone()).collect();
-    let benches = c.entries.iter().filter(|e| e.path.join(SETUP_FILE).is_file()).map(|e| e.name.clone()).collect();
+    let suites = c
+        .entries
+        .iter()
+        .filter(|e| e.path.join(SUITE_FILE).is_file())
+        .map(|e| e.name.clone())
+        .collect();
+    let benches = c
+        .entries
+        .iter()
+        .filter(|e| e.path.join(SETUP_FILE).is_file())
+        .map(|e| e.name.clone())
+        .collect();
     Ok((suites, benches))
 }
 
 /// The view to export and whether it is a suite.
-pub fn pick_view(project: &Project, library: &str, cell: &str, view: Option<&str>) -> Result<(String, bool)> {
+pub fn pick_view(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+) -> Result<(String, bool)> {
     let (suites, benches) = views_of(project, library, cell)?;
     match view {
         Some(v) if suites.iter().any(|s| s == v) => Ok((v.to_string(), true)),
         Some(v) if benches.iter().any(|s| s == v) => Ok((v.to_string(), false)),
-        Some(v) => Err(eyre!("{library}/{cell}/{v} is neither a suite nor a testbench")),
+        Some(v) => Err(eyre!(
+            "{library}/{cell}/{v} is neither a suite nor a testbench"
+        )),
         None => match (suites.as_slice(), benches.as_slice()) {
             ([one], _) => Ok((one.clone(), true)),
             ([], [one]) => Ok((one.clone(), false)),
             ([], []) => Err(eyre!("{library}/{cell} has no suite and no testbench")),
-            ([], many) => Err(eyre!("{library}/{cell} has several testbenches ({}): name one with --view", many.join(", "))),
-            (many, _) => Err(eyre!("{library}/{cell} has several suites ({}): name one with --view", many.join(", "))),
+            ([], many) => Err(eyre!(
+                "{library}/{cell} has several testbenches ({}): name one with --view",
+                many.join(", ")
+            )),
+            (many, _) => Err(eyre!(
+                "{library}/{cell} has several suites ({}): name one with --view",
+                many.join(", ")
+            )),
         },
     }
 }
@@ -93,7 +122,13 @@ fn default_header(project: &Project, cell: &str, description: &str) -> Mapping {
     h.insert("PDK".into(), pdk.into());
     h.insert("cace_format".into(), Value::from(super::FORMAT));
     let mut paths = Mapping::new();
-    for (k, v) in [("root", ".."), ("schematic", "xschem"), ("layout", "gds"), ("netlist", "netlist"), ("documentation", "docs")] {
+    for (k, v) in [
+        ("root", ".."),
+        ("schematic", "xschem"),
+        ("layout", "gds"),
+        ("netlist", "netlist"),
+        ("documentation", "docs"),
+    ] {
         paths.insert(k.into(), v.into());
     }
     h.insert("paths".into(), Value::Mapping(paths));
@@ -105,11 +140,19 @@ fn table_str<'a>(t: &'a toml::Table, key: &str) -> Option<&'a str> {
 }
 
 fn parse_yaml(text: &str, what: &str) -> Result<Mapping> {
-    let v: Value = serde_yaml_ng::from_str(text).wrap_err_with(|| format!("{what}: the CACE YAML in [cace] does not read"))?;
+    let v: Value = serde_yaml_ng::from_str(text)
+        .wrap_err_with(|| format!("{what}: the CACE YAML in [cace] does not read"))?;
     Ok(v.as_mapping().cloned().unwrap_or_default())
 }
 
-const VALUE_KEYS: &[&str] = &["minimum", "typical", "maximum", "enumerate", "step", "stepsize"];
+const VALUE_KEYS: &[&str] = &[
+    "minimum",
+    "typical",
+    "maximum",
+    "enumerate",
+    "step",
+    "stepsize",
+];
 
 /// A CDePT value (SI) for a condition with this unit.
 fn condition_value(text: &str, unit: &str) -> Value {
@@ -153,7 +196,11 @@ fn parameter_of(
         // The schematic the testbench netlists, by its file name (the cell's when it has none yet).
         let template = crate::sim::open(project, library, cell, view)
             .ok()
-            .and_then(|tb| tb.schematic.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .and_then(|tb| {
+                tb.schematic
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+            })
             .unwrap_or_else(|| format!("{cell}.sch"));
         args.insert("template".into(), template.into());
         let mut tool = Mapping::new();
@@ -170,13 +217,22 @@ fn parameter_of(
     let own = mapping(&raw, "conditions").cloned();
     let merged = merged_conditions(defaults, own.as_ref());
     let known = known_corners(project);
-    let expected = map_conditions(&merged, &args, known.as_deref(), &mut vec![], &mut vec![]).values;
+    let expected =
+        map_conditions(&merged, &args, known.as_deref(), &mut vec![], &mut vec![]).values;
     let current = setup_values(setup, &collate);
     let mut conds = own.clone().unwrap_or_default();
     let mut names: Vec<String> = merged.iter().map(|(n, _, _)| n.clone()).collect();
-    let more: Vec<String> = current.keys().filter(|k| !names.contains(k)).cloned().collect();
+    let more: Vec<String> = current
+        .keys()
+        .filter(|k| !names.contains(k))
+        .cloned()
+        .collect();
     names.extend(more);
-    let mc_collate = if collate.is_empty() { "iterations".to_string() } else { collate.clone() };
+    let mc_collate = if collate.is_empty() {
+        "iterations".to_string()
+    } else {
+        collate.clone()
+    };
     for name in &names {
         let (exp, cur) = (expected.get(name), current.get(name));
         if exp == cur {
@@ -189,7 +245,11 @@ fn parameter_of(
             .unwrap_or_default();
         match cur {
             Some(values) => {
-                let mut entry = conds.get(name.as_str()).and_then(Value::as_mapping).cloned().unwrap_or_default();
+                let mut entry = conds
+                    .get(name.as_str())
+                    .and_then(Value::as_mapping)
+                    .cloned()
+                    .unwrap_or_default();
                 entry.retain(|k, _| !VALUE_KEYS.contains(&k.as_str().unwrap_or("")));
                 if setup.montecarlo.is_some() && *name == mc_collate {
                     entry.insert("minimum".into(), Value::from(1));
@@ -199,15 +259,21 @@ fn parameter_of(
                 } else if values.len() == 1 {
                     entry.insert("typical".into(), condition_value(&values[0], &unit));
                 } else {
-                    let list: Vec<Value> = values.iter().map(|v| condition_value(v, &unit)).collect();
+                    let list: Vec<Value> =
+                        values.iter().map(|v| condition_value(v, &unit)).collect();
                     entry.insert("enumerate".into(), Value::Sequence(list));
                 }
                 conds.insert(name.as_str().into(), Value::Mapping(entry));
-                notes.push(format!("{key}: condition {name} is {} in {id}", values.join(", ")));
+                notes.push(format!(
+                    "{key}: condition {name} is {} in {id}",
+                    values.join(", ")
+                ));
             }
             None => {
                 if conds.shift_remove(name.as_str()).is_some() {
-                    notes.push(format!("{key}: condition {name} is not in {id} any more: left out"));
+                    notes.push(format!(
+                        "{key}: condition {name} is not in {id} any more: left out"
+                    ));
                 } else {
                     notes.push(format!(
                         "{key}: {id} does not set {name}; CACE applies its default_conditions entry"
@@ -219,7 +285,10 @@ fn parameter_of(
     // Monte Carlo collates its runs.
     if setup.montecarlo.is_some() {
         args.insert("collate".into(), mc_collate.as_str().into());
-    } else if !collate.is_empty() && expected.contains_key(&collate) && !current.contains_key(&collate) {
+    } else if !collate.is_empty()
+        && expected.contains_key(&collate)
+        && !current.contains_key(&collate)
+    {
         args.shift_remove("collate");
     }
     if let Some(Value::Mapping(tools)) = param.get_mut("tool")
@@ -233,47 +302,81 @@ fn parameter_of(
     }
 
     // Spec limits: CDePT's bounds are the numeric limits that fail.
-    let units = cace.get("units").and_then(toml::Value::as_table).cloned().unwrap_or_default();
+    let units = cace
+        .get("units")
+        .and_then(toml::Value::as_table)
+        .cloned()
+        .unwrap_or_default();
     let mut spec = mapping(&raw, "spec").cloned().unwrap_or_default();
     let mut lines: Vec<SpecLine> = vec![];
     for (k, v) in spec.iter_mut() {
         let Some(name) = scalar_text(k) else { continue };
-        let Some(result) = v.as_mapping_mut() else { continue };
+        let Some(result) = v.as_mapping_mut() else {
+            continue;
+        };
         let read_unit = result_unit(&raw, result);
-        let unit = units.get(&name).and_then(toml::Value::as_str).map(String::from).unwrap_or(read_unit.clone());
+        let unit = units
+            .get(&name)
+            .and_then(toml::Value::as_str)
+            .map(String::from)
+            .unwrap_or(read_unit.clone());
         if unit != read_unit {
             result.insert("unit".into(), unit.as_str().into());
         }
         let scale = unit_scale(&unit);
-        let s = setup.specs.iter().find(|s| s.name.eq_ignore_ascii_case(&name));
-        for (entry, bound) in [("minimum", s.and_then(|s| s.min)), ("maximum", s.and_then(|s| s.max))] {
+        let s = setup
+            .specs
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(&name));
+        for (entry, bound) in [
+            ("minimum", s.and_then(|s| s.min)),
+            ("maximum", s.and_then(|s| s.max)),
+        ] {
             let before = bound_of(entry, result.get(entry), scale).ok().flatten();
             if before.map(num_text) == bound.map(num_text) {
                 continue;
             }
-            let mut e = result.get(entry).and_then(Value::as_mapping).cloned().unwrap_or_default();
+            let mut e = result
+                .get(entry)
+                .and_then(Value::as_mapping)
+                .cloned()
+                .unwrap_or_default();
             match bound {
                 Some(b) => {
                     for k in ["fail", "calculation", "limit"] {
                         e.shift_remove(k);
                     }
                     e.insert("value".into(), yaml_number(b / scale));
-                    notes.push(format!("{key}: spec {name} {entry} is {} in {id}", num_text(b / scale)));
+                    notes.push(format!(
+                        "{key}: spec {name} {entry} is {} in {id}",
+                        num_text(b / scale)
+                    ));
                 }
                 None => {
                     e.insert("value".into(), "any".into());
-                    notes.push(format!("{key}: spec {name} has no {entry} bound in {id}: any"));
+                    notes.push(format!(
+                        "{key}: spec {name} has no {entry} bound in {id}: any"
+                    ));
                 }
             }
             result.insert(entry.into(), Value::Mapping(e));
         }
-        lines.push(SpecLine { name: name.clone(), min: s.and_then(|s| s.min), max: s.and_then(|s| s.max), unit });
+        lines.push(SpecLine {
+            name: name.clone(),
+            min: s.and_then(|s| s.min),
+            max: s.and_then(|s| s.max),
+            unit,
+        });
     }
     for s in &setup.specs {
         if lines.iter().any(|l| l.name.eq_ignore_ascii_case(&s.name)) {
             continue;
         }
-        let unit = units.get(&s.name).and_then(toml::Value::as_str).unwrap_or("").to_string();
+        let unit = units
+            .get(&s.name)
+            .and_then(toml::Value::as_str)
+            .unwrap_or("")
+            .to_string();
         let scale = unit_scale(&unit);
         let mut result = Mapping::new();
         if !unit.is_empty() {
@@ -287,7 +390,12 @@ fn parameter_of(
             }
         }
         spec.insert(s.name.as_str().into(), Value::Mapping(result));
-        lines.push(SpecLine { name: s.name.clone(), min: s.min, max: s.max, unit });
+        lines.push(SpecLine {
+            name: s.name.clone(),
+            min: s.min,
+            max: s.max,
+            unit,
+        });
     }
     if !spec.is_empty() || raw.contains_key("spec") {
         param.insert("spec".into(), Value::Mapping(spec));
@@ -306,7 +414,11 @@ fn parameter_of(
 
 fn median(sorted: &[f64]) -> f64 {
     let n = sorted.len();
-    if n % 2 == 1 { sorted[n / 2] } else { (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0 }
+    if n % 2 == 1 {
+        sorted[n / 2]
+    } else {
+        (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+    }
 }
 
 /// What the runs measured, per named result: minimum, typical (median, CACE's default
@@ -354,7 +466,10 @@ pub fn results_of(records: &[RunRecord], specs: &[SpecLine]) -> Value {
         m.insert("typical".into(), entry(mid, None));
         m.insert("maximum".into(), entry(hi, s.max.map(|b| hi <= b)));
         if values.len() < records.len() {
-            m.insert("missing".into(), Value::from((records.len() - values.len()) as i64));
+            m.insert(
+                "missing".into(),
+                Value::from((records.len() - values.len()) as i64),
+            );
         }
         r.insert(s.name.as_str().into(), Value::Mapping(m));
     }
@@ -362,9 +477,18 @@ pub fn results_of(records: &[RunRecord], specs: &[SpecLine]) -> Value {
 }
 
 /// The datasheet of a suite or testbench of `library/cell`.
-pub fn export(project: &Project, library: &str, cell: &str, options: &ExportOptions) -> Result<Exported> {
+pub fn export(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    options: &ExportOptions,
+) -> Result<Exported> {
     let (view, is_suite) = pick_view(project, library, cell, options.view.as_deref())?;
-    let mut out = Exported { view: view.clone(), suite: is_suite, ..Default::default() };
+    let mut out = Exported {
+        view: view.clone(),
+        suite: is_suite,
+        ..Default::default()
+    };
     let mut params = Mapping::new();
     let add = |params: &mut Mapping, out: &mut Exported, key: String, p: Mapping| {
         let mut key = key;
@@ -383,34 +507,58 @@ pub fn export(project: &Project, library: &str, cell: &str, options: &ExportOpti
             Some(text) => parse_yaml(text, &format!("{library}/{cell}/{view}"))?,
             None => default_header(project, cell, &s.description),
         };
-        if !s.description.is_empty() && header.get("description").and_then(scalar_text).as_deref() != Some(&s.description) {
+        if !s.description.is_empty()
+            && header.get("description").and_then(scalar_text).as_deref() != Some(&s.description)
+        {
             header.insert("description".into(), s.description.as_str().into());
         }
         let defaults = mapping(&header, "default_conditions").cloned();
         let views: BTreeMap<String, String> = cace
             .get("views")
             .and_then(toml::Value::as_table)
-            .map(|t| t.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect())
+            .map(|t| {
+                t.iter()
+                    .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+                    .collect()
+            })
             .unwrap_or_default();
-        let other = cace.get("other").and_then(toml::Value::as_table).cloned().unwrap_or_default();
+        let other = cace
+            .get("other")
+            .and_then(toml::Value::as_table)
+            .cloned()
+            .unwrap_or_default();
         let order: Vec<String> = cace
             .get("parameters")
             .and_then(toml::Value::as_array)
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         let mut done: Vec<(String, String, String)> = vec![];
         for p in &order {
             if let Some(v) = views.get(p) {
                 let at = (library.to_string(), cell.to_string(), v.clone());
-                match parameter_of(project, (library, cell, v), defaults.as_ref(), options.results, &mut out.notes) {
+                match parameter_of(
+                    project,
+                    (library, cell, v),
+                    defaults.as_ref(),
+                    options.results,
+                    &mut out.notes,
+                ) {
                     Ok((key, param)) => add(&mut params, &mut out, key, param),
-                    Err(e) => out.notes.push(format!("{p}: {library}/{cell}/{v} left out: {e:#}")),
+                    Err(e) => out
+                        .notes
+                        .push(format!("{p}: {library}/{cell}/{v} left out: {e:#}")),
                 }
                 done.push(at);
             } else if let Some(text) = other.get(p).and_then(toml::Value::as_str) {
                 add(&mut params, &mut out, p.clone(), parse_yaml(text, p)?);
             } else {
-                out.notes.push(format!("{p}: neither a testbench nor kept in [cace.other]: left out"));
+                out.notes.push(format!(
+                    "{p}: neither a testbench nor kept in [cace.other]: left out"
+                ));
             }
         }
         for t in &s.tests {
@@ -418,7 +566,13 @@ pub fn export(project: &Project, library: &str, cell: &str, options: &ExportOpti
             if done.contains(&(l.clone(), c.clone(), v.clone())) {
                 continue;
             }
-            match parameter_of(project, (&l, &c, &v), defaults.as_ref(), options.results, &mut out.notes) {
+            match parameter_of(
+                project,
+                (&l, &c, &v),
+                defaults.as_ref(),
+                options.results,
+                &mut out.notes,
+            ) {
                 Ok((key, param)) => add(&mut params, &mut out, key, param),
                 Err(e) => out.notes.push(format!("test {l}/{c}/{v} left out: {e:#}")),
             }
@@ -431,16 +585,30 @@ pub fn export(project: &Project, library: &str, cell: &str, options: &ExportOpti
         let from_suite = suites.iter().find_map(|sv| {
             let s = suite::open(project, library, cell, sv).ok()?;
             let cace = s.cace?;
-            let listed = cace.get("views")?.as_table()?.values().any(|v| v.as_str() == Some(view.as_str()));
+            let listed = cace
+                .get("views")?
+                .as_table()?
+                .values()
+                .any(|v| v.as_str() == Some(view.as_str()));
             let text = cace.get("datasheet")?.as_str()?.to_string();
             listed.then_some(text)
         });
         let header = match from_suite {
             Some(text) => parse_yaml(&text, "datasheet")?,
-            None => default_header(project, cell, &format!("CDePT testbench {library}/{cell}/{view}")),
+            None => default_header(
+                project,
+                cell,
+                &format!("CDePT testbench {library}/{cell}/{view}"),
+            ),
         };
         let defaults = mapping(&header, "default_conditions").cloned();
-        let (key, param) = parameter_of(project, (library, cell, &view), defaults.as_ref(), options.results, &mut out.notes)?;
+        let (key, param) = parameter_of(
+            project,
+            (library, cell, &view),
+            defaults.as_ref(),
+            options.results,
+            &mut out.notes,
+        )?;
         add(&mut params, &mut out, key, param);
         header
     };
@@ -469,7 +637,10 @@ mod tests {
             setup_hash: String::new(),
             deck_hash: String::new(),
             simulator: "ngspice".into(),
-            point: PointRecord { name: point.into(), ..Default::default() },
+            point: PointRecord {
+                name: point.into(),
+                ..Default::default()
+            },
             status: Status::Ok,
             error: None,
             measures: measures.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
@@ -480,7 +651,11 @@ mod tests {
                 value: None,
                 min: None,
                 max: None,
-                verdict: if fail { crate::sim::spec::Verdict::Fail } else { crate::sim::spec::Verdict::Pass },
+                verdict: if fail {
+                    crate::sim::spec::Verdict::Fail
+                } else {
+                    crate::sim::spec::Verdict::Pass
+                },
             }],
             started: String::new(),
             duration_ms: 0,
@@ -499,9 +674,24 @@ mod tests {
             record("ff_27", &[("a0", 70.0)], false),
         ];
         let specs = vec![
-            SpecLine { name: "a0".into(), min: Some(50.0), max: None, unit: "V/V".into() },
-            SpecLine { name: "vos".into(), min: None, max: Some(0.005), unit: "mV".into() },
-            SpecLine { name: "pm".into(), min: Some(60.0), max: None, unit: String::new() },
+            SpecLine {
+                name: "a0".into(),
+                min: Some(50.0),
+                max: None,
+                unit: "V/V".into(),
+            },
+            SpecLine {
+                name: "vos".into(),
+                min: None,
+                max: Some(0.005),
+                unit: "mV".into(),
+            },
+            SpecLine {
+                name: "pm".into(),
+                min: Some(60.0),
+                max: None,
+                unit: String::new(),
+            },
         ];
         let v = results_of(&recs, &specs);
         let r = v.as_sequence().unwrap()[0].as_mapping().unwrap();

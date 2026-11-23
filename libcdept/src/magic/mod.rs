@@ -129,7 +129,12 @@ impl DrcReport {
         let mut rows: Vec<(String, usize)> = self
             .violations
             .iter()
-            .map(|v| (v.rule.clone().unwrap_or_else(|| v.why.clone()), v.boxes.len()))
+            .map(|v| {
+                (
+                    v.rule.clone().unwrap_or_else(|| v.why.clone()),
+                    v.boxes.len(),
+                )
+            })
             .collect();
         rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         rows
@@ -201,9 +206,8 @@ impl Magic {
     /// the snapshot's `[magic]` section (else `$PDK_ROOT/$PDK/libs.tech/magic/$PDK.magicrc`),
     /// the PDK environment and the time limit of `[magic] timeout` in `cdept.toml`.
     pub fn for_project(project: &Project) -> Result<Magic> {
-        let program = Magic::find().ok_or_else(|| {
-            eyre!("magic not found: put it on PATH or set {MAGIC_ENV}")
-        })?;
+        let program = Magic::find()
+            .ok_or_else(|| eyre!("magic not found: put it on PATH or set {MAGIC_ENV}"))?;
         Ok(Magic {
             rc: rc_file(project),
             env: project.tool_env(),
@@ -217,7 +221,7 @@ impl Magic {
     /// script does, it runs out of time ([`Magic::timeout`]) or it is cancelled
     /// ([`Magic::cancel`]; then it is killed); each one carries the end of the output.
     pub fn run(&self, script: &str, dir: &Path) -> Result<String> {
-        use crate::batch::{Watch, Waited};
+        use crate::batch::{Waited, Watch};
         std::fs::create_dir_all(dir)?;
         let mut cmd = Command::new(&self.program);
         cmd.args(["-dnull", "-noconsole"]);
@@ -241,7 +245,10 @@ impl Magic {
         // Read on threads too, so that the output so far is there when Magic is stopped.
         let (out, out_reader) = collect(child.stdout.take());
         let (err, err_reader) = collect(child.stderr.take());
-        let watch = Watch { cancel: self.cancel.clone(), timeout: self.timeout };
+        let watch = Watch {
+            cancel: self.cancel.clone(),
+            timeout: self.timeout,
+        };
         let waited = watch.wait(&mut child)?;
         // After a kill, a process Magic started may keep the pipes open: do not wait
         // for it.
@@ -255,7 +262,10 @@ impl Magic {
         let status = match waited {
             Waited::Exited(status) => status,
             Waited::Cancelled => {
-                return Err(eyre!("magic was cancelled and stopped\n{}", parse::tail(&text, TAIL)));
+                return Err(eyre!(
+                    "magic was cancelled and stopped\n{}",
+                    parse::tail(&text, TAIL)
+                ));
             }
             Waited::TimedOut(limit) => {
                 return Err(eyre!(
@@ -280,7 +290,12 @@ impl Magic {
     }
 
     /// Extract `src` to SPICE: `<dir>/<cell>.spice`, with Magic's `.ext` files in `dir`.
-    pub fn extract(&self, src: &Source, dir: &Path, options: &ExtractOptions) -> Result<Extraction> {
+    pub fn extract(
+        &self,
+        src: &Source,
+        dir: &Path,
+        options: &ExtractOptions,
+    ) -> Result<Extraction> {
         let cell = src.cell();
         let spice = dir.join(format!("{cell}.spice"));
         let _ = std::fs::remove_file(&spice);
@@ -345,7 +360,9 @@ impl Magic {
 }
 
 /// Read a pipe to its end on a thread, into a buffer that can be looked at meanwhile.
-fn collect(pipe: Option<impl Read + Send + 'static>) -> (Arc<Mutex<Vec<u8>>>, std::thread::JoinHandle<()>) {
+fn collect(
+    pipe: Option<impl Read + Send + 'static>,
+) -> (Arc<Mutex<Vec<u8>>>, std::thread::JoinHandle<()>) {
     let buf = Arc::new(Mutex::new(Vec::new()));
     let b = buf.clone();
     let handle = std::thread::spawn(move || {
@@ -365,9 +382,10 @@ fn collect(pipe: Option<impl Read + Send + 'static>) -> (Arc<Mutex<Vec<u8>>>, st
 pub fn rc_file(project: &Project) -> Option<PathBuf> {
     if let Some(rc) = project.snapshot().and_then(|t| t.magic.rc.as_ref())
         && let Ok(path) = rc.resolve(|n| project.var(n))
-            && path.is_file() {
-                return Some(path);
-            }
+        && path.is_file()
+    {
+        return Some(path);
+    }
     let pdk = project.pdk_dir()?;
     let rc = pdk
         .dir()
@@ -466,17 +484,34 @@ mod tests {
     #[test]
     fn a_hung_magic_is_stopped_with_its_last_lines() {
         let dir = tempfile::tempdir().unwrap();
-        let magic = fake_magic(dir.path(), "echo 'Magic 8.3 starting'\necho 'Loading cell inv'\nexec sleep 30")
-            .with_timeout(Duration::from_millis(400));
+        let magic = fake_magic(
+            dir.path(),
+            "echo 'Magic 8.3 starting'\necho 'Loading cell inv'\nexec sleep 30",
+        )
+        .with_timeout(Duration::from_millis(400));
         let t = std::time::Instant::now();
         let msg = format!("{}", magic.run("puts hi\n", dir.path()).unwrap_err());
-        assert!(t.elapsed() < Duration::from_secs(10), "killed, not waited for");
-        assert!(msg.contains("did not finish within 400ms") && msg.contains("Loading cell inv"), "{msg}");
+        assert!(
+            t.elapsed() < Duration::from_secs(10),
+            "killed, not waited for"
+        );
+        assert!(
+            msg.contains("did not finish within 400ms") && msg.contains("Loading cell inv"),
+            "{msg}"
+        );
         // A Magic that ends in time is not affected.
-        let ok = fake_magic(dir.path(), "cat >/dev/null\necho 'CDEPT: done'").with_timeout(Duration::from_secs(30));
-        assert!(ok.run("puts hi\n", dir.path()).unwrap().contains("CDEPT: done"));
+        let ok = fake_magic(dir.path(), "cat >/dev/null\necho 'CDEPT: done'")
+            .with_timeout(Duration::from_secs(30));
+        assert!(
+            ok.run("puts hi\n", dir.path())
+                .unwrap()
+                .contains("CDEPT: done")
+        );
         assert_eq!(Magic::new("m".into()).timeout, Some(DEFAULT_TIMEOUT));
-        assert_eq!(Magic::new("m".into()).with_timeout(Duration::ZERO).timeout, None);
+        assert_eq!(
+            Magic::new("m".into()).with_timeout(Duration::ZERO).timeout,
+            None
+        );
     }
 
     #[cfg(unix)]
@@ -500,9 +535,15 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
         q.cancel(id);
         assert_eq!(q.wait(id).unwrap().state, JobState::Cancelled);
-        assert!(t.elapsed() < Duration::from_secs(10), "killed, not waited for");
+        assert!(
+            t.elapsed() < Duration::from_secs(10),
+            "killed, not waited for"
+        );
         let msg = error.lock().unwrap().clone();
-        assert!(msg.contains("cancelled") && msg.contains("Magic 8.3 starting"), "{msg}");
+        assert!(
+            msg.contains("cancelled") && msg.contains("Magic 8.3 starting"),
+            "{msg}"
+        );
     }
 
     // -- against a real Magic and PDK, when they are installed ------------------------
@@ -516,7 +557,9 @@ mod tests {
         })?;
         let installed = crate::testutil::real_pdk(pdk)?;
         let root = installed.root.clone();
-        let rc = root.join(pdk).join(format!("libs.tech/magic/{pdk}.magicrc"));
+        let rc = root
+            .join(pdk)
+            .join(format!("libs.tech/magic/{pdk}.magicrc"));
         if !rc.is_file() {
             return None;
         }
@@ -553,7 +596,12 @@ mod tests {
         assert_eq!(e.cell, "sky130_fd_sc_hd__inv_1");
         assert_eq!(e.summary.subckts[0].name, "sky130_fd_sc_hd__inv_1");
         assert!(e.summary.subckts[0].ports.contains(&"Y".to_string()));
-        assert_eq!(e.summary.devices.values().sum::<usize>(), 2, "{:?}", e.summary);
+        assert_eq!(
+            e.summary.devices.values().sum::<usize>(),
+            2,
+            "{:?}",
+            e.summary
+        );
 
         let d = magic.drc(&src, tmp.path(), None).unwrap();
         assert!(d.is_clean(), "{:?}", d.violations);
@@ -571,7 +619,9 @@ mod tests {
             eprintln!("skipped: no magic or ihp-sg13g2");
             return;
         };
-        let gds = pdk.dir.join("libs.ref/sg13g2_stdcell/gds/sg13g2_stdcell.gds");
+        let gds = pdk
+            .dir
+            .join("libs.ref/sg13g2_stdcell/gds/sg13g2_stdcell.gds");
         if !gds.is_file() {
             eprintln!("skipped: no standard cell GDS in ihp-sg13g2");
             return;
@@ -585,7 +635,12 @@ mod tests {
             .extract(&src, tmp.path(), &ExtractOptions::default())
             .unwrap();
         assert_eq!(e.summary.subckts[0].name, "sg13g2_inv_1");
-        assert_eq!(e.summary.devices.values().sum::<usize>(), 2, "{:?}", e.summary);
+        assert_eq!(
+            e.summary.devices.values().sum::<usize>(),
+            2,
+            "{:?}",
+            e.summary
+        );
         assert!(magic.drc(&src, tmp.path(), None).unwrap().is_clean());
     }
 
@@ -632,11 +687,18 @@ mod tests {
         assert!(gds.is_file());
         let out = tmp.path().join("mag");
         let imp = magic.import_gds(&gds, &out).unwrap();
-        assert!(imp.cells.contains(&"sky130_fd_sc_hd__inv_1".to_string()), "{:?}", imp.cells);
+        assert!(
+            imp.cells.contains(&"sky130_fd_sc_hd__inv_1".to_string()),
+            "{:?}",
+            imp.cells
+        );
         assert!(out.join("sky130_fd_sc_hd__inv_1.mag").is_file());
 
         // A cell that is not in the file is an error with Magic's output.
-        let src = Source::Gds { file: gds, cell: "nope".into() };
+        let src = Source::Gds {
+            file: gds,
+            cell: "nope".into(),
+        };
         let err = magic.lef(&src, &out, false).unwrap_err().to_string();
         assert!(err.contains("no such cell"), "{err}");
     }

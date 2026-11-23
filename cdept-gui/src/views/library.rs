@@ -199,10 +199,21 @@ fn cell_items(ui: &mut Ui, project: &Project, lib: &Library, cell: &Cell, cmds: 
         cmds.push(Cmd::Dialog(copy_cell_dialog(project, lib, cell)));
     }
     super::categories::cell_menu(ui, lib, cell);
-    if let Some(tb) = cell.entries.iter().find(|e| super::simulation::is_testbench(e)) {
+    if let Some(tb) = cell
+        .entries
+        .iter()
+        .find(|e| super::simulation::is_testbench(e))
+    {
         let selection = Selection::view(&lib.name, &cell.name, &tb.name);
-        if ui.button("Run Simulation").on_hover_text("Run the testbench view of this cell").clicked() {
-            cmds.push(Cmd::Action(Action::OpenSimulation { selection, run: true }));
+        if ui
+            .button("Run Simulation")
+            .on_hover_text("Run the testbench view of this cell")
+            .clicked()
+        {
+            cmds.push(Cmd::Action(Action::OpenSimulation {
+                selection,
+                run: true,
+            }));
         }
     }
     cmds.extend(crate::cace::menu(ui, lib, cell).map(Cmd::Dialog));
@@ -271,18 +282,35 @@ fn view_items(
     }
     if entry.format == Some(libcdept::entry::Format::QucsSchematic)
         && let Some(file) = &entry.main_file
-        && ui.button("Open in Qucs-S").on_hover_text("Start the Qucs-S window on this schematic").clicked()
+        && ui
+            .button("Open in Qucs-S")
+            .on_hover_text("Start the Qucs-S window on this schematic")
+            .clicked()
         && let Err(e) = libcdept::batch::qucs::launch(None, Some(file))
     {
         tracing::warn!("Open in Qucs-S: {e:#}");
     }
     if super::simulation::is_testbench(entry) {
         let selection = Selection::view(&lib.name, &cell.name, &entry.name);
-        if ui.button("Simulation").on_hover_text("Edit the setup and see the results").clicked() {
-            cmds.push(Cmd::Action(Action::OpenSimulation { selection: selection.clone(), run: false }));
+        if ui
+            .button("Simulation")
+            .on_hover_text("Edit the setup and see the results")
+            .clicked()
+        {
+            cmds.push(Cmd::Action(Action::OpenSimulation {
+                selection: selection.clone(),
+                run: false,
+            }));
         }
-        if ui.button("Run Simulation").on_hover_text("Open the Simulation tab and run the testbench").clicked() {
-            cmds.push(Cmd::Action(Action::OpenSimulation { selection, run: true }));
+        if ui
+            .button("Run Simulation")
+            .on_hover_text("Open the Simulation tab and run the testbench")
+            .clicked()
+        {
+            cmds.push(Cmd::Action(Action::OpenSimulation {
+                selection,
+                run: true,
+            }));
         }
     }
     if let Some(u) = link

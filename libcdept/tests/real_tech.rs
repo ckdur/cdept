@@ -233,7 +233,11 @@ fn config_files(name: &str, stdcell: &str) {
     }
     assert!(!files.liberty.is_empty());
     for item in &files.liberty {
-        assert!(item.file.resolve_in(&pdk).unwrap().is_file(), "{}", item.file);
+        assert!(
+            item.file.resolve_in(&pdk).unwrap().is_file(),
+            "{}",
+            item.file
+        );
     }
     assert!(!files.power_pins.is_empty() && !files.ground_pins.is_empty());
     // The snapshot with the new table still reads back.

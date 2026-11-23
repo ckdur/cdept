@@ -39,14 +39,23 @@ struct Event {
 }
 
 fn parse_event(w: &[&str]) -> Result<Event> {
-    let mut e = Event { vec: w[0].to_string(), val: f64::NAN, edge: Edge::Cross, n: 1, last: false, td: 0.0 };
+    let mut e = Event {
+        vec: w[0].to_string(),
+        val: f64::NAN,
+        edge: Edge::Cross,
+        n: 1,
+        last: false,
+        td: 0.0,
+    };
     for t in &w[1..] {
         let lower = t.to_lowercase();
         if lower == "last" {
             e.last = true;
             continue;
         }
-        let Some((k, v)) = lower.split_once('=') else { return Err(eyre!("cannot read '{t}' in a measurement")) };
+        let Some((k, v)) = lower.split_once('=') else {
+            return Err(eyre!("cannot read '{t}' in a measurement"));
+        };
         match k {
             "val" => e.val = num(v)?,
             "td" => e.td = num(v)?,
@@ -59,7 +68,9 @@ fn parse_event(w: &[&str]) -> Result<Event> {
                 if v == "last" {
                     e.last = true;
                 } else {
-                    e.n = v.parse().map_err(|_| eyre!("'{t}': the number of the crossing must be a whole number"))?;
+                    e.n = v.parse().map_err(|_| {
+                        eyre!("'{t}': the number of the crossing must be a whole number")
+                    })?;
                 }
             }
             other => return Err(eyre!("'{other}' is not supported in a VACASK measurement")),
@@ -72,7 +83,9 @@ fn parse_event(w: &[&str]) -> Result<Event> {
 }
 
 fn crossing(plot: &Plot, e: &Event) -> Result<Option<f64>> {
-    let y = plot.get(&e.vec).ok_or_else(|| eyre!("no vector '{}' in the {} results", e.vec, plot.plotname))?;
+    let y = plot
+        .get(&e.vec)
+        .ok_or_else(|| eyre!("no vector '{}' in the {} results", e.vec, plot.plotname))?;
     let x = plot.x();
     let mut count = 0;
     let mut found = None;
@@ -104,7 +117,10 @@ fn crossing(plot: &Plot, e: &Event) -> Result<Option<f64>> {
 
 fn window(plot: &Plot, w: &[&str]) -> Result<(f64, f64)> {
     let x = plot.x();
-    let (mut from, mut to) = (x.first().copied().unwrap_or(0.0), x.last().copied().unwrap_or(0.0));
+    let (mut from, mut to) = (
+        x.first().copied().unwrap_or(0.0),
+        x.last().copied().unwrap_or(0.0),
+    );
     for t in w {
         let lower = t.to_lowercase();
         match lower.split_once('=') {
@@ -134,29 +150,47 @@ pub fn evaluate(measure: &str, plot: &Plot) -> Result<Option<f64>> {
     }
     let lower: Vec<String> = w.iter().map(|s| s.to_lowercase()).collect();
     if lower[2] == "trig" {
-        let targ = lower.iter().position(|t| t == "targ").ok_or_else(|| eyre!("'{measure}': trig without targ"))?;
+        let targ = lower
+            .iter()
+            .position(|t| t == "targ")
+            .ok_or_else(|| eyre!("'{measure}': trig without targ"))?;
         let trig = parse_event(&w[3..targ])?;
         let targ = parse_event(&w[targ + 1..])?;
-        let Some(t0) = crossing(plot, &trig)? else { return Ok(None) };
-        let Some(t1) = crossing(plot, &targ)? else { return Ok(None) };
+        let Some(t0) = crossing(plot, &trig)? else {
+            return Ok(None);
+        };
+        let Some(t1) = crossing(plot, &targ)? else {
+            return Ok(None);
+        };
         return Ok(Some(t1 - t0));
     }
     let what = lower[2].as_str();
     let vec = w[3];
-    let y = plot.get(vec).ok_or_else(|| eyre!("no vector '{vec}' in the {} results", plot.plotname))?;
+    let y = plot
+        .get(vec)
+        .ok_or_else(|| eyre!("no vector '{vec}' in the {} results", plot.plotname))?;
     let x = plot.x();
     if what == "find" && lower.get(4).is_some_and(|t| t == "when") {
         // `find v(a) when v(b)=0.5 [rise|fall|cross=N]`: v(a) where v(b) crosses.
-        let (name, val) = lower.get(5).and_then(|t| t.split_once('=')).ok_or_else(|| eyre!("'{measure}': find .. when needs vec=value"))?;
+        let (name, val) = lower
+            .get(5)
+            .and_then(|t| t.split_once('='))
+            .ok_or_else(|| eyre!("'{measure}': find .. when needs vec=value"))?;
         let mut ev = vec![w[5][..name.len()].to_string()];
         ev.push(format!("val={val}"));
         ev.extend(w[6..].iter().map(|s| s.to_string()));
         let ev: Vec<&str> = ev.iter().map(String::as_str).collect();
         let event = parse_event(&ev)?;
-        let Some(t) = crossing(plot, &event)? else { return Ok(None) };
+        let Some(t) = crossing(plot, &event)? else {
+            return Ok(None);
+        };
         for i in 1..x.len() {
             if (x[i - 1] <= t && t <= x[i]) || (x[i - 1] >= t && t >= x[i]) {
-                let f = if x[i] == x[i - 1] { 0.0 } else { (t - x[i - 1]) / (x[i] - x[i - 1]) };
+                let f = if x[i] == x[i - 1] {
+                    0.0
+                } else {
+                    (t - x[i - 1]) / (x[i] - x[i - 1])
+                };
                 return Ok(Some(y[i - 1] + f * (y[i] - y[i - 1])));
             }
         }
@@ -170,19 +204,30 @@ pub fn evaluate(measure: &str, plot: &Plot) -> Result<Option<f64>> {
         let at = num(&at)?;
         for i in 1..x.len() {
             if (x[i - 1] <= at && at <= x[i]) || (x[i - 1] >= at && at >= x[i]) {
-                let f = if x[i] == x[i - 1] { 0.0 } else { (at - x[i - 1]) / (x[i] - x[i - 1]) };
+                let f = if x[i] == x[i - 1] {
+                    0.0
+                } else {
+                    (at - x[i - 1]) / (x[i] - x[i - 1])
+                };
                 return Ok(Some(y[i - 1] + f * (y[i] - y[i - 1])));
             }
         }
         return Ok(None);
     }
     if !matches!(what, "max" | "min" | "pp" | "avg" | "rms" | "integ") {
-        bail!("'{what}' is not supported in a VACASK measurement (trig/targ, max, min, pp, avg, rms, integ, find at)");
+        bail!(
+            "'{what}' is not supported in a VACASK measurement (trig/targ, max, min, pp, avg, rms, integ, find at)"
+        );
     }
     let (from, to) = window(plot, &w[4..])?;
     // A plot of one point (an operating point) has no axis to cut a window from.
-    let idx: Vec<usize> =
-        if x.len() == 1 { vec![0] } else { (0..x.len()).filter(|&i| x[i] >= from && x[i] <= to).collect() };
+    let idx: Vec<usize> = if x.len() == 1 {
+        vec![0]
+    } else {
+        (0..x.len())
+            .filter(|&i| x[i] >= from && x[i] <= to)
+            .collect()
+    };
     if idx.is_empty() {
         return Ok(None);
     }
@@ -220,31 +265,66 @@ mod tests {
         let t: Vec<f64> = (0..=10).map(|i| i as f64).collect();
         let vin: Vec<f64> = t.iter().map(|t| if *t < 2.0 { 0.0 } else { 1.0 }).collect();
         let vout: Vec<f64> = t.iter().map(|t| (t / 10.0).min(1.0)).collect();
-        raw::parse(&raw::tests::binary(&["time", "in", "out"], &[t, vin, vout])).unwrap().remove(0)
+        raw::parse(&raw::tests::binary(&["time", "in", "out"], &[t, vin, vout]))
+            .unwrap()
+            .remove(0)
     }
 
     #[test]
     fn delays_between_crossings() {
         let p = plot();
         // in rises through 0.5 at t=1.5, out through 0.5 at t=5.
-        let d = evaluate("tran tpd trig v(in) val=0.5 rise=1 targ v(out) val=0.5 rise=1", &p).unwrap().unwrap();
+        let d = evaluate(
+            "tran tpd trig v(in) val=0.5 rise=1 targ v(out) val=0.5 rise=1",
+            &p,
+        )
+        .unwrap()
+        .unwrap();
         assert!((d - 3.5).abs() < 1e-12, "{d}");
-        assert!(evaluate("tran x trig v(in) val=0.5 fall=1 targ v(out) val=0.5 rise=1", &p).unwrap().is_none());
-        assert!(evaluate("tran x trig v(in) val=0.5 rise=1 targ v(out) val=0.5 rise=1 td=9", &p).unwrap().is_none());
+        assert!(
+            evaluate(
+                "tran x trig v(in) val=0.5 fall=1 targ v(out) val=0.5 rise=1",
+                &p
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            evaluate(
+                "tran x trig v(in) val=0.5 rise=1 targ v(out) val=0.5 rise=1 td=9",
+                &p
+            )
+            .unwrap()
+            .is_none()
+        );
     }
 
     #[test]
     fn extremes_averages_and_points() {
         let p = plot();
         assert_eq!(evaluate("tran m max v(out)", &p).unwrap(), Some(1.0));
-        assert_eq!(evaluate("tran m min v(out) from=2 to=4", &p).unwrap(), Some(0.2));
+        assert_eq!(
+            evaluate("tran m min v(out) from=2 to=4", &p).unwrap(),
+            Some(0.2)
+        );
         assert!((evaluate("tran m avg v(out)", &p).unwrap().unwrap() - 0.5).abs() < 1e-12);
         assert_eq!(evaluate("tran m pp v(in)", &p).unwrap(), Some(1.0));
         assert!((evaluate("tran m find v(out) at=2.5", &p).unwrap().unwrap() - 0.25).abs() < 1e-12);
         assert!((evaluate("tran m integ v(out)", &p).unwrap().unwrap() - 5.0).abs() < 1e-12);
         // v(out) where v(in) rises through 0.5 (t = 1.5).
-        assert!((evaluate("tran m find v(out) when v(in)=0.5 rise=1", &p).unwrap().unwrap() - 0.15).abs() < 1e-12);
-        assert!(evaluate("tran m find v(out) when v(in)=0.5 fall=1", &p).unwrap().is_none());
+        assert!(
+            (evaluate("tran m find v(out) when v(in)=0.5 rise=1", &p)
+                .unwrap()
+                .unwrap()
+                - 0.15)
+                .abs()
+                < 1e-12
+        );
+        assert!(
+            evaluate("tran m find v(out) when v(in)=0.5 fall=1", &p)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

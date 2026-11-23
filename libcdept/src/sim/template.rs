@@ -57,7 +57,10 @@ const BUILTIN: &[(&str, &str)] = &[
     ("psrr_cmrr", include_str!("templates/psrr_cmrr.toml")),
     ("power", include_str!("templates/power.toml")),
     ("inl_dnl", include_str!("templates/inl_dnl.toml")),
-    ("startup_settle", include_str!("templates/startup_settle.toml")),
+    (
+        "startup_settle",
+        include_str!("templates/startup_settle.toml"),
+    ),
 ];
 
 /// Where a template came from.
@@ -104,7 +107,12 @@ fn scalar_text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>,
         toml::Value::Integer(i) => Some(i.to_string()),
         toml::Value::Float(f) => Some(crate::sim::setup::fmt_num(f)),
         toml::Value::Boolean(b) => Some(b.to_string()),
-        other => return Err(serde::de::Error::custom(format!("expected a scalar, found {}", other.type_str()))),
+        other => {
+            return Err(serde::de::Error::custom(format!(
+                "expected a scalar, found {}",
+                other.type_str()
+            )));
+        }
     })
 }
 
@@ -183,34 +191,61 @@ impl Template {
 
     fn validate(&self) -> Result<()> {
         let name = &self.file.name;
-        if !word(name) || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+        if !word(name)
+            || !name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        {
             bail!("'{name}' is not a valid template name");
         }
         for (i, p) in self.file.params.iter().enumerate() {
             if !word(&p.name) || !p.name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                bail!("template {name}: '{}' is not a valid parameter name", p.name);
+                bail!(
+                    "template {name}: '{}' is not a valid parameter name",
+                    p.name
+                );
             }
             if self.file.params[..i].iter().any(|q| q.name == p.name) {
                 bail!("template {name}: parameter '{}' is defined twice", p.name);
             }
-            if !matches!(p.kind.as_str(), "" | "net" | "string" | "number" | "int" | "bool" | "choice") {
-                bail!("template {name}: parameter '{}' has the unknown type '{}'", p.name, p.kind);
+            if !matches!(
+                p.kind.as_str(),
+                "" | "net" | "string" | "number" | "int" | "bool" | "choice"
+            ) {
+                bail!(
+                    "template {name}: parameter '{}' has the unknown type '{}'",
+                    p.name,
+                    p.kind
+                );
             }
             if p.kind == "choice" && p.choices.is_empty() {
-                bail!("template {name}: choice parameter '{}' lists no choices", p.name);
+                bail!(
+                    "template {name}: choice parameter '{}' lists no choices",
+                    p.name
+                );
             }
         }
         for d in &self.file.derived {
             if !word(&d.name) || self.file.params.iter().any(|p| p.name == d.name) {
-                bail!("template {name}: derived value '{}' is not a valid new name", d.name);
+                bail!(
+                    "template {name}: derived value '{}' is not a valid new name",
+                    d.name
+                );
             }
             if d.expr.is_empty() == d.from.is_empty() {
-                bail!("template {name}: derived '{}' needs `expr` or `from` + `map`", d.name);
+                bail!(
+                    "template {name}: derived '{}' needs `expr` or `from` + `map`",
+                    d.name
+                );
             }
             if !d.expr.is_empty()
                 && let Err(e) = calc::parse(&d.expr)
             {
-                bail!("template {name}: derived '{}': {}", d.name, e.render(&d.expr));
+                bail!(
+                    "template {name}: derived '{}': {}",
+                    d.name,
+                    e.render(&d.expr)
+                );
             }
         }
         // The fragment with every default (a sample for the required ones) must be a setup.
@@ -247,12 +282,19 @@ impl Template {
     /// unset optional parameter is fine; a required one is only an error once the whole
     /// set is bound.
     pub fn validate_param(&self, name: &str, args: &BTreeMap<String, String>) -> Result<()> {
-        let p = self.param(name).ok_or_else(|| eyre!("template '{}' has no parameter '{name}'", self.file.name))?;
+        let p = self
+            .param(name)
+            .ok_or_else(|| eyre!("template '{}' has no parameter '{name}'", self.file.name))?;
         match args.get(name).map(|v| v.trim()).filter(|v| !v.is_empty()) {
-            Some(v) => check_value(&self.file.name, p, v.to_string()).map(|_| ()).map_err(|e| {
-                let m = format!("{e:#}");
-                eyre!(m.split_once(" is not ").map_or(m.clone(), |(_, rest)| format!("not {rest}")))
-            }),
+            Some(v) => check_value(&self.file.name, p, v.to_string())
+                .map(|_| ())
+                .map_err(|e| {
+                    let m = format!("{e:#}");
+                    eyre!(
+                        m.split_once(" is not ")
+                            .map_or(m.clone(), |(_, rest)| format!("not {rest}"))
+                    )
+                }),
             None => Ok(()),
         }
     }
@@ -272,7 +314,9 @@ impl Template {
         for k in args.keys() {
             if self.param(k).is_none() {
                 let known: Vec<&str> = self.file.params.iter().map(|p| p.name.as_str()).collect();
-                let hint = closest(k, &known).map(|c| format!(" (did you mean '{c}'?)")).unwrap_or_default();
+                let hint = closest(k, &known)
+                    .map(|c| format!(" (did you mean '{c}'?)"))
+                    .unwrap_or_default();
                 bail!(
                     "template '{name}' has no parameter '{k}'{hint}; its parameters are: {}",
                     known.join(", ")
@@ -284,9 +328,18 @@ impl Template {
             let raw = match args.get(&p.name) {
                 Some(v) => Some(v.clone()),
                 None => match &p.default {
-                    Some(d) => Some(substitute(d, &bound, name).wrap_err_with(|| format!("default of '{}'", p.name))?),
+                    Some(d) => Some(
+                        substitute(d, &bound, name)
+                            .wrap_err_with(|| format!("default of '{}'", p.name))?,
+                    ),
                     None if p.optional => None,
-                    None => return Err(eyre!("template '{name}' needs the parameter '{}' ({})", p.name, describe(p))),
+                    None => {
+                        return Err(eyre!(
+                            "template '{name}' needs the parameter '{}' ({})",
+                            p.name,
+                            describe(p)
+                        ));
+                    }
                 },
             };
             let value = match raw {
@@ -299,7 +352,11 @@ impl Template {
         for d in &self.file.derived {
             let value = if !d.from.is_empty() {
                 let Some(Some(src)) = bound.get(&d.from) else {
-                    bail!("template '{name}': derived '{}' reads '{}', which is not set", d.name, d.from);
+                    bail!(
+                        "template '{name}': derived '{}' reads '{}', which is not set",
+                        d.name,
+                        d.from
+                    );
                 };
                 d.map.get(src).cloned().ok_or_else(|| {
                     eyre!(
@@ -316,9 +373,19 @@ impl Template {
                         env.set_text(k, v);
                     }
                 }
-                let v = calc::evaluate(&d.expr, &env).map_err(|e| eyre!("template '{name}': derived '{}': {}", d.name, e.render(&d.expr)))?;
+                let v = calc::evaluate(&d.expr, &env).map_err(|e| {
+                    eyre!(
+                        "template '{name}': derived '{}': {}",
+                        d.name,
+                        e.render(&d.expr)
+                    )
+                })?;
                 let x = v.as_f64().filter(|x| x.is_finite()).ok_or_else(|| {
-                    eyre!("template '{name}': derived '{}' is {}, not a number", d.name, v.kind())
+                    eyre!(
+                        "template '{name}': derived '{}' is {}, not a number",
+                        d.name,
+                        v.kind()
+                    )
                 })?;
                 fmt_spice(x)
             };
@@ -334,9 +401,15 @@ impl Template {
         let mut table = toml::Table::new();
         for (k, v) in &self.file.setup {
             let filled = match k.as_str() {
-                "sweep" => Some(toml::Value::Array(fill_sweeps(v.as_array().map_or(&[][..], |a| a), &bound, name)?)),
+                "sweep" => Some(toml::Value::Array(fill_sweeps(
+                    v.as_array().map_or(&[][..], |a| a),
+                    &bound,
+                    name,
+                )?)),
                 "montecarlo" => match v {
-                    toml::Value::Table(t) => fill_montecarlo(t, &bound, name)?.map(toml::Value::Table),
+                    toml::Value::Table(t) => {
+                        fill_montecarlo(t, &bound, name)?.map(toml::Value::Table)
+                    }
                     other => Some(other.clone()),
                 },
                 _ => fill(v, &bound, name, k)?,
@@ -347,7 +420,13 @@ impl Template {
         }
         // The template's own `[[sweep]]` and `[montecarlo]` (setup.toml's win, in `overlay`).
         if !self.file.sweep.is_empty() {
-            let items: Vec<toml::Value> = self.file.sweep.iter().cloned().map(toml::Value::Table).collect();
+            let items: Vec<toml::Value> = self
+                .file
+                .sweep
+                .iter()
+                .cloned()
+                .map(toml::Value::Table)
+                .collect();
             let mut sweeps = fill_sweeps(&items, &bound, name)?;
             if let Some(toml::Value::Array(own)) = table.remove("sweep") {
                 sweeps.splice(0..0, own);
@@ -394,12 +473,21 @@ pub struct Instance {
 
 fn describe(p: &Param) -> String {
     let kind = if p.kind.is_empty() { "string" } else { &p.kind };
-    if p.doc.is_empty() { kind.to_string() } else { format!("{kind}: {}", p.doc) }
+    if p.doc.is_empty() {
+        kind.to_string()
+    } else {
+        format!("{kind}: {}", p.doc)
+    }
 }
 
 /// Validate and normalise a value of the type of `p`.
 fn check_value(template: &str, p: &Param, v: String) -> Result<String> {
-    let bad = |what: &str| eyre!("template '{template}': parameter '{}' = '{v}' is not {what}", p.name);
+    let bad = |what: &str| {
+        eyre!(
+            "template '{template}': parameter '{}' = '{v}' is not {what}",
+            p.name
+        )
+    };
     match p.kind.as_str() {
         "net" => {
             if !word(&v) || v.contains(['(', ')', '"', '\'', ',', '=', '$', '{', '}']) {
@@ -408,7 +496,9 @@ fn check_value(template: &str, p: &Param, v: String) -> Result<String> {
         }
         "number" => {
             if calc::parse_spice_number(&v).is_none() {
-                return Err(bad("a number (SPICE suffixes such as 1k, 5p, 1meg are fine)"));
+                return Err(bad(
+                    "a number (SPICE suffixes such as 1k, 5p, 1meg are fine)",
+                ));
             }
         }
         "int" => {
@@ -454,8 +544,16 @@ fn substitute(s: &str, bound: &Bound, template: &str) -> Result<String> {
         let key = &rest[i + 2..i + j];
         match bound.get(key) {
             Some(Some(v)) => out.push_str(v),
-            Some(None) => return Err(eyre!("template '{template}': the parameter '{key}' is not set but \"{s}\" uses it")),
-            None => return Err(eyre!("template '{template}': \"{s}\" uses ${{{key}}}, which is not a parameter")),
+            Some(None) => {
+                return Err(eyre!(
+                    "template '{template}': the parameter '{key}' is not set but \"{s}\" uses it"
+                ));
+            }
+            None => {
+                return Err(eyre!(
+                    "template '{template}': \"{s}\" uses ${{{key}}}, which is not a parameter"
+                ));
+            }
         }
         rest = &rest[i + j + 1..];
     }
@@ -480,9 +578,14 @@ fn fill(v: &toml::Value, bound: &Bound, template: &str, key: &str) -> Result<Opt
                 let Some(value) = value else { return Ok(None) };
                 // Numbers keep their type where the setup wants a number.
                 if matches!(key, "min" | "max" | "points") {
-                    let x = calc::parse_spice_number(value)
-                        .ok_or_else(|| eyre!("template '{template}': '{value}' (for {key}) is not a number"))?;
-                    return Ok(Some(if key == "points" { toml::Value::Integer(x as i64) } else { toml::Value::Float(x) }));
+                    let x = calc::parse_spice_number(value).ok_or_else(|| {
+                        eyre!("template '{template}': '{value}' (for {key}) is not a number")
+                    })?;
+                    return Ok(Some(if key == "points" {
+                        toml::Value::Integer(x as i64)
+                    } else {
+                        toml::Value::Float(x)
+                    }));
                 }
             }
             toml::Value::String(substitute(s, bound, template)?)
@@ -494,7 +597,9 @@ fn fill(v: &toml::Value, bound: &Bound, template: &str, key: &str) -> Result<Opt
                 if let toml::Value::Table(t) = &mut item
                     && let Some(cond) = t.remove("when")
                 {
-                    let cond = cond.as_str().ok_or_else(|| eyre!("template '{template}': `when` must be a string"))?;
+                    let cond = cond
+                        .as_str()
+                        .ok_or_else(|| eyre!("template '{template}': `when` must be a string"))?;
                     if !condition(cond, bound, template)? {
                         continue;
                     }
@@ -529,7 +634,9 @@ fn keep_entry(t: &mut toml::Table, bound: &Bound, template: &str) -> Result<bool
     match t.remove("when") {
         None => Ok(true),
         Some(cond) => {
-            let cond = cond.as_str().ok_or_else(|| eyre!("template '{template}': `when` must be a string"))?;
+            let cond = cond
+                .as_str()
+                .ok_or_else(|| eyre!("template '{template}': `when` must be a string"))?;
             condition(cond, bound, template)
         }
     }
@@ -538,7 +645,9 @@ fn keep_entry(t: &mut toml::Table, bound: &Bound, template: &str) -> Result<bool
 /// A number key of a sweep or Monte Carlo table: a string (after `${param}`) is read as
 /// a number with SPICE suffixes, `whole` ones become integers.
 fn number_value(v: toml::Value, what: &str, whole: bool, template: &str) -> Result<toml::Value> {
-    let toml::Value::String(x) = &v else { return Ok(v) };
+    let toml::Value::String(x) = &v else {
+        return Ok(v);
+    };
     let n = calc::parse_spice_number(x.trim())
         .ok_or_else(|| eyre!("template '{template}': {what} '{x}' is not a number"))?;
     if !whole {
@@ -581,12 +690,19 @@ fn fill_sweeps(items: &[toml::Value], bound: &Bound, template: &str) -> Result<V
                 continue;
             };
             let value = match k.as_str() {
-                "start" | "stop" | "step" => number_value(value, &format!("sweep {k}"), false, template)?,
+                "start" | "stop" | "step" => {
+                    number_value(value, &format!("sweep {k}"), false, template)?
+                }
                 _ => value,
             };
             filled.insert(k.clone(), value);
         }
-        let has_values = ["values", "list"].iter().any(|k| filled.get(*k).and_then(|v| v.as_array()).is_some_and(|a| !a.is_empty()));
+        let has_values = ["values", "list"].iter().any(|k| {
+            filled
+                .get(*k)
+                .and_then(|v| v.as_array())
+                .is_some_and(|a| !a.is_empty())
+        });
         if dropped && !has_values && !filled.contains_key("start") {
             continue;
         }
@@ -604,7 +720,9 @@ fn fill_montecarlo(t: &toml::Table, bound: &Bound, template: &str) -> Result<Opt
     }
     let mut out = toml::Table::new();
     for (k, v) in &t {
-        let Some(value) = fill(v, bound, template, k)? else { continue };
+        let Some(value) = fill(v, bound, template, k)? else {
+            continue;
+        };
         let value = match k.as_str() {
             "runs" | "seed" => number_value(value, &format!("montecarlo {k}"), true, template)?,
             _ => value,
@@ -619,10 +737,11 @@ fn fill_montecarlo(t: &toml::Table, bound: &Bound, template: &str) -> Result<Opt
 fn condition(cond: &str, bound: &Bound, template: &str) -> Result<bool> {
     let cond = cond.trim();
     let get = |n: &str| -> Result<Option<&String>> {
-        bound
-            .get(n.trim())
-            .map(|v| v.as_ref())
-            .ok_or_else(|| eyre!("template '{template}': `when = \"{cond}\"` names '{n}', which is not a parameter"))
+        bound.get(n.trim()).map(|v| v.as_ref()).ok_or_else(|| {
+            eyre!(
+                "template '{template}': `when = \"{cond}\"` names '{n}', which is not a parameter"
+            )
+        })
     };
     if let Some((n, v)) = cond.split_once("!=") {
         return Ok(get(n)?.map(String::as_str) != Some(v.trim()));
@@ -654,7 +773,12 @@ fn distance(a: &str, b: &str) -> usize {
 }
 
 fn closest<'a>(name: &str, names: &[&'a str]) -> Option<&'a str> {
-    names.iter().map(|n| (distance(name, n), *n)).filter(|(d, _)| *d <= 2).min().map(|(_, n)| n)
+    names
+        .iter()
+        .map(|n| (distance(name, n), *n))
+        .filter(|(d, _)| *d <= 2)
+        .min()
+        .map(|(_, n)| n)
 }
 
 /// The templates that can be picked.
@@ -703,9 +827,14 @@ impl TemplateSet {
     }
 
     fn load_dir(&mut self, dir: &Path, origin: fn(PathBuf) -> Origin) {
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
-        let mut files: Vec<PathBuf> =
-            rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "toml")).collect();
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut files: Vec<PathBuf> = rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+            .collect();
         files.sort();
         for f in files {
             let loaded = std::fs::read_to_string(&f)
@@ -719,7 +848,11 @@ impl TemplateSet {
     }
 
     fn add(&mut self, t: Template) {
-        if let Some(old) = self.templates.iter().position(|o| o.file.name == t.file.name) {
+        if let Some(old) = self
+            .templates
+            .iter()
+            .position(|o| o.file.name == t.file.name)
+        {
             self.notes.push(format!(
                 "template '{}' ({}) shadows the one from {}",
                 t.file.name,
@@ -745,14 +878,24 @@ impl TemplateSet {
 
     pub fn find(&self, name: &str) -> Result<&Template> {
         self.get(name).ok_or_else(|| {
-            let names: Vec<&str> = self.templates.iter().map(|t| t.file.name.as_str()).collect();
-            let hint = closest(name, &names).map(|c| format!(" (did you mean '{c}'?)")).unwrap_or_default();
+            let names: Vec<&str> = self
+                .templates
+                .iter()
+                .map(|t| t.file.name.as_str())
+                .collect();
+            let hint = closest(name, &names)
+                .map(|c| format!(" (did you mean '{c}'?)"))
+                .unwrap_or_default();
             let mut s = format!("no test template '{name}'{hint}; there are: {}", {
                 let mut n = names.clone();
                 n.sort();
                 n.join(", ")
             });
-            for note in self.notes.iter().filter(|n| n.contains(name) && n.contains(".toml")) {
+            for note in self
+                .notes
+                .iter()
+                .filter(|n| n.contains(name) && n.contains(".toml"))
+            {
                 s.push_str(&format!("\n  note: {note}"));
             }
             eyre!(s)
@@ -793,14 +936,23 @@ const OWN_KEYS: [&str; 2] = ["template", "template_args"];
 
 /// If `text` names a template, make the plain setup text out of it.
 pub fn resolve(text: &str, set: &TemplateSet) -> Result<Resolved> {
-    let plain = || Resolved { text: text.to_string(), ..Default::default() };
+    let plain = || Resolved {
+        text: text.to_string(),
+        ..Default::default()
+    };
     if !text.contains("template") {
         return Ok(plain());
     }
     // A syntax error is reported by the setup parser, with its own message.
-    let Ok(user) = toml::from_str::<toml::Table>(text) else { return Ok(plain()) };
-    let Some(name) = user.get("template") else { return Ok(plain()) };
-    let name = name.as_str().ok_or_else(|| eyre!("`template` must be a name, e.g. template = \"ac_response\""))?;
+    let Ok(user) = toml::from_str::<toml::Table>(text) else {
+        return Ok(plain());
+    };
+    let Some(name) = user.get("template") else {
+        return Ok(plain());
+    };
+    let name = name
+        .as_str()
+        .ok_or_else(|| eyre!("`template` must be a name, e.g. template = \"ac_response\""))?;
     let template = set.find(name)?;
     let mut args = BTreeMap::new();
     match user.get("template_args") {
@@ -812,12 +964,21 @@ pub fn resolve(text: &str, set: &TemplateSet) -> Result<Resolved> {
                     toml::Value::Integer(i) => i.to_string(),
                     toml::Value::Float(f) => crate::sim::setup::fmt_num(*f),
                     toml::Value::Boolean(b) => b.to_string(),
-                    other => return Err(eyre!("template_args.{k}: expected a string, number or boolean, found {}", other.type_str())),
+                    other => {
+                        return Err(eyre!(
+                            "template_args.{k}: expected a string, number or boolean, found {}",
+                            other.type_str()
+                        ));
+                    }
                 };
                 args.insert(k.clone(), s);
             }
         }
-        Some(_) => return Err(eyre!("`template_args` must be a table: [template_args] out = \"out\"")),
+        Some(_) => {
+            return Err(eyre!(
+                "`template_args` must be a table: [template_args] out = \"out\""
+            ));
+        }
     }
     let instance = template.instantiate(&args)?;
     let table = overlay(instance.table.clone(), &user);
@@ -835,14 +996,23 @@ fn overlay(mut base: toml::Table, user: &toml::Table) -> toml::Table {
     use toml::Value;
     // Arrays of tables merged by a key; the user's entry replaces the template's.
     let by_key = |key: &'static str| -> Box<dyn Fn(&Value) -> String> {
-        Box::new(move |v: &Value| v.get(key).and_then(|k| k.as_str()).unwrap_or("").to_lowercase())
+        Box::new(move |v: &Value| {
+            v.get(key)
+                .and_then(|k| k.as_str())
+                .unwrap_or("")
+                .to_lowercase()
+        })
     };
     for (k, v) in user {
         if k == "template" {
             continue;
         }
         let merged = match (k.as_str(), base.get(k), v) {
-            ("analysis" | "output" | "spec" | "sweep", Some(Value::Array(old)), Value::Array(new)) => {
+            (
+                "analysis" | "output" | "spec" | "sweep",
+                Some(Value::Array(old)),
+                Value::Array(new),
+            ) => {
                 let key = match k.as_str() {
                     "analysis" => by_key("kind"),
                     "sweep" => by_key("variable"),
@@ -888,7 +1058,10 @@ pub fn netlist_names(netlist: &str) -> (Vec<String>, Vec<String>) {
             lines.push(l.to_string());
         }
     }
-    let (mut nets, mut elements) = (std::collections::BTreeSet::new(), std::collections::BTreeSet::new());
+    let (mut nets, mut elements) = (
+        std::collections::BTreeSet::new(),
+        std::collections::BTreeSet::new(),
+    );
     let mut depth = 0usize;
     for l in &lines {
         let low = l.to_lowercase();
@@ -906,7 +1079,11 @@ pub fn netlist_names(netlist: &str) -> (Vec<String>, Vec<String>) {
         let toks: Vec<&str> = low.split_whitespace().collect();
         let Some(first) = toks.first() else { continue };
         elements.insert(first.to_string());
-        let args: Vec<&str> = toks[1..].iter().copied().take_while(|t| !t.contains('=')).collect();
+        let args: Vec<&str> = toks[1..]
+            .iter()
+            .copied()
+            .take_while(|t| !t.contains('='))
+            .collect();
         let nodes: &[&str] = match first.chars().next() {
             Some('x') => &args[..args.len().saturating_sub(1)],
             Some('r' | 'c' | 'l' | 'v' | 'i' | 'd') => &args[..args.len().min(2)],
@@ -925,7 +1102,11 @@ pub fn check_netlist(setup: &super::Setup, netlist: &str) -> Result<()> {
         return Ok(());
     }
     let (nets, elements) = netlist_names(netlist);
-    let name = if setup.template.is_empty() { "the testbench" } else { setup.template.as_str() };
+    let name = if setup.template.is_empty() {
+        "the testbench"
+    } else {
+        setup.template.as_str()
+    };
     let mut problems = vec![];
     for n in &setup.requires_nets {
         let l = n.to_lowercase();
@@ -940,7 +1121,12 @@ pub fn check_netlist(setup: &super::Setup, netlist: &str) -> Result<()> {
         if !elements.contains(&e.to_lowercase()) {
             problems.push(format!(
                 "element '{e}' does not exist in the netlist (elements: {})",
-                elements.iter().take(30).cloned().collect::<Vec<_>>().join(", ")
+                elements
+                    .iter()
+                    .take(30)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
     }
@@ -954,7 +1140,11 @@ pub fn check_netlist(setup: &super::Setup, netlist: &str) -> Result<()> {
 }
 
 /// A `setup.toml` for a new testbench from a template.
-pub fn starter_setup(template: &Template, args: &BTreeMap<String, String>, schematic: &str) -> Result<String> {
+pub fn starter_setup(
+    template: &Template,
+    args: &BTreeMap<String, String>,
+    schematic: &str,
+) -> Result<String> {
     // Check the arguments now, so a mistake is an error at `sim new`, not at the first run.
     template.bind(args)?;
     let mut out = format!(
@@ -979,7 +1169,12 @@ pub fn format_list(set: &TemplateSet) -> String {
     let mut out = String::new();
     let width = set.list().iter().map(|t| t.name.len()).max().unwrap_or(4);
     for t in set.list() {
-        out.push_str(&format!("{:<width$}  {:<9}  {}\n", t.name, t.analyses().join("+"), t.description));
+        out.push_str(&format!(
+            "{:<width$}  {:<9}  {}\n",
+            t.name,
+            t.analyses().join("+"),
+            t.description
+        ));
     }
     for n in &set.notes {
         out.push_str(&format!("note: {n}\n"));
@@ -998,24 +1193,50 @@ pub fn format_show(t: &Template) -> Result<String> {
             (None, true) => "optional".into(),
             (None, false) => "required".into(),
         };
-        let unit = if p.unit.is_empty() { String::new() } else { format!(" [{}]", p.unit) };
-        let choices = if p.choices.is_empty() { String::new() } else { format!(" ({})", p.choices.join("|")) };
-        out.push_str(&format!("  {:<14} {kind}{choices}{unit}, {default}\n      {}\n", p.name, p.doc));
+        let unit = if p.unit.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", p.unit)
+        };
+        let choices = if p.choices.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", p.choices.join("|"))
+        };
+        out.push_str(&format!(
+            "  {:<14} {kind}{choices}{unit}, {default}\n      {}\n",
+            p.name, p.doc
+        ));
     }
     for d in &t.derived {
         out.push_str(&format!(
             "  {:<14} derived: {}\n      {}\n",
             d.name,
-            if d.expr.is_empty() { format!("{} -> map", d.from) } else { d.expr.clone() },
+            if d.expr.is_empty() {
+                format!("{} -> map", d.from)
+            } else {
+                d.expr.clone()
+            },
             d.doc
         ));
     }
     let inst = t.instantiate(&t.sample_args())?;
     let setup = super::Setup::parse_with(&toml::to_string(&inst.table)?, &TemplateSet::default())?;
-    out.push_str(&format!("\nanalyses: {}\n", if setup.analyses.is_empty() { "-".into() } else { t.analyses().join(", ") }));
+    out.push_str(&format!(
+        "\nanalyses: {}\n",
+        if setup.analyses.is_empty() {
+            "-".into()
+        } else {
+            t.analyses().join(", ")
+        }
+    ));
     out.push_str("\noutputs (with the default parameters)\n");
     for o in &setup.outputs {
-        let plot = if o.plot.is_empty() { String::new() } else { format!("   [plot {}]", o.plot) };
+        let plot = if o.plot.is_empty() {
+            String::new()
+        } else {
+            format!("   [plot {}]", o.plot)
+        };
         out.push_str(&format!("  {:<14} {}{plot}\n", o.name, o.expr));
     }
     if !setup.measures.is_empty() {
@@ -1025,21 +1246,32 @@ pub fn format_show(t: &Template) -> Result<String> {
         }
     }
     for s in &setup.sweeps {
-        let values = s.expand().map(|v| v.join(", ")).unwrap_or_else(|e| format!("{e:#}"));
+        let values = s
+            .expand()
+            .map(|v| v.join(", "))
+            .unwrap_or_else(|e| format!("{e:#}"));
         out.push_str(&format!("\nsweep {}: {values}", s.variable));
     }
     if !setup.sweeps.is_empty() {
         out.push('\n');
     }
     if let Some(mc) = &setup.montecarlo {
-        out.push_str(&format!("\nmonte carlo: {} runs, seed {}, {}\n", mc.runs, mc.seed, mc.mode.name()));
+        out.push_str(&format!(
+            "\nmonte carlo: {} runs, seed {}, {}\n",
+            mc.runs,
+            mc.seed,
+            mc.mode.name()
+        ));
     }
     out.push_str("\ndefault specs\n");
     if setup.specs.is_empty() {
         out.push_str("  none (set the *_min / *_max parameters, or add [[spec]] to setup.toml)\n");
     }
     for s in &setup.specs {
-        out.push_str(&format!("  {:<14} min {:?} max {:?}\n", s.name, s.min, s.max));
+        out.push_str(&format!(
+            "  {:<14} min {:?} max {:?}\n",
+            s.name, s.min, s.max
+        ));
     }
     if !inst.requires_nets.is_empty() || !inst.requires_elements.is_empty() {
         out.push_str(&format!(
@@ -1125,11 +1357,21 @@ min = "${gmin}"
     #[test]
     fn substitutes_parameters_and_derived_values() {
         let s = set(&[TOY]);
-        let r = resolve("template = \"toy\"\n[template_args]\nout = \"y\"\nf = 2000\nmode = \"b\"\n", &s).unwrap();
-        let setup = super::super::Setup::parse_with("template = \"toy\"\n[template_args]\nout = \"y\"\nf = 2000\nmode = \"b\"\n", &s).unwrap();
+        let r = resolve(
+            "template = \"toy\"\n[template_args]\nout = \"y\"\nf = 2000\nmode = \"b\"\n",
+            &s,
+        )
+        .unwrap();
+        let setup = super::super::Setup::parse_with(
+            "template = \"toy\"\n[template_args]\nout = \"y\"\nf = 2000\nmode = \"b\"\n",
+            &s,
+        )
+        .unwrap();
         assert_eq!(setup.outputs[0].expr, "db20(value_at(v(\"y\"), 2000))");
         assert_eq!(setup.outputs[1].expr, "cross(v(\"y\"), 0.5, \"fall\")");
-        assert!(matches!(&setup.analyses[0], crate::sim::Analysis::Ac { stop, points: 10, .. } if stop == "4000"));
+        assert!(
+            matches!(&setup.analyses[0], crate::sim::Analysis::Ac { stop, points: 10, .. } if stop == "4000")
+        );
         assert_eq!(setup.variables["fa"], "2000");
         // the optional bound is unset, so the spec is dropped
         assert!(setup.specs.is_empty());
@@ -1143,8 +1385,11 @@ min = "${gmin}"
     #[test]
     fn optional_spec_bound_becomes_a_number() {
         let s = set(&[TOY]);
-        let setup =
-            super::super::Setup::parse_with("template = \"toy\"\n[template_args]\ngmin = \"10\"\n", &s).unwrap();
+        let setup = super::super::Setup::parse_with(
+            "template = \"toy\"\n[template_args]\ngmin = \"10\"\n",
+            &s,
+        )
+        .unwrap();
         assert_eq!(setup.specs[0].min, Some(10.0));
     }
 
@@ -1179,7 +1424,10 @@ kind = "op"
         assert_eq!(names, ["gain", "e", "mine"]);
         assert_eq!(setup.outputs[0].expr, "1");
         assert_eq!(setup.analyses.len(), 2);
-        assert!(matches!(&setup.analyses[0], crate::sim::Analysis::Ac { points: 5, .. }));
+        assert!(matches!(
+            &setup.analyses[0],
+            crate::sim::Analysis::Ac { points: 5, .. }
+        ));
     }
 
     #[test]
@@ -1187,9 +1435,15 @@ kind = "op"
         let s = set(&[TOY]);
         let e = |t: &str| format!("{:#}", super::super::Setup::parse_with(t, &s).unwrap_err());
         let m = e("template = \"toi\"");
-        assert!(m.contains("no test template 'toi'") && m.contains("did you mean 'toy'"), "{m}");
+        assert!(
+            m.contains("no test template 'toi'") && m.contains("did you mean 'toy'"),
+            "{m}"
+        );
         let m = e("template = \"toy\"\n[template_args]\nouput = \"x\"");
-        assert!(m.contains("no parameter 'ouput'") && m.contains("did you mean 'out'"), "{m}");
+        assert!(
+            m.contains("no parameter 'ouput'") && m.contains("did you mean 'out'"),
+            "{m}"
+        );
         let m = e("template = \"toy\"\n[template_args]\nf = \"fast\"");
         assert!(m.contains("not a number"), "{m}");
         let m = e("template = \"toy\"\n[template_args]\nmode = \"c\"");
@@ -1201,8 +1455,12 @@ kind = "op"
         // an unknown field of the setup still fails
         assert!(e("template = \"toy\"\nbogus = 1").contains("bogus"));
         // a required parameter
-        let r = set(&["name=\"r\"\n[[param]]\nname=\"a\"\ntype=\"net\"\n[setup]\nsave=[\"v(${a})\"]"]);
-        let m = format!("{:#}", super::super::Setup::parse_with("template=\"r\"", &r).unwrap_err());
+        let r =
+            set(&["name=\"r\"\n[[param]]\nname=\"a\"\ntype=\"net\"\n[setup]\nsave=[\"v(${a})\"]"]);
+        let m = format!(
+            "{:#}",
+            super::super::Setup::parse_with("template=\"r\"", &r).unwrap_err()
+        );
         assert!(m.contains("needs the parameter 'a'"), "{m}");
     }
 
@@ -1221,24 +1479,43 @@ kind = "op"
     fn netlist_requirements() {
         let nl = "* t\nvdd vdd 0 1.2\nvin in 0 dc 0\nx1 in out vdd 0 inv\nC1 out 0 10f m=1\n.subckt inv a y vdd vss\nm1 y a vdd vdd p w=1\n.ends\n.end\n";
         let (nets, els) = netlist_names(nl);
-        assert!(nets.contains(&"out".to_string()) && nets.contains(&"in".to_string()), "{nets:?}");
-        assert!(!nets.contains(&"inv".to_string()) && !nets.contains(&"y".to_string()), "{nets:?}");
+        assert!(
+            nets.contains(&"out".to_string()) && nets.contains(&"in".to_string()),
+            "{nets:?}"
+        );
+        assert!(
+            !nets.contains(&"inv".to_string()) && !nets.contains(&"y".to_string()),
+            "{nets:?}"
+        );
         assert!(els.contains(&"vin".to_string()));
         let s = set(&[TOY]);
         let setup = super::super::Setup::parse_with("template=\"toy\"", &s).unwrap();
         check_netlist(&setup, nl).unwrap();
-        let setup = super::super::Setup::parse_with("template=\"toy\"\n[template_args]\nout=\"vout\"\nsrc=\"vx\"", &s).unwrap();
+        let setup = super::super::Setup::parse_with(
+            "template=\"toy\"\n[template_args]\nout=\"vout\"\nsrc=\"vx\"",
+            &s,
+        )
+        .unwrap();
         let m = format!("{:#}", check_netlist(&setup, nl).unwrap_err());
-        assert!(m.contains("net 'vout'") && m.contains("element 'vx'"), "{m}");
+        assert!(
+            m.contains("net 'vout'") && m.contains("element 'vx'"),
+            "{m}"
+        );
     }
 
     #[test]
     fn coherent_tone() {
         let mut env = Env::empty();
         env.set("x", Value::Num(1.0));
-        let v = calc::evaluate("coherent(10.1meg, 100meg, 1024)", &env).unwrap().as_f64().unwrap();
+        let v = calc::evaluate("coherent(10.1meg, 100meg, 1024)", &env)
+            .unwrap()
+            .as_f64()
+            .unwrap();
         let m = v * 1024.0 / 100e6;
-        assert!((m - m.round()).abs() < 1e-9 && (m.round() as u64) % 2 == 1, "{m}");
+        assert!(
+            (m - m.round()).abs() < 1e-9 && (m.round() as u64) % 2 == 1,
+            "{m}"
+        );
         assert!((v - 10e6).abs() <= 100e6 / 1024.0);
         assert!(calc::evaluate("coherent(60meg, 100meg, 1024)", &env).is_err());
     }
@@ -1297,10 +1574,19 @@ temperatures = [27]
         let s = set(&[SWEEPY]);
         let p = |t: &str| super::super::Setup::parse_with(t, &s);
         let setup = p("template = \"sweepy\"").unwrap();
-        let sweeps: Vec<(&str, Vec<String>)> =
-            setup.sweeps.iter().map(|w| (w.variable.as_str(), w.expand().unwrap())).collect();
+        let sweeps: Vec<(&str, Vec<String>)> = setup
+            .sweeps
+            .iter()
+            .map(|w| (w.variable.as_str(), w.expand().unwrap()))
+            .collect();
         // `x` is switched off by its unset parameter, `y` and Monte Carlo by `when`
-        assert_eq!(sweeps, [("cl", vec!["10f".to_string(), "100f".into()]), ("vdd", vec!["1".into(), "1.2".into(), "1.4".into()])]);
+        assert_eq!(
+            sweeps,
+            [
+                ("cl", vec!["10f".to_string(), "100f".into()]),
+                ("vdd", vec!["1".into(), "1.2".into(), "1.4".into()])
+            ]
+        );
         assert_eq!(setup.montecarlo, None);
 
         let setup = p("template = \"sweepy\"\n[template_args]\nmc = true\nruns = 25\nextra = \"3 4\"\nvhi = \"1.2\"").unwrap();
@@ -1309,10 +1595,16 @@ temperatures = [27]
         assert_eq!(setup.sweeps[1].stop, Some(1.2));
         assert_eq!(setup.sweeps[2].values, ["3", "4"]);
         let mc = setup.montecarlo.clone().unwrap();
-        assert_eq!((mc.runs, mc.seed, mc.mode), (25, 7, crate::sim::setup::McMode::Mismatch));
+        assert_eq!(
+            (mc.runs, mc.seed, mc.mode),
+            (25, 7, crate::sim::setup::McMode::Mismatch)
+        );
         // `runs` unset: the default number of runs
         let setup = p("template = \"sweepy\"\n[template_args]\nmc = true").unwrap();
-        assert_eq!(setup.montecarlo.unwrap().runs, crate::sim::setup::MonteCarlo::default().runs);
+        assert_eq!(
+            setup.montecarlo.unwrap().runs,
+            crate::sim::setup::MonteCarlo::default().runs
+        );
 
         // setup.toml's own tables win: a sweep of the same variable replaces the
         // template's, `[montecarlo]` replaces it as a whole
@@ -1324,11 +1616,17 @@ temperatures = [27]
         assert_eq!(cl.values, ["1f"]);
         assert!(setup.sweeps.iter().any(|w| w.variable == "z"));
         let mc = setup.montecarlo.unwrap();
-        assert_eq!((mc.runs, mc.seed, mc.mode), (3, 1, crate::sim::setup::McMode::Process));
+        assert_eq!(
+            (mc.runs, mc.seed, mc.mode),
+            (3, 1, crate::sim::setup::McMode::Process)
+        );
 
         // the expansion shows them
         let shown = format_show(s.get("sweepy").unwrap()).unwrap();
-        assert!(shown.contains("sweep cl: 10f, 100f") && shown.contains("sweep vdd: 1, 1.2, 1.4"), "{shown}");
+        assert!(
+            shown.contains("sweep cl: 10f, 100f") && shown.contains("sweep vdd: 1, 1.2, 1.4"),
+            "{shown}"
+        );
     }
 
     #[test]
@@ -1341,18 +1639,26 @@ temperatures = [27]
         assert!(m.contains("not a number"), "{m}");
         // a template whose sweep names an unknown parameter does not load
         let t = |src: &str| format!("{:#}", Template::parse(src, Origin::Builtin).unwrap_err());
-        assert!(t("name=\"a\"\n[[sweep]]\nvariable=\"v\"\nvalues=\"${nope}\"").contains("not a parameter"));
+        assert!(
+            t("name=\"a\"\n[[sweep]]\nvariable=\"v\"\nvalues=\"${nope}\"")
+                .contains("not a parameter")
+        );
         // nor one whose expansion is not a setup (a sweep without values)
         assert!(t("name=\"a\"\n[[sweep]]\nvariable=\"v\"").contains("not valid"));
         assert!(t("name=\"a\"\n[montecarlo]\nruns=1\nbogus=2").contains("not valid"));
         // runs from a parameter that is not a whole number
-        assert!(t("name=\"r\"\n[[param]]\nname=\"n\"\ndefault=\"2.5\"\n[montecarlo]\nruns=\"${n}\"").contains("not a whole number"));
+        assert!(
+            t("name=\"r\"\n[[param]]\nname=\"n\"\ndefault=\"2.5\"\n[montecarlo]\nruns=\"${n}\"")
+                .contains("not a whole number")
+        );
     }
 
     #[test]
     fn sweeps_inside_the_setup_fragment_are_typed_too() {
-        let s = set(&["name=\"f\"\n[[param]]\nname=\"a\"\ntype=\"number\"\ndefault=\"1p\"\n[[param]]\nname=\"n\"\ntype=\"int\"\ndefault=\"4\"\n\
-                       [setup]\n[[setup.sweep]]\nvariable=\"c\"\nstart=\"${a}\"\nstop=\"3p\"\nstep=\"${a}\"\n[setup.montecarlo]\nruns=\"${n}\""]);
+        let s = set(&[
+            "name=\"f\"\n[[param]]\nname=\"a\"\ntype=\"number\"\ndefault=\"1p\"\n[[param]]\nname=\"n\"\ntype=\"int\"\ndefault=\"4\"\n\
+                       [setup]\n[[setup.sweep]]\nvariable=\"c\"\nstart=\"${a}\"\nstop=\"3p\"\nstep=\"${a}\"\n[setup.montecarlo]\nruns=\"${n}\"",
+        ]);
         let setup = super::super::Setup::parse_with("template=\"f\"", &s).unwrap();
         assert_eq!(setup.sweeps[0].start, Some(1e-12));
         assert_eq!(setup.sweeps[0].expand().unwrap().len(), 3);
@@ -1362,7 +1668,11 @@ temperatures = [27]
     #[test]
     fn project_templates_shadow_builtins() {
         let mut s = TemplateSet::builtin().clone();
-        let t = Template::parse("name = \"dc_op\"\ndescription = \"mine\"", Origin::Project("x".into())).unwrap();
+        let t = Template::parse(
+            "name = \"dc_op\"\ndescription = \"mine\"",
+            Origin::Project("x".into()),
+        )
+        .unwrap();
         s.add(t);
         assert_eq!(s.get("dc_op").unwrap().description, "mine");
         assert!(s.notes.iter().any(|n| n.contains("shadows")));

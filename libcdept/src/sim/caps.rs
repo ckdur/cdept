@@ -90,7 +90,9 @@ pub fn analysis_kind(a: &Analysis) -> &'static str {
 /// Refuse a setup the simulator it names cannot run, with the reason. (`simulator` that
 /// is not a known name is the caller's error.)
 pub fn check(setup: &Setup) -> Result<()> {
-    let Some(kind) = SimKind::of(&setup.simulator) else { return Ok(()) };
+    let Some(kind) = SimKind::of(&setup.simulator) else {
+        return Ok(());
+    };
     let caps = kind.capabilities();
     for a in &setup.analyses {
         let k = analysis_kind(a);
@@ -98,11 +100,24 @@ pub fn check(setup: &Setup) -> Result<()> {
             bail!("{} does not run the {k} analysis", caps.name);
         }
         match a {
-            Analysis::Tran { start, .. } if !caps.tran_start && !start.is_empty() && start.trim().parse::<f64>() != Ok(0.0) => {
-                bail!("a transient that saves from a start time ({start}) is not supported with {}; use start 0", caps.name.to_uppercase());
+            Analysis::Tran { start, .. }
+                if !caps.tran_start
+                    && !start.is_empty()
+                    && start.trim().parse::<f64>() != Ok(0.0) =>
+            {
+                bail!(
+                    "a transient that saves from a start time ({start}) is not supported with {}; use start 0",
+                    caps.name.to_uppercase()
+                );
             }
-            Analysis::Ac { sweep, .. } | Analysis::Noise { sweep, .. } if !caps.sweeps.contains(&sweep.to_lowercase().as_str()) => {
-                bail!("sweep '{sweep}' is not supported with {} ({})", caps.name.to_uppercase(), caps.sweeps.join(", "));
+            Analysis::Ac { sweep, .. } | Analysis::Noise { sweep, .. }
+                if !caps.sweeps.contains(&sweep.to_lowercase().as_str()) =>
+            {
+                bail!(
+                    "sweep '{sweep}' is not supported with {} ({})",
+                    caps.name.to_uppercase(),
+                    caps.sweeps.join(", ")
+                );
             }
             _ => {}
         }
@@ -133,7 +148,10 @@ mod tests {
             assert!(c.cancellable);
         }
         assert!(SimKind::Ngspice.capabilities().in_process);
-        assert!(!SimKind::Vacask.capabilities().in_process && !SimKind::Vacask.capabilities().native_measures);
+        assert!(
+            !SimKind::Vacask.capabilities().in_process
+                && !SimKind::Vacask.capabilities().native_measures
+        );
         assert!(SimKind::Vacask.capabilities().mc_modes.contains(&"both"));
     }
 
@@ -142,21 +160,30 @@ mod tests {
         let mut s = Setup::parse("simulator=\"xyce\"\n[[analysis]]\nkind=\"op\"\n").unwrap();
         assert_eq!(s.models, "xyce");
         s.set_simulator("vacask").unwrap();
-        assert_eq!((s.simulator.as_str(), s.models.as_str()), ("vacask", "vacask"));
+        assert_eq!(
+            (s.simulator.as_str(), s.models.as_str()),
+            ("vacask", "vacask")
+        );
         s.set_simulator("ngspice").unwrap();
         assert_eq!((s.simulator.as_str(), s.models.as_str()), ("", ""));
         assert!(s.set_simulator("spectre").is_err());
         // What the new simulator cannot run is refused with the reason.
-        let mut t = Setup::parse("[[analysis]]\nkind=\"tran\"\nstep=\"1n\"\nstop=\"1u\"\nstart=\"0.5u\"\n").unwrap();
+        let mut t =
+            Setup::parse("[[analysis]]\nkind=\"tran\"\nstep=\"1n\"\nstop=\"1u\"\nstart=\"0.5u\"\n")
+                .unwrap();
         assert!(format!("{:#}", t.set_simulator("vacask").unwrap_err()).contains("start time"));
-        let suite = crate::sim::suite::Suite::parse("simulator = \"vacask\"\n[[test]]\nview = \"a\"\n").unwrap();
+        let suite =
+            crate::sim::suite::Suite::parse("simulator = \"vacask\"\n[[test]]\nview = \"a\"\n")
+                .unwrap();
         assert_eq!(suite.simulator, "vacask");
     }
 
     #[test]
     fn a_setup_the_simulator_cannot_run_is_refused_with_the_reason() {
         let tran = |sim: &str, start: &str| {
-            Setup::parse(&format!("simulator=\"{sim}\"\n[[analysis]]\nkind=\"tran\"\nstep=\"1n\"\nstop=\"1u\"\nstart=\"{start}\"\n"))
+            Setup::parse(&format!(
+                "simulator=\"{sim}\"\n[[analysis]]\nkind=\"tran\"\nstep=\"1n\"\nstop=\"1u\"\nstart=\"{start}\"\n"
+            ))
         };
         assert!(tran("ngspice", "0.5u").is_ok());
         assert!(tran("vacask", "0").is_ok());

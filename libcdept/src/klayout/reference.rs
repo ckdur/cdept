@@ -10,8 +10,8 @@
 //! PDK's own file is never edited. Calls of anything else (a standard cell, a block) stay
 //! as they are, and are reported.
 
-use std::collections::{BTreeMap, BTreeSet};
 use crate::tech::Catalog;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The models that are devices of the technology, each with the letter of the SPICE
 /// element that stands for it.
@@ -299,11 +299,17 @@ X1 VPWR A Y VPB sky130_fd_pr__pfet_01v8_hvt w=1e+06u l=150000u
             out.text
                 .contains("M0 VGND A Y VNB sky130_fd_pr__nfet_01v8 w=650000u l=150000u")
         );
-        assert!(out.text.contains("M1 VPWR A Y VPB sky130_fd_pr__pfet_01v8_hvt"));
+        assert!(
+            out.text
+                .contains("M1 VPWR A Y VPB sky130_fd_pr__pfet_01v8_hvt")
+        );
         // A name that already exists is not used twice.
         let text = "M0 a b c d sky130_fd_pr__nfet_01v8\nX0 a b c d sky130_fd_pr__nfet_01v8\n";
         let out = device_calls(text, &sky);
-        assert_eq!(out.text.lines().nth(1).unwrap().split(' ').next(), Some("MX0"));
+        assert_eq!(
+            out.text.lines().nth(1).unwrap().split(' ').next(),
+            Some("MX0")
+        );
     }
 
     #[test]
@@ -322,7 +328,10 @@ X1 VPWR A Y VPB sky130_fd_pr__pfet_01v8_hvt w=1e+06u l=150000u
         assert_eq!(lines[2], "Rr1 a b gnd rsil w=1u l=2u");
         assert_eq!(lines[3], "M5 a b c d nmos");
         assert_eq!(lines[4], "MM1 d g s b sg13_lv_nmos w=1u l=0.13u");
-        assert!(out.note().contains("kept as subcircuit calls: sg13g2_inv_1"));
+        assert!(
+            out.note()
+                .contains("kept as subcircuit calls: sg13g2_inv_1")
+        );
     }
 
     #[test]
@@ -350,7 +359,10 @@ M$2 VDD A Y VDD sg13_lv_pmos L=0.13u W=1.12u
     #[test]
     fn without_a_snapshot_the_names_decide() {
         let none = DeviceModels::from_catalog(None);
-        let out = device_calls("X0 d g s b sky130_fd_pr__nfet_01v8 w=1\nX1 a b res_x\n", &none);
+        let out = device_calls(
+            "X0 d g s b sky130_fd_pr__nfet_01v8 w=1\nX1 a b res_x\n",
+            &none,
+        );
         assert_eq!(out.converted, 1);
         assert_eq!(out.kept.len(), 1);
     }

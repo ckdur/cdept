@@ -93,7 +93,9 @@ fn lines_of(text: &str) -> impl Iterator<Item = &str> {
 fn has_sections(text: &str) -> bool {
     lines_of(text).any(|l| {
         let mut w = l.split_whitespace();
-        w.next().is_some_and(|c| c.eq_ignore_ascii_case(".lib")) && w.next().is_some() && w.next().is_none()
+        w.next().is_some_and(|c| c.eq_ignore_ascii_case(".lib"))
+            && w.next().is_some()
+            && w.next().is_none()
     })
 }
 
@@ -104,7 +106,9 @@ fn included(text: &str, sections: Option<&BTreeSet<&str>>) -> Vec<String> {
     let mut current: Option<String> = None;
     for l in lines_of(text) {
         let mut w = l.split_whitespace();
-        let Some(card) = w.next().map(str::to_lowercase) else { continue };
+        let Some(card) = w.next().map(str::to_lowercase) else {
+            continue;
+        };
         if card == ".endl" {
             current = None;
             continue;
@@ -138,7 +142,10 @@ fn included(text: &str, sections: Option<&BTreeSet<&str>>) -> Vec<String> {
 
 /// Find `stem.va` below `dir` (the folder of the same name first).
 fn find_va(dir: &Path, stem: &str) -> Option<PathBuf> {
-    let direct = [dir.join(stem).join(format!("{stem}.va")), dir.join(format!("{stem}.va"))];
+    let direct = [
+        dir.join(stem).join(format!("{stem}.va")),
+        dir.join(format!("{stem}.va")),
+    ];
     if let Some(p) = direct.iter().find(|p| p.is_file()) {
         return Some(p.clone());
     }
@@ -155,14 +162,21 @@ impl Plan {
     /// What converting this technology's ngspice models reads. An error when the
     /// technology has no ngspice models to start from.
     pub fn new(project: &Project, tech: &Tech) -> Result<Plan> {
-        let (_, ngspice) = tech
-            .models
-            .set("ngspice")
-            .ok_or_else(|| eyre!("the technology '{}' has no ngspice models to make VACASK models from", tech.pdk.name))?;
+        let (_, ngspice) = tech.models.set("ngspice").ok_or_else(|| {
+            eyre!(
+                "the technology '{}' has no ngspice models to make VACASK models from",
+                tech.pdk.name
+            )
+        })?;
         let var = |n: &str| project.var(n);
         let dir = ngspice.dir.resolve(var).map_err(|e| eyre!(e))?;
         let mut notes = vec![];
-        let mut wanted: Vec<String> = ngspice.libraries.iter().chain(&ngspice.includes).cloned().collect();
+        let mut wanted: Vec<String> = ngspice
+            .libraries
+            .iter()
+            .chain(&ngspice.includes)
+            .cloned()
+            .collect();
         for entries in ngspice.corners.values() {
             for e in entries {
                 if let Some(f) = e.split_whitespace().next() {
@@ -176,7 +190,10 @@ impl Plan {
             .flatten()
             .filter_map(|e| {
                 let mut w = e.split_whitespace();
-                let file = Path::new(w.next()?).file_name()?.to_string_lossy().into_owned();
+                let file = Path::new(w.next()?)
+                    .file_name()?
+                    .to_string_lossy()
+                    .into_owned();
                 Some((file, w.next()?.to_string()))
             })
             .collect();
@@ -190,16 +207,26 @@ impl Plan {
         let mut seen = BTreeSet::new();
         let mut queue: Vec<(String, PathBuf)> = vec![];
         for w in wanted {
-            let p = if Path::new(&w).is_absolute() { PathBuf::from(&w) } else { dir.join(&w) };
+            let p = if Path::new(&w).is_absolute() {
+                PathBuf::from(&w)
+            } else {
+                dir.join(&w)
+            };
             queue.push((w, p));
         }
         while let Some((name, path)) = queue.pop() {
-            let base = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(name.clone());
+            let base = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or(name.clone());
             if !seen.insert(base.clone()) {
                 continue;
             }
             let Ok(bytes) = std::fs::read(&path) else {
-                notes.push(format!("vacask: {name} is named by the ngspice models and is not there ({})", path.display()));
+                notes.push(format!(
+                    "vacask: {name} is named by the ngspice models and is not there ({})",
+                    path.display()
+                ));
                 continue;
             };
             let text = String::from_utf8_lossy(&bytes).into_owned();
@@ -221,24 +248,38 @@ impl Plan {
                         .find(|p| p.is_file());
                     match found {
                         Some(p) => queue.push((inc, p)),
-                        None => notes.push(format!("vacask: {base} includes {inc}, which is not there")),
+                        None => {
+                            notes.push(format!("vacask: {base} includes {inc}, which is not there"))
+                        }
                     }
                 }
             }
-            sources.push(Source { name: base, path, corner });
+            sources.push(Source {
+                name: base,
+                path,
+                corner,
+            });
         }
         sources.sort_by(|a, b| a.name.cmp(&b.name));
-        let va_dir = tech.models.verilog_a.as_ref().and_then(|p| p.resolve(var).ok());
+        let va_dir = tech
+            .models
+            .verilog_a
+            .as_ref()
+            .and_then(|p| p.resolve(var).ok());
         let mut osdi = vec![];
         for o in &ngspice.osdi {
-            let stem = Path::new(o.as_str()).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let stem = Path::new(o.as_str())
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let va = va_dir.as_ref().and_then(|d| find_va(d, &stem));
             osdi.push((stem, va));
         }
         osdi.sort();
         osdi.dedup();
         // The hash: every source file, every Verilog-A file next to a model, the glue.
-        let mut parts: Vec<Vec<u8>> = vec![GLUE.as_bytes().to_vec(), tech.pdk.name.as_bytes().to_vec()];
+        let mut parts: Vec<Vec<u8>> =
+            vec![GLUE.as_bytes().to_vec(), tech.pdk.name.as_bytes().to_vec()];
         for s in &sources {
             parts.push(s.name.as_bytes().to_vec());
             parts.push(std::fs::read(&s.path).unwrap_or_default());
@@ -247,13 +288,25 @@ impl Plan {
             parts.push(stem.as_bytes().to_vec());
             if let Some(va) = va {
                 for f in openvaf::source_files(va) {
-                    parts.push(f.file_name().unwrap_or_default().as_encoded_bytes().to_vec());
+                    parts.push(
+                        f.file_name()
+                            .unwrap_or_default()
+                            .as_encoded_bytes()
+                            .to_vec(),
+                    );
                     parts.push(std::fs::read(&f).unwrap_or_default());
                 }
             }
         }
         let hash = openvaf::hash_parts(parts.iter().map(|p| p.as_slice()));
-        Ok(Plan { pdk: tech.pdk.name.clone(), sources, osdi, hash, ngspice: ngspice.clone(), notes })
+        Ok(Plan {
+            pdk: tech.pdk.name.clone(),
+            sources,
+            osdi,
+            hash,
+            ngspice: ngspice.clone(),
+            notes,
+        })
     }
 
     /// The folder this plan generates into.
@@ -300,7 +353,10 @@ pub fn converter_dir() -> Result<PathBuf> {
             }
         }
     }
-    Err(eyre!("VACASK's converter (ng2vclib) was not found next to {}; set CDEPT_VACASK_PYTHON", vacask.display()))
+    Err(eyre!(
+        "VACASK's converter (ng2vclib) was not found next to {}; set CDEPT_VACASK_PYTHON",
+        vacask.display()
+    ))
 }
 
 fn project_path(project: &Project, p: &Path) -> TechPath {
@@ -329,7 +385,9 @@ fn behavioural_subckts(text: &str) -> Vec<String> {
         let bytes = l.as_bytes();
         let uses_v = l.match_indices("v(").any(|(i, _)| {
             (i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_'))
-                && l[i + 2..].split(')').next().is_some_and(|a| a.contains(',') || a.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+                && l[i + 2..].split(')').next().is_some_and(|a| {
+                    a.contains(',') || a.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                })
         });
         if uses_v
             && let Some(c) = &current
@@ -352,7 +410,10 @@ fn section_needs(text: &str, section: &str, failed: &BTreeSet<String>) -> Option
             Some("endsection") => inside = false,
             Some("include") if inside => {
                 let f = w.next().unwrap_or_default().trim_matches('"');
-                let base = Path::new(f).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let base = Path::new(f)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 if failed.contains(&base) {
                     return Some(base);
                 }
@@ -387,7 +448,8 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
     }
     let env = project.tool_env();
     let models = dir.join("models");
-    std::fs::create_dir_all(&models).wrap_err_with(|| format!("cannot create {}", models.display()))?;
+    std::fs::create_dir_all(&models)
+        .wrap_err_with(|| format!("cannot create {}", models.display()))?;
     let mut notes = plan.notes.clone();
     let prefix = format!("{}_default_mod_", plan.pdk.replace(['-', '.'], "_"));
 
@@ -403,20 +465,30 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
             "src": s.path, "dst": models.join(&s.name), "corner": s.corner })).collect::<Vec<_>>(),
         "result": dir.join("convert-result.json"),
     });
-    std::fs::write(dir.join("convert-spec.json"), serde_json::to_vec_pretty(&spec)?)?;
+    std::fs::write(
+        dir.join("convert-spec.json"),
+        serde_json::to_vec_pretty(&spec)?,
+    )?;
     std::fs::write(dir.join("convert.py"), GLUE)?;
     let mut job = crate::batch::Job::new("ng2vc", &python()?, &dir, "convert.log")
         .args(["-I", "convert.py", "convert-spec.json"])
         .env(&env);
     job.env_defaults = vec![("PYTHONDONTWRITEBYTECODE".into(), "1".into())];
     let out = job.run_unchecked()?;
-    out.check().wrap_err("VACASK's model converter did not run")?;
+    out.check()
+        .wrap_err("VACASK's model converter did not run")?;
     let result: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(dir.join("convert-result.json")).wrap_err("the model converter wrote no result")?,
+        &std::fs::read_to_string(dir.join("convert-result.json"))
+            .wrap_err("the model converter wrote no result")?,
     )?;
     let results: Vec<serde_json::Value> = result["files"].as_array().cloned().unwrap_or_default();
     let mut stat = super::stat::MmInfo {
-        globals: result["globals"].as_array().into_iter().flatten().filter_map(|g| g.as_str().map(String::from)).collect(),
+        globals: result["globals"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|g| g.as_str().map(String::from))
+            .collect(),
         ..Default::default()
     };
     let mut defined = BTreeSet::new();
@@ -426,13 +498,21 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
     let mut failed: BTreeSet<String> = BTreeSet::new();
     for r in &results {
         let src = r["src"].as_str().unwrap_or_default();
-        let name = Path::new(src).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = Path::new(src)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         if r["ok"].as_bool() == Some(true) {
             converted.push(name.clone());
             if let Ok(info) = serde_json::from_value::<super::stat::FileInfo>(r.clone()) {
                 stat.files.insert(name.clone(), info);
             }
-            for o in r["osdi"].as_array().into_iter().flatten().filter_map(|o| o.as_str()) {
+            for o in r["osdi"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|o| o.as_str())
+            {
                 builtin_osdi.insert(o.to_string());
             }
             if let Some(m) = r["default_models"].as_object() {
@@ -451,7 +531,10 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
             }
         } else {
             failed.insert(name.clone());
-            let why = r["error"].as_str().unwrap_or("unknown error").replace('\n', " ");
+            let why = r["error"]
+                .as_str()
+                .unwrap_or("unknown error")
+                .replace('\n', " ");
             notes.push(format!("vacask: {name} could not be converted: {why}"));
         }
     }
@@ -462,7 +545,14 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
     match openvaf::ADAPTER.require() {
         Err(e) => {
             if !plan.osdi.is_empty() {
-                notes.push(format!("vacask: the Verilog-A models ({}) were not compiled: {e}", plan.osdi.iter().map(|o| o.0.as_str()).collect::<Vec<_>>().join(", ")));
+                notes.push(format!(
+                    "vacask: the Verilog-A models ({}) were not compiled: {e}",
+                    plan.osdi
+                        .iter()
+                        .map(|o| o.0.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
             }
         }
         Ok(program) => {
@@ -473,13 +563,19 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
                     notes.push(format!("vacask: no Verilog-A source for '{stem}' under the technology's verilog-a folder"));
                     continue;
                 };
-                let c = openvaf::Compile { source: va.clone(), ..Default::default() };
+                let c = openvaf::Compile {
+                    source: va.clone(),
+                    ..Default::default()
+                };
                 match openvaf::compile_cached(&program, &c, &dir, &env2) {
                     Ok(r) => {
                         compiled.push(format!("{stem}.osdi"));
                         osdi_paths.push(project_path(project, &r.osdi));
                     }
-                    Err(e) => notes.push(format!("vacask: {stem}.va did not compile: {}", format!("{e:#}").lines().next().unwrap_or(""))),
+                    Err(e) => notes.push(format!(
+                        "vacask: {stem}.va did not compile: {}",
+                        format!("{e:#}").lines().next().unwrap_or("")
+                    )),
                 }
             }
         }
@@ -497,7 +593,10 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
         let mut broken = false;
         for e in entries {
             let file = e.split_whitespace().next().unwrap_or_default();
-            let base = Path::new(file).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let base = Path::new(file)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             if ok(&base) {
                 // A section that includes a file that failed cannot be used: VACASK would
                 // stop at the missing file, so the corner is left out, with the reason.
@@ -518,7 +617,8 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
     let mut options = vec![];
     // SOA checks of the PSP wrappers read a global that the ngspice flow defines.
     let uses_swsoa = converted.iter().any(|f| {
-        std::fs::read_to_string(models.join(f)).is_ok_and(|t| t.contains("swsoa=swsoa") || t.contains("swsoa ="))
+        std::fs::read_to_string(models.join(f))
+            .is_ok_and(|t| t.contains("swsoa=swsoa") || t.contains("swsoa ="))
     });
     if uses_swsoa {
         options.push("parameters swsoa=0".to_string());
@@ -601,7 +701,11 @@ pub fn ready(project: &Project) -> Result<Ready> {
     if let Some(set) = tech.models.sets.get(SET)
         && set.generated.is_none()
     {
-        return Ok(Ready { tech: tech.clone(), defined: None, stat: Default::default() });
+        return Ok(Ready {
+            tech: tech.clone(),
+            defined: None,
+            stat: Default::default(),
+        });
     }
     let plan = Plan::new(project, tech)?;
     let g = generate(project, tech, &plan)?;
@@ -622,7 +726,11 @@ pub fn ready(project: &Project) -> Result<Ready> {
     }
     tech.notes.retain(|n| !n.starts_with("vacask:"));
     tech.notes.extend(g.notes.iter().cloned());
-    Ok(Ready { tech, defined: Some(g.defined), stat: g.stat })
+    Ok(Ready {
+        tech,
+        defined: Some(g.defined),
+        stat: g.stat,
+    })
 }
 
 #[cfg(test)]
@@ -637,21 +745,33 @@ mod tests {
         assert_eq!(included(corner, None), ["sg13g2_moslv_mod.lib", "x.lib"]);
         let only: BTreeSet<&str> = ["mos_ff"].into();
         assert_eq!(included(corner, Some(&only)), ["x.lib"]);
-        assert_eq!(included(".lib other.lib tt\n.lib tt2\n", None), ["other.lib"]);
+        assert_eq!(
+            included(".lib other.lib tt\n.lib tt2\n", None),
+            ["other.lib"]
+        );
     }
 
     #[test]
     fn collects_defined_names() {
         let mut s = BTreeSet::new();
-        defined_names("subckt sg13_lv_nmos(d g s b)\nmodel sg13g2_lv_nmos_psp psp103va (\n  type=1\nsubckt  x2 (a)\n// subckt no\n", &mut s);
-        assert_eq!(s.iter().cloned().collect::<Vec<_>>(), ["sg13_lv_nmos", "sg13g2_lv_nmos_psp", "x2"]);
+        defined_names(
+            "subckt sg13_lv_nmos(d g s b)\nmodel sg13g2_lv_nmos_psp psp103va (\n  type=1\nsubckt  x2 (a)\n// subckt no\n",
+            &mut s,
+        );
+        assert_eq!(
+            s.iter().cloned().collect::<Vec<_>>(),
+            ["sg13_lv_nmos", "sg13g2_lv_nmos_psp", "x2"]
+        );
     }
 
     #[test]
     fn a_section_that_needs_a_failed_file_is_found() {
         let text = "section tt\n  parameters a=1\n  include \"models_fet.spice\"\nendsection\nsection ff\n  include \"ok.lib\"\nendsection\n";
         let failed: BTreeSet<String> = ["models_fet.spice".to_string()].into();
-        assert_eq!(section_needs(text, "tt", &failed).as_deref(), Some("models_fet.spice"));
+        assert_eq!(
+            section_needs(text, "tt", &failed).as_deref(),
+            Some("models_fet.spice")
+        );
         assert_eq!(section_needs(text, "ff", &failed), None);
     }
 
@@ -667,7 +787,8 @@ mod tests {
     /// two files define alike moves into the shared list.
     #[test]
     fn the_converter_turns_gauss_calls_into_draw_reads() {
-        let (Ok(py), Some(python)) = (converter_dir(), crate::tools::find_in_path("python3")) else {
+        let (Ok(py), Some(python)) = (converter_dir(), crate::tools::find_in_path("python3"))
+        else {
             eprintln!("skipped: VACASK's converter or python3 not found");
             return;
         };
@@ -680,7 +801,11 @@ mod tests {
              .param nsig=1\n.param gp='gauss(2, 0.1, nsig)'\n",
         )
         .unwrap();
-        std::fs::write(src.join("other.lib"), ".param nsig=1\n.param gq='agauss(0, 1, 1)'\n").unwrap();
+        std::fs::write(
+            src.join("other.lib"),
+            ".param nsig=1\n.param gq='agauss(0, 1, 1)'\n",
+        )
+        .unwrap();
         let out = dir.path().join("out");
         let files: Vec<_> = ["dev.lib", "other.lib"]
             .iter()
@@ -697,14 +822,30 @@ mod tests {
             .status()
             .unwrap();
         assert!(status.success());
-        let result: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.path().join("result.json")).unwrap()).unwrap();
-        assert_eq!(result["globals"], serde_json::json!(["gp", "gq"]), "{result}");
-        assert_eq!(result["shared"], serde_json::json!({ "nsig": "1" }), "{result}");
+        let result: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.path().join("result.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            result["globals"],
+            serde_json::json!(["gp", "gq"]),
+            "{result}"
+        );
+        assert_eq!(
+            result["shared"],
+            serde_json::json!({ "nsig": "1" }),
+            "{result}"
+        );
         let dev = std::fs::read_to_string(out.join("dev.lib")).unwrap();
         assert!(dev.contains("parameters mmk=-1"), "{dev}");
-        assert!(dev.contains("mmz[mmk*mmnz+0]") && dev.contains("||mmk<0"), "{dev}");
+        assert!(
+            dev.contains("mmz[mmk*mmnz+0]") && dev.contains("||mmk<0"),
+            "{dev}"
+        );
         assert!(!dev.contains("!="), "{dev}");
-        assert!(dev.contains("mcz[0]") && !dev.contains("parameters nsig"), "{dev}");
+        assert!(
+            dev.contains("mcz[0]") && !dev.contains("parameters nsig"),
+            "{dev}"
+        );
         let files = result["files"].as_array().unwrap();
         assert_eq!(files[0]["mm"]["dev"], serde_json::json!(["rr"]));
         let other = std::fs::read_to_string(out.join("other.lib")).unwrap();
@@ -717,7 +858,11 @@ mod tests {
         std::fs::create_dir_all(d.path().join("psp103")).unwrap();
         std::fs::write(d.path().join("psp103/psp103_nqs.va"), "").unwrap();
         std::fs::write(d.path().join("r.va"), "").unwrap();
-        assert!(find_va(d.path(), "psp103_nqs").unwrap().ends_with("psp103/psp103_nqs.va"));
+        assert!(
+            find_va(d.path(), "psp103_nqs")
+                .unwrap()
+                .ends_with("psp103/psp103_nqs.va")
+        );
         assert!(find_va(d.path(), "r").unwrap().ends_with("r.va"));
         assert!(find_va(d.path(), "nothing").is_none());
     }

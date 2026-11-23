@@ -78,7 +78,8 @@ impl Suite {
     }
 
     pub fn load(file: &Path) -> Result<Suite> {
-        let text = std::fs::read_to_string(file).wrap_err_with(|| format!("cannot read {}", file.display()))?;
+        let text = std::fs::read_to_string(file)
+            .wrap_err_with(|| format!("cannot read {}", file.display()))?;
         Self::parse(&text).wrap_err_with(|| file.display().to_string())
     }
 }
@@ -116,7 +117,11 @@ pub fn suites_of(project: &Project, library: &str, cell: &str) -> Vec<String> {
         .library(library)
         .and_then(|l| l.cell(cell))
         .map(|c| {
-            c.entries.iter().filter(|e| e.path.join(SUITE_FILE).is_file()).map(|e| e.name.clone()).collect()
+            c.entries
+                .iter()
+                .filter(|e| e.path.join(SUITE_FILE).is_file())
+                .map(|e| e.name.clone())
+                .collect()
         })
         .unwrap_or_default()
 }
@@ -187,7 +192,10 @@ impl TestReport {
 
 impl SuiteReport {
     pub fn summary(&self) -> Summary {
-        let mut s = Summary { tests: self.tests.len(), ..Default::default() };
+        let mut s = Summary {
+            tests: self.tests.len(),
+            ..Default::default()
+        };
         for t in &self.tests {
             if t.error.is_some() {
                 s.test_errors += 1;
@@ -233,14 +241,24 @@ pub fn report_file(project: &Project, library: &str, cell: &str, view: &str) -> 
 }
 
 /// Run every test of the suite `library/cell/view`.
-pub fn run(project: &Project, library: &str, cell: &str, view: &str, options: &SuiteOptions) -> Result<SuiteReport> {
+pub fn run(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: &str,
+    options: &SuiteOptions,
+) -> Result<SuiteReport> {
     let suite = open(project, library, cell, view)?;
     let started = chrono::Local::now().to_rfc3339();
     let clock = std::time::Instant::now();
     let queue = match &options.queue {
         Some(q) => q.clone(),
         None => {
-            let workers = if options.jobs > 0 { options.jobs } else { crate::jobs::Queue::default_workers() };
+            let workers = if options.jobs > 0 {
+                options.jobs
+            } else {
+                crate::jobs::Queue::default_workers()
+            };
             let q = Arc::new(crate::jobs::Queue::new(workers));
             if let Some(f) = &options.on_event {
                 let f = f.clone();
@@ -263,14 +281,22 @@ pub fn run(project: &Project, library: &str, cell: &str, view: &str, options: &S
             .iter()
             .map(|t| {
                 let (l, c, v) = t.resolve(library, cell);
-                let label = if t.name.is_empty() { format!("{c}/{v}") } else { t.name.clone() };
+                let label = if t.name.is_empty() {
+                    format!("{c}/{v}")
+                } else {
+                    t.name.clone()
+                };
                 let run_options = run_options.clone();
                 let suite = &suite;
                 let sim = options.simulator.as_deref();
-                scope.spawn(move || run_test(project, suite, (&l, &c, &v), label, &run_options, sim))
+                scope
+                    .spawn(move || run_test(project, suite, (&l, &c, &v), label, &run_options, sim))
             })
             .collect();
-        handles.into_iter().map(|h| h.join().expect("a suite test panicked")).collect()
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("a suite test panicked"))
+            .collect()
     });
     let report = SuiteReport {
         library: library.into(),
@@ -297,7 +323,11 @@ fn run_test(
     options: &super::RunOptions,
     simulator: Option<&str>,
 ) -> TestReport {
-    let mut report = TestReport { id: format!("{library}/{cell}/{view}"), label, ..Default::default() };
+    let mut report = TestReport {
+        id: format!("{library}/{cell}/{view}"),
+        label,
+        ..Default::default()
+    };
     let outcome = (|| -> Result<Vec<RunRecord>> {
         let mut tb = super::open(project, library, cell, view)?;
         report.template = tb.setup.template.clone();
@@ -307,7 +337,9 @@ fn run_test(
         if !suite.temperatures.is_empty() {
             tb.setup.temperatures = suite.temperatures.clone();
         }
-        let chosen = simulator.map(str::to_string).or_else(|| Some(suite.simulator.clone()).filter(|s| !s.is_empty()));
+        let chosen = simulator
+            .map(str::to_string)
+            .or_else(|| Some(suite.simulator.clone()).filter(|s| !s.is_empty()));
         if let Some(name) = chosen {
             tb.setup.set_simulator(&name)?;
         }
@@ -408,8 +440,21 @@ pub fn columns(report: &SuiteReport, all: bool) -> Vec<String> {
 /// each row, then the verdict summary.
 pub fn format_report(report: &SuiteReport, all_columns: bool) -> String {
     let cols = columns(report, all_columns);
-    let tw = report.tests.iter().map(|t| t.label.len()).max().unwrap_or(4).max(4);
-    let pw = report.tests.iter().flat_map(|t| &t.records).map(|r| r.point.name.len()).max().unwrap_or(5).max(5);
+    let tw = report
+        .tests
+        .iter()
+        .map(|t| t.label.len())
+        .max()
+        .unwrap_or(4)
+        .max(4);
+    let pw = report
+        .tests
+        .iter()
+        .flat_map(|t| &t.records)
+        .map(|r| r.point.name.len())
+        .max()
+        .unwrap_or(5)
+        .max(5);
     let mut out = format!("{:<tw$}  {:<pw$}  {:<6}", "test", "point", "result");
     for c in &cols {
         out.push_str(&format!("  {c:>12}"));
@@ -417,11 +462,22 @@ pub fn format_report(report: &SuiteReport, all_columns: bool) -> String {
     out.push('\n');
     for t in &report.tests {
         if let Some(e) = &t.error {
-            out.push_str(&format!("{:<tw$}  {:<pw$}  {:<6}   {}\n", t.label, "-", "ERROR", e.lines().next().unwrap_or("")));
+            out.push_str(&format!(
+                "{:<tw$}  {:<pw$}  {:<6}   {}\n",
+                t.label,
+                "-",
+                "ERROR",
+                e.lines().next().unwrap_or("")
+            ));
             continue;
         }
         for r in &t.records {
-            out.push_str(&format!("{:<tw$}  {:<pw$}  {:<6}", t.label, r.point.name, r.overall().word().to_uppercase()));
+            out.push_str(&format!(
+                "{:<tw$}  {:<pw$}  {:<6}",
+                t.label,
+                r.point.name,
+                r.overall().word().to_uppercase()
+            ));
             for c in &cols {
                 match r.measures.get(c) {
                     Some(v) => out.push_str(&format!("  {:>12}", num(*v))),
@@ -451,12 +507,19 @@ pub fn format_report(report: &SuiteReport, all_columns: bool) -> String {
                     t.label,
                     r.point.name,
                     s.name,
-                    if s.verdict == Verdict::Fail { "FAIL" } else { "MISSING" },
+                    if s.verdict == Verdict::Fail {
+                        "FAIL"
+                    } else {
+                        "MISSING"
+                    },
                     s.value.map_or("-".into(), num)
                 ));
             }
             for (k, e) in &r.calc_errors {
-                bad.push_str(&format!("  {} / {}: output {k}: {e}\n", t.label, r.point.name));
+                bad.push_str(&format!(
+                    "  {} / {}: output {k}: {e}\n",
+                    t.label, r.point.name
+                ));
             }
         }
     }
@@ -480,7 +543,11 @@ pub fn format_report(report: &SuiteReport, all_columns: bool) -> String {
         s.spec_missing,
         if s.test_errors > 0 { format!("; {} test(s) did not run", s.test_errors) } else { String::new() }
     ));
-    out.push_str(if s.ok() { "SUITE PASS\n" } else { "SUITE FAIL\n" });
+    out.push_str(if s.ok() {
+        "SUITE PASS\n"
+    } else {
+        "SUITE FAIL\n"
+    });
     out
 }
 
@@ -490,7 +557,12 @@ mod tests {
     use crate::sim::results::{PointRecord, SpecRecord, Status};
     use std::collections::BTreeMap;
 
-    fn record(test: &str, point: &str, measures: &[(&str, f64)], specs: Vec<SpecRecord>) -> RunRecord {
+    fn record(
+        test: &str,
+        point: &str,
+        measures: &[(&str, f64)],
+        specs: Vec<SpecRecord>,
+    ) -> RunRecord {
         RunRecord {
             schema: 1,
             id: None,
@@ -500,10 +572,16 @@ mod tests {
             setup_hash: String::new(),
             deck_hash: String::new(),
             simulator: "ngspice".into(),
-            point: PointRecord { name: point.into(), ..Default::default() },
+            point: PointRecord {
+                name: point.into(),
+                ..Default::default()
+            },
             status: Status::Ok,
             error: None,
-            measures: measures.iter().map(|(k, v)| (k.to_string(), *v)).collect::<BTreeMap<_, _>>(),
+            measures: measures
+                .iter()
+                .map(|(k, v)| (k.to_string(), *v))
+                .collect::<BTreeMap<_, _>>(),
             calc: vec![],
             calc_errors: BTreeMap::new(),
             specs,
@@ -517,7 +595,13 @@ mod tests {
     }
 
     fn spec(name: &str, value: Option<f64>, max: f64, verdict: Verdict) -> SpecRecord {
-        SpecRecord { name: name.into(), value, min: None, max: Some(max), verdict }
+        SpecRecord {
+            name: name.into(),
+            value,
+            min: None,
+            max: Some(max),
+            verdict,
+        }
     }
 
     #[test]
@@ -526,9 +610,18 @@ mod tests {
             "description='d'\ncorners=['tt']\n[[test]]\nview='a/b/c'\n[[test]]\nview='b/c'\nname='x'\n[[test]]\nview='c'",
         )
         .unwrap();
-        assert_eq!(s.tests[0].resolve("L", "C"), ("a".into(), "b".into(), "c".into()));
-        assert_eq!(s.tests[1].resolve("L", "C"), ("L".into(), "b".into(), "c".into()));
-        assert_eq!(s.tests[2].resolve("L", "C"), ("L".into(), "C".into(), "c".into()));
+        assert_eq!(
+            s.tests[0].resolve("L", "C"),
+            ("a".into(), "b".into(), "c".into())
+        );
+        assert_eq!(
+            s.tests[1].resolve("L", "C"),
+            ("L".into(), "b".into(), "c".into())
+        );
+        assert_eq!(
+            s.tests[2].resolve("L", "C"),
+            ("L".into(), "C".into(), "c".into())
+        );
         assert!(Suite::parse("description='x'").is_err());
         assert!(Suite::parse("[[test]]\nview='a/b/c/d'").is_err());
         assert!(Suite::parse("[[test]]\nview='a'\nbogus=1").is_err());
@@ -536,16 +629,44 @@ mod tests {
 
     #[test]
     fn summary_and_table() {
-        let ok = record("t1", "tt_27", &[("tpd", 1e-10), ("t_rise", 2e-11)], vec![spec("tpd", Some(1e-10), 3e-10, Verdict::Pass)]);
-        let bad = record("t2", "tt_27", &[("p_avg", 5e-6)], vec![spec("p_avg", Some(5e-6), 1e-6, Verdict::Fail), spec("e_cycle", None, 1e-15, Verdict::Missing)]);
+        let ok = record(
+            "t1",
+            "tt_27",
+            &[("tpd", 1e-10), ("t_rise", 2e-11)],
+            vec![spec("tpd", Some(1e-10), 3e-10, Verdict::Pass)],
+        );
+        let bad = record(
+            "t2",
+            "tt_27",
+            &[("p_avg", 5e-6)],
+            vec![
+                spec("p_avg", Some(5e-6), 1e-6, Verdict::Fail),
+                spec("e_cycle", None, 1e-15, Verdict::Missing),
+            ],
+        );
         let report = SuiteReport {
             library: "l".into(),
             cell: "c".into(),
             view: "suite".into(),
             tests: vec![
-                TestReport { id: "l/c/t1".into(), label: "t1".into(), records: vec![ok], ..Default::default() },
-                TestReport { id: "l/c/t2".into(), label: "t2".into(), records: vec![bad], ..Default::default() },
-                TestReport { id: "l/c/t3".into(), label: "t3".into(), error: Some("net 'x' missing".into()), ..Default::default() },
+                TestReport {
+                    id: "l/c/t1".into(),
+                    label: "t1".into(),
+                    records: vec![ok],
+                    ..Default::default()
+                },
+                TestReport {
+                    id: "l/c/t2".into(),
+                    label: "t2".into(),
+                    records: vec![bad],
+                    ..Default::default()
+                },
+                TestReport {
+                    id: "l/c/t3".into(),
+                    label: "t3".into(),
+                    error: Some("net 'x' missing".into()),
+                    ..Default::default()
+                },
             ],
             ..Default::default()
         };
@@ -558,8 +679,17 @@ mod tests {
         assert_eq!(columns(&report, false), ["tpd", "p_avg", "e_cycle"]);
         assert!(columns(&report, true).contains(&"t_rise".to_string()));
         let text = format_report(&report, false);
-        assert!(text.contains("t1") && text.contains("FAIL") && text.contains("ERROR"), "{text}");
-        assert!(text.contains("e_cycle MISSING") && text.contains("p_avg FAIL"), "{text}");
-        assert!(text.contains("SUITE FAIL") && text.contains("1 missing"), "{text}");
+        assert!(
+            text.contains("t1") && text.contains("FAIL") && text.contains("ERROR"),
+            "{text}"
+        );
+        assert!(
+            text.contains("e_cycle MISSING") && text.contains("p_avg FAIL"),
+            "{text}"
+        );
+        assert!(
+            text.contains("SUITE FAIL") && text.contains("1 missing"),
+            "{text}"
+        );
     }
 }

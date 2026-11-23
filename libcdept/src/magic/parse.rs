@@ -27,7 +27,9 @@ pub fn script_error(output: &str) -> Option<String> {
 
 /// Whether the script ran to its end.
 pub fn finished(output: &str) -> bool {
-    output.lines().any(|l| l.trim_end() == format!("{MARK} done"))
+    output
+        .lines()
+        .any(|l| l.trim_end() == format!("{MARK} done"))
 }
 
 /// The last `n` lines of `text`.
@@ -113,11 +115,12 @@ pub fn spice(text: &str) -> SpiceSummary {
     let mut lines: Vec<String> = Vec::new();
     for raw in text.lines() {
         if let Some(rest) = raw.strip_prefix('+')
-            && let Some(last) = lines.last_mut() {
-                last.push(' ');
-                last.push_str(rest.trim());
-                continue;
-            }
+            && let Some(last) = lines.last_mut()
+        {
+            last.push(' ');
+            last.push_str(rest.trim());
+            continue;
+        }
         lines.push(raw.trim().to_string());
     }
     let mut out = SpiceSummary::default();
@@ -260,7 +263,10 @@ CDEPT: done\n";
     #[test]
     fn errors_are_found() {
         let out = "junk\nCDEPT: error no such cell in the GDS file\n";
-        assert_eq!(script_error(out).as_deref(), Some("no such cell in the GDS file"));
+        assert_eq!(
+            script_error(out).as_deref(),
+            Some("no such cell in the GDS file")
+        );
         assert!(!finished(out));
     }
 

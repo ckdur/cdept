@@ -9,7 +9,11 @@ use super::{Adapter, Job};
 /// Environment variable that names the Xyce program.
 pub const XYCE_ENV: &str = "CDEPT_XYCE";
 
-pub const ADAPTER: Adapter = Adapter { name: "Xyce", env_var: XYCE_ENV, tool: "Xyce" };
+pub const ADAPTER: Adapter = Adapter {
+    name: "Xyce",
+    env_var: XYCE_ENV,
+    tool: "Xyce",
+};
 
 /// The job for a deck that is already written in `dir`. The raw file is `out.raw`,
 /// Xyce's own log `out.log`, what the program printed `xyce.stdout`.
@@ -47,12 +51,16 @@ pub fn measures(dir: &Path, deck: &str, log: &str) -> BTreeMap<String, f64> {
 pub fn parse_measures(text: &str) -> BTreeMap<String, f64> {
     let mut out = BTreeMap::new();
     for line in text.lines() {
-        let Some((name, rest)) = line.split_once('=') else { continue };
+        let Some((name, rest)) = line.split_once('=') else {
+            continue;
+        };
         let name = name.trim();
         if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             continue;
         }
-        let Some(first) = rest.split_whitespace().next() else { continue };
+        let Some(first) = rest.split_whitespace().next() else {
+            continue;
+        };
         if let Ok(v) = first.parse::<f64>()
             && v.is_finite()
         {
@@ -79,7 +87,11 @@ mod tests {
     #[test]
     fn the_command_line_is_xyces() {
         let j = job(Path::new("/x/Xyce"), "deck.sp", Path::new("/w"), &[]);
-        let args: Vec<_> = j.args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args: Vec<_> = j
+            .args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(args, ["-r", "out.raw", "-l", "out.log", "deck.sp"]);
     }
 

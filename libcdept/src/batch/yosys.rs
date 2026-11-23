@@ -12,7 +12,11 @@ use super::{Adapter, Job, Output};
 /// Environment variable that names the Yosys program.
 pub const YOSYS_ENV: &str = "CDEPT_YOSYS";
 
-pub const ADAPTER: Adapter = Adapter { name: "Yosys", env_var: YOSYS_ENV, tool: "Yosys" };
+pub const ADAPTER: Adapter = Adapter {
+    name: "Yosys",
+    env_var: YOSYS_ENV,
+    tool: "Yosys",
+};
 
 /// A synthesis: Verilog sources to a gate-level netlist.
 #[derive(Debug, Clone)]
@@ -31,7 +35,10 @@ pub fn synth_script(s: &Synth) -> String {
     for src in &s.sources {
         out.push_str(&format!("read_verilog -sv \"{}\"\n", src.display()));
     }
-    out.push_str(&format!("hierarchy -check -top {}\nsynth -top {} -flatten\n", s.top, s.top));
+    out.push_str(&format!(
+        "hierarchy -check -top {}\nsynth -top {} -flatten\n",
+        s.top, s.top
+    ));
     if let Some(lib) = &s.liberty {
         let lib = lib.display();
         out.push_str(&format!(
@@ -41,7 +48,10 @@ pub fn synth_script(s: &Synth) -> String {
     } else {
         out.push_str("tee -o stat.txt stat\n");
     }
-    out.push_str(&format!("write_verilog -noattr \"{}\"\n", s.netlist.display()));
+    out.push_str(&format!(
+        "write_verilog -noattr \"{}\"\n",
+        s.netlist.display()
+    ));
     out
 }
 
@@ -77,7 +87,12 @@ pub struct SynthReport {
 
 /// Write the script and run it in `dir`. Sources are made absolute (Yosys runs in
 /// `dir`), the netlist goes to `dir/<netlist>` when relative.
-pub fn synth(program: &Path, s: &Synth, dir: &Path, env: &[(OsString, OsString)]) -> Result<SynthReport> {
+pub fn synth(
+    program: &Path,
+    s: &Synth,
+    dir: &Path,
+    env: &[(OsString, OsString)],
+) -> Result<SynthReport> {
     if s.sources.is_empty() {
         bail!("no Verilog sources to synthesise");
     }
@@ -94,9 +109,18 @@ pub fn synth(program: &Path, s: &Synth, dir: &Path, env: &[(OsString, OsString)]
     let _ = std::fs::remove_file(&netlist);
     let (out, stat) = run_script(program, &script, dir, env)?;
     if !netlist.is_file() {
-        bail!("Yosys wrote no netlist ({})\nlog: {}", netlist.display(), out.log.display());
+        bail!(
+            "Yosys wrote no netlist ({})\nlog: {}",
+            netlist.display(),
+            out.log.display()
+        );
     }
-    Ok(SynthReport { netlist, script, log: out.log, stat })
+    Ok(SynthReport {
+        netlist,
+        script,
+        log: out.log,
+        stat,
+    })
 }
 
 /// The design size `stat` printed.
@@ -125,10 +149,15 @@ pub fn parse_stat(log: &str) -> Option<Stat> {
             break;
         }
         if let Some(name) = t.strip_prefix("===").and_then(|r| r.strip_suffix("===")) {
-            blocks.push(Stat { module: name.trim().to_string(), ..Default::default() });
+            blocks.push(Stat {
+                module: name.trim().to_string(),
+                ..Default::default()
+            });
             continue;
         }
-        let Some(block) = blocks.last_mut() else { continue };
+        let Some(block) = blocks.last_mut() else {
+            continue;
+        };
         if let Some(n) = t.strip_prefix("Number of cells:") {
             block.cells = n.trim().parse().unwrap_or(0);
         } else if let Some((head, rest)) = t.split_once(" area for module") {
@@ -140,10 +169,14 @@ pub fn parse_stat(log: &str) -> Option<Stat> {
             match words.as_slice() {
                 [n, "cells" | "cell"] => block.cells = n.parse().unwrap_or(block.cells),
                 [n, name] if n.parse::<u64>().is_ok() && is_cell_name(name) => {
-                    block.by_type.insert(name.to_string(), n.parse().unwrap_or(0));
+                    block
+                        .by_type
+                        .insert(name.to_string(), n.parse().unwrap_or(0));
                 }
                 [name, n] if n.parse::<u64>().is_ok() && is_cell_name(name) => {
-                    block.by_type.insert(name.to_string(), n.parse().unwrap_or(0));
+                    block
+                        .by_type
+                        .insert(name.to_string(), n.parse().unwrap_or(0));
                 }
                 _ => {}
             }
@@ -159,22 +192,42 @@ pub fn parse_stat(log: &str) -> Option<Stat> {
 fn is_cell_name(word: &str) -> bool {
     !matches!(
         word,
-        "wires" | "wire" | "cells" | "ports" | "memories" | "memory" | "processes" | "bits" | "submodules" | "modules"
-            | "area" | "count"
+        "wires"
+            | "wire"
+            | "cells"
+            | "ports"
+            | "memories"
+            | "memory"
+            | "processes"
+            | "bits"
+            | "submodules"
+            | "modules"
+            | "area"
+            | "count"
     ) && word.chars().all(|c| !c.is_whitespace() && c != ':')
-        && word.chars().any(|c| c.is_alphabetic() || c == '$' || c == '\\')
+        && word
+            .chars()
+            .any(|c| c.is_alphabetic() || c == '$' || c == '\\')
 }
 
 /// The Liberty file of a reference library in the project's snapshot (`[refs]`): the
 /// library (`refs.digital`'s default when `library` is `None`) at a corner (the
 /// library's default, else the digital default, when `corner` is `None`).
-pub fn liberty_of(project: &crate::Project, library: Option<&str>, corner: Option<&str>) -> Result<PathBuf> {
-    let tech = project.snapshot().ok_or_else(|| eyre!("the project has no technology snapshot (cdept tech scan)"))?;
+pub fn liberty_of(
+    project: &crate::Project,
+    library: Option<&str>,
+    corner: Option<&str>,
+) -> Result<PathBuf> {
+    let tech = project
+        .snapshot()
+        .ok_or_else(|| eyre!("the project has no technology snapshot (cdept tech scan)"))?;
     let digital = tech.refs.digital.as_ref();
     let name = library
         .map(str::to_string)
         .or_else(|| digital.and_then(|d| d.default_library.clone()))
-        .ok_or_else(|| eyre!("no library given and the technology names no default digital library"))?;
+        .ok_or_else(|| {
+            eyre!("no library given and the technology names no default digital library")
+        })?;
     let lib = tech
         .refs
         .libraries
@@ -188,11 +241,17 @@ pub fn liberty_of(project: &crate::Project, library: Option<&str>, corner: Optio
         .ok_or_else(|| eyre!("no corner given and '{name}' names no default"))?;
     let file = lib.liberty.get(&corner).ok_or_else(|| {
         let known: Vec<&str> = lib.liberty.keys().map(String::as_str).collect();
-        eyre!("'{name}' has no Liberty corner '{corner}' (there are: {})", known.join(", "))
+        eyre!(
+            "'{name}' has no Liberty corner '{corner}' (there are: {})",
+            known.join(", ")
+        )
     })?;
     let path = file.resolve(|n| project.var(n)).map_err(|e| eyre!(e))?;
     if path.to_string_lossy().contains('*') {
-        bail!("'{name}' has a Liberty file per cell at '{corner}' ({}); name a file", path.display());
+        bail!(
+            "'{name}' has a Liberty file per cell at '{corner}' ({}); name a file",
+            path.display()
+        );
     }
     if !path.is_file() {
         bail!("{} is not on this machine", path.display());
@@ -268,27 +327,61 @@ mod tests {
             "yosys",
             "echo '3. Printing statistics.'; echo '=== top ==='; echo '   2 cells'; echo '   2   $_AND_'; echo 'x' > out.v",
         );
-        let s = Synth { sources: vec!["a.v".into()], top: "top".into(), liberty: None, netlist: "out.v".into() };
+        let s = Synth {
+            sources: vec!["a.v".into()],
+            top: "top".into(),
+            liberty: None,
+            netlist: "out.v".into(),
+        };
         let r = synth(&fake, &s, &dir.path().join("w"), &[]).unwrap();
         assert_eq!(r.stat.unwrap().cells, 2);
         assert!(r.netlist.is_file() && r.script.is_file());
-        let bad = super::super::testutil::fake(dir.path(), "badyosys", "echo 'ERROR: no top'; exit 1");
-        assert!(format!("{}", synth(&bad, &s, &dir.path().join("w2"), &[]).unwrap_err()).contains("no top"));
-        assert!(synth(&fake, &Synth { sources: vec![], ..s }, dir.path(), &[]).is_err());
+        let bad =
+            super::super::testutil::fake(dir.path(), "badyosys", "echo 'ERROR: no top'; exit 1");
+        assert!(
+            format!(
+                "{}",
+                synth(&bad, &s, &dir.path().join("w2"), &[]).unwrap_err()
+            )
+            .contains("no top")
+        );
+        assert!(
+            synth(
+                &fake,
+                &Synth {
+                    sources: vec![],
+                    ..s
+                },
+                dir.path(),
+                &[]
+            )
+            .is_err()
+        );
     }
 
     /// Against the real program, when there is one.
     #[test]
     fn real_yosys_synthesises() {
-        let Some(program) = ADAPTER.locate() else { return };
+        let Some(program) = ADAPTER.locate() else {
+            return;
+        };
         let dir = tempfile::tempdir().unwrap();
         let v = dir.path().join("top.v");
         std::fs::write(&v, "module top(input a,b,c, output y, output z);\nassign y = (a&b)|c;\nassign z = a^b;\nendmodule\n").unwrap();
-        let s = Synth { sources: vec![v], top: "top".into(), liberty: None, netlist: "out.v".into() };
+        let s = Synth {
+            sources: vec![v],
+            top: "top".into(),
+            liberty: None,
+            netlist: "out.v".into(),
+        };
         let r = synth(&program, &s, &dir.path().join("run"), &[]).unwrap();
         let stat = r.stat.unwrap();
         assert_eq!(stat.cells, 3, "{stat:?}");
         assert_eq!(stat.by_type["$_XOR_"], 1);
-        assert!(std::fs::read_to_string(r.netlist).unwrap().contains("module top"));
+        assert!(
+            std::fs::read_to_string(r.netlist)
+                .unwrap()
+                .contains("module top")
+        );
     }
 }

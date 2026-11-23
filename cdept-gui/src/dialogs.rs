@@ -662,7 +662,9 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
         Dialog::ImportFiles(_) | Dialog::ImportSummary(_) => {
             unreachable!("handled by crate::import_files above")
         }
-        Dialog::CaceImport(_) | Dialog::CaceExport(_) => unreachable!("handled by crate::cace above"),
+        Dialog::CaceImport(_) | Dialog::CaceExport(_) => {
+            unreachable!("handled by crate::cace above")
+        }
         Dialog::RenameCell { .. } | Dialog::CopyCell { .. } | Dialog::Refactor(_) => {
             unreachable!("handled by crate::refactor above")
         }

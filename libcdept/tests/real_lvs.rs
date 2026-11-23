@@ -33,7 +33,10 @@ fn subckt(file: &Path, cell: &str) -> String {
         if inside {
             out.push_str(line);
             out.push('\n');
-            if words.first().is_some_and(|w| w.eq_ignore_ascii_case(".ends")) {
+            if words
+                .first()
+                .is_some_and(|w| w.eq_ignore_ascii_case(".ends"))
+            {
                 break;
             }
         }
@@ -43,12 +46,7 @@ fn subckt(file: &Path, cell: &str) -> String {
 }
 
 /// A project of the PDK (with its snapshot) and the layout of `cell` cut out of `gds`.
-fn project_with_cell(
-    dir: &Path,
-    real: &RealPdk,
-    gds: &Path,
-    cell: &str,
-) -> (Project, PathBuf) {
+fn project_with_cell(dir: &Path, real: &RealPdk, gds: &Path, cell: &str) -> (Project, PathBuf) {
     let pdk = PdkDir::new(real.root.clone(), &real.name);
     let (tech, catalog) = tech::scan(&ScanContext::new(pdk).files_only());
     std::fs::write(
@@ -93,8 +91,8 @@ fn lvs_of(
     let deck = verify::find_deck(&project, Check::Lvs).expect("the PDK has an LVS deck");
     let dir = tmp.join("lvs");
     std::fs::create_dir_all(&dir).unwrap();
-    let stream = verify::export_stream(&project, &layout, cell, &dir.join(format!("{cell}.gds")))
-        .unwrap();
+    let stream =
+        verify::export_stream(&project, &layout, cell, &dir.join(format!("{cell}.gds"))).unwrap();
     let netlist = tmp.join(format!("{cell}.spice"));
     std::fs::write(&netlist, subckt(spice, cell)).unwrap();
     let run = verify::run_lvs(&project, &deck, &stream, &netlist, &dir, &[]).unwrap();
@@ -106,7 +104,9 @@ fn ihp_standard_cells_match_the_pdk_netlist_as_it_is() {
     if !tools() {
         return;
     }
-    let Some(real) = real_pdk("ihp-sg13g2") else { return };
+    let Some(real) = real_pdk("ihp-sg13g2") else {
+        return;
+    };
     let lib = real.dir.join("libs.ref/sg13g2_stdcell");
     let gds = lib.join("gds/sg13g2_stdcell.gds");
     let spice = lib.join("spice/sg13g2_stdcell.spice");
@@ -117,14 +117,21 @@ fn ihp_standard_cells_match_the_pdk_netlist_as_it_is() {
     for cell in ["sg13g2_inv_1", "sg13g2_nand2_1"] {
         let (run, _, _guard) = lvs_of(&real, &gds, &spice, cell);
         assert!(run.summary.matched, "{cell}: {:?}", run.summary);
-        assert_ne!(run.reference, run.schematic, "the PDK's file is not the deck's");
+        assert_ne!(
+            run.reference, run.schematic,
+            "the PDK's file is not the deck's"
+        );
         assert!(
             std::fs::read_to_string(&run.schematic)
                 .unwrap()
                 .contains("XN0"),
             "the original netlist is not edited"
         );
-        assert!(run.notes.iter().any(|n| n.contains("written as devices")), "{:?}", run.notes);
+        assert!(
+            run.notes.iter().any(|n| n.contains("written as devices")),
+            "{:?}",
+            run.notes
+        );
     }
 }
 
@@ -133,7 +140,9 @@ fn sky130_standard_cell_matches_with_the_deck_variables_of_the_technology() {
     if !tools() {
         return;
     }
-    let Some(real) = real_pdk("sky130A") else { return };
+    let Some(real) = real_pdk("sky130A") else {
+        return;
+    };
     let lib = real.dir.join("libs.ref/sky130_fd_sc_hd");
     let gds = lib.join("gds/sky130_fd_sc_hd.gds");
     let spice = lib.join("spice/sky130_fd_sc_hd.spice");
@@ -144,10 +153,18 @@ fn sky130_standard_cell_matches_with_the_deck_variables_of_the_technology() {
     let (run, project, _) = lvs_of(&real, &gds, &spice, "sky130_fd_sc_hd__inv_1");
     assert!(run.summary.matched, "{:?}", run.summary);
     assert_eq!(
-        project.klayout.lvs_variables.get("scale").map(String::as_str),
+        project
+            .klayout
+            .lvs_variables
+            .get("scale")
+            .map(String::as_str),
         Some("true")
     );
-    assert!(run.notes.iter().any(|n| n.contains("scale=true")), "{:?}", run.notes);
+    assert!(
+        run.notes.iter().any(|n| n.contains("scale=true")),
+        "{:?}",
+        run.notes
+    );
 }
 
 #[test]
@@ -159,7 +176,9 @@ fn netgen_accepts_the_netlist_klayout_extracted() {
         eprintln!("skipped: netgen not found");
         return;
     };
-    let Some(real) = real_pdk("ihp-sg13g2") else { return };
+    let Some(real) = real_pdk("ihp-sg13g2") else {
+        return;
+    };
     let lib = real.dir.join("libs.ref/sg13g2_stdcell");
     let gds = lib.join("gds/sg13g2_stdcell.gds");
     let spice = lib.join("spice/sg13g2_stdcell.spice");

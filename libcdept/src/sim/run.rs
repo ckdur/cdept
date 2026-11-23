@@ -59,12 +59,19 @@ impl Backend {
     pub fn choose(chosen: Option<Backend>, setup: &super::setup::Setup) -> Result<Backend> {
         let backend = match chosen {
             Some(b) => b,
-            None => Backend::of(&setup.simulator_backend)
-                .ok_or_else(|| eyre::eyre!("simulator_backend '{}' is not process or inproc", setup.simulator_backend))?,
+            None => Backend::of(&setup.simulator_backend).ok_or_else(|| {
+                eyre::eyre!(
+                    "simulator_backend '{}' is not process or inproc",
+                    setup.simulator_backend
+                )
+            })?,
         };
         if backend == Backend::Inproc {
             if SimKind::of(&setup.simulator) != Some(SimKind::Ngspice) {
-                bail!("the in-process backend runs ngspice only, not '{}'", setup.simulator);
+                bail!(
+                    "the in-process backend runs ngspice only, not '{}'",
+                    setup.simulator
+                );
             }
             crate::ngspice::backend::check()?;
         }
@@ -105,12 +112,16 @@ impl Simulator {
     pub fn for_setup(setup: &super::setup::Setup) -> Option<Simulator> {
         let kind = SimKind::of(&setup.simulator)?;
         Self::find_kind(kind).or_else(|| {
-            (kind == SimKind::Ngspice && setup.simulator_backend == "inproc").then(|| Simulator::ngspice("ngspice".into()))
+            (kind == SimKind::Ngspice && setup.simulator_backend == "inproc")
+                .then(|| Simulator::ngspice("ngspice".into()))
         })
     }
 
     pub fn ngspice(program: PathBuf) -> Simulator {
-        Simulator { kind: SimKind::Ngspice, program }
+        Simulator {
+            kind: SimKind::Ngspice,
+            program,
+        }
     }
 }
 
@@ -134,8 +145,13 @@ pub fn run(
     env: &[(std::ffi::OsString, std::ffi::OsString)],
 ) -> Result<Outcome> {
     run_with(simulator, deck, dir, env, None, |cmd| {
-        let output = cmd.output().wrap_err_with(|| format!("cannot start {}", simulator.program.display()))?;
-        Ok((output.status, String::from_utf8_lossy(&output.stderr).into_owned()))
+        let output = cmd
+            .output()
+            .wrap_err_with(|| format!("cannot start {}", simulator.program.display()))?;
+        Ok((
+            output.status,
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ))
     })
 }
 
@@ -148,7 +164,9 @@ pub fn run_in_job(
     env: &[(std::ffi::OsString, std::ffi::OsString)],
     ctx: &crate::jobs::JobCtx,
 ) -> Result<Outcome> {
-    run_with(simulator, deck, dir, env, Some(ctx.cancel_flag()), |cmd| Ok((ctx.run_command(cmd)?, String::new())))
+    run_with(simulator, deck, dir, env, Some(ctx.cancel_flag()), |cmd| {
+        Ok((ctx.run_command(cmd)?, String::new()))
+    })
 }
 
 fn run_with(
@@ -170,13 +188,16 @@ fn run_with(
     let deck_file = dir.join("deck.sp");
     let raw = dir.join("out.raw");
     let log = dir.join("out.log");
-    std::fs::write(&deck_file, deck).wrap_err_with(|| format!("cannot write {}", deck_file.display()))?;
+    std::fs::write(&deck_file, deck)
+        .wrap_err_with(|| format!("cannot write {}", deck_file.display()))?;
     // A stale result must not pass for a new one.
     for old in [&raw, &log] {
         let _ = std::fs::remove_file(old);
     }
     let mut cmd = Command::new(&simulator.program);
-    cmd.current_dir(dir).envs(env.iter().map(|(k, v)| (k, v))).args(["-b", "-o", "out.log", "deck.sp"]);
+    cmd.current_dir(dir)
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        .args(["-b", "-o", "out.log", "deck.sp"]);
     let (status, stderr) = exec(&mut cmd)?;
     let text = std::fs::read_to_string(&log).unwrap_or_default();
     if !status.success() || !raw.is_file() {
@@ -190,7 +211,12 @@ fn run_with(
             stderr.trim_end()
         );
     }
-    Ok(Outcome { deck: deck_file, raw, log, measures: parse_measures(&text) })
+    Ok(Outcome {
+        deck: deck_file,
+        raw,
+        log,
+        measures: parse_measures(&text),
+    })
 }
 
 /// Xyce: `Xyce -r out.raw -l out.log deck.cir` ([`crate::batch::xyce`]), killed when
@@ -207,19 +233,27 @@ fn run_xyce(
     let deck_file = dir.join(name);
     let raw = dir.join("out.raw");
     let log = dir.join("out.log");
-    std::fs::write(&deck_file, deck).wrap_err_with(|| format!("cannot write {}", deck_file.display()))?;
+    std::fs::write(&deck_file, deck)
+        .wrap_err_with(|| format!("cannot write {}", deck_file.display()))?;
     for old in [&raw, &log, &dir.join(format!("{name}.mt0"))] {
         let _ = std::fs::remove_file(old);
     }
     let mut job = crate::batch::xyce::job(&simulator.program, name, dir, env);
     if let Some((_, extra)) = env.iter().rev().find(|(k, _)| *k == XYCE_ARGS_ENV) {
         // Before the deck: Xyce wants its options first.
-        let extra: Vec<std::ffi::OsString> =
-            extra.to_string_lossy().lines().filter(|l| !l.is_empty()).map(Into::into).collect();
+        let extra: Vec<std::ffi::OsString> = extra
+            .to_string_lossy()
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(Into::into)
+            .collect();
         let at = job.args.len().saturating_sub(1);
         job.args.splice(at..at, extra);
     }
-    let out = job.run_watched(&crate::batch::Watch { cancel, timeout: None })?;
+    let out = job.run_watched(&crate::batch::Watch {
+        cancel,
+        timeout: None,
+    })?;
     let text = std::fs::read_to_string(&log).unwrap_or_default();
     if !out.status.success() || !raw.is_file() {
         bail!(
@@ -230,7 +264,12 @@ fn run_xyce(
             crate::batch::tail(&out.text, 6)
         );
     }
-    Ok(Outcome { deck: deck_file, raw, log, measures: crate::batch::xyce::measures(dir, name, &text) })
+    Ok(Outcome {
+        deck: deck_file,
+        raw,
+        log,
+        measures: crate::batch::xyce::measures(dir, name, &text),
+    })
 }
 
 /// The `.meas` results of an ngspice log: lines `name = value …`. A failed
@@ -238,14 +277,22 @@ fn run_xyce(
 pub fn parse_measures(log: &str) -> BTreeMap<String, f64> {
     let mut out = BTreeMap::new();
     for line in log.lines() {
-        let Some((name, rest)) = line.split_once('=') else { continue };
+        let Some((name, rest)) = line.split_once('=') else {
+            continue;
+        };
         let name = name.trim();
         // ngspice prints measurement names in lower case; that leaves out its
         // statistics (`Stack = 0 bytes.`).
-        if name.is_empty() || !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        {
             continue;
         }
-        let Some(first) = rest.split_whitespace().next() else { continue };
+        let Some(first) = rest.split_whitespace().next() else {
+            continue;
+        };
         if let Ok(value) = first.parse::<f64>()
             && value.is_finite()
         {
@@ -276,18 +323,32 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let fake = dir.path().join("fake-spice");
-        std::fs::write(&fake, "#!/bin/sh\nsleep 0.3\necho 'gain = 2.5' > out.log\necho raw > out.raw\n").unwrap();
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\nsleep 0.3\necho 'gain = 2.5' > out.log\necho raw > out.raw\n",
+        )
+        .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let sim = Simulator::ngspice(fake);
         let q = Queue::new(4);
         let t = std::time::Instant::now();
         for i in 0..4 {
             let (sim, run_dir) = (sim.clone(), dir.path().join(format!("p{i}")));
-            q.submit(JobSpec::func(format!("p{i}"), move |ctx| run_in_job(&sim, ".end\n", &run_dir, &[], ctx).map(|_| ())));
+            q.submit(JobSpec::func(format!("p{i}"), move |ctx| {
+                run_in_job(&sim, ".end\n", &run_dir, &[], ctx).map(|_| ())
+            }));
         }
         q.wait_all();
-        assert!(q.snapshot().iter().all(|j| j.state == JobState::Done), "{:?}", q.snapshot());
-        assert!(t.elapsed() < std::time::Duration::from_millis(1100), "4 x 0.3 s ran serially: {:?}", t.elapsed());
+        assert!(
+            q.snapshot().iter().all(|j| j.state == JobState::Done),
+            "{:?}",
+            q.snapshot()
+        );
+        assert!(
+            t.elapsed() < std::time::Duration::from_millis(1100),
+            "4 x 0.3 s ran serially: {:?}",
+            t.elapsed()
+        );
     }
 
     #[cfg(unix)]
@@ -296,7 +357,11 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let fake = dir.path().join("fake-spice");
-        std::fs::write(&fake, "#!/bin/sh\necho 'gain = 2.5' > out.log\necho raw > out.raw\n").unwrap();
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\necho 'gain = 2.5' > out.log\necho raw > out.raw\n",
+        )
+        .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let sim = Simulator::ngspice(fake);
         let out = run(&sim, ".end\n", &dir.path().join("run"), &[]).unwrap();
@@ -305,7 +370,13 @@ mod tests {
         let broken = dir.path().join("broken");
         std::fs::write(&broken, "#!/bin/sh\necho 'boom' > out.log\nexit 1\n").unwrap();
         std::fs::set_permissions(&broken, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let err = run(&Simulator::ngspice(broken), ".end\n", &dir.path().join("run2"), &[]).unwrap_err();
+        let err = run(
+            &Simulator::ngspice(broken),
+            ".end\n",
+            &dir.path().join("run2"),
+            &[],
+        )
+        .unwrap_err();
         assert!(format!("{err}").contains("boom"), "{err}");
     }
 
@@ -322,14 +393,30 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let sim = Simulator { kind: SimKind::Xyce, program: fake };
+        let sim = Simulator {
+            kind: SimKind::Xyce,
+            program: fake,
+        };
         let out = run(&sim, ".end\n", &dir.path().join("run"), &[]).unwrap();
         assert_eq!(out.measures["gain"], 2.5);
         assert!(out.deck.ends_with("deck.cir") && out.raw.is_file());
         let broken = dir.path().join("broken-xyce");
-        std::fs::write(&broken, "#!/bin/sh\necho 'Netlist error: X has invalid MEASURE line' > out.log\nexit 1\n").unwrap();
+        std::fs::write(
+            &broken,
+            "#!/bin/sh\necho 'Netlist error: X has invalid MEASURE line' > out.log\nexit 1\n",
+        )
+        .unwrap();
         std::fs::set_permissions(&broken, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let err = run(&Simulator { kind: SimKind::Xyce, program: broken }, ".end\n", &dir.path().join("r2"), &[]).unwrap_err();
+        let err = run(
+            &Simulator {
+                kind: SimKind::Xyce,
+                program: broken,
+            },
+            ".end\n",
+            &dir.path().join("r2"),
+            &[],
+        )
+        .unwrap_err();
         assert!(format!("{err}").contains("invalid MEASURE"), "{err}");
     }
 
@@ -342,20 +429,33 @@ mod tests {
         let fake = dir.path().join("slow-xyce");
         std::fs::write(&fake, "#!/bin/sh\necho 'Xyce starting'\nexec sleep 30\n").unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let sim = Simulator { kind: SimKind::Xyce, program: fake };
+        let sim = Simulator {
+            kind: SimKind::Xyce,
+            program: fake,
+        };
         let q = Queue::new(1);
         let run_dir = dir.path().join("run");
         let d = run_dir.clone();
-        let id = q.submit(JobSpec::func("xyce", move |ctx| run_in_job(&sim, ".end\n", &d, &[], ctx).map(|_| ())));
+        let id = q.submit(JobSpec::func("xyce", move |ctx| {
+            run_in_job(&sim, ".end\n", &d, &[], ctx).map(|_| ())
+        }));
         let t = std::time::Instant::now();
-        while !std::fs::read_to_string(run_dir.join("xyce.stdout")).is_ok_and(|s| s.contains("starting")) {
-            assert!(t.elapsed() < std::time::Duration::from_secs(10), "the fake Xyce did not start");
+        while !std::fs::read_to_string(run_dir.join("xyce.stdout"))
+            .is_ok_and(|s| s.contains("starting"))
+        {
+            assert!(
+                t.elapsed() < std::time::Duration::from_secs(10),
+                "the fake Xyce did not start"
+            );
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         q.cancel(id);
         let info = q.wait(id).unwrap();
         assert_eq!(info.state, JobState::Cancelled);
-        assert!(t.elapsed() < std::time::Duration::from_secs(10), "Xyce was killed, not waited for");
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(10),
+            "Xyce was killed, not waited for"
+        );
     }
 
     #[cfg(unix)]
@@ -367,20 +467,33 @@ mod tests {
         let fake = dir.path().join("slow-vacask");
         std::fs::write(&fake, "#!/bin/sh\necho 'VACASK starting'\nexec sleep 30\n").unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let sim = Simulator { kind: SimKind::Vacask, program: fake };
+        let sim = Simulator {
+            kind: SimKind::Vacask,
+            program: fake,
+        };
         let q = Queue::new(1);
         let run_dir = dir.path().join("run");
         let d = run_dir.clone();
-        let id = q.submit(JobSpec::func("vacask", move |ctx| run_in_job(&sim, "ground 0\n", &d, &[], ctx).map(|_| ())));
+        let id = q.submit(JobSpec::func("vacask", move |ctx| {
+            run_in_job(&sim, "ground 0\n", &d, &[], ctx).map(|_| ())
+        }));
         let t = std::time::Instant::now();
-        while !std::fs::read_to_string(run_dir.join("vacask.stdout")).is_ok_and(|s| s.contains("starting")) {
-            assert!(t.elapsed() < std::time::Duration::from_secs(10), "the fake VACASK did not start");
+        while !std::fs::read_to_string(run_dir.join("vacask.stdout"))
+            .is_ok_and(|s| s.contains("starting"))
+        {
+            assert!(
+                t.elapsed() < std::time::Duration::from_secs(10),
+                "the fake VACASK did not start"
+            );
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         q.cancel(id);
         let info = q.wait(id).unwrap();
         assert_eq!(info.state, JobState::Cancelled);
-        assert!(t.elapsed() < std::time::Duration::from_secs(10), "VACASK was killed, not waited for");
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(10),
+            "VACASK was killed, not waited for"
+        );
     }
 
     #[test]
@@ -391,8 +504,19 @@ mod tests {
         assert_eq!(Backend::of("shared"), None);
         let tb = |text: &str| super::super::setup::Setup::parse(text).unwrap();
         assert_eq!(Backend::choose(None, &tb("")).unwrap(), Backend::Process);
-        assert_eq!(Backend::choose(Some(Backend::Process), &tb("simulator_backend = \"inproc\"")).unwrap(), Backend::Process);
-        let err = Backend::choose(None, &tb("simulator = \"xyce\"\nsimulator_backend = \"inproc\"")).unwrap_err();
+        assert_eq!(
+            Backend::choose(
+                Some(Backend::Process),
+                &tb("simulator_backend = \"inproc\"")
+            )
+            .unwrap(),
+            Backend::Process
+        );
+        let err = Backend::choose(
+            None,
+            &tb("simulator = \"xyce\"\nsimulator_backend = \"inproc\""),
+        )
+        .unwrap_err();
         assert!(format!("{err}").contains("ngspice only"), "{err}");
         assert!(super::super::setup::Setup::parse("simulator_backend = \"threads\"").is_err());
     }
@@ -407,18 +531,27 @@ mod tests {
     /// A deck for the real Xyce, when there is one: a transient and a measurement.
     #[test]
     fn real_xyce_runs_a_deck() {
-        let Some(sim) = Simulator::find_kind(SimKind::Xyce) else { return };
+        let Some(sim) = Simulator::find_kind(SimKind::Xyce) else {
+            return;
+        };
         let dir = tempfile::tempdir().unwrap();
         let setup = super::super::setup::Setup::parse(
             "simulator=\"xyce\"\nmeasures=[\"tran dly trig v(in) val=0.5 rise=1 targ v(out) val=0.5 rise=1\"]\n\
              [[analysis]]\nkind=\"tran\"\nstep=\"0.1n\"\nstop=\"20n\"",
         )
         .unwrap();
-        let point = super::super::deck::RunPoint { corner: "tt".into(), ..Default::default() };
+        let point = super::super::deck::RunPoint {
+            corner: "tt".into(),
+            ..Default::default()
+        };
         let net = "* rc\nV1 in 0 PULSE(0 1 1n 1n 1n 5n 20n)\nR1 in out 1k\nC1 out 0 1p\n.end\n";
         let deck = super::super::deck::build(&setup, &point, "rc", &[], net);
         let out = run(&sim, &deck, dir.path(), &[]).unwrap();
-        assert!((out.measures["dly"] - 7.35e-10).abs() < 5e-11, "{:?}", out.measures);
+        assert!(
+            (out.measures["dly"] - 7.35e-10).abs() < 5e-11,
+            "{:?}",
+            out.measures
+        );
         assert!(std::fs::metadata(&out.raw).unwrap().len() > 100);
     }
 }

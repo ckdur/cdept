@@ -34,14 +34,22 @@ pub const SIM_TOOLS: &[&str] = &["ngspice"];
 pub fn parse(text: &str) -> Result<Mapping> {
     let value: Value = serde_yaml_ng::from_str(text).wrap_err("not a CACE datasheet (YAML)")?;
     let Value::Mapping(map) = value else {
-        bail!("not a CACE datasheet: the YAML is not a mapping (the CACE 4.0 text format is not read; convert it with CACE 2.x)");
+        bail!(
+            "not a CACE datasheet: the YAML is not a mapping (the CACE 4.0 text format is not read; convert it with CACE 2.x)"
+        );
     };
     if map.contains_key("electrical_parameters") {
-        bail!("a CACE 4.x datasheet (`electrical_parameters`): convert it to the YAML format 5.x with CACE 2.x first");
+        bail!(
+            "a CACE 4.x datasheet (`electrical_parameters`): convert it to the YAML format 5.x with CACE 2.x first"
+        );
     }
     match map.get("parameters") {
         Some(Value::Mapping(_)) => {}
-        Some(_) => return Err(eyre!("not a CACE datasheet: `parameters` is not a mapping of parameters")),
+        Some(_) => {
+            return Err(eyre!(
+                "not a CACE datasheet: `parameters` is not a mapping of parameters"
+            ));
+        }
         None => return Err(eyre!("not a CACE datasheet: no `parameters`")),
     }
     Ok(map)
@@ -85,7 +93,11 @@ pub fn num_text(v: f64) -> String {
     if v.fract() == 0.0 && v.abs() < 1e15 {
         return format!("{}", v as i64);
     }
-    if v != 0.0 && (v.abs() < 1e-3 || v.abs() >= 1e6) { format!("{v:e}") } else { format!("{v}") }
+    if v != 0.0 && (v.abs() < 1e-3 || v.abs() >= 1e6) {
+        format!("{v:e}")
+    } else {
+        format!("{v}")
+    }
 }
 
 /// A YAML scalar for a value CDePT keeps as text: a number when it is one, else a string.
@@ -93,7 +105,9 @@ pub(crate) fn yaml_scalar(text: &str) -> Value {
     if let Ok(i) = text.parse::<i64>() {
         return Value::from(i);
     }
-    let letters = text.chars().any(|c| c.is_alphabetic() && c != 'e' && c != 'E');
+    let letters = text
+        .chars()
+        .any(|c| c.is_alphabetic() && c != 'e' && c != 'E');
     match text.parse::<f64>() {
         Ok(f) if f.is_finite() && !letters => Value::from(f),
         _ => Value::from(text),
@@ -103,7 +117,11 @@ pub(crate) fn yaml_scalar(text: &str) -> Value {
 /// A number for YAML: an integer when it is one.
 pub(crate) fn yaml_number(v: f64) -> Value {
     let v: f64 = format!("{v:.11e}").parse().unwrap_or(v);
-    if v.fract() == 0.0 && v.abs() < 1e15 { Value::from(v as i64) } else { Value::from(v) }
+    if v.fract() == 0.0 && v.abs() < 1e15 {
+        Value::from(v as i64)
+    } else {
+        Value::from(v)
+    }
 }
 
 /// The tool of a parameter and its arguments: `tool: magic_area` or
@@ -149,9 +167,19 @@ pub fn condition_values(cond: &Mapping) -> Vec<Value> {
         let mut a = min;
         let mut n = 0;
         // linseq / logseq in CACE's common.py: the last value is clipped to the maximum.
-        while n < 10_000 && if logarithmic { a < max * stepsize } else { a < max + stepsize } {
+        while n < 10_000
+            && if logarithmic {
+                a < max * stepsize
+            } else {
+                a < max + stepsize
+            }
+        {
             out.push(yaml_number(if a > max { max } else { a }));
-            a = if logarithmic { a * stepsize } else { a + stepsize };
+            a = if logarithmic {
+                a * stepsize
+            } else {
+                a + stepsize
+            };
             if logarithmic && stepsize <= 1.0 || !logarithmic && stepsize <= 0.0 {
                 break;
             }
@@ -284,12 +312,17 @@ fn is_unit(s: &str) -> bool {
     }
     // [°]*[Cc], [°]*[Cc]elsius, [°]*[Kk], [°]*[Kk]elvin
     let t = s.trim_start_matches('\u{b0}');
-    if [('c', ""), ('c', "elsius"), ('k', ""), ('k', "elvin")].iter().any(|(f, r)| pat(t, *f, r, false)) {
+    if [('c', ""), ('c', "elsius"), ('k', ""), ('k', "elvin")]
+        .iter()
+        .any(|(f, r)| pat(t, *f, r, false))
+    {
         return true;
     }
     // '[bohd]
     let mut chars = s.chars();
-    chars.next() == Some('\'') && matches!(chars.next(), Some('b' | 'o' | 'h' | 'd')) && chars.next().is_none()
+    chars.next() == Some('\'')
+        && matches!(chars.next(), Some('b' | 'o' | 'h' | 'd'))
+        && chars.next().is_none()
 }
 
 /// A YAML text of a value (a mapping), as CACE would read it.
@@ -301,9 +334,18 @@ pub(crate) fn to_yaml(v: &Value) -> String {
 pub(crate) fn brief(v: &Value) -> String {
     match v {
         Value::Sequence(items) => {
-            format!("[{}]", items.iter().map(brief).collect::<Vec<_>>().join(", "))
+            format!(
+                "[{}]",
+                items.iter().map(brief).collect::<Vec<_>>().join(", ")
+            )
         }
-        Value::Mapping(m) => format!("{{{}}}", m.keys().filter_map(scalar_text).collect::<Vec<_>>().join(", ")),
+        Value::Mapping(m) => format!(
+            "{{{}}}",
+            m.keys()
+                .filter_map(scalar_text)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         other => scalar_text(other).unwrap_or_else(|| "null".into()),
     }
 }
@@ -322,20 +364,34 @@ mod tests {
 
     #[test]
     fn condition_values_follow_cace() {
-        assert_eq!(texts(&condition_values(&cond("enumerate: [ss, tt, ff]"))), ["ss", "tt", "ff"]);
-        assert_eq!(texts(&condition_values(&cond("minimum: -40\ntypical: 27\nmaximum: 130"))), ["-40", "27", "130"]);
+        assert_eq!(
+            texts(&condition_values(&cond("enumerate: [ss, tt, ff]"))),
+            ["ss", "tt", "ff"]
+        );
+        assert_eq!(
+            texts(&condition_values(&cond(
+                "minimum: -40\ntypical: 27\nmaximum: 130"
+            ))),
+            ["-40", "27", "130"]
+        );
         assert_eq!(texts(&condition_values(&cond("maximum: 1"))), ["1"]);
         assert_eq!(
-            texts(&condition_values(&cond("minimum: 1\nmaximum: 4\nstep: linear\nstepsize: 1"))),
+            texts(&condition_values(&cond(
+                "minimum: 1\nmaximum: 4\nstep: linear\nstepsize: 1"
+            ))),
             ["1", "2", "3", "4"]
         );
         // The last step is clipped to the maximum, the typical value comes first.
         assert_eq!(
-            texts(&condition_values(&cond("typical: 0.5\nminimum: 0\nmaximum: 1\nstep: linear\nstepsize: 0.3"))),
+            texts(&condition_values(&cond(
+                "typical: 0.5\nminimum: 0\nmaximum: 1\nstep: linear\nstepsize: 0.3"
+            ))),
             ["0.5", "0", "0.3", "0.6", "0.9", "1"]
         );
         assert_eq!(
-            texts(&condition_values(&cond("minimum: 1\nmaximum: 8\nstep: logarithmic"))),
+            texts(&condition_values(&cond(
+                "minimum: 1\nmaximum: 8\nstep: logarithmic"
+            ))),
             ["1", "2", "4", "8"]
         );
     }
@@ -360,7 +416,11 @@ mod tests {
             ("m", 1.0),
             ("Volts-rms", 1.0),
         ] {
-            assert!((unit_scale(unit) - scale).abs() <= scale * 1e-12, "{unit}: {}", unit_scale(unit));
+            assert!(
+                (unit_scale(unit) - scale).abs() <= scale * 1e-12,
+                "{unit}: {}",
+                unit_scale(unit)
+            );
         }
     }
 

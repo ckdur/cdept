@@ -2,10 +2,10 @@
 //! reference library) into a library of the project. A real-PDK test: skipped when the PDK
 //! is absent.
 
-use libcdept::testutil::real_pdk;
+use libcdept::Project;
 use libcdept::layout::gds;
 use libcdept::refactor::{self, Operation, Options};
-use libcdept::Project;
+use libcdept::testutil::real_pdk;
 
 const PDK: &str = "ihp-sg13g2";
 
@@ -31,9 +31,10 @@ fn a_standard_cell_is_copied_as_files_of_its_own() {
     let std = project
         .library("sg13g2_stdcell")
         .expect("the technology brings the standard cells");
-    assert!(std
-        .cell("sg13g2_inv_1")
-        .is_some_and(|c| c.entries.iter().any(|e| e.is_member())));
+    assert!(
+        std.cell("sg13g2_inv_1")
+            .is_some_and(|c| c.entries.iter().any(|e| e.is_member()))
+    );
 
     let operation = Operation::CopyCell {
         library: "sg13g2_stdcell".into(),

@@ -79,13 +79,24 @@ pub struct JobSpec {
 
 impl JobSpec {
     /// A job that runs a closure. It should poll [`JobCtx::is_cancelled`] if it is long.
-    pub fn func(name: impl Into<String>, work: impl FnOnce(&JobCtx) -> Result<()> + Send + 'static) -> JobSpec {
-        JobSpec { name: name.into(), log: None, work: Box::new(work) }
+    pub fn func(
+        name: impl Into<String>,
+        work: impl FnOnce(&JobCtx) -> Result<()> + Send + 'static,
+    ) -> JobSpec {
+        JobSpec {
+            name: name.into(),
+            log: None,
+            work: Box::new(work),
+        }
     }
 
     /// A job that runs `program args…`; stdout and stderr go to the log. Fails when it
     /// exits with a non-zero status. Add [`CommandSpec::cwd`]/[`CommandSpec::env`] as needed.
-    pub fn command<I, S>(name: impl Into<String>, program: impl Into<OsString>, args: I) -> CommandSpec
+    pub fn command<I, S>(
+        name: impl Into<String>,
+        program: impl Into<OsString>,
+        args: I,
+    ) -> CommandSpec
     where
         I: IntoIterator<Item = S>,
         S: Into<OsString>,
@@ -143,7 +154,14 @@ impl From<CommandSpec> for JobSpec {
                 cmd.current_dir(d);
             }
             let status = ctx.run_command(&mut cmd)?;
-            if status.success() { Ok(()) } else { Err(eyre!("{} exited with {status}", c.program.to_string_lossy())) }
+            if status.success() {
+                Ok(())
+            } else {
+                Err(eyre!(
+                    "{} exited with {status}",
+                    c.program.to_string_lossy()
+                ))
+            }
         });
         spec.log = log;
         spec
@@ -195,7 +213,13 @@ impl JobCtx {
     /// Run `cmd` with stdout and stderr appended to the job log, and wait for it. If the
     /// job is cancelled meanwhile, the child is killed and this returns an error.
     pub fn run_command(&self, cmd: &mut Command) -> Result<ExitStatus> {
-        let (out, err) = match self.log.lock().unwrap().as_ref().map(|f| (f.try_clone(), f.try_clone())) {
+        let (out, err) = match self
+            .log
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|f| (f.try_clone(), f.try_clone()))
+        {
             Some((Ok(a), Ok(b))) => (Stdio::from(a), Stdio::from(b)),
             _ => (Stdio::null(), Stdio::null()),
         };
@@ -236,10 +260,16 @@ pub fn parse_duration(text: &str) -> Result<Duration> {
     let mut total = Duration::ZERO;
     let mut rest = t;
     while !rest.is_empty() {
-        let n_end = rest.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(rest.len());
-        let unit_end = rest[n_end..].find(|c: char| c.is_ascii_digit()).map_or(rest.len(), |i| n_end + i);
+        let n_end = rest
+            .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+            .unwrap_or(rest.len());
+        let unit_end = rest[n_end..]
+            .find(|c: char| c.is_ascii_digit())
+            .map_or(rest.len(), |i| n_end + i);
         let (number, unit) = (&rest[..n_end], rest[n_end..unit_end].trim());
-        let value: f64 = number.parse().map_err(|_| eyre!("'{text}' is not a duration (like 90s, 10m, 1h30m)"))?;
+        let value: f64 = number
+            .parse()
+            .map_err(|_| eyre!("'{text}' is not a duration (like 90s, 10m, 1h30m)"))?;
         let scale = match unit {
             "ms" => 0.001,
             "s" | "sec" => 1.0,
@@ -357,7 +387,9 @@ impl Queue {
 
     /// The number of cores, the usual default for [`Queue::new`].
     pub fn default_workers() -> usize {
-        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
     }
 
     /// Call `f` on every state or progress change of any job. See [`JobEvent`].
@@ -397,7 +429,9 @@ impl Queue {
     pub fn cancel(&self, id: JobId) {
         let ev = {
             let mut g = self.shared.lock();
-            let Some(rec) = g.jobs.get_mut(id.0) else { return };
+            let Some(rec) = g.jobs.get_mut(id.0) else {
+                return;
+            };
             match rec.state {
                 JobState::Queued => {
                     rec.state = JobState::Cancelled;
@@ -422,8 +456,14 @@ impl Queue {
 
     /// Cancel every job that is not final.
     pub fn cancel_all(&self) {
-        let ids: Vec<JobId> =
-            self.shared.lock().jobs.iter().filter(|j| !j.state.is_final()).map(|j| j.id).collect();
+        let ids: Vec<JobId> = self
+            .shared
+            .lock()
+            .jobs
+            .iter()
+            .filter(|j| !j.state.is_final())
+            .map(|j| j.id)
+            .collect();
         for id in ids {
             self.cancel(id);
         }
@@ -484,7 +524,13 @@ fn worker(shared: Arc<Shared>) {
             let rec = &mut g.jobs[idx];
             rec.state = JobState::Running;
             rec.started = Some(Instant::now());
-            (rec.id, rec.work.take(), rec.cancel.clone(), rec.log.clone(), rec.info())
+            (
+                rec.id,
+                rec.work.take(),
+                rec.cancel.clone(),
+                rec.log.clone(),
+                rec.info(),
+            )
         };
         shared.emit(info);
         let Some(work) = work else { continue };
@@ -494,7 +540,13 @@ fn worker(shared: Arc<Shared>) {
             }
             File::create(p).ok()
         });
-        let ctx = JobCtx { id, cancel: cancel.clone(), log: Mutex::new(file), log_path: log, shared: shared.clone() };
+        let ctx = JobCtx {
+            id,
+            cancel: cancel.clone(),
+            log: Mutex::new(file),
+            log_path: log,
+            shared: shared.clone(),
+        };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&ctx)));
         let (state, error) = if cancel.load(Ordering::SeqCst) {
             (JobState::Cancelled, None)
@@ -540,7 +592,11 @@ mod tests {
     #[test]
     fn command_runs_logs_and_fails() {
         let dir = tempfile::tempdir().unwrap();
-        let ok = script(dir.path(), "ok", "echo hello; echo oops >&2; echo $FOO; pwd");
+        let ok = script(
+            dir.path(),
+            "ok",
+            "echo hello; echo oops >&2; echo $FOO; pwd",
+        );
         let bad = script(dir.path(), "bad", "echo nope; exit 3");
         let q = Queue::new(2);
         let a = q.submit(
@@ -549,17 +605,29 @@ mod tests {
                 .env([("FOO".into(), "bar".into())])
                 .log(dir.path().join("logs/a.log")),
         );
-        let b = q.submit(JobSpec::command("bad", bad, Vec::<String>::new()).log(dir.path().join("b.log")));
+        let b = q.submit(
+            JobSpec::command("bad", bad, Vec::<String>::new()).log(dir.path().join("b.log")),
+        );
         q.wait_all();
         let (ia, ib) = (q.info(a).unwrap(), q.info(b).unwrap());
         assert_eq!(ia.state, JobState::Done);
         assert_eq!(ia.progress, 1.0);
         let log = std::fs::read_to_string(ia.log.unwrap()).unwrap();
-        assert!(log.contains("hello") && log.contains("oops") && log.contains("bar"), "{log}");
-        assert!(log.contains(dir.path().file_name().unwrap().to_str().unwrap()), "{log}");
+        assert!(
+            log.contains("hello") && log.contains("oops") && log.contains("bar"),
+            "{log}"
+        );
+        assert!(
+            log.contains(dir.path().file_name().unwrap().to_str().unwrap()),
+            "{log}"
+        );
         assert_eq!(ib.state, JobState::Failed);
         assert!(ib.error.unwrap().contains("status"), "exit code in error");
-        assert!(std::fs::read_to_string(dir.path().join("b.log")).unwrap().contains("nope"));
+        assert!(
+            std::fs::read_to_string(dir.path().join("b.log"))
+                .unwrap()
+                .contains("nope")
+        );
     }
 
     #[test]
@@ -587,7 +655,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let slow = script(dir.path(), "slow", "echo started; exec sleep 30");
         let q = Queue::new(1);
-        let running = q.submit(JobSpec::command("slow", &slow, Vec::<String>::new()).log(dir.path().join("s.log")));
+        let running = q.submit(
+            JobSpec::command("slow", &slow, Vec::<String>::new()).log(dir.path().join("s.log")),
+        );
         let queued = q.submit(JobSpec::command("later", &slow, Vec::<String>::new()));
         let t = Instant::now();
         while q.info(running).unwrap().state != JobState::Running {
@@ -599,10 +669,17 @@ mod tests {
         q.cancel(queued);
         q.cancel(running);
         q.wait_all();
-        assert!(t.elapsed() < Duration::from_secs(10), "the child was killed, not waited for");
+        assert!(
+            t.elapsed() < Duration::from_secs(10),
+            "the child was killed, not waited for"
+        );
         assert_eq!(q.info(running).unwrap().state, JobState::Cancelled);
         assert_eq!(q.info(queued).unwrap().state, JobState::Cancelled);
-        assert!(std::fs::read_to_string(dir.path().join("s.log")).unwrap().contains("started"));
+        assert!(
+            std::fs::read_to_string(dir.path().join("s.log"))
+                .unwrap()
+                .contains("started")
+        );
     }
 
     #[test]
@@ -610,7 +687,10 @@ mod tests {
         assert_eq!(parse_duration("90").unwrap(), Duration::from_secs(90));
         assert_eq!(parse_duration("10m").unwrap(), Duration::from_secs(600));
         assert_eq!(parse_duration("1h30m").unwrap(), Duration::from_secs(5400));
-        assert_eq!(parse_duration(" 2h 5s ").unwrap(), Duration::from_secs(7205));
+        assert_eq!(
+            parse_duration(" 2h 5s ").unwrap(),
+            Duration::from_secs(7205)
+        );
         assert_eq!(parse_duration("250ms").unwrap(), Duration::from_millis(250));
         assert_eq!(parse_duration("0").unwrap(), Duration::ZERO);
         for bad in ["", "ten", "5x", "-3", "m"] {
@@ -626,7 +706,11 @@ mod tests {
         let events = Arc::new(Mutex::new(Vec::new()));
         let q = Queue::new(1);
         let e = events.clone();
-        q.on_event(move |ev| e.lock().unwrap().push((ev.info.id, ev.info.state, ev.info.progress)));
+        q.on_event(move |ev| {
+            e.lock()
+                .unwrap()
+                .push((ev.info.id, ev.info.state, ev.info.progress))
+        });
         let a = q.submit(JobSpec::func("p", |ctx| {
             ctx.progress(0.5);
             ctx.log("half");

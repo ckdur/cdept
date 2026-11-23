@@ -42,11 +42,20 @@ pub enum Event {
     InitData { plot: String, vectors: Vec<String> },
     /// One point of every vector, by name (the real part; complex ones also as
     /// `(re, im)` in `complex`). The scale vector is among them.
-    Data { index: i32, count: i32, values: BTreeMap<String, f64>, complex: BTreeMap<String, (f64, f64)> },
+    Data {
+        index: i32,
+        count: i32,
+        values: BTreeMap<String, f64>,
+        complex: BTreeMap<String, (f64, f64)>,
+    },
     /// The background thread started (`true`) or ended (`false`).
     BackgroundRunning(bool),
     /// ngspice asked to exit (`quit`, or a fatal error); the process is NOT exited.
-    Exit { status: i32, immediate: bool, quit: bool },
+    Exit {
+        status: i32,
+        immediate: bool,
+        quit: bool,
+    },
 }
 
 /// The values of one vector.
@@ -83,11 +92,20 @@ pub fn candidates() -> Vec<PathBuf> {
         out.push(PathBuf::from(p));
         return out; // an explicit choice is the only one
     }
-    for name in ["libngspice.so.0", "libngspice.so", "libngspice.dylib", "ngspice.dll", "libngspice-0.dll"] {
+    for name in [
+        "libngspice.so.0",
+        "libngspice.so",
+        "libngspice.dylib",
+        "ngspice.dll",
+        "libngspice-0.dll",
+    ] {
         out.push(PathBuf::from(name));
     }
     if let Some(prog) = crate::tools::find_in_path("ngspice")
-        && let Some(root) = prog.canonicalize().ok().and_then(|p| p.parent()?.parent().map(Path::to_path_buf))
+        && let Some(root) = prog
+            .canonicalize()
+            .ok()
+            .and_then(|p| p.parent()?.parent().map(Path::to_path_buf))
     {
         for lib in ["lib", "lib64"] {
             for name in ["libngspice.so.0", "libngspice.so"] {
@@ -110,7 +128,10 @@ fn api() -> Result<&'static sys::Api> {
                 Err(e) => errors.push(format!("{e:#}")),
             }
         }
-        Err(format!("libngspice not found (set ${LIB_ENV}): {}", errors.join("; ")))
+        Err(format!(
+            "libngspice not found (set ${LIB_ENV}): {}",
+            errors.join("; ")
+        ))
     });
     loaded.as_ref().map_err(|e| eyre!("{e}"))
 }
@@ -144,7 +165,9 @@ unsafe extern "C" fn on_char(s: *mut c_char, _id: c_int, _u: *mut c_void) -> c_i
     let s = unsafe { text(s) };
     match s.strip_prefix("stderr ") {
         Some(rest) => emit(Event::Stderr(rest.to_string())),
-        None => emit(Event::Stdout(s.strip_prefix("stdout ").unwrap_or(&s).to_string())),
+        None => emit(Event::Stdout(
+            s.strip_prefix("stdout ").unwrap_or(&s).to_string(),
+        )),
     }
     0
 }
@@ -155,12 +178,27 @@ unsafe extern "C" fn on_stat(s: *mut c_char, _id: c_int, _u: *mut c_void) -> c_i
     0
 }
 
-unsafe extern "C" fn on_exit(status: c_int, immediate: bool, quit: bool, _id: c_int, _u: *mut c_void) -> c_int {
-    emit(Event::Exit { status, immediate, quit });
+unsafe extern "C" fn on_exit(
+    status: c_int,
+    immediate: bool,
+    quit: bool,
+    _id: c_int,
+    _u: *mut c_void,
+) -> c_int {
+    emit(Event::Exit {
+        status,
+        immediate,
+        quit,
+    });
     0
 }
 
-unsafe extern "C" fn on_data(all: *mut sys::VecValuesAll, _n: c_int, _id: c_int, _u: *mut c_void) -> c_int {
+unsafe extern "C" fn on_data(
+    all: *mut sys::VecValuesAll,
+    _n: c_int,
+    _id: c_int,
+    _u: *mut c_void,
+) -> c_int {
     // SAFETY: ngspice passes a valid array of `count` pointers for the call.
     unsafe {
         let all = &*all;
@@ -174,7 +212,12 @@ unsafe extern "C" fn on_data(all: *mut sys::VecValuesAll, _n: c_int, _id: c_int,
             }
             values.insert(name, v.creal);
         }
-        emit(Event::Data { index: all.index, count: all.count, values, complex });
+        emit(Event::Data {
+            index: all.index,
+            count: all.count,
+            values,
+            complex,
+        });
     }
     0
 }
@@ -183,8 +226,13 @@ unsafe extern "C" fn on_init_data(all: *mut sys::VecInfoAll, _id: c_int, _u: *mu
     // SAFETY: as above.
     unsafe {
         let all = &*all;
-        let vectors = (0..all.count.max(0) as usize).map(|i| text((**all.vecs.add(i)).name)).collect();
-        emit(Event::InitData { plot: text(all.name), vectors });
+        let vectors = (0..all.count.max(0) as usize)
+            .map(|i| text((**all.vecs.add(i)).name))
+            .collect();
+        emit(Event::InitData {
+            plot: text(all.name),
+            vectors,
+        });
     }
     0
 }
@@ -264,7 +312,11 @@ impl Session {
             }
             let _ = INITIALISED.set(());
         }
-        let session = Session { api, events: rx, _lock: lock };
+        let session = Session {
+            api,
+            events: rx,
+            _lock: lock,
+        };
         // A clean slate: the previous session's circuit and plots.
         let _ = session.command("destroy all");
         let _ = session.command("remcirc");
@@ -392,14 +444,20 @@ impl Session {
 
     /// The vector names of a plot.
     pub fn vectors(&self, plot: &str) -> Vec<String> {
-        let Ok(p) = cstring(plot) else { return Vec::new() };
+        let Ok(p) = cstring(plot) else {
+            return Vec::new();
+        };
         // SAFETY: as above.
         unsafe { strings((self.api.all_vecs)(p.as_ptr() as *mut c_char)) }
     }
 
     /// The values of `plot.name` (an empty plot means the current one).
     pub fn vector(&self, plot: &str, name: &str) -> Result<VectorData> {
-        let full = if plot.is_empty() { name.to_string() } else { format!("{plot}.{name}") };
+        let full = if plot.is_empty() {
+            name.to_string()
+        } else {
+            format!("{plot}.{name}")
+        };
         let c = cstring(&full)?;
         // SAFETY: the info and its arrays belong to ngspice and live while the plot does;
         // they are copied out before returning.
@@ -411,10 +469,14 @@ impl Session {
             let info = &*info;
             let n = info.length.max(0) as usize;
             if !info.real.is_null() {
-                Ok(VectorData::Real(std::slice::from_raw_parts(info.real, n).to_vec()))
+                Ok(VectorData::Real(
+                    std::slice::from_raw_parts(info.real, n).to_vec(),
+                ))
             } else if !info.comp.is_null() {
                 let s = std::slice::from_raw_parts(info.comp, n);
-                Ok(VectorData::Complex(s.iter().map(|c| (c.re, c.im)).collect()))
+                Ok(VectorData::Complex(
+                    s.iter().map(|c| (c.re, c.im)).collect(),
+                ))
             } else {
                 Ok(VectorData::Real(Vec::new()))
             }
@@ -489,7 +551,11 @@ fn tail(text: &str) -> String {
 ///
 /// Holds the session lock for the whole run, and changes the process working
 /// directory and environment meanwhile: do not call it while other threads rely on either.
-pub fn run_deck(deck: &str, dir: &Path, env: &[(std::ffi::OsString, std::ffi::OsString)]) -> Result<Outcome> {
+pub fn run_deck(
+    deck: &str,
+    dir: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+) -> Result<Outcome> {
     std::fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     let dir = dir.canonicalize()?;
     let deck_file = dir.join("deck.sp");
@@ -502,7 +568,10 @@ pub fn run_deck(deck: &str, dir: &Path, env: &[(std::ffi::OsString, std::ffi::Os
     }
     let session = Session::open()?;
     let previous_dir = std::env::current_dir().ok();
-    let saved_env: Vec<_> = env.iter().map(|(k, _)| (k.clone(), std::env::var_os(k))).collect();
+    let saved_env: Vec<_> = env
+        .iter()
+        .map(|(k, _)| (k.clone(), std::env::var_os(k)))
+        .collect();
     // SAFETY: documented above; the caller accepts process-global changes.
     unsafe {
         for (k, v) in env {
@@ -541,7 +610,12 @@ pub fn run_deck(deck: &str, dir: &Path, env: &[(std::ffi::OsString, std::ffi::Os
     if !raw.is_file() {
         bail!("the simulator left no raw file\n{}", tail(&output));
     }
-    Ok(Outcome { deck: deck_file, raw, log, measures: parse_measures(&output) })
+    Ok(Outcome {
+        deck: deck_file,
+        raw,
+        log,
+        measures: parse_measures(&output),
+    })
 }
 
 #[cfg(test)]
@@ -576,15 +650,23 @@ mod tests {
             return;
         }
         let s = Session::open().unwrap();
-        assert!(Session::try_open().is_ok_and(|o| o.is_none()), "a second session must be refused");
+        assert!(
+            Session::try_open().is_ok_and(|o| o.is_none()),
+            "a second session must be refused"
+        );
         s.load_deck(RC).unwrap();
         s.run().unwrap();
         let plot = s.current_plot();
         assert!(plot.starts_with("tran"), "{plot}");
         assert!(s.plot_names().contains(&plot));
         let names = s.vectors(&plot);
-        assert!(names.iter().any(|n| n == "time") && names.iter().any(|n| n == "out"), "{names:?}");
-        let VectorData::Real(out) = s.vector(&plot, "out").unwrap() else { panic!("complex") };
+        assert!(
+            names.iter().any(|n| n == "time") && names.iter().any(|n| n == "out"),
+            "{names:?}"
+        );
+        let VectorData::Real(out) = s.vector(&plot, "out").unwrap() else {
+            panic!("complex")
+        };
         assert!(out.len() > 50 && out.iter().cloned().fold(0.0, f64::max) > 0.5);
 
         s.load_deck(RC).unwrap();
@@ -597,11 +679,17 @@ mod tests {
         });
         assert!(init && points > 50, "init {init} points {points}");
 
-        s.load_deck("rc ac\nv1 in 0 dc 0 ac 1\nr1 in out 1k\nc1 out 0 1n\n.ac dec 5 1k 1meg\n.end\n").unwrap();
+        s.load_deck(
+            "rc ac\nv1 in 0 dc 0 ac 1\nr1 in out 1k\nc1 out 0 1n\n.ac dec 5 1k 1meg\n.end\n",
+        )
+        .unwrap();
         s.run().unwrap();
         let plot = s.current_plot();
         assert!(plot.starts_with("ac"), "{plot}");
-        assert!(matches!(s.vector(&plot, "out").unwrap(), VectorData::Complex(_)));
+        assert!(matches!(
+            s.vector(&plot, "out").unwrap(),
+            VectorData::Complex(_)
+        ));
         drop(s);
 
         let deck = "t\nv1 in 0 pulse(0 1 0 1n 1n 1u 2u)\nr1 in out 1k\nc1 out 0 1n\n.control\ntran 10n 2u\nwrite out.raw all\n\

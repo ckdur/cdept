@@ -828,11 +828,19 @@ pub(crate) fn script_parse(
                         folder: args.len() == 4,
                     })
                 }
-                ["import_files", _] => Dialog::ImportFiles(crate::import_files::ImportFiles::new(args[1])),
-                ["cace_import", _, _] => Dialog::CaceImport(crate::cace::CaceImport::new(args[1], args[2])),
-                ["cace_export", _, _] | ["cace_export", _, _, _] => Dialog::CaceExport(
-                    crate::cace::CaceExport::new(args[1], args[2], args.get(3).copied().unwrap_or("")),
-                ),
+                ["import_files", _] => {
+                    Dialog::ImportFiles(crate::import_files::ImportFiles::new(args[1]))
+                }
+                ["cace_import", _, _] => {
+                    Dialog::CaceImport(crate::cace::CaceImport::new(args[1], args[2]))
+                }
+                ["cace_export", _, _] | ["cace_export", _, _, _] => {
+                    Dialog::CaceExport(crate::cace::CaceExport::new(
+                        args[1],
+                        args[2],
+                        args.get(3).copied().unwrap_or(""),
+                    ))
+                }
                 _ => return Some(Err(USAGE.into())),
             };
             Ok(ScriptCommand::Open(dialog))

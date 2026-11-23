@@ -17,9 +17,9 @@ pub mod run;
 pub mod setup;
 pub mod spec;
 pub mod starter;
+pub mod stats;
 pub mod suite;
 pub mod template;
-pub mod stats;
 
 pub use deck::{RunPoint, build as build_deck};
 pub use run::{Outcome, Simulator, run, run_in_job};
@@ -33,7 +33,12 @@ use crate::Project;
 
 /// Where the runs of a testbench go: `<project>/simulations/<library>/<cell>/<view>`.
 pub fn runs_dir(project: &Project, library: &str, cell: &str, view: &str) -> PathBuf {
-    project.root.join("simulations").join(library).join(cell).join(view)
+    project
+        .root
+        .join("simulations")
+        .join(library)
+        .join(cell)
+        .join(view)
 }
 
 /// A testbench found in a project.
@@ -55,7 +60,10 @@ pub fn open(project: &Project, library: &str, cell: &str, view: &str) -> Result<
         .ok_or_else(|| eyre!("no view '{view}' of {library}/{cell}"))?;
     let file = entry.path.join(setup::SETUP_FILE);
     if !file.is_file() {
-        return Err(eyre!("{library}/{cell}/{view} is not a testbench (no {})", setup::SETUP_FILE));
+        return Err(eyre!(
+            "{library}/{cell}/{view} is not a testbench (no {})",
+            setup::SETUP_FILE
+        ));
     }
     let setup = Setup::load_with(&file, &template::TemplateSet::for_project(project))?;
     let (sch_lib, sch_cell) = match setup.schematic.split_once('/') {
@@ -64,9 +72,20 @@ pub fn open(project: &Project, library: &str, cell: &str, view: &str) -> Result<
         None => return Err(eyre!("schematic '{}' is not library/cell", setup.schematic)),
     };
     let view_name = (!setup.schematic_view.is_empty()).then_some(setup.schematic_view.as_str());
-    let schematic =
-        crate::batch::qucs::schematic_for(project, &sch_lib, &sch_cell, view_name, &setup.schematic_kind)?;
-    Ok(Testbench { library: library.into(), cell: cell.into(), view: view.into(), setup, schematic })
+    let schematic = crate::batch::qucs::schematic_for(
+        project,
+        &sch_lib,
+        &sch_cell,
+        view_name,
+        &setup.schematic_kind,
+    )?;
+    Ok(Testbench {
+        library: library.into(),
+        cell: cell.into(),
+        view: view.into(),
+        setup,
+        schematic,
+    })
 }
 
 /// The result of one run point.
@@ -135,7 +154,9 @@ pub fn monte_carlo_plan(
     simulator: &str,
     mc: &setup::MonteCarlo,
 ) -> Result<mc::Plan> {
-    let (_, set_models) = models.set(set).ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
+    let (_, set_models) = models
+        .set(set)
+        .ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
     let mentions = |corner: &str, word: &str| {
         set_models.corner(corner).is_some_and(|libs| {
             libs.iter().any(|l| {
@@ -143,7 +164,11 @@ pub fn monte_carlo_plan(
                     .resolve(|n| project.var(n))
                     .ok()
                     .and_then(|p| std::fs::read(p).ok())
-                    .is_some_and(|t| String::from_utf8_lossy(&t).to_ascii_lowercase().contains(word))
+                    .is_some_and(|t| {
+                        String::from_utf8_lossy(&t)
+                            .to_ascii_lowercase()
+                            .contains(word)
+                    })
             })
         })
     };
@@ -168,13 +193,20 @@ pub fn run_testbench_with(
         .as_ref()
         .ok_or_else(|| eyre!("the project has no technology snapshot (cdept tech scan)"))?;
     // VACASK: the technology's ngspice models converted for it (made on first use).
-    let vacask_ready = if tb.setup.simulator == "vacask" { Some(crate::vacask::models::ready(project)?) } else { None };
+    let vacask_ready = if tb.setup.simulator == "vacask" {
+        Some(crate::vacask::models::ready(project)?)
+    } else {
+        None
+    };
     let tech = vacask_ready.as_ref().map_or(tech, |r| &r.tech);
     let models = &tech.models;
     let set = if !tb.setup.models.is_empty() {
         tb.setup.models.clone()
     } else {
-        models.default.clone().ok_or_else(|| eyre!("the technology names no default model set"))?
+        models
+            .default
+            .clone()
+            .ok_or_else(|| eyre!("the technology names no default model set"))?
     };
     let backend = run::Backend::choose(options.backend, &tb.setup)?;
     let default_corner = models
@@ -196,7 +228,13 @@ pub fn run_testbench_with(
     };
     // The corner sets (and switches) the Monte Carlo mode draws from.
     let mc_plan = match &mc {
-        Some(mc) => Some(monte_carlo_plan(project, models, &set, &tb.setup.simulator, mc)?),
+        Some(mc) => Some(monte_carlo_plan(
+            project,
+            models,
+            &set,
+            &tb.setup.simulator,
+            mc,
+        )?),
         None => None,
     };
     let mut points = if let (Some(mc), Some(plan)) = (&mc, &mc_plan) {
@@ -206,7 +244,13 @@ pub fn run_testbench_with(
     };
     if !only.is_empty() && mc.is_none() {
         points = vec![];
-        let all = deck::points(&Setup { corners: only.to_vec(), ..tb.setup.clone() }, &default_corner);
+        let all = deck::points(
+            &Setup {
+                corners: only.to_vec(),
+                ..tb.setup.clone()
+            },
+            &default_corner,
+        );
         points.extend(all);
     }
     let base = runs_dir(project, &tb.library, &tb.cell, &tb.view);
@@ -215,12 +259,22 @@ pub fn run_testbench_with(
     let netlist = std::fs::read_to_string(&netlist_file)
         .wrap_err_with(|| format!("cannot read {}", netlist_file.display()))?;
     template::check_netlist(&tb.setup, &netlist)?;
-    let (_, model_set) = models.set(&set).ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
+    let (_, model_set) = models
+        .set(&set)
+        .ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
     let title = format!("{}/{}/{}", tb.library, tb.cell, tb.view);
     let env = project.tool_env();
-    let workers = if options.jobs > 0 { options.jobs } else { Queue::default_workers().min(points.len()) };
+    let workers = if options.jobs > 0 {
+        options.jobs
+    } else {
+        Queue::default_workers().min(points.len())
+    };
     // One libngspice runs one point at a time: more workers would only wait for it.
-    let workers = if backend == run::Backend::Inproc { 1 } else { workers };
+    let workers = if backend == run::Backend::Inproc {
+        1
+    } else {
+        workers
+    };
     let own;
     let queue: &Queue = match &options.queue {
         Some(q) => q,
@@ -233,7 +287,12 @@ pub fn run_testbench_with(
             &own
         }
     };
-    let cancelled = || options.cancel.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed));
+    let cancelled = || {
+        options
+            .cancel
+            .as_ref()
+            .is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed))
+    };
     let mut ids = vec![];
     type Slot = Arc<Mutex<Option<(Result<Outcome>, String, u64)>>>;
     let mut slots: Vec<Slot> = vec![];
@@ -245,7 +304,9 @@ pub fn run_testbench_with(
         let dir = base.join(point.name());
         std::fs::create_dir_all(&dir)?;
         let text = if let Some(ready) = &vacask_ready {
-            let d = crate::vacask::build_point(project, ready, &tb.setup, &set, point, &title, &netlist)?;
+            let d = crate::vacask::build_point(
+                project, ready, &tb.setup, &set, point, &title, &netlist,
+            )?;
             for w in &d.warnings {
                 tracing::warn!("{}: {w}", point.name());
             }
@@ -256,12 +317,18 @@ pub fn run_testbench_with(
                 Some(plan) => {
                     let mut all = vec![];
                     for c in &plan.corners {
-                        all.extend(models.lines(&set, c, |n| project.var(n)).map_err(|e| eyre!(e))?);
+                        all.extend(
+                            models
+                                .lines(&set, c, |n| project.var(n))
+                                .map_err(|e| eyre!(e))?,
+                        );
                     }
                     all.extend(plan.extra.iter().cloned());
                     all
                 }
-                None => models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?,
+                None => models
+                    .lines(&set, &point.corner, |n| project.var(n))
+                    .map_err(|e| eyre!(e))?,
             };
             std::fs::write(dir.join(".spiceinit"), &init)?;
             deck::build(&tb.setup, point, &title, &lines, &netlist)
@@ -270,7 +337,9 @@ pub fn run_testbench_with(
         let slot: Slot = Arc::default();
         slots.push(slot.clone());
         let mut env = env.clone();
-        if let Some(args) = deck::xyce_args(&tb.setup, point, model_set, |n| project.var(n)).map_err(|e| eyre!(e))? {
+        if let Some(args) = deck::xyce_args(&tb.setup, point, model_set, |n| project.var(n))
+            .map_err(|e| eyre!(e))?
+        {
             env.push((run::XYCE_ARGS_ENV.into(), args.into()));
         }
         let (simulator, log) = (simulator.clone(), dir.join("job.log"));
@@ -297,15 +366,19 @@ pub fn run_testbench_with(
     let mut store = if options.no_store {
         None
     } else {
-        results::Store::open(&project.root).map_err(|e| tracing::warn!("results database: {e:#}")).ok()
+        results::Store::open(&project.root)
+            .map_err(|e| tracing::warn!("results database: {e:#}"))
+            .ok()
     };
     let mut results = vec![];
     for ((point, slot), deck_text) in points.into_iter().zip(slots).zip(decks) {
-        let (outcome, started, duration_ms) = slot
-            .lock()
-            .unwrap()
-            .take()
-            .unwrap_or_else(|| (Err(eyre!("cancelled")), chrono::Local::now().to_rfc3339(), 0));
+        let (outcome, started, duration_ms) = slot.lock().unwrap().take().unwrap_or_else(|| {
+            (
+                Err(eyre!("cancelled")),
+                chrono::Local::now().to_rfc3339(),
+                0,
+            )
+        });
         let (outcome, calc_errors) = crate::calc::sim::apply(&tb.setup, &point, outcome);
         let specs = match &outcome {
             Ok(o) => spec::check(&tb.setup.specs, &o.measures),
@@ -335,7 +408,15 @@ pub fn run_testbench_with(
                 tracing::warn!("{}: results database: {e:#}", point.name());
             }
         }
-        results.push(PointResult { point, outcome, specs, started, duration_ms, record, run: rec });
+        results.push(PointResult {
+            point,
+            outcome,
+            specs,
+            started,
+            duration_ms,
+            record,
+            run: rec,
+        });
     }
     Ok(results)
 }

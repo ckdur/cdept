@@ -61,11 +61,17 @@ fn a_cace_parameter_runs_at_the_ihp_corners() {
         eprintln!("skipped: the xschem helper is not built");
         return;
     }
-    let Some(pdk) = real_pdk("ihp-sg13g2") else { return };
+    let Some(pdk) = real_pdk("ihp-sg13g2") else {
+        return;
+    };
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/ihp-inv");
     let dir = tempfile::tempdir().unwrap();
     copy_dir(&example, dir.path());
-    std::fs::write(dir.path().join("cdept.local.toml"), format!("pdk_root = \"{}\"\n", pdk.root.display())).unwrap();
+    std::fs::write(
+        dir.path().join("cdept.local.toml"),
+        format!("pdk_root = \"{}\"\n", pdk.root.display()),
+    )
+    .unwrap();
     let mut project = Project::load(dir.path()).unwrap();
     let options = import::ImportOptions {
         library: "cells".into(),
@@ -81,7 +87,11 @@ fn a_cace_parameter_runs_at_the_ihp_corners() {
     assert!(!lines.contains("not a corner set"), "{lines}");
     import::apply(&plan).unwrap();
     // CACE's template measured tpd; the testbench says how.
-    let file = project.library("cells").unwrap().path.join("tb_inv/cace_delay/setup.toml");
+    let file = project
+        .library("cells")
+        .unwrap()
+        .path
+        .join("tb_inv/cace_delay/setup.toml");
     let text = std::fs::read_to_string(&file).unwrap();
     let at = text.find("\n[").unwrap();
     let text = format!(
@@ -96,18 +106,29 @@ fn a_cace_parameter_runs_at_the_ihp_corners() {
     let names: Vec<String> = results.iter().map(|r| r.point.name()).collect();
     assert_eq!(names, ["tt_27", "ff_27", "ss_27"]);
     for r in &results {
-        assert!(r.outcome.is_ok(), "{}: {:?}", r.point.name(), r.outcome.as_ref().err());
+        assert!(
+            r.outcome.is_ok(),
+            "{}: {:?}",
+            r.point.name(),
+            r.outcome.as_ref().err()
+        );
     }
     let out = export::export(
         &project,
         "cells",
         "tb_inv",
-        &export::ExportOptions { view: Some("cace_delay".into()), results: true },
+        &export::ExportOptions {
+            view: Some("cace_delay".into()),
+            results: true,
+        },
     )
     .unwrap();
     let back = cace::parse(&out.text).unwrap();
     let param = &back["parameters"]["delay"];
-    assert_eq!(param["spec"], cace::parse(SHEET).unwrap()["parameters"]["delay"]["spec"]);
+    assert_eq!(
+        param["spec"],
+        cace::parse(SHEET).unwrap()["parameters"]["delay"]["spec"]
+    );
     let r = &param["results"][0];
     assert_eq!(r["runs"], Value::from(3));
     assert_eq!(r["status"], Value::from("pass"), "{}", out.text);

@@ -10,7 +10,11 @@ use super::{Adapter, Job};
 /// Environment variable that names the netgen program.
 pub const NETGEN_ENV: &str = "CDEPT_NETGEN";
 
-pub const ADAPTER: Adapter = Adapter { name: "netgen", env_var: NETGEN_ENV, tool: "netgen" };
+pub const ADAPTER: Adapter = Adapter {
+    name: "netgen",
+    env_var: NETGEN_ENV,
+    tool: "netgen",
+};
 
 /// The result netgen states at the end of a comparison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +63,12 @@ pub fn parse(text: &str) -> Report {
         if let Some(rest) = line.split_once("Final result:").map(|(_, r)| r.trim()) {
             // The text may be on the next line.
             result = if rest.is_empty() {
-                lines[i + 1..].iter().map(|l| l.trim()).find(|l| !l.is_empty()).unwrap_or("").to_string()
+                lines[i + 1..]
+                    .iter()
+                    .map(|l| l.trim())
+                    .find(|l| !l.is_empty())
+                    .unwrap_or("")
+                    .to_string()
             } else {
                 rest.to_string()
             };
@@ -77,7 +86,11 @@ pub fn parse(text: &str) -> Report {
         Verdict::Mismatch
     } else if low.contains("match") {
         // netgen says `match uniquely` of circuits whose properties differ, and lists the cells.
-        if property_cells { Verdict::PropertyErrors } else { Verdict::Match }
+        if property_cells {
+            Verdict::PropertyErrors
+        } else {
+            Verdict::Match
+        }
     } else {
         Verdict::Unknown
     };
@@ -88,16 +101,27 @@ pub fn parse(text: &str) -> Report {
             let (a, rest) = l.split_once(' ')?;
             let (_, rest) = rest.split_once("Circuit 2 contains ")?;
             let (b, rest) = rest.split_once(' ')?;
-            rest.starts_with(word).then(|| Some((a.parse().ok()?, b.parse().ok()?)))?
+            rest.starts_with(word)
+                .then(|| Some((a.parse().ok()?, b.parse().ok()?)))?
         })
     };
     let property_errors = property_errors_of(&lines);
-    Report { verdict, result, devices: pair("devices"), nets: pair("nets"), property_errors, log: None }
+    Report {
+        verdict,
+        result,
+        devices: pair("devices"),
+        nets: pair("nets"),
+        property_errors,
+        log: None,
+    }
 }
 
 /// The cells listed after `The following cells had property errors:`.
 fn property_errors_of(lines: &[&str]) -> Vec<String> {
-    let Some(at) = lines.iter().position(|l| l.contains("cells had property errors")) else {
+    let Some(at) = lines
+        .iter()
+        .position(|l| l.contains("cells had property errors"))
+    else {
         return vec![];
     };
     lines[at + 1..]
@@ -139,7 +163,10 @@ pub fn lvs_job(program: &Path, lvs: &Lvs, dir: &Path, env: &[(OsString, OsString
         None => {
             std::fs::create_dir_all(dir)?;
             let empty = dir.join("empty_setup.tcl");
-            std::fs::write(&empty, "# no PDK set-up file: devices are compared as they are\n")?;
+            std::fs::write(
+                &empty,
+                "# no PDK set-up file: devices are compared as they are\n",
+            )?;
             abs(&empty)?
         }
     };
@@ -166,7 +193,10 @@ pub fn run(program: &Path, lvs: &Lvs, dir: &Path, env: &[(OsString, OsString)]) 
     let from_log = std::fs::read_to_string(&lvs_log).ok();
     let mut report = parse(from_log.as_deref().unwrap_or(&out.text));
     if report.verdict == Verdict::Unknown
-        && let Some(e) = out.text.lines().find(|l| l.trim_start().starts_with("Error:"))
+        && let Some(e) = out
+            .text
+            .lines()
+            .find(|l| l.trim_start().starts_with("Error:"))
     {
         return Err(eyre!("netgen: {}\nlog: {}", e.trim(), out.log.display()));
     }
@@ -185,7 +215,13 @@ pub fn run(program: &Path, lvs: &Lvs, dir: &Path, env: &[(OsString, OsString)]) 
 /// The set-up file of the project's technology snapshot (`[netgen] setup`), when it
 /// has one on this machine.
 pub fn project_setup(project: &crate::Project) -> Option<PathBuf> {
-    let path = project.snapshot()?.netgen.setup.as_ref()?.resolve(|n| project.var(n)).ok()?;
+    let path = project
+        .snapshot()?
+        .netgen
+        .setup
+        .as_ref()?
+        .resolve(|n| project.var(n))
+        .ok()?;
     path.is_file().then_some(path)
 }
 
@@ -208,7 +244,10 @@ pub fn prepare_netlist(
         return Ok((file.to_path_buf(), None));
     }
     std::fs::create_dir_all(dir)?;
-    let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = file
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let out = dir.join(format!("{stem}_calls.spice"));
     std::fs::write(&out, &rewrite.text)
         .wrap_err_with(|| format!("cannot write {}", out.display()))?;
@@ -217,7 +256,12 @@ pub fn prepare_netlist(
          call of its model, which is how the PDK's netlists have them); copy {}",
         file.display(),
         rewrite.converted,
-        rewrite.models.iter().cloned().collect::<Vec<_>>().join(", "),
+        rewrite
+            .models
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", "),
         out.display()
     );
     Ok((out, Some(note)))
@@ -267,20 +311,39 @@ mod tests {
     #[test]
     fn reads_the_other_results() {
         let v = |t: &str| parse(t).verdict;
-        assert_eq!(v("Final result: Netlists do not match.\n"), Verdict::Mismatch);
-        assert_eq!(v("Final result: Top level cell failed pin matching.\n"), Verdict::PinMismatch);
-        assert_eq!(v("Final result: Circuits match with property errors.\n"), Verdict::PropertyErrors);
-        assert_eq!(v("Final result: Circuits match correctly.\n"), Verdict::Match);
+        assert_eq!(
+            v("Final result: Netlists do not match.\n"),
+            Verdict::Mismatch
+        );
+        assert_eq!(
+            v("Final result: Top level cell failed pin matching.\n"),
+            Verdict::PinMismatch
+        );
+        assert_eq!(
+            v("Final result: Circuits match with property errors.\n"),
+            Verdict::PropertyErrors
+        );
+        assert_eq!(
+            v("Final result: Circuits match correctly.\n"),
+            Verdict::Match
+        );
         assert_eq!(v("nothing here"), Verdict::Unknown);
-        let r = parse("Final result: Circuits match with property errors.\n\nThe following cells had property errors:\n a\n b\n\nLVS Done.\n");
+        let r = parse(
+            "Final result: Circuits match with property errors.\n\nThe following cells had property errors:\n a\n b\n\nLVS Done.\n",
+        );
         assert_eq!(r.property_errors, ["a", "b"]);
         // `match uniquely`, but with cells listed for property errors: not clean.
         assert_eq!(
-            v("Final result: Circuits match uniquely.\n\nThe following cells had property errors:\n top\n"),
+            v(
+                "Final result: Circuits match uniquely.\n\nThe following cells had property errors:\n top\n"
+            ),
             Verdict::PropertyErrors
         );
         // The last Final result counts (a log with several comparisons).
-        assert_eq!(v("Final result: Netlists do not match.\nFinal result: Circuits match uniquely.\n"), Verdict::Match);
+        assert_eq!(
+            v("Final result: Netlists do not match.\nFinal result: Circuits match uniquely.\n"),
+            Verdict::Match
+        );
     }
 
     #[test]
@@ -294,9 +357,26 @@ mod tests {
             setup: Some("/pdk/setup.tcl".into()),
         };
         let j = lvs_job(Path::new("netgen"), &lvs, dir.path(), &[]).unwrap();
-        let args: Vec<_> = j.args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
-        assert_eq!(args, ["-batch", "lvs", "/l/top.spice top", "/s/top.spice top", "/pdk/setup.tcl", "lvs.log"]);
-        let spaced = Lvs { layout: "/a b/x.spice".into(), ..lvs.clone() };
+        let args: Vec<_> = j
+            .args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "-batch",
+                "lvs",
+                "/l/top.spice top",
+                "/s/top.spice top",
+                "/pdk/setup.tcl",
+                "lvs.log"
+            ]
+        );
+        let spaced = Lvs {
+            layout: "/a b/x.spice".into(),
+            ..lvs.clone()
+        };
         assert!(lvs_job(Path::new("netgen"), &spaced, dir.path(), &[]).is_err());
         let none = Lvs { setup: None, ..lvs };
         assert!(lvs_job(Path::new("netgen"), &none, dir.path(), &[]).is_ok());
@@ -325,7 +405,11 @@ mod tests {
         assert_eq!(r.devices, Some((4, 5)));
         assert!(r.log.is_some());
         // An unreadable file: netgen prints Error: and exits 0.
-        let broken = super::super::testutil::fake(dir.path(), "netgen2", "echo 'Error:  Setup file x does not exist.'");
+        let broken = super::super::testutil::fake(
+            dir.path(),
+            "netgen2",
+            "echo 'Error:  Setup file x does not exist.'",
+        );
         let err = run(&broken, &lvs, &dir.path().join("w2"), &[]).unwrap_err();
         assert!(format!("{err}").contains("Setup file"), "{err}");
     }
@@ -333,7 +417,9 @@ mod tests {
     /// Against the real program, when there is one.
     #[test]
     fn real_netgen_compares_two_netlists() {
-        let Some(program) = ADAPTER.locate() else { return };
+        let Some(program) = ADAPTER.locate() else {
+            return;
+        };
         let dir = tempfile::tempdir().unwrap();
         let w = |name: &str, text: &str| {
             let p = dir.path().join(name);

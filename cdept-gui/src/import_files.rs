@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use egui::{Id, Ui};
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use libcdept::importer::{self, ImportRequest, OnClash};
 use libcdept::{Library, Project};
 

@@ -70,9 +70,24 @@ fn parse_timeout(text: &str) -> Result<Duration, String> {
 pub fn run(command: MagicCommand, project: &Project) -> Result<()> {
     let mut magic = Magic::for_project(project)?;
     let (library, cell, timeout) = match &command {
-        MagicCommand::Extract { library, cell, timeout, .. }
-        | MagicCommand::Drc { library, cell, timeout, .. }
-        | MagicCommand::Lef { library, cell, timeout, .. } => (library.clone(), cell.clone(), *timeout),
+        MagicCommand::Extract {
+            library,
+            cell,
+            timeout,
+            ..
+        }
+        | MagicCommand::Drc {
+            library,
+            cell,
+            timeout,
+            ..
+        }
+        | MagicCommand::Lef {
+            library,
+            cell,
+            timeout,
+            ..
+        } => (library.clone(), cell.clone(), *timeout),
     };
     if let Some(limit) = timeout {
         magic = magic.with_timeout(limit);
@@ -103,7 +118,10 @@ pub fn run(command: MagicCommand, project: &Project) -> Result<()> {
             std::fs::write(&file, serde_json::to_string_pretty(&report)?)
                 .wrap_err_with(|| format!("writing {}", file.display()))?;
             if report.is_clean() {
-                println!("{library}/{cell}: DRC clean ({})", report.style.as_deref().unwrap_or("-"));
+                println!(
+                    "{library}/{cell}: DRC clean ({})",
+                    report.style.as_deref().unwrap_or("-")
+                );
             } else {
                 println!(
                     "{library}/{cell}: {} violation(s) of {} rule(s), report {}",

@@ -57,7 +57,9 @@ fn layout_file(project: &Project) -> PathBuf {
 
 #[test]
 fn drc_of_the_pdk_inverter_and_of_a_narrow_wire() {
-    let Some((root, case, _env)) = pdk() else { return };
+    let Some((root, case, _env)) = pdk() else {
+        return;
+    };
     let tmp = tempfile::tempdir().unwrap();
     let project = project(tmp.path(), &root, &case);
     let deck = verify::find_deck(&project, Check::Drc).expect("the PDK has a DRC deck");
@@ -114,7 +116,9 @@ fn drc_of_the_pdk_inverter_and_of_a_narrow_wire() {
 
 #[test]
 fn lvs_of_the_pdk_inverter() {
-    let Some((root, case, _env)) = pdk() else { return };
+    let Some((root, case, _env)) = pdk() else {
+        return;
+    };
     let tmp = tempfile::tempdir().unwrap();
     let project = project(tmp.path(), &root, &case);
     let deck = verify::find_deck(&project, Check::Lvs).expect("the PDK has an LVS deck");

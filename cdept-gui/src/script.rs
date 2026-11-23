@@ -287,7 +287,9 @@ impl Command {
     fn patience(&self) -> Duration {
         match self {
             Command::Sim(args) if args.first().map(String::as_str) == Some("wait") => SIM_PATIENCE,
-            Command::Sim(args) if args.first().map(String::as_str) == Some("suite_wait") => SUITE_PATIENCE,
+            Command::Sim(args) if args.first().map(String::as_str) == Some("suite_wait") => {
+                SUITE_PATIENCE
+            }
             _ => PATIENCE,
         }
     }
@@ -1026,7 +1028,9 @@ impl Script {
         match self.start(app, ctx, command.clone()) {
             Ok(()) => self.give_up = None,
             Err(message) => {
-                let give_up = *self.give_up.get_or_insert(Instant::now() + command.patience());
+                let give_up = *self
+                    .give_up
+                    .get_or_insert(Instant::now() + command.patience());
                 if command.patient() && Instant::now() < give_up {
                     // Not yet: the same command again in the next frame.
                     self.commands.push_front((line, command));

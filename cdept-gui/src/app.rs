@@ -273,7 +273,13 @@ impl CdeptApp {
                 && crate::views::simulation::testbench_of(p, &selection).is_some()
         });
         if is_testbench {
-            return self.apply(ctx, Action::OpenSimulation { selection, run: false });
+            return self.apply(
+                ctx,
+                Action::OpenSimulation {
+                    selection,
+                    run: false,
+                },
+            );
         }
         if let (Some(library), Some(cell), Some(view)) =
             (selection.library, selection.cell, selection.view)

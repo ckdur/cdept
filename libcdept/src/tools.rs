@@ -430,7 +430,9 @@ pub const KNOWN_TOOLS: &[ToolSpec] = &[
         phase: Some(5),
         locate: Locate::Bin(&["UberWaveViewer", "uberwave"]),
         version_args: &[],
-        note: Some("the waveform viewer (separate GPL program): `cdept wave`; `$CDEPT_UBERWAVE`; docs/howto/view-waveforms.md"),
+        note: Some(
+            "the waveform viewer (separate GPL program): `cdept wave`; `$CDEPT_UBERWAVE`; docs/howto/view-waveforms.md",
+        ),
     },
     ToolSpec {
         name: "Surfer",
@@ -525,7 +527,11 @@ pub fn detect(spec: &ToolSpec) -> ToolInfo {
     if spec.name == "UberWave" {
         let path = crate::wave::locate(None);
         let version = path.as_deref().and_then(crate::wave::describe);
-        return ToolInfo { spec: *spec, path, version };
+        return ToolInfo {
+            spec: *spec,
+            path,
+            version,
+        };
     }
     let (path, version) = match spec.locate {
         Locate::Bin(names) => {

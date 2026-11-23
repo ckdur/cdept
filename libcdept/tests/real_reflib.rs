@@ -11,7 +11,10 @@ use libcdept::testutil::{RealPdk, real_pdk};
 /// The folder of the installed PDK, and the guard that keeps the environment for it.
 fn pdk(name: &str) -> Option<(PathBuf, RealPdk)> {
     let real = real_pdk(name)?;
-    real.dir.join("libs.ref").is_dir().then(|| (real.dir.clone(), real))
+    real.dir
+        .join("libs.ref")
+        .is_dir()
+        .then(|| (real.dir.clone(), real))
 }
 
 fn files(dir: &Path) -> Vec<PathBuf> {

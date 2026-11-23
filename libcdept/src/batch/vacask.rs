@@ -11,7 +11,11 @@ use super::{Adapter, Job};
 /// Environment variable that names the VACASK program.
 pub const VACASK_ENV: &str = "CDEPT_VACASK";
 
-pub const ADAPTER: Adapter = Adapter { name: "VACASK", env_var: VACASK_ENV, tool: "VACASK" };
+pub const ADAPTER: Adapter = Adapter {
+    name: "VACASK",
+    env_var: VACASK_ENV,
+    tool: "VACASK",
+};
 
 /// The job for a deck already written in `dir`. Output goes to `vacask.stdout`.
 ///
@@ -22,7 +26,9 @@ pub const ADAPTER: Adapter = Adapter { name: "VACASK", env_var: VACASK_ENV, tool
 pub fn job(program: &Path, deck: &str, dir: &Path, env: &[(OsString, OsString)]) -> Job {
     let mut all = crate::vacask::tool_env_for(program);
     all.extend(env.iter().cloned());
-    Job::new("VACASK", program, dir, "vacask.stdout").args(["-qp", deck]).env(&all)
+    Job::new("VACASK", program, dir, "vacask.stdout")
+        .args(["-qp", deck])
+        .env(&all)
 }
 
 /// Lines of the log that report a failure: VACASK exits with 0 after most of them.
@@ -53,7 +59,11 @@ mod tests {
     #[test]
     fn the_command_line_is_vacasks() {
         let j = job(Path::new("/x/vacask"), "deck.sim", Path::new("/w"), &[]);
-        let args: Vec<_> = j.args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args: Vec<_> = j
+            .args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(args, ["-qp", "deck.sim"]);
     }
 
@@ -63,6 +73,8 @@ mod tests {
         let p = problems(log);
         assert_eq!(p.len(), 1, "{p:?}");
         assert!(p[0].contains("aborted"));
-        assert!(problems("Simulating: x\nRunning analysis 'tran1'.\n  Elapsed time: 0.01\n").is_empty());
+        assert!(
+            problems("Simulating: x\nRunning analysis 'tran1'.\n  Elapsed time: 0.01\n").is_empty()
+        );
     }
 }

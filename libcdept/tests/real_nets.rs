@@ -267,7 +267,8 @@ fn pins_are_in_the_sidecar_the_stream_and_the_checks() {
     moved.write_for(&file).unwrap();
     let stream_dir = work.path().join("moved");
     std::fs::create_dir_all(&stream_dir).unwrap();
-    let stream = verify::export_stream(&project, &file, "inv", &stream_dir.join("inv.gds")).unwrap();
+    let stream =
+        verify::export_stream(&project, &file, "inv", &stream_dir.join("inv.gds")).unwrap();
     let (source_view, schematic) = link::schematic_view(&project, "cells", "inv", None).unwrap();
     let run = link::nets::run(
         &project,

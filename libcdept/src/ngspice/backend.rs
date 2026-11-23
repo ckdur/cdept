@@ -105,7 +105,9 @@ pub fn run(
         cancel: cancel.unwrap_or_default(),
         reply,
     };
-    worker().send(req).map_err(|_| eyre!("the ngspice worker thread has stopped"))?;
+    worker()
+        .send(req)
+        .map_err(|_| eyre!("the ngspice worker thread has stopped"))?;
     for msg in answers {
         match msg {
             Msg::Progress(p) => progress(p),
@@ -125,18 +127,32 @@ pub fn run_in_job(
     ctx: &crate::jobs::JobCtx,
 ) -> Result<Outcome> {
     ctx.log("in-process ngspice (libngspice)");
-    run(deck, dir, env, Some(ctx.cancel_flag()), |p| ctx.progress(p), |l| ctx.log(l))
+    run(
+        deck,
+        dir,
+        env,
+        Some(ctx.cancel_flag()),
+        |p| ctx.progress(p),
+        |l| ctx.log(l),
+    )
 }
 
 /// Commands that run an analysis: sent as `bg_<command>`.
-const ANALYSES: &[&str] = &["op", "tran", "ac", "dc", "noise", "run", "pz", "sens", "tf", "disto", "pss", "sp", "resume"];
+const ANALYSES: &[&str] = &[
+    "op", "tran", "ac", "dc", "noise", "run", "pz", "sens", "tf", "disto", "pss", "sp", "resume",
+];
 
 /// Control-flow words: a block with one of them is not run line by line.
-const CONTROL_FLOW: &[&str] =
-    &["if", "else", "elseif", "end", "while", "repeat", "dowhile", "foreach", "break", "continue", "label", "goto"];
+const CONTROL_FLOW: &[&str] = &[
+    "if", "else", "elseif", "end", "while", "repeat", "dowhile", "foreach", "break", "continue",
+    "label", "goto",
+];
 
 fn first_word(line: &str) -> String {
-    line.split_whitespace().next().unwrap_or("").to_ascii_lowercase()
+    line.split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
 }
 
 /// The lines of the deck's `.control` blocks, in order, or None when they cannot be run
@@ -169,7 +185,9 @@ fn control_lines(deck: &str) -> Option<Vec<String>> {
 /// The percentage of a status line (`tran: 45.2%`), as a fraction.
 fn status_fraction(status: &str) -> Option<f32> {
     let (before, _) = status.split_once('%')?;
-    let number = before.rsplit(|c: char| c.is_whitespace() || c == ':').next()?;
+    let number = before
+        .rsplit(|c: char| c.is_whitespace() || c == ':')
+        .next()?;
     let p: f32 = number.trim().parse().ok()?;
     p.is_finite().then(|| (p / 100.0).clamp(0.0, 1.0))
 }
@@ -182,18 +200,29 @@ fn run_point(req: &Request) -> Result<Outcome> {
     let deck_file = dir.join("deck.sp");
     let raw = dir.join("out.raw");
     let log = dir.join("out.log");
-    std::fs::write(&deck_file, &req.deck).wrap_err_with(|| format!("cannot write {}", deck_file.display()))?;
+    std::fs::write(&deck_file, &req.deck)
+        .wrap_err_with(|| format!("cannot write {}", deck_file.display()))?;
     // A stale result must not pass for a new one.
     for old in [&raw, &log] {
         let _ = std::fs::remove_file(old);
     }
     // Initialises the library the first time; clears the previous circuit and plots.
     let session = Session::open()?;
-    let mut point = Point { session: &session, req, text: String::new(), exit: None, halted: false };
+    let mut point = Point {
+        session: &session,
+        req,
+        text: String::new(),
+        exit: None,
+        halted: false,
+    };
     // ngspice resolves `write out.raw` and relative includes against the process's
     // working directory, and `$VAR` in control lines against its environment.
     let previous_dir = std::env::current_dir().ok();
-    let saved_env: Vec<_> = req.env.iter().map(|(k, _)| (k.clone(), std::env::var_os(k))).collect();
+    let saved_env: Vec<_> = req
+        .env
+        .iter()
+        .map(|(k, _)| (k.clone(), std::env::var_os(k)))
+        .collect();
     // SAFETY: the worker thread is the only one that runs ngspice; the variables are the
     // project's tool environment, the same for every point (docs/NGSPICE.md).
     unsafe {
@@ -203,7 +232,9 @@ fn run_point(req: &Request) -> Result<Outcome> {
             }
         }
     }
-    let result = std::env::set_current_dir(&dir).map_err(Into::into).and_then(|()| point.simulate());
+    let result = std::env::set_current_dir(&dir)
+        .map_err(Into::into)
+        .and_then(|()| point.simulate());
     point.pump();
     if let Some(p) = previous_dir {
         let _ = std::env::set_current_dir(p);
@@ -235,7 +266,12 @@ fn run_point(req: &Request) -> Result<Outcome> {
     if !raw.is_file() {
         bail!("the simulator failed, no raw file\n{}", tail(&text));
     }
-    Ok(Outcome { deck: deck_file, raw, log, measures: parse_measures(&text) })
+    Ok(Outcome {
+        deck: deck_file,
+        raw,
+        log,
+        measures: parse_measures(&text),
+    })
 }
 
 struct Point<'a> {
@@ -261,7 +297,10 @@ impl Point<'_> {
             }
             Event::Status(s) => {
                 if let (Some((done, of)), Some(f)) = (analysis, status_fraction(&s)) {
-                    let _ = self.req.reply.send(Msg::Progress((done as f32 + f) / of as f32));
+                    let _ = self
+                        .req
+                        .reply
+                        .send(Msg::Progress((done as f32 + f) / of as f32));
                 }
             }
             Event::Exit { status, .. } => self.exit = Some(status),
@@ -289,9 +328,14 @@ impl Point<'_> {
             self.session.load_deck(&self.req.deck)?;
             return Ok(());
         };
-        self.session.load_deck(&strip_control_blocks(&self.req.deck))?;
+        self.session
+            .load_deck(&strip_control_blocks(&self.req.deck))?;
         self.pump();
-        let of = lines.iter().filter(|l| ANALYSES.contains(&first_word(l).as_str())).count().max(1);
+        let of = lines
+            .iter()
+            .filter(|l| ANALYSES.contains(&first_word(l).as_str()))
+            .count()
+            .max(1);
         let mut done = 0;
         for line in &lines {
             if self.cancelled() || self.exit.is_some() {
@@ -315,7 +359,11 @@ impl Point<'_> {
     /// Follow the background thread until it ends; halt it when the job is cancelled.
     fn wait_background(&mut self, done: usize, of: usize) {
         loop {
-            match self.session.events().recv_timeout(Duration::from_millis(20)) {
+            match self
+                .session
+                .events()
+                .recv_timeout(Duration::from_millis(20))
+            {
                 Ok(ev) => self.handle(ev, Some((done, of))),
                 Err(_) if !self.session.is_running() => break,
                 Err(_) => {}
@@ -339,9 +387,15 @@ mod tests {
     #[test]
     fn reads_the_control_lines() {
         let deck = "t\nr1 a 0 1\n.control\n* c\nset filetype=binary\ntran 1n 1u\nwrite out.raw all\nquit\nmeas x\n.endc\n.end\n";
-        assert_eq!(control_lines(deck).unwrap(), ["set filetype=binary", "tran 1n 1u", "write out.raw all"]);
+        assert_eq!(
+            control_lines(deck).unwrap(),
+            ["set filetype=binary", "tran 1n 1u", "write out.raw all"]
+        );
         assert!(control_lines("t\n.control\nforeach v 1 2\ntran 1n 1u\nend\n.endc\n").is_none());
-        assert_eq!(control_lines("t\nr1 a 0 1\n.end\n").unwrap(), Vec::<String>::new());
+        assert_eq!(
+            control_lines("t\nr1 a 0 1\n.end\n").unwrap(),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -374,7 +428,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut progress = vec![];
         let mut lines = 0;
-        let o = run(deck, &dir.path().join("a"), &[], None, |p| progress.push(p), |_| lines += 1).unwrap();
+        let o = run(
+            deck,
+            &dir.path().join("a"),
+            &[],
+            None,
+            |p| progress.push(p),
+            |_| lines += 1,
+        )
+        .unwrap();
         assert!(o.raw.is_file() && o.log.is_file() && o.deck.is_file());
         assert!(o.measures["vmax"] > 0.5, "{:?}", o.measures);
         assert_eq!(progress.last(), Some(&1.0));
@@ -391,7 +453,15 @@ mod tests {
             f.store(true, Ordering::SeqCst);
         });
         let t = std::time::Instant::now();
-        let err = run(&long, &dir.path().join("c"), &[], Some(flag), |_| {}, |_| {}).unwrap_err();
+        let err = run(
+            &long,
+            &dir.path().join("c"),
+            &[],
+            Some(flag),
+            |_| {},
+            |_| {},
+        )
+        .unwrap_err();
         assert!(format!("{err}").contains("cancelled"), "{err}");
         assert!(t.elapsed() < Duration::from_secs(20), "{:?}", t.elapsed());
         // And the instance still works afterwards.

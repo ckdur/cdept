@@ -310,8 +310,7 @@ pub fn save(dir: &Path, tech: &Tech, catalog: &Catalog) -> Result<()> {
     let file = tech_file(dir);
     if file.is_file() {
         let backup = dir.join(BACKUP_FILE);
-        fs::copy(&file, &backup)
-            .wrap_err_with(|| format!("cannot write {}", backup.display()))?;
+        fs::copy(&file, &backup).wrap_err_with(|| format!("cannot write {}", backup.display()))?;
     }
     write(&file, &tech_text(tech)?)?;
     write(&catalog_file(dir), &catalog_text(catalog)?)

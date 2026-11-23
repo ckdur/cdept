@@ -704,7 +704,9 @@ impl Project {
         let parsed = match (item.as_str(), item.as_integer(), item.as_float()) {
             (Some(text), _, _) => crate::jobs::parse_duration(text).map_err(|e| format!("{e}")),
             (_, Some(n), _) if n >= 0 => Ok(std::time::Duration::from_secs(n as u64)),
-            (_, _, Some(f)) if f >= 0.0 && f.is_finite() => Ok(std::time::Duration::from_secs_f64(f)),
+            (_, _, Some(f)) if f >= 0.0 && f.is_finite() => {
+                Ok(std::time::Duration::from_secs_f64(f))
+            }
             _ => Err("it must be a duration such as \"10m\"".to_string()),
         };
         match parsed {
@@ -1667,7 +1669,12 @@ mod tests {
         assert_eq!(vars.get("n").map(String::as_str), Some("3"));
         assert_eq!(vars.get("flag").map(String::as_str), Some("true"));
         assert!(!vars.contains_key("bad"));
-        assert!(project.warnings.iter().any(|w| w.contains("lvs_variables: bad")));
+        assert!(
+            project
+                .warnings
+                .iter()
+                .any(|w| w.contains("lvs_variables: bad"))
+        );
     }
 
     #[test]
@@ -1685,7 +1692,13 @@ mod tests {
         assert_eq!(load("[magic]\ntimeout = \"0\"\n").magic.timeout, d(0));
         let bad = load("[magic]\ntimeout = \"soon\"\n");
         assert_eq!(bad.magic.timeout, None);
-        assert!(bad.warnings.iter().any(|w| w.starts_with("[magic] timeout")), "{:?}", bad.warnings);
+        assert!(
+            bad.warnings
+                .iter()
+                .any(|w| w.starts_with("[magic] timeout")),
+            "{:?}",
+            bad.warnings
+        );
     }
 
     #[test]
@@ -2218,7 +2231,11 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
 
     fn main_liberty(project: &Project) -> Option<String> {
         let lib = project.library("cells")?;
-        let entry = lib.cell("inv")?.entries.iter().find(|e| e.kind == crate::ViewKind::Liberty)?;
+        let entry = lib
+            .cell("inv")?
+            .entries
+            .iter()
+            .find(|e| e.kind == crate::ViewKind::Liberty)?;
         entry
             .main_file
             .as_ref()
@@ -2262,8 +2279,14 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
         let project =
             Project::create_for_pdk(&root, None, &pdk, &tech, &Catalog::default()).unwrap();
         let warnings = project.warnings.join("\n");
-        assert!(warnings.contains("library cells names liberty"), "{warnings}");
-        assert!(warnings.contains("cells_gone.lib, which does not exist"), "{warnings}");
+        assert!(
+            warnings.contains("library cells names liberty"),
+            "{warnings}"
+        );
+        assert!(
+            warnings.contains("cells_gone.lib, which does not exist"),
+            "{warnings}"
+        );
         assert!(warnings.contains("names gds"), "{warnings}");
         assert!(warnings.contains("cdept tech refresh"), "{warnings}");
         // The folder scan still gives the view.
@@ -2292,7 +2315,10 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
         fs::write(&config, "set ::env(A) 2\n").unwrap();
         project.reload().unwrap();
         let warnings = project.warnings.join("\n");
-        assert!(warnings.contains("configuration changed since the scan"), "{warnings}");
+        assert!(
+            warnings.contains("configuration changed since the scan"),
+            "{warnings}"
+        );
     }
 
     #[test]
@@ -2308,7 +2334,11 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
         crate::tech::file::save(&root, &other, &Catalog::default()).unwrap();
         let backup = fs::read_to_string(root.join(crate::tech::file::BACKUP_FILE)).unwrap();
         assert_eq!(backup, first);
-        assert!(fs::read_to_string(root.join("tech.toml")).unwrap().contains("other"));
+        assert!(
+            fs::read_to_string(root.join("tech.toml"))
+                .unwrap()
+                .contains("other")
+        );
     }
 
     #[test]

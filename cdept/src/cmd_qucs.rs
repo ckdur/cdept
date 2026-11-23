@@ -48,7 +48,14 @@ pub enum QucsCommand {
 pub fn run(command: QucsCommand, project: Option<&Project>) -> Result<()> {
     let need = || project.ok_or_else(|| eyre!("no project (run inside one or use --project)"));
     match command {
-        QucsCommand::Export { library, cell, view, flavour, for_sim, out } => {
+        QucsCommand::Export {
+            library,
+            cell,
+            view,
+            flavour,
+            for_sim,
+            out,
+        } => {
             let project = need()?;
             let file = qucs::schematic_for(project, &library, &cell, view.as_deref(), "qucs")?;
             let flavour = match flavour {
@@ -57,7 +64,12 @@ pub fn run(command: QucsCommand, project: Option<&Project>) -> Result<()> {
                 FlavourArg::Cdl => Flavour::Cdl,
             };
             let out = out.unwrap_or_else(|| {
-                project.root.join("batch").join("qucs").join(&library).join(format!("{cell}.cir"))
+                project
+                    .root
+                    .join("batch")
+                    .join("qucs")
+                    .join(&library)
+                    .join(format!("{cell}.cir"))
             });
             qucs::export(Some(project), &file, &out, flavour)?;
             if for_sim {
@@ -66,7 +78,11 @@ pub fn run(command: QucsCommand, project: Option<&Project>) -> Result<()> {
             }
             println!("{}", out.display());
         }
-        QucsCommand::Open { library, cell, view } => {
+        QucsCommand::Open {
+            library,
+            cell,
+            view,
+        } => {
             let project = need()?;
             let file = qucs::schematic_for(project, &library, &cell, view.as_deref(), "qucs")?;
             qucs::launch(Some(project), Some(&file))?;

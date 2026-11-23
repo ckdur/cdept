@@ -23,7 +23,11 @@ fn project(root: &Path, tech: bool) -> Project {
         let models = root.join("models");
         std::fs::create_dir_all(&models).unwrap();
         for (corner, r) in [("tt", "1k"), ("ff", "800"), ("ss", "1.2k")] {
-            std::fs::write(models.join(format!("{corner}.lib")), format!("* corner {corner}\n.param rval={r}\n")).unwrap();
+            std::fs::write(
+                models.join(format!("{corner}.lib")),
+                format!("* corner {corner}\n.param rval={r}\n"),
+            )
+            .unwrap();
         }
         std::fs::write(
             root.join("tech.toml"),
@@ -53,7 +57,16 @@ fn params(sheet: &Mapping) -> &Mapping {
 }
 
 fn setup_of(project: &Project, cell: &str, view: &str) -> Setup {
-    Setup::load(&project.library("cells").unwrap().path.join(cell).join(view).join("setup.toml")).unwrap()
+    Setup::load(
+        &project
+            .library("cells")
+            .unwrap()
+            .path
+            .join(cell)
+            .join(view)
+            .join("setup.toml"),
+    )
+    .unwrap()
 }
 
 #[test]
@@ -66,7 +79,11 @@ fn import_maps_the_datasheet_and_reports_the_rest() {
     assert!(plan.ok(), "{lines}");
     // Four simulated parameters and the suite; the layout checks are kept in the suite.
     let views: Vec<&str> = plan.files.iter().map(|f| f.view.as_str()).collect();
-    assert_eq!(views, ["dc_params", "offset", "gain_mc", "transient", "datasheet"], "{lines}");
+    assert_eq!(
+        views,
+        ["dc_params", "offset", "gain_mc", "transient", "datasheet"],
+        "{lines}"
+    );
     for needle in [
         "corner ss, tt, ff -> corners",
         "vdd 1.08, 1.2, 1.32 -> [[sweep]]",
@@ -103,7 +120,10 @@ fn import_maps_the_datasheet_and_reports_the_rest() {
     assert_eq!(cace_table["units"]["pm"].as_str(), Some("°"));
     let mc = setup_of(&p, "ota", "gain_mc").montecarlo.unwrap();
     assert_eq!(mc.runs, 20);
-    assert!(mc.corner.is_empty(), "the technology's mc corner is the default");
+    assert!(
+        mc.corner.is_empty(),
+        "the technology's mc corner is the default"
+    );
     // The suite lists the tests that are not skipped and loads.
     let suite = sim::suite::open(&p, "cells", "ota", "datasheet").unwrap();
     let tests: Vec<&str> = suite.tests.iter().map(|t| t.view.as_str()).collect();
@@ -113,7 +133,15 @@ fn import_maps_the_datasheet_and_reports_the_rest() {
     let again = import::plan(&p, DEMO, &options("ota")).unwrap();
     assert!(!again.ok());
     assert!(again.blockers[0].contains("exists"), "{:?}", again.blockers);
-    let over = import::plan(&p, DEMO, &import::ImportOptions { overwrite: true, ..options("ota") }).unwrap();
+    let over = import::plan(
+        &p,
+        DEMO,
+        &import::ImportOptions {
+            overwrite: true,
+            ..options("ota")
+        },
+    )
+    .unwrap();
     assert!(over.ok() && over.files.iter().all(|f| f.exists));
 }
 
@@ -129,7 +157,11 @@ fn export_gives_back_what_was_imported() {
     assert!(out.suite && out.view == "datasheet");
     let back = cace::parse(&out.text).unwrap();
     // Every parameter, in order, as it was: conditions, spec limits, tools, plots.
-    let keys = |m: &Mapping| m.keys().map(|k| k.as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let keys = |m: &Mapping| {
+        m.keys()
+            .map(|k| k.as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
     assert_eq!(keys(params(&back)), keys(params(&original)));
     for (k, v) in params(&original) {
         assert_eq!(&params(&back)[k], v, "parameter {k:?}:\n{}", out.text);
@@ -140,18 +172,47 @@ fn export_gives_back_what_was_imported() {
             assert_eq!(&back[k], v, "{k:?}");
         }
     }
-    assert!(out.notes.iter().any(|n| n.contains("has not been run")), "{:?}", out.notes);
+    assert!(
+        out.notes.iter().any(|n| n.contains("has not been run")),
+        "{:?}",
+        out.notes
+    );
 
     // Edit the testbenches, export again: the CDePT values win.
-    let dc_file = p.library("cells").unwrap().path.join("ota/dc_params/setup.toml");
+    let dc_file = p
+        .library("cells")
+        .unwrap()
+        .path
+        .join("ota/dc_params/setup.toml");
     let text = std::fs::read_to_string(&dc_file).unwrap();
-    let text = text.replace("temperatures = [-40.0, 27.0, 125.0]", "temperatures = [27.0]");
-    let text = text.replace("name = \"a0\"\nmin = 50.0", "name = \"a0\"\nmin = 55.0\nmax = 1000.0");
+    let text = text.replace(
+        "temperatures = [-40.0, 27.0, 125.0]",
+        "temperatures = [27.0]",
+    );
+    let text = text.replace(
+        "name = \"a0\"\nmin = 50.0",
+        "name = \"a0\"\nmin = 55.0\nmax = 1000.0",
+    );
     std::fs::write(&dc_file, text).unwrap();
-    let mc_file = p.library("cells").unwrap().path.join("ota/gain_mc/setup.toml");
-    let text = std::fs::read_to_string(&mc_file).unwrap().replace("runs = 20", "runs = 5");
+    let mc_file = p
+        .library("cells")
+        .unwrap()
+        .path
+        .join("ota/gain_mc/setup.toml");
+    let text = std::fs::read_to_string(&mc_file)
+        .unwrap()
+        .replace("runs = 20", "runs = 5");
     std::fs::write(&mc_file, text).unwrap();
-    let out = export::export(&p, "cells", "ota", &export::ExportOptions { results: false, ..Default::default() }).unwrap();
+    let out = export::export(
+        &p,
+        "cells",
+        "ota",
+        &export::ExportOptions {
+            results: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     let back = cace::parse(&out.text).unwrap();
     let dc = params(&back)["dc_params"].as_mapping().unwrap();
     let temp = dc["conditions"]["temperature"].as_mapping().unwrap();
@@ -160,18 +221,35 @@ fn export_gives_back_what_was_imported() {
     assert_eq!(dc["spec"]["a0"]["minimum"]["value"], Value::from(55));
     assert_eq!(dc["spec"]["a0"]["maximum"]["value"], Value::from(1000));
     // The untouched parts stay as read.
-    assert_eq!(dc["conditions"]["vdd"], params(&original)["dc_params"]["conditions"]["vdd"]);
-    assert_eq!(dc["spec"]["ugf"], params(&original)["dc_params"]["spec"]["ugf"]);
-    let iterations = params(&back)["gain_mc"]["conditions"]["iterations"].as_mapping().unwrap();
+    assert_eq!(
+        dc["conditions"]["vdd"],
+        params(&original)["dc_params"]["conditions"]["vdd"]
+    );
+    assert_eq!(
+        dc["spec"]["ugf"],
+        params(&original)["dc_params"]["spec"]["ugf"]
+    );
+    let iterations = params(&back)["gain_mc"]["conditions"]["iterations"]
+        .as_mapping()
+        .unwrap();
     assert_eq!(iterations.get("maximum"), Some(&Value::from(5)));
-    assert!(out.notes.iter().any(|n| n.contains("condition temperature is 27")), "{:?}", out.notes);
+    assert!(
+        out.notes
+            .iter()
+            .any(|n| n.contains("condition temperature is 27")),
+        "{:?}",
+        out.notes
+    );
 
     // A testbench alone takes the header of the suite it came from.
     let one = export::export(
         &p,
         "cells",
         "ota",
-        &export::ExportOptions { view: Some("offset".into()), results: false },
+        &export::ExportOptions {
+            view: Some("offset".into()),
+            results: false,
+        },
     )
     .unwrap();
     let back = cace::parse(&one.text).unwrap();
@@ -189,7 +267,11 @@ fn a_testbench_that_was_not_imported_becomes_a_parameter() {
     let view = p.library("cells").unwrap().path.join("tb/testbench");
     std::fs::create_dir_all(&view).unwrap();
     std::fs::create_dir_all(view.parent().unwrap().join("schematic")).unwrap();
-    std::fs::write(view.parent().unwrap().join("schematic/tb.sch"), "v {xschem version=3.4.5 file_version=1.2\n}\n").unwrap();
+    std::fs::write(
+        view.parent().unwrap().join("schematic/tb.sch"),
+        "v {xschem version=3.4.5 file_version=1.2\n}\n",
+    )
+    .unwrap();
     std::fs::write(
         view.join("setup.toml"),
         "corners = [\"tt\", \"ss\"]\ntemperatures = [27]\n[variables]\nvdd = \"1.2\"\n[[sweep]]\nvariable = \"cl\"\nvalues = [\"1p\", \"2p\"]\n[[spec]]\nname = \"tpd\"\nmax = 3e-10\n",
@@ -202,16 +284,32 @@ fn a_testbench_that_was_not_imported_becomes_a_parameter() {
     assert_eq!(back["cace_format"], Value::from(5.2));
     let param = params(&back)["testbench"].as_mapping().unwrap();
     assert_eq!(param["tool"]["ngspice"]["template"], Value::from("tb.sch"));
-    let corner: Vec<&str> = param["conditions"]["corner"]["enumerate"].as_sequence().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+    let corner: Vec<&str> = param["conditions"]["corner"]["enumerate"]
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
     assert_eq!(corner, ["tt", "ss"]);
     assert_eq!(param["conditions"]["vdd"]["typical"], Value::from(1.2));
     assert_eq!(param["conditions"]["cl"]["enumerate"][0], Value::from("1p"));
     assert_eq!(param["spec"]["tpd"]["maximum"]["value"], Value::from(3e-10));
     // And it imports again into the same table.
-    let plan = import::plan(&p, &out.text, &import::ImportOptions { prefix: "again_".into(), ..options("tb") }).unwrap();
+    let plan = import::plan(
+        &p,
+        &out.text,
+        &import::ImportOptions {
+            prefix: "again_".into(),
+            ..options("tb")
+        },
+    )
+    .unwrap();
     assert!(plan.ok(), "{:?}", plan.blockers);
     let s = Setup::parse(&plan.files[0].text).unwrap();
-    assert_eq!((s.corners.clone(), s.temperatures.clone()), (vec!["tt".to_string(), "ss".into()], vec![27.0]));
+    assert_eq!(
+        (s.corners.clone(), s.temperatures.clone()),
+        (vec!["tt".to_string(), "ss".into()], vec![27.0])
+    );
     assert_eq!(s.specs[0].max, Some(3e-10));
 }
 
@@ -220,15 +318,27 @@ fn an_old_datasheet_or_a_corner_the_technology_lacks_is_reported() {
     let _env = libcdept::testutil::hermetic_env();
     let dir = tempfile::tempdir().unwrap();
     let p = project(dir.path(), true);
-    let e = import::plan(&p, "electrical_parameters: []\nparameters: {}\n", &options("x")).unwrap_err();
+    let e = import::plan(
+        &p,
+        "electrical_parameters: []\nparameters: {}\n",
+        &options("x"),
+    )
+    .unwrap_err();
     assert!(format!("{e:#}").contains("4.x"));
     let sheet = "name: x\ndescription: d\nPDK: made-up\ncace_format: 5.2\nparameters:\n  p:\n    tool:\n      ngspice:\n        template: t.sch\n    conditions:\n      corner:\n        enumerate: [tt, fs]\n";
     let plan = import::plan(&p, sheet, &options("x")).unwrap();
     let lines = plan.lines(&p.root).join("\n");
-    assert!(lines.contains("corner 'fs' is not a corner set of the technology"), "{lines}");
+    assert!(
+        lines.contains("corner 'fs' is not a corner set of the technology"),
+        "{lines}"
+    );
     let only_drc = "name: x\nparameters:\n  drc:\n    tool: magic_drc\n";
     let plan = import::plan(&p, only_drc, &options("x")).unwrap();
-    assert!(!plan.ok() && plan.blockers[0].contains("no parameter is simulated"), "{:?}", plan.blockers);
+    assert!(
+        !plan.ok() && plan.blockers[0].contains("no parameter is simulated"),
+        "{:?}",
+        plan.blockers
+    );
 }
 
 /// An RC delay: the datasheet's corners only change the resistor (the made-up
@@ -291,7 +401,15 @@ fn an_imported_testbench_runs_with_ngspice() {
     std::fs::create_dir_all(&sch).unwrap();
     std::fs::write(sch.join("rc.sch"), RC_SCH).unwrap();
     p.rescan();
-    let plan = import::plan(&p, RC_SHEET, &import::ImportOptions { source: "rc.yaml".into(), ..options("rc") }).unwrap();
+    let plan = import::plan(
+        &p,
+        RC_SHEET,
+        &import::ImportOptions {
+            source: "rc.yaml".into(),
+            ..options("rc")
+        },
+    )
+    .unwrap();
     assert!(plan.ok(), "{:?}", plan.blockers);
     import::apply(&plan).unwrap();
     // The datasheet's template measured tdly; here the setup does.
@@ -313,9 +431,16 @@ fn an_imported_testbench_runs_with_ngspice() {
     let tdly: Vec<f64> = results
         .iter()
         .map(|r| {
-            let out = r.outcome.as_ref().unwrap_or_else(|e| panic!("{}: {e:#}", r.point.name()));
+            let out = r
+                .outcome
+                .as_ref()
+                .unwrap_or_else(|e| panic!("{}: {e:#}", r.point.name()));
             *out.measures.get("tdly").unwrap_or_else(|| {
-                panic!("no tdly: {}\n{}", std::fs::read_to_string(&out.log).unwrap_or_default(), std::fs::read_to_string(&out.deck).unwrap_or_default())
+                panic!(
+                    "no tdly: {}\n{}",
+                    std::fs::read_to_string(&out.log).unwrap_or_default(),
+                    std::fs::read_to_string(&out.deck).unwrap_or_default()
+                )
             })
         })
         .collect();
@@ -332,5 +457,8 @@ fn an_imported_testbench_runs_with_ngspice() {
     assert!((max - tdly[2] * 1e9).abs() < 1e-6, "{max} {tdly:?}");
     assert_eq!(r["tdly"]["maximum"]["status"], Value::from("pass"));
     // Spec and conditions are those of the datasheet.
-    assert_eq!(params(&back)["delay"]["spec"], cace::parse(RC_SHEET).unwrap()["parameters"]["delay"]["spec"]);
+    assert_eq!(
+        params(&back)["delay"]["spec"],
+        cace::parse(RC_SHEET).unwrap()["parameters"]["delay"]["spec"]
+    );
 }

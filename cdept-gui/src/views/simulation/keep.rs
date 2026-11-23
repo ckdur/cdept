@@ -20,7 +20,9 @@ fn same(a: &Value, b: &Value) -> bool {
         _ => None,
     };
     match (a, b) {
-        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| same(p, q)),
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| same(p, q))
+        }
         (Value::Table(x), Value::Table(y)) => {
             x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same(v, w)))
         }
@@ -43,7 +45,11 @@ pub(super) fn merge(original: &str, new_text: &str) -> String {
     ) else {
         return new_text.to_string();
     };
-    let gone: Vec<String> = old.keys().filter(|k| !new.contains_key(*k)).cloned().collect();
+    let gone: Vec<String> = old
+        .keys()
+        .filter(|k| !new.contains_key(*k))
+        .cloned()
+        .collect();
     for k in gone {
         doc.remove(&k);
     }
@@ -51,7 +57,9 @@ pub(super) fn merge(original: &str, new_text: &str) -> String {
         if old.get(k).is_some_and(|o| same(o, v)) {
             continue;
         }
-        let Some(mut item) = new_doc.get(k).cloned() else { continue };
+        let Some(mut item) = new_doc.get(k).cloned() else {
+            continue;
+        };
         match (doc.get_mut(k), &mut item) {
             // A plain value: the comments around it stay.
             (Some(Item::Value(old_value)), Item::Value(new_value)) => {
@@ -64,7 +72,9 @@ pub(super) fn merge(original: &str, new_text: &str) -> String {
                 doc.insert(k, item);
             }
             (Some(Item::ArrayOfTables(old_array)), Item::ArrayOfTables(new_array)) => {
-                if let (Some(first_old), Some(first_new)) = (old_array.iter().next(), new_array.iter_mut().next()) {
+                if let (Some(first_old), Some(first_new)) =
+                    (old_array.iter().next(), new_array.iter_mut().next())
+                {
                     *first_new.decor_mut() = first_old.decor().clone();
                 }
                 doc.insert(k, item);
@@ -94,7 +104,13 @@ mod tests {
     fn changes_keep_the_rest_and_the_comments_around() {
         let form = "corners = [\"tt\", \"ff\"]\ntemperatures = [27.0]\n\n[variables]\nvdd = \"1.2\"\n\n[[spec]]\nname = \"tpd\"\nmax = 4e-10\n\n[[sweep]]\nvariable = \"vdd\"\nvalues = [\"1.08\", \"1.2\"]\n\n[montecarlo]\nruns = 5\nseed = 1\n";
         let out = merge(FILE, form);
-        for keep in ["# Testbench of the inverter", "# which corners", "# typical only", "# the supply", "# delay"] {
+        for keep in [
+            "# Testbench of the inverter",
+            "# which corners",
+            "# typical only",
+            "# the supply",
+            "# delay",
+        ] {
             assert!(out.contains(keep), "{keep} lost:\n{out}");
         }
         let setup: toml::Table = toml::from_str(&out).unwrap();
@@ -103,16 +119,35 @@ mod tests {
         assert_eq!(setup["sweep"][0]["variable"].as_str(), Some("vdd"));
         assert_eq!(setup["montecarlo"]["runs"].as_integer(), Some(5));
         // removing them again drops only them
-        let back = merge(&out, "corners = [\"tt\", \"ff\"]\ntemperatures = [27.0]\n\n[variables]\nvdd = \"1.2\"\n\n[[spec]]\nname = \"tpd\"\nmax = 4e-10\n");
-        assert!(!back.contains("sweep") && !back.contains("montecarlo"), "{back}");
-        assert!(back.contains("# the supply") && back.contains("# which corners"), "{back}");
+        let back = merge(
+            &out,
+            "corners = [\"tt\", \"ff\"]\ntemperatures = [27.0]\n\n[variables]\nvdd = \"1.2\"\n\n[[spec]]\nname = \"tpd\"\nmax = 4e-10\n",
+        );
+        assert!(
+            !back.contains("sweep") && !back.contains("montecarlo"),
+            "{back}"
+        );
+        assert!(
+            back.contains("# the supply") && back.contains("# which corners"),
+            "{back}"
+        );
     }
 
     #[test]
     fn a_new_plain_key_goes_above_the_tables() {
-        let out = merge(FILE, "corners = [\"tt\"]\ntemperatures = [27]\nsimulator = \"xyce\"\n\n[variables]\nvdd = \"1.2\"\n\n[[spec]]\nname = \"tpd\"\nmax = 3e-10\n");
+        let out = merge(
+            FILE,
+            "corners = [\"tt\"]\ntemperatures = [27]\nsimulator = \"xyce\"\n\n[variables]\nvdd = \"1.2\"\n\n[[spec]]\nname = \"tpd\"\nmax = 3e-10\n",
+        );
         let t: toml::Table = toml::from_str(&out).unwrap();
         assert_eq!(t["simulator"].as_str(), Some("xyce"), "{out}");
-        assert!(t["variables"].as_table().unwrap().get("simulator").is_none(), "{out}");
+        assert!(
+            t["variables"]
+                .as_table()
+                .unwrap()
+                .get("simulator")
+                .is_none(),
+            "{out}"
+        );
     }
 }

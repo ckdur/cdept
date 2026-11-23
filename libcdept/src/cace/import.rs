@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use eyre::{Result, WrapErr, bail, eyre};
 
 use super::{
-    Mapping, Value, brief, condition_values, mapping, num_text, scalar_number, scalar_text, to_yaml, tool_of,
-    unit_scale,
+    Mapping, Value, brief, condition_values, mapping, num_text, scalar_number, scalar_text,
+    to_yaml, tool_of, unit_scale,
 };
 use crate::Project;
 use crate::sim::setup::{SETUP_FILE, Setup};
@@ -105,7 +105,12 @@ impl ImportPlan {
     pub fn lines(&self, root: &Path) -> Vec<String> {
         let mut out = vec![self.summary.clone()];
         for f in &self.files {
-            let file = f.file.strip_prefix(root).unwrap_or(&f.file).display().to_string();
+            let file = f
+                .file
+                .strip_prefix(root)
+                .unwrap_or(&f.file)
+                .display()
+                .to_string();
             let verb = if f.exists { "replace" } else { "create" };
             out.push(format!("  {verb} {file}: {}", f.what));
         }
@@ -119,11 +124,17 @@ impl ImportPlan {
             }
             out.push(match level {
                 Level::Mapped => "mapped:".into(),
-                Level::Kept => "kept in [cace] (not used by CDePT, given back by an export):".into(),
+                Level::Kept => {
+                    "kept in [cace] (not used by CDePT, given back by an export):".into()
+                }
                 Level::Warning => "warnings:".into(),
             });
             for n in notes {
-                let who = if n.parameter.is_empty() { String::new() } else { format!("{}: ", n.parameter) };
+                let who = if n.parameter.is_empty() {
+                    String::new()
+                } else {
+                    format!("{}: ", n.parameter)
+                };
                 out.push(format!("  {who}{}", n.text));
             }
         }
@@ -154,7 +165,12 @@ impl Mapped {
             Some(n) => n as usize,
             None => self.corners.len().max(1),
         };
-        base * self.temperatures.len().max(1) * self.sweeps.iter().map(|(_, v)| v.len().max(1)).product::<usize>()
+        base * self.temperatures.len().max(1)
+            * self
+                .sweeps
+                .iter()
+                .map(|(_, v)| v.len().max(1))
+                .product::<usize>()
     }
 }
 
@@ -163,13 +179,27 @@ impl Mapped {
 pub(crate) fn setup_values(setup: &Setup, collate: &str) -> BTreeMap<String, Vec<String>> {
     let mut out = BTreeMap::new();
     if !setup.temperatures.is_empty() {
-        out.insert("temperature".to_string(), setup.temperatures.iter().map(|t| num_text(*t)).collect());
+        out.insert(
+            "temperature".to_string(),
+            setup.temperatures.iter().map(|t| num_text(*t)).collect(),
+        );
     }
     if let Some(mc) = &setup.montecarlo {
-        let corner = if mc.corner.is_empty() { "mc".to_string() } else { mc.corner.clone() };
+        let corner = if mc.corner.is_empty() {
+            "mc".to_string()
+        } else {
+            mc.corner.clone()
+        };
         out.insert("corner".to_string(), vec![corner]);
-        let name = if collate.is_empty() { "iterations" } else { collate };
-        out.insert(name.to_string(), (1..=mc.runs).map(|i| i.to_string()).collect());
+        let name = if collate.is_empty() {
+            "iterations"
+        } else {
+            collate
+        };
+        out.insert(
+            name.to_string(),
+            (1..=mc.runs).map(|i| i.to_string()).collect(),
+        );
     } else if !setup.corners.is_empty() {
         out.insert("corner".to_string(), setup.corners.clone());
     }
@@ -187,7 +217,11 @@ pub(crate) fn setup_values(setup: &Setup, collate: &str) -> BTreeMap<String, Vec
 /// The corner sets of the project's technology (its default model set), if it has any.
 pub(crate) fn known_corners(project: &Project) -> Option<Vec<String>> {
     let tech = project.tech.as_ref()?;
-    let set = tech.models.default.clone().unwrap_or_else(|| "ngspice".into());
+    let set = tech
+        .models
+        .default
+        .clone()
+        .unwrap_or_else(|| "ngspice".into());
     let corners = tech.models.corners(&set);
     (!corners.is_empty()).then(|| corners.into_iter().map(String::from).collect())
 }
@@ -203,7 +237,10 @@ pub(crate) fn map_corner(name: &str, known: Option<&[String]>) -> (String, Optio
         return (name.to_string(), None);
     }
     if let Some(k) = known.iter().find(|k| k.eq_ignore_ascii_case(name)) {
-        return (k.clone(), Some(format!("corner '{name}' is the technology's '{k}'")));
+        return (
+            k.clone(),
+            Some(format!("corner '{name}' is the technology's '{k}'")),
+        );
     }
     let synonym = match name.to_ascii_lowercase().as_str() {
         "typical" | "typ" | "nom" | "nominal" => "tt",
@@ -214,7 +251,10 @@ pub(crate) fn map_corner(name: &str, known: Option<&[String]>) -> (String, Optio
     if !synonym.is_empty()
         && let Some(k) = known.iter().find(|k| k.as_str() == synonym)
     {
-        return (k.clone(), Some(format!("corner '{name}' taken as the technology's '{k}'")));
+        return (
+            k.clone(),
+            Some(format!("corner '{name}' taken as the technology's '{k}'")),
+        );
     }
     (
         name.to_string(),
@@ -235,7 +275,10 @@ const COND_INFO: &[&str] = &["description", "display", "unit"];
 /// datasheet's default, with the parameter's description, display and unit over it and
 /// the parameter's values instead of the default's when it has any. CACE only takes the
 /// conditions its template uses; without the template every one is taken.
-pub(crate) fn merged_conditions(defaults: Option<&Mapping>, own: Option<&Mapping>) -> Vec<Condition> {
+pub(crate) fn merged_conditions(
+    defaults: Option<&Mapping>,
+    own: Option<&Mapping>,
+) -> Vec<Condition> {
     let mut out: Vec<Condition> = vec![];
     for (k, v) in defaults.into_iter().flatten() {
         if let (Some(name), Some(m)) = (scalar_text(k), v.as_mapping()) {
@@ -243,7 +286,9 @@ pub(crate) fn merged_conditions(defaults: Option<&Mapping>, own: Option<&Mapping
         }
     }
     for (k, v) in own.into_iter().flatten() {
-        let (Some(name), Some(m)) = (scalar_text(k), v.as_mapping()) else { continue };
+        let (Some(name), Some(m)) = (scalar_text(k), v.as_mapping()) else {
+            continue;
+        };
         match out.iter_mut().find(|(n, _, _)| *n == name) {
             Some((_, merged, is_own)) => {
                 *is_own = true;
@@ -252,7 +297,9 @@ pub(crate) fn merged_conditions(defaults: Option<&Mapping>, own: Option<&Mapping
                         merged.insert(Value::from(*key), v.clone());
                     }
                 }
-                let has_values = m.keys().any(|k| !COND_INFO.contains(&k.as_str().unwrap_or("")));
+                let has_values = m
+                    .keys()
+                    .any(|k| !COND_INFO.contains(&k.as_str().unwrap_or("")));
                 if has_values {
                     merged.retain(|k, _| COND_INFO.contains(&k.as_str().unwrap_or("")));
                     for (k, v) in m {
@@ -302,37 +349,58 @@ pub(crate) fn map_conditions(
     kept: &mut Vec<String>,
 ) -> Mapped {
     let mut m = Mapped::default();
-    let collate = tool_args.get("collate").and_then(scalar_text).unwrap_or_default();
-    let corner_values: Vec<String> =
-        conditions.iter().find(|(n, _, _)| n == "corner").map(|(_, c, _)| scaled_values(c)).unwrap_or_default();
+    let collate = tool_args
+        .get("collate")
+        .and_then(scalar_text)
+        .unwrap_or_default();
+    let corner_values: Vec<String> = conditions
+        .iter()
+        .find(|(n, _, _)| n == "corner")
+        .map(|(_, c, _)| scaled_values(c))
+        .unwrap_or_default();
     let monte_carlo = corner_values.len() == 1 && corner_values[0].eq_ignore_ascii_case("mc");
     for (name, cond, _) in conditions {
         let values = scaled_values(cond);
         let unit = cond.get("unit").and_then(scalar_text).unwrap_or_default();
         let shown = |vals: &[String]| vals.join(", ");
         if values.is_empty() {
-            kept.push(format!("condition {name}: no value (only {})", brief(&Value::Mapping(cond.clone()))));
+            kept.push(format!(
+                "condition {name}: no value (only {})",
+                brief(&Value::Mapping(cond.clone()))
+            ));
             continue;
         }
         if name.contains('[') {
-            kept.push(format!("condition {name}: a bit vector, CDePT has no vector variables"));
+            kept.push(format!(
+                "condition {name}: a bit vector, CDePT has no vector variables"
+            ));
             continue;
         }
         match name.as_str() {
             "temperature" => {
                 let temps: Vec<Option<f64>> = values.iter().map(|v| v.parse().ok()).collect();
                 if temps.iter().any(Option::is_none) {
-                    kept.push(format!("condition temperature: not numbers ({})", shown(&values)));
+                    kept.push(format!(
+                        "condition temperature: not numbers ({})",
+                        shown(&values)
+                    ));
                     continue;
                 }
                 m.temperatures = temps.into_iter().flatten().collect();
-                m.values.insert(name.clone(), m.temperatures.iter().map(|t| num_text(*t)).collect());
+                m.values.insert(
+                    name.clone(),
+                    m.temperatures.iter().map(|t| num_text(*t)).collect(),
+                );
                 notes.push(format!("temperature {} -> temperatures", shown(&values)));
             }
             "corner" if monte_carlo => {
                 let (corner, warning) = map_corner("mc", known);
                 notes.extend(warning);
-                m.mc_corner = if corner == "mc" { String::new() } else { corner.clone() };
+                m.mc_corner = if corner == "mc" {
+                    String::new()
+                } else {
+                    corner.clone()
+                };
                 m.values.insert(name.clone(), vec![corner]);
             }
             "corner" => {
@@ -361,13 +429,22 @@ pub(crate) fn map_conditions(
                     values.len(),
                     values.len()
                 ));
-                m.values.insert(name.clone(), (1..=values.len()).map(|i| i.to_string()).collect());
+                m.values.insert(
+                    name.clone(),
+                    (1..=values.len()).map(|i| i.to_string()).collect(),
+                );
             }
             _ if !word(name) => {
-                kept.push(format!("condition {name}: not a valid design-variable name"));
+                kept.push(format!(
+                    "condition {name}: not a valid design-variable name"
+                ));
             }
             _ => {
-                let scaled = if unit_scale(&unit) != 1.0 { format!(" ({unit} scaled to SI, as CACE does)") } else { String::new() };
+                let scaled = if unit_scale(&unit) != 1.0 {
+                    format!(" ({unit} scaled to SI, as CACE does)")
+                } else {
+                    String::new()
+                };
                 if values.len() == 1 {
                     notes.push(format!("{name} = {} -> [variables]{scaled}", values[0]));
                     m.variables.insert(name.clone(), values[0].clone());
@@ -418,25 +495,47 @@ pub(crate) fn result_unit(param: &Mapping, result: &Mapping) -> String {
 
 /// Whether an entry of a spec (`minimum`, ...) is a bound CDePT checks, and its value
 /// in SI. `None`: not a bound (`any`, `fail: false`, absent, or another calculation).
-pub(crate) fn bound_of(entry_name: &str, entry: Option<&Value>, scale: f64) -> Result<Option<f64>, String> {
+pub(crate) fn bound_of(
+    entry_name: &str,
+    entry: Option<&Value>,
+    scale: f64,
+) -> Result<Option<f64>, String> {
     let Some(entry) = entry else { return Ok(None) };
     let Some(e) = entry.as_mapping() else {
         return Err(format!("{entry_name} is not a mapping"));
     };
-    let (_, fail_default, calc_default, limit_default) =
-        SPEC_DEFAULTS.iter().find(|(n, ..)| *n == entry_name).copied().unwrap_or(("", false, "", ""));
+    let (_, fail_default, calc_default, limit_default) = SPEC_DEFAULTS
+        .iter()
+        .find(|(n, ..)| *n == entry_name)
+        .copied()
+        .unwrap_or(("", false, "", ""));
     let value = e.get("value");
     if value.and_then(Value::as_str) == Some("any") || value.is_none() {
         return Ok(None);
     }
     let Some(v) = value.and_then(scalar_number) else {
-        return Err(format!("{entry_name} value {} is not a number", value.map(brief).unwrap_or_default()));
+        return Err(format!(
+            "{entry_name} value {} is not a number",
+            value.map(brief).unwrap_or_default()
+        ));
     };
-    let fail = e.get("fail").and_then(Value::as_bool).unwrap_or(fail_default);
-    let calc = e.get("calculation").and_then(scalar_text).unwrap_or_else(|| calc_default.into());
-    let limit = e.get("limit").and_then(scalar_text).unwrap_or_else(|| limit_default.into());
+    let fail = e
+        .get("fail")
+        .and_then(Value::as_bool)
+        .unwrap_or(fail_default);
+    let calc = e
+        .get("calculation")
+        .and_then(scalar_text)
+        .unwrap_or_else(|| calc_default.into());
+    let limit = e
+        .get("limit")
+        .and_then(scalar_text)
+        .unwrap_or_else(|| limit_default.into());
     if !fail {
-        return Err(format!("{entry_name} {} is not checked (fail: false)", num_text(v)));
+        return Err(format!(
+            "{entry_name} {} is not checked (fail: false)",
+            num_text(v)
+        ));
     }
     if calc != calc_default || limit != limit_default {
         return Err(format!(
@@ -445,13 +544,21 @@ pub(crate) fn bound_of(entry_name: &str, entry: Option<&Value>, scale: f64) -> R
         ));
     }
     if entry_name == "typical" {
-        return Err(format!("{entry_name} {} with fail: CDePT has no typical check", num_text(v)));
+        return Err(format!(
+            "{entry_name} {} with fail: CDePT has no typical check",
+            num_text(v)
+        ));
     }
     Ok(Some(v * scale))
 }
 
 /// The `[[spec]]` lines of a parameter's spec.
-pub(crate) fn map_specs(param: &Mapping, notes: &mut Vec<String>, kept: &mut Vec<String>, warnings: &mut Vec<String>) -> Vec<SpecLine> {
+pub(crate) fn map_specs(
+    param: &Mapping,
+    notes: &mut Vec<String>,
+    kept: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) -> Vec<SpecLine> {
     let mut out = vec![];
     for (k, v) in mapping(param, "spec").into_iter().flatten() {
         let Some(name) = scalar_text(k) else { continue };
@@ -461,19 +568,32 @@ pub(crate) fn map_specs(param: &Mapping, notes: &mut Vec<String>, kept: &mut Vec
         };
         let unit = result_unit(param, result);
         let scale = unit_scale(&unit);
-        let mut line = SpecLine { name: name.clone(), min: None, max: None, unit: unit.clone() };
+        let mut line = SpecLine {
+            name: name.clone(),
+            min: None,
+            max: None,
+            unit: unit.clone(),
+        };
         for (entry, ..) in SPEC_DEFAULTS {
             match bound_of(entry, result.get(entry), scale) {
                 Ok(Some(b)) if entry == "minimum" => line.min = Some(b),
                 Ok(Some(b)) => line.max = Some(b),
                 Ok(None) => {}
-                Err(e) if e.contains("not checked") || e.contains("typical") => kept.push(format!("spec {name}: {e}")),
+                Err(e) if e.contains("not checked") || e.contains("typical") => {
+                    kept.push(format!("spec {name}: {e}"))
+                }
                 Err(e) => warnings.push(format!("spec {name}: {e}; not a CDePT bound (kept)")),
             }
         }
-        let u = if unit.is_empty() { String::new() } else { format!(" [{unit}]") };
+        let u = if unit.is_empty() {
+            String::new()
+        } else {
+            format!(" [{unit}]")
+        };
         if line.min.is_none() && line.max.is_none() {
-            kept.push(format!("spec {name}{u}: no limit CDePT checks (measured only)"));
+            kept.push(format!(
+                "spec {name}{u}: no limit CDePT checks (measured only)"
+            ));
             continue;
         }
         let range = match (line.min, line.max) {
@@ -490,8 +610,16 @@ pub(crate) fn map_specs(param: &Mapping, notes: &mut Vec<String>, kept: &mut Vec
 
 /// A view name made of a parameter name.
 fn view_name(prefix: &str, name: &str) -> String {
-    let clean: String =
-        name.chars().map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect();
+    let clean: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
     format!("{prefix}{clean}")
 }
 
@@ -500,7 +628,14 @@ fn toml_str(s: &str) -> String {
 }
 
 fn toml_list<T: AsRef<str>>(items: &[T]) -> String {
-    format!("[{}]", items.iter().map(|s| toml_str(s.as_ref())).collect::<Vec<_>>().join(", "))
+    format!(
+        "[{}]",
+        items
+            .iter()
+            .map(|s| toml_str(s.as_ref()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 /// A TOML float, short: `3e-10`, `50.0`, `-40.0`.
@@ -534,13 +669,18 @@ fn setup_text(
     specs: &[SpecLine],
     schematic: &str,
 ) -> String {
-    let template = tool_args.get("template").and_then(scalar_text).unwrap_or_default();
+    let template = tool_args
+        .get("template")
+        .and_then(scalar_text)
+        .unwrap_or_default();
     let measured: Vec<String> = mapping(param, "spec")
         .into_iter()
         .flatten()
         .filter_map(|(k, _)| scalar_text(k))
         .collect();
-    let mut t = format!("# Imported by `cdept cace import` from the CACE datasheet {source}, parameter `{pname}`.\n");
+    let mut t = format!(
+        "# Imported by `cdept cace import` from the CACE datasheet {source}, parameter `{pname}`.\n"
+    );
     t.push_str(&format!(
         "# CACE simulates it with {tool}{}. This testbench netlists {}; its code blocks may run the\n",
         if template.is_empty() { String::new() } else { format!(" on the template {template}") },
@@ -572,7 +712,11 @@ fn setup_text(
         }
     }
     for (name, values) in &m.sweeps {
-        t.push_str(&format!("\n[[sweep]]\nvariable = {}\nvalues = {}\n", toml_str(name), toml_list(values)));
+        t.push_str(&format!(
+            "\n[[sweep]]\nvariable = {}\nvalues = {}\n",
+            toml_str(name),
+            toml_list(values)
+        ));
     }
     if let Some(runs) = m.mc_runs {
         t.push_str(&format!("\n[montecarlo]\nruns = {runs}\nseed = 1\n"));
@@ -609,7 +753,10 @@ fn setup_text(
     if !units.is_empty() {
         cace.insert("units".into(), toml::Value::Table(units));
     }
-    cace.insert("yaml".into(), toml::Value::String(to_yaml(&Value::Mapping(param.clone()))));
+    cace.insert(
+        "yaml".into(),
+        toml::Value::String(to_yaml(&Value::Mapping(param.clone()))),
+    );
     t.push('\n');
     t.push_str(&cace_table(cace));
     t
@@ -618,17 +765,26 @@ fn setup_text(
 /// Plan the import of the datasheet `text` into `options.library` / `options.cell`.
 pub fn plan(project: &Project, text: &str, options: &ImportOptions) -> Result<ImportPlan> {
     let sheet = super::parse(text)?;
-    let lib = project.library(&options.library).ok_or_else(|| eyre!("no library '{}'", options.library))?;
+    let lib = project
+        .library(&options.library)
+        .ok_or_else(|| eyre!("no library '{}'", options.library))?;
     if lib.read_only {
         bail!("library '{}' is read-only", options.library);
     }
     if lib.layout != crate::library::LibraryLayout::Cells {
-        bail!("library '{}' is not a cells library (views live in <cell>/<view>/)", options.library);
+        bail!(
+            "library '{}' is not a cells library (views live in <cell>/<view>/)",
+            options.library
+        );
     }
     if !word(&options.cell.replace('-', "_")) {
         bail!("'{}' is not a valid cell name", options.cell);
     }
-    let source = if options.source.is_empty() { "(text)".to_string() } else { options.source.clone() };
+    let source = if options.source.is_empty() {
+        "(text)".to_string()
+    } else {
+        options.source.clone()
+    };
     let cell_dir = lib.path.join(&options.cell);
     let mut plan = ImportPlan {
         library: options.library.clone(),
@@ -637,28 +793,52 @@ pub fn plan(project: &Project, text: &str, options: &ImportOptions) -> Result<Im
         ..Default::default()
     };
     let note = |plan: &mut ImportPlan, level, parameter: &str, text: String| {
-        plan.notes.push(Note { level, parameter: parameter.into(), text });
+        plan.notes.push(Note {
+            level,
+            parameter: parameter.into(),
+            text,
+        });
     };
     let name = sheet.get("name").and_then(scalar_text).unwrap_or_default();
     let pdk = sheet.get("PDK").and_then(scalar_text).unwrap_or_default();
-    let format = sheet.get("cace_format").and_then(scalar_text).unwrap_or_default();
+    let format = sheet
+        .get("cace_format")
+        .and_then(scalar_text)
+        .unwrap_or_default();
     let params = mapping(&sheet, "parameters").cloned().unwrap_or_default();
     plan.summary = format!(
         "CACE datasheet {source}: {} ({}), cace_format {}, {} parameter(s)",
         if name.is_empty() { "unnamed" } else { &name },
         if pdk.is_empty() { "no PDK" } else { &pdk },
-        if format.is_empty() { "not given" } else { &format },
+        if format.is_empty() {
+            "not given"
+        } else {
+            &format
+        },
         params.len()
     );
     if !format.is_empty() && format != "5.2" {
-        note(&mut plan, Level::Warning, "", format!("cace_format {format}: read as 5.2 (CACE 2.9's format)"));
+        note(
+            &mut plan,
+            Level::Warning,
+            "",
+            format!("cace_format {format}: read as 5.2 (CACE 2.9's format)"),
+        );
     }
-    let tech_pdk = project.technology.clone().or_else(|| project.tech.as_ref().map(|t| t.pdk.name.clone()));
+    let tech_pdk = project
+        .technology
+        .clone()
+        .or_else(|| project.tech.as_ref().map(|t| t.pdk.name.clone()));
     if let Some(t) = &tech_pdk
         && !pdk.is_empty()
         && !t.eq_ignore_ascii_case(&pdk)
     {
-        note(&mut plan, Level::Warning, "", format!("the datasheet is for {pdk}, the project's technology is {t}"));
+        note(
+            &mut plan,
+            Level::Warning,
+            "",
+            format!("the datasheet is for {pdk}, the project's technology is {t}"),
+        );
     }
     for key in sheet.keys().filter_map(scalar_text) {
         let text = match key.as_str() {
@@ -667,16 +847,28 @@ pub fn plan(project: &Project, text: &str, options: &ImportOptions) -> Result<Im
             "default_conditions" => "default_conditions: merged into every testbench's conditions (CACE takes only those its template uses)".to_string(),
             other => format!("{other}: datasheet header, in the suite's [cace] datasheet"),
         };
-        let level = if key == "default_conditions" { Level::Mapped } else { Level::Kept };
+        let level = if key == "default_conditions" {
+            Level::Mapped
+        } else {
+            Level::Kept
+        };
         note(&mut plan, level, "", text);
     }
     let known = known_corners(project);
     if known.is_none() {
-        note(&mut plan, Level::Warning, "", "the project has no technology snapshot with corners: corner names are kept as written".into());
+        note(
+            &mut plan,
+            Level::Warning,
+            "",
+            "the project has no technology snapshot with corners: corner names are kept as written"
+                .into(),
+        );
     }
     let defaults = mapping(&sheet, "default_conditions");
     let has_schematic = lib.cell(&options.cell).is_some_and(|c| {
-        c.entries.iter().any(|e| e.format == Some(crate::entry::Format::XschemSchematic))
+        c.entries
+            .iter()
+            .any(|e| e.format == Some(crate::entry::Format::XschemSchematic))
     });
     let mut tests: Vec<(String, String)> = vec![];
     let mut views = toml::Table::new();
@@ -684,10 +876,13 @@ pub fn plan(project: &Project, text: &str, options: &ImportOptions) -> Result<Im
     let mut order: Vec<toml::Value> = vec![];
     let templates = crate::sim::template::TemplateSet::for_project(project);
     for (k, v) in &params {
-        let Some(pname) = scalar_text(k) else { continue };
+        let Some(pname) = scalar_text(k) else {
+            continue;
+        };
         order.push(toml::Value::String(pname.clone()));
         let Some(param) = v.as_mapping() else {
-            plan.blockers.push(format!("parameter {pname} is not a mapping"));
+            plan.blockers
+                .push(format!("parameter {pname} is not a mapping"));
             continue;
         };
         let (tool, tool_args) = tool_of(param);
@@ -707,34 +902,71 @@ pub fn plan(project: &Project, text: &str, options: &ImportOptions) -> Result<Im
         let view = view_name(&options.prefix, &pname);
         let (mut mapped_notes, mut kept, mut warnings) = (vec![], vec![], vec![]);
         let conditions = merged_conditions(defaults, mapping(param, "conditions"));
-        let m = map_conditions(&conditions, &tool_args, known.as_deref(), &mut mapped_notes, &mut kept);
+        let m = map_conditions(
+            &conditions,
+            &tool_args,
+            known.as_deref(),
+            &mut mapped_notes,
+            &mut kept,
+        );
         let specs = map_specs(param, &mut mapped_notes, &mut kept, &mut warnings);
         for key in param.keys().filter_map(scalar_text) {
             match key.as_str() {
                 "spec" | "conditions" | "tool" | "display" | "description" | "unit" => {}
                 "status" => {
-                    let s = param.get("status").and_then(scalar_text).unwrap_or_default();
-                    kept.push(format!("status {s}{}", if s == "skip" { ": not a test of the suite" } else { "" }));
+                    let s = param
+                        .get("status")
+                        .and_then(scalar_text)
+                        .unwrap_or_default();
+                    kept.push(format!(
+                        "status {s}{}",
+                        if s == "skip" {
+                            ": not a test of the suite"
+                        } else {
+                            ""
+                        }
+                    ));
                 }
-                other => kept.push(format!("{other}: {}", param.get(other).map(brief).unwrap_or_default())),
+                other => kept.push(format!(
+                    "{other}: {}",
+                    param.get(other).map(brief).unwrap_or_default()
+                )),
             }
         }
-        let args: Vec<String> = tool_args.keys().filter_map(scalar_text).filter(|k| k != "collate" || m.collate.is_empty()).collect();
+        let args: Vec<String> = tool_args
+            .keys()
+            .filter_map(scalar_text)
+            .filter(|k| k != "collate" || m.collate.is_empty())
+            .collect();
         if !args.is_empty() {
             kept.push(format!("{tool} arguments {}", args.join(", ")));
         }
         if !specs.is_empty() || mapping(param, "spec").is_some_and(|s| !s.is_empty()) {
-            let names: Vec<String> =
-                mapping(param, "spec").into_iter().flatten().filter_map(|(k, _)| scalar_text(k)).collect();
+            let names: Vec<String> = mapping(param, "spec")
+                .into_iter()
+                .flatten()
+                .filter_map(|(k, _)| scalar_text(k))
+                .collect();
             warnings.push(format!(
                 "the testbench must measure {} (CACE's template {} did): add measures or [[output]]",
                 names.join(", "),
                 tool_args.get("template").and_then(scalar_text).unwrap_or_else(|| "?".into())
             ));
         }
-        let text = setup_text(&source, &pname, param, &tool, &tool_args, &m, &specs, &options.schematic);
+        let text = setup_text(
+            &source,
+            &pname,
+            param,
+            &tool,
+            &tool_args,
+            &m,
+            &specs,
+            &options.schematic,
+        );
         if let Err(e) = Setup::parse_with(&text, &templates) {
-            plan.blockers.push(format!("{pname}: the setup.toml made of it does not load: {e:#}"));
+            plan.blockers.push(format!(
+                "{pname}: the setup.toml made of it does not load: {e:#}"
+            ));
         }
         for t in mapped_notes {
             note(&mut plan, Level::Mapped, &pname, t);
@@ -748,7 +980,10 @@ pub fn plan(project: &Project, text: &str, options: &ImportOptions) -> Result<Im
         let dir = cell_dir.join(&view);
         let exists = dir.exists();
         if exists && !options.overwrite {
-            plan.blockers.push(format!("{}/{}/{view} exists (overwrite replaces it)", options.library, options.cell));
+            plan.blockers.push(format!(
+                "{}/{}/{view} exists (overwrite replaces it)",
+                options.library, options.cell
+            ));
         }
         plan.files.push(PlannedFile {
             view: view.clone(),
@@ -759,18 +994,26 @@ pub fn plan(project: &Project, text: &str, options: &ImportOptions) -> Result<Im
                 "testbench of {pname}: {} run(s), {} spec(s){}",
                 m.runs(),
                 specs.len(),
-                if m.mc_runs.is_some() { ", Monte Carlo" } else { "" }
+                if m.mc_runs.is_some() {
+                    ", Monte Carlo"
+                } else {
+                    ""
+                }
             ),
         });
         views.insert(pname.clone(), toml::Value::String(view.clone()));
         let skip = param.get("status").and_then(Value::as_str) == Some("skip");
         if !skip {
-            let label = param.get("display").and_then(scalar_text).unwrap_or_else(|| pname.clone());
+            let label = param
+                .get("display")
+                .and_then(scalar_text)
+                .unwrap_or_else(|| pname.clone());
             tests.push((view, label));
         }
     }
     if views.is_empty() {
-        plan.blockers.push("no parameter is simulated with ngspice: there is no testbench to make".into());
+        plan.blockers
+            .push("no parameter is simulated with ngspice: there is no testbench to make".into());
     } else if tests.is_empty() {
         // Every simulated parameter is skipped; the suite lists them anyway.
         for (p, v) in &views {
@@ -778,11 +1021,17 @@ pub fn plan(project: &Project, text: &str, options: &ImportOptions) -> Result<Im
         }
     }
     if plan.files.iter().any(|f| f.view == plan.suite_view) {
-        plan.blockers.push(format!("a parameter has the name of the suite view '{}': use a prefix", plan.suite_view));
+        plan.blockers.push(format!(
+            "a parameter has the name of the suite view '{}': use a prefix",
+            plan.suite_view
+        ));
     }
     if !options.schematic.is_empty() {
         if options.schematic.split('/').count() != 2 {
-            plan.blockers.push(format!("schematic '{}' is not library/cell", options.schematic));
+            plan.blockers.push(format!(
+                "schematic '{}' is not library/cell",
+                options.schematic
+            ));
         }
     } else if !has_schematic && !views.is_empty() {
         note(
@@ -798,13 +1047,20 @@ pub fn plan(project: &Project, text: &str, options: &ImportOptions) -> Result<Im
     // The suite.
     let mut header = sheet.clone();
     header.shift_remove("parameters");
-    let description = sheet.get("description").and_then(scalar_text).unwrap_or_default();
+    let description = sheet
+        .get("description")
+        .and_then(scalar_text)
+        .unwrap_or_default();
     let mut s = format!(
         "# Imported by `cdept cace import` from the CACE datasheet {source}: a test per simulated\n# parameter. [cace] keeps the datasheet header and the other parameters for `cdept cace export`.\n"
     );
     s.push_str(&format!("description = {}\n", toml_str(&description)));
     for (view, label) in &tests {
-        s.push_str(&format!("\n[[test]]\nview = {}\nname = {}\n", toml_str(view), toml_str(label)));
+        s.push_str(&format!(
+            "\n[[test]]\nview = {}\nname = {}\n",
+            toml_str(view),
+            toml_str(label)
+        ));
     }
     let mut cace = toml::Table::new();
     cace.insert("source".into(), toml::Value::String(source.clone()));
@@ -813,18 +1069,25 @@ pub fn plan(project: &Project, text: &str, options: &ImportOptions) -> Result<Im
     if !other.is_empty() {
         cace.insert("other".into(), toml::Value::Table(other));
     }
-    cace.insert("datasheet".into(), toml::Value::String(to_yaml(&Value::Mapping(header))));
+    cace.insert(
+        "datasheet".into(),
+        toml::Value::String(to_yaml(&Value::Mapping(header))),
+    );
     s.push('\n');
     s.push_str(&cace_table(cace));
     if !tests.is_empty()
         && let Err(e) = crate::sim::suite::Suite::parse(&s)
     {
-        plan.blockers.push(format!("the suite.toml does not load: {e:#}"));
+        plan.blockers
+            .push(format!("the suite.toml does not load: {e:#}"));
     }
     let dir = cell_dir.join(&plan.suite_view);
     let exists = dir.exists();
     if exists && !options.overwrite {
-        plan.blockers.push(format!("{}/{}/{} exists (overwrite replaces it)", options.library, options.cell, plan.suite_view));
+        plan.blockers.push(format!(
+            "{}/{}/{} exists (overwrite replaces it)",
+            options.library, options.cell, plan.suite_view
+        ));
     }
     if !tests.is_empty() {
         plan.files.push(PlannedFile {
@@ -840,7 +1103,8 @@ pub fn plan(project: &Project, text: &str, options: &ImportOptions) -> Result<Im
 
 /// [`plan`] of a datasheet file.
 pub fn plan_file(project: &Project, file: &Path, options: &ImportOptions) -> Result<ImportPlan> {
-    let text = std::fs::read_to_string(file).wrap_err_with(|| format!("cannot read {}", file.display()))?;
+    let text = std::fs::read_to_string(file)
+        .wrap_err_with(|| format!("cannot read {}", file.display()))?;
     let mut options = options.clone();
     if options.source.is_empty() {
         options.source = file.display().to_string();
@@ -856,9 +1120,11 @@ pub fn apply(plan: &ImportPlan) -> Result<Vec<PathBuf>> {
     let mut written = vec![];
     for f in &plan.files {
         if let Some(dir) = f.file.parent() {
-            std::fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
+            std::fs::create_dir_all(dir)
+                .wrap_err_with(|| format!("cannot create {}", dir.display()))?;
         }
-        std::fs::write(&f.file, &f.text).wrap_err_with(|| format!("cannot write {}", f.file.display()))?;
+        std::fs::write(&f.file, &f.text)
+            .wrap_err_with(|| format!("cannot write {}", f.file.display()))?;
         written.push(f.file.clone());
     }
     Ok(written)
@@ -874,14 +1140,19 @@ mod tests {
 
     #[test]
     fn conditions_merge_like_cace() {
-        let defaults = yaml("vdd:\n  display: Vdd\n  unit: V\n  typical: 1.8\ncorner:\n  typical: tt\nib:\n  unit: uA\n  typical: 10\n");
+        let defaults = yaml(
+            "vdd:\n  display: Vdd\n  unit: V\n  typical: 1.8\ncorner:\n  typical: tt\nib:\n  unit: uA\n  typical: 10\n",
+        );
         let own = yaml("vdd:\n  minimum: 1.7\n  maximum: 1.9\nTmax:\n  unit: ns\n  typical: 500\n");
         let merged = merged_conditions(Some(&defaults), Some(&own));
         let names: Vec<&str> = merged.iter().map(|(n, _, _)| n.as_str()).collect();
         assert_eq!(names, ["vdd", "corner", "ib", "Tmax"]);
         // The parameter's values replace the default's (typical is gone), the display stays.
         assert_eq!(scaled_values(&merged[0].1), ["1.7", "1.9"]);
-        assert_eq!(merged[0].1.get("display").and_then(Value::as_str), Some("Vdd"));
+        assert_eq!(
+            merged[0].1.get("display").and_then(Value::as_str),
+            Some("Vdd")
+        );
         assert!(merged[0].2 && !merged[1].2);
         // Units scale the values.
         assert_eq!(scaled_values(&merged[2].1), ["1e-5"]);
@@ -904,10 +1175,18 @@ mod tests {
     fn monte_carlo_is_collated_iterations() {
         let conds = merged_conditions(
             None,
-            Some(&yaml("iterations:\n  minimum: 1\n  maximum: 10\n  step: linear\n  stepsize: 1\ncorner:\n  typical: mc\ntemperature:\n  minimum: -40\n  typical: 27\n  maximum: 130\n")),
+            Some(&yaml(
+                "iterations:\n  minimum: 1\n  maximum: 10\n  step: linear\n  stepsize: 1\ncorner:\n  typical: mc\ntemperature:\n  minimum: -40\n  typical: 27\n  maximum: 130\n",
+            )),
         );
         let (mut n, mut k) = (vec![], vec![]);
-        let m = map_conditions(&conds, &yaml("collate: iterations"), Some(&["tt".into(), "mc".into()]), &mut n, &mut k);
+        let m = map_conditions(
+            &conds,
+            &yaml("collate: iterations"),
+            Some(&["tt".into(), "mc".into()]),
+            &mut n,
+            &mut k,
+        );
         assert_eq!(m.mc_runs, Some(10));
         assert_eq!(m.mc_corner, "");
         assert_eq!(m.temperatures, [-40.0, 27.0, 130.0]);
@@ -926,8 +1205,18 @@ mod tests {
         let specs = map_specs(&param, &mut n, &mut k, &mut w);
         assert_eq!(specs.len(), 2);
         assert_eq!((specs[0].min, specs[0].max), (Some(-0.005), Some(0.005)));
-        assert_eq!((specs[1].min, specs[1].max, specs[1].unit.as_str()), (Some(50.0), None, "V/V"));
-        assert!(k.iter().any(|t| t.contains("noise") && t.contains("fail: false")), "{k:?}");
-        assert!(w.iter().any(|t| t.contains("odd") && t.contains("average")), "{w:?}");
+        assert_eq!(
+            (specs[1].min, specs[1].max, specs[1].unit.as_str()),
+            (Some(50.0), None, "V/V")
+        );
+        assert!(
+            k.iter()
+                .any(|t| t.contains("noise") && t.contains("fail: false")),
+            "{k:?}"
+        );
+        assert!(
+            w.iter().any(|t| t.contains("odd") && t.contains("average")),
+            "{w:?}"
+        );
     }
 }

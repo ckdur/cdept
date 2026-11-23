@@ -135,7 +135,10 @@ impl CaceExport {
 }
 
 fn plan_lines_of(project: &Project, import: &CaceImport) -> Result<Vec<String>, String> {
-    import.plan(project).map(|p| p.lines(&project.root)).map_err(|e| format!("{e:#}"))
+    import
+        .plan(project)
+        .map(|p| p.lines(&project.root))
+        .map_err(|e| format!("{e:#}"))
 }
 
 /// The lines below the fields, for the dialog and the test scripts.
@@ -152,16 +155,19 @@ fn show_lines(ui: &mut Ui, lines: Result<Vec<String>, String>) {
     ui.add_space(6.0);
     match lines {
         Ok(lines) => {
-            egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
-                for line in lines {
-                    let text = egui::RichText::new(line.as_str()).small().monospace();
-                    if line.trim_start().starts_with("blocked") || line.starts_with("warnings") {
-                        ui.colored_label(ui.visuals().warn_fg_color, text);
-                    } else {
-                        ui.label(text);
+            egui::ScrollArea::vertical()
+                .max_height(280.0)
+                .show(ui, |ui| {
+                    for line in lines {
+                        let text = egui::RichText::new(line.as_str()).small().monospace();
+                        if line.trim_start().starts_with("blocked") || line.starts_with("warnings")
+                        {
+                            ui.colored_label(ui.visuals().warn_fg_color, text);
+                        } else {
+                            ui.label(text);
+                        }
                     }
-                }
-            });
+                });
         }
         Err(e) => {
             ui.colored_label(ui.visuals().warn_fg_color, e);
@@ -175,29 +181,36 @@ pub fn import_body(ui: &mut Ui, import: &mut CaceImport, app: &AppCtx) {
         ui.label("No project is open.");
         return;
     };
-    egui::Grid::new("cace-import-grid").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-        ui.label("Datasheet");
-        PathField::file("cace-import-file", &mut import.file)
-            .base(&project.root)
-            .title("Choose a CACE datasheet")
-            .width(260.0)
-            .show(ui);
-        ui.end_row();
-        ui.label("Into");
-        ui.horizontal(|ui| {
-            ui.label(format!("{} /", import.library));
-            ui.add(egui::TextEdit::singleline(&mut import.cell).desired_width(140.0));
-        });
-        ui.end_row();
-        ui.label("View prefix");
-        ui.add(egui::TextEdit::singleline(&mut import.prefix).desired_width(140.0))
-            .on_hover_text("Put in front of every view name");
-        ui.end_row();
-        ui.label("Schematic");
-        ui.add(egui::TextEdit::singleline(&mut import.schematic).hint_text("the cell's own").desired_width(180.0))
+    egui::Grid::new("cace-import-grid")
+        .num_columns(2)
+        .spacing([8.0, 6.0])
+        .show(ui, |ui| {
+            ui.label("Datasheet");
+            PathField::file("cace-import-file", &mut import.file)
+                .base(&project.root)
+                .title("Choose a CACE datasheet")
+                .width(260.0)
+                .show(ui);
+            ui.end_row();
+            ui.label("Into");
+            ui.horizontal(|ui| {
+                ui.label(format!("{} /", import.library));
+                ui.add(egui::TextEdit::singleline(&mut import.cell).desired_width(140.0));
+            });
+            ui.end_row();
+            ui.label("View prefix");
+            ui.add(egui::TextEdit::singleline(&mut import.prefix).desired_width(140.0))
+                .on_hover_text("Put in front of every view name");
+            ui.end_row();
+            ui.label("Schematic");
+            ui.add(
+                egui::TextEdit::singleline(&mut import.schematic)
+                    .hint_text("the cell's own")
+                    .desired_width(180.0),
+            )
             .on_hover_text("library/cell of the testbench schematic every testbench netlists");
-        ui.end_row();
-    });
+            ui.end_row();
+        });
     ui.checkbox(&mut import.overwrite, "Replace views that exist");
     if import.file.trim().is_empty() {
         ui.add_space(6.0);
@@ -213,28 +226,38 @@ pub fn export_body(ui: &mut Ui, export: &mut CaceExport, app: &AppCtx) {
         ui.label("No project is open.");
         return;
     };
-    egui::Grid::new("cace-export-grid").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-        ui.label("Of");
-        ui.horizontal(|ui| {
-            ui.label(format!("{}/{} /", export.library, export.cell));
-            ui.add(egui::TextEdit::singleline(&mut export.view).hint_text("its suite").desired_width(140.0));
+    egui::Grid::new("cace-export-grid")
+        .num_columns(2)
+        .spacing([8.0, 6.0])
+        .show(ui, |ui| {
+            ui.label("Of");
+            ui.horizontal(|ui| {
+                ui.label(format!("{}/{} /", export.library, export.cell));
+                ui.add(
+                    egui::TextEdit::singleline(&mut export.view)
+                        .hint_text("its suite")
+                        .desired_width(140.0),
+                );
+            });
+            ui.end_row();
+            ui.label("Datasheet");
+            PathField::save_file("cace-export-file", &mut export.file)
+                .base(&project.root)
+                .title("Write the CACE datasheet to")
+                .width(260.0)
+                .show(ui);
+            ui.end_row();
         });
-        ui.end_row();
-        ui.label("Datasheet");
-        PathField::save_file("cace-export-file", &mut export.file)
-            .base(&project.root)
-            .title("Write the CACE datasheet to")
-            .width(260.0)
-            .show(ui);
-        ui.end_row();
-    });
     ui.checkbox(&mut export.results, "With the results of the latest runs");
     show_lines(ui, export.lines(project).map_err(|e| format!("{e:#}")));
 }
 
 /// Import: write the views, read the library again, select the suite, say what was written.
 pub fn apply_import(app: &mut AppCtx, import: &CaceImport) -> Result<()> {
-    let project = app.project.as_mut().ok_or_else(|| eyre!("no project is open"))?;
+    let project = app
+        .project
+        .as_mut()
+        .ok_or_else(|| eyre!("no project is open"))?;
     let plan = import.plan(project)?;
     let lines = plan.lines(&project.root);
     let written = import::apply(&plan)?;
@@ -245,7 +268,12 @@ pub fn apply_import(app: &mut AppCtx, import: &CaceImport) -> Result<()> {
     app.refactor.epoch += 1;
     app.selection = Selection::view(&plan.library, &plan.cell, &plan.suite_view);
     app.validate_selection();
-    let mut summary = vec![format!("Imported {} file(s) into {}/{}.", written.len(), plan.library, plan.cell)];
+    let mut summary = vec![format!(
+        "Imported {} file(s) into {}/{}.",
+        written.len(),
+        plan.library,
+        plan.cell
+    )];
     summary.extend(lines.into_iter().skip(1));
     app.open_dialog(Dialog::ImportSummary(summary));
     Ok(())
@@ -253,7 +281,10 @@ pub fn apply_import(app: &mut AppCtx, import: &CaceImport) -> Result<()> {
 
 /// Export: write the datasheet, say where.
 pub fn apply_export(app: &mut AppCtx, export: &CaceExport) -> Result<()> {
-    let project = app.project.as_ref().ok_or_else(|| eyre!("no project is open"))?;
+    let project = app
+        .project
+        .as_ref()
+        .ok_or_else(|| eyre!("no project is open"))?;
     let file = crate::pathfield::resolve(export.file.trim(), Some(&project.root), None)
         .ok_or_else(|| eyre!("choose where the datasheet goes"))?;
     let out = export.export(project)?;
@@ -274,7 +305,9 @@ pub fn apply_export(app: &mut AppCtx, export: &CaceExport) -> Result<()> {
 
 /// Entries of a cell's context menu: import into it, export its suite or testbench.
 pub fn menu(ui: &mut Ui, lib: &Library, cell: &Cell) -> Option<Dialog> {
-    let rw = !lib.read_only && lib.error.is_none() && lib.layout == libcdept::library::LibraryLayout::Cells;
+    let rw = !lib.read_only
+        && lib.error.is_none()
+        && lib.layout == libcdept::library::LibraryLayout::Cells;
     let mut dialog = None;
     if ui
         .add_enabled(rw, egui::Button::new("Import CACE Datasheet…"))
@@ -285,15 +318,20 @@ pub fn menu(ui: &mut Ui, lib: &Library, cell: &Cell) -> Option<Dialog> {
         dialog = Some(Dialog::CaceImport(CaceImport::new(&lib.name, &cell.name)));
     }
     let runnable = cell.entries.iter().any(|e| {
-        e.path.join(libcdept::sim::suite::SUITE_FILE).is_file() || e.path.join(libcdept::sim::setup::SETUP_FILE).is_file()
+        e.path.join(libcdept::sim::suite::SUITE_FILE).is_file()
+            || e.path.join(libcdept::sim::setup::SETUP_FILE).is_file()
     });
     if ui
         .add_enabled(runnable, egui::Button::new("Export CACE Datasheet…"))
-        .on_hover_text("This cell's suite or testbench, with the latest results, as a CACE datasheet")
+        .on_hover_text(
+            "This cell's suite or testbench, with the latest results, as a CACE datasheet",
+        )
         .on_disabled_hover_text("The cell has no suite or testbench")
         .clicked()
     {
-        dialog = Some(Dialog::CaceExport(CaceExport::new(&lib.name, &cell.name, "")));
+        dialog = Some(Dialog::CaceExport(CaceExport::new(
+            &lib.name, &cell.name, "",
+        )));
     }
     dialog
 }
@@ -327,18 +365,31 @@ mod tests {
         let mut import = CaceImport::new("cells", "amp");
         import.set("file", "sheet.yaml").unwrap();
         assert!(import.set("bogus", "x").is_err());
-        let lines = plan_lines(&app, &Dialog::CaceImport(import.clone())).unwrap().unwrap();
-        assert!(lines.iter().any(|l| l.contains("amp/gain/setup.toml")), "{lines:#?}");
-        assert!(lines.iter().any(|l| l.contains("drc: tool magic_drc")), "{lines:#?}");
+        let lines = plan_lines(&app, &Dialog::CaceImport(import.clone()))
+            .unwrap()
+            .unwrap();
+        assert!(
+            lines.iter().any(|l| l.contains("amp/gain/setup.toml")),
+            "{lines:#?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("drc: tool magic_drc")),
+            "{lines:#?}"
+        );
         apply_import(&mut app, &import).unwrap();
         assert!(root.join("libs/cells/amp/datasheet/suite.toml").is_file());
         assert_eq!(app.selection.view.as_deref(), Some("datasheet"));
         let mut export = CaceExport::new("cells", "amp", "");
         export.set("file", "back.yaml").unwrap();
-        let lines = plan_lines(&app, &Dialog::CaceExport(export.clone())).unwrap().unwrap();
+        let lines = plan_lines(&app, &Dialog::CaceExport(export.clone()))
+            .unwrap()
+            .unwrap();
         assert!(lines[0].contains("2 parameter(s)"), "{lines:#?}");
         apply_export(&mut app, &export).unwrap();
         let back = fs::read_to_string(root.join("back.yaml")).unwrap();
-        assert!(back.contains("magic_drc") && back.contains("value: 40"), "{back}");
+        assert!(
+            back.contains("magic_drc") && back.contains("value: 40"),
+            "{back}"
+        );
     }
 }

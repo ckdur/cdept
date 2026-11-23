@@ -5,10 +5,10 @@
 //! to it. The tests that ask KLayout skip when it is not built (`cdept-klayout/.bin`) or
 //! found.
 
-use libcdept::testutil::{RealPdk, real_pdk};
 use libcdept::klayout::setup;
 use libcdept::tech::klayout::{self, KlayoutCatalog};
 use libcdept::tech::{PdkDir, ScanContext, magic, netgen};
+use libcdept::testutil::{RealPdk, real_pdk};
 
 /// The installed PDK, and the guard that keeps the environment for it.
 fn pdk(name: &str) -> Option<(PdkDir, RealPdk)> {

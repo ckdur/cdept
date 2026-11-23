@@ -81,7 +81,14 @@ fn run_dir(project: &Project, dir: Option<PathBuf>, tool: &str) -> PathBuf {
 }
 
 pub fn netgen(command: NetgenCommand, project: &Project) -> Result<()> {
-    let NetgenCommand::Lvs { layout, layout_cell, schematic, schematic_cell, setup, dir } = command;
+    let NetgenCommand::Lvs {
+        layout,
+        layout_cell,
+        schematic,
+        schematic_cell,
+        setup,
+        dir,
+    } = command;
     let program = netgen::ADAPTER.require()?;
     let setup = setup.or_else(|| netgen::project_setup(project));
     let dir = run_dir(project, dir, "netgen");
@@ -90,9 +97,22 @@ pub fn netgen(command: NetgenCommand, project: &Project) -> Result<()> {
     for note in [note_a, note_b].into_iter().flatten() {
         println!("note: {note}");
     }
-    let lvs = netgen::Lvs { layout, layout_cell, schematic, schematic_cell, setup };
+    let lvs = netgen::Lvs {
+        layout,
+        layout_cell,
+        schematic,
+        schematic_cell,
+        setup,
+    };
     let report = netgen::run(&program, &lvs, &dir, &project.tool_env())?;
-    println!("{}", if report.result.is_empty() { "(no result)" } else { &report.result });
+    println!(
+        "{}",
+        if report.result.is_empty() {
+            "(no result)"
+        } else {
+            &report.result
+        }
+    );
     if let Some((a, b)) = report.devices {
         println!("devices: layout {a}, schematic {b}");
     }
@@ -118,7 +138,12 @@ fn print_stat(stat: &Option<yosys::Stat>) {
     match stat {
         None => println!("(no statistics in the log)"),
         Some(s) => {
-            println!("{}: {} cells{}", s.module, s.cells, s.area.map(|a| format!(", area {a}")).unwrap_or_default());
+            println!(
+                "{}: {} cells{}",
+                s.module,
+                s.cells,
+                s.area.map(|a| format!(", area {a}")).unwrap_or_default()
+            );
             for (name, n) in &s.by_type {
                 println!("    {n:>6}  {name}");
             }
@@ -129,17 +154,39 @@ fn print_stat(stat: &Option<yosys::Stat>) {
 pub fn yosys(command: YosysCommand, project: &Project) -> Result<()> {
     let program = yosys::ADAPTER.require()?;
     match command {
-        YosysCommand::Synth { top, sources, liberty, library, corner, generic, out, dir } => {
+        YosysCommand::Synth {
+            top,
+            sources,
+            liberty,
+            library,
+            corner,
+            generic,
+            out,
+            dir,
+        } => {
             let liberty = match (generic, liberty) {
                 (true, _) => None,
                 (false, Some(file)) => Some(file),
-                (false, None) => Some(yosys::liberty_of(project, library.as_deref(), corner.as_deref())?),
+                (false, None) => Some(yosys::liberty_of(
+                    project,
+                    library.as_deref(),
+                    corner.as_deref(),
+                )?),
             };
             let dir = run_dir(project, dir, "yosys");
             let netlist = out.unwrap_or_else(|| PathBuf::from(format!("{top}.v")));
-            let synth = yosys::Synth { sources, top, liberty, netlist };
+            let synth = yosys::Synth {
+                sources,
+                top,
+                liberty,
+                netlist,
+            };
             let r = yosys::synth(&program, &synth, &dir, &project.tool_env())?;
-            println!("netlist: {}\nlog:     {}", r.netlist.display(), r.log.display());
+            println!(
+                "netlist: {}\nlog:     {}",
+                r.netlist.display(),
+                r.log.display()
+            );
             print_stat(&r.stat);
         }
         YosysCommand::Script { script, dir } => {
@@ -159,7 +206,11 @@ pub fn openroad(command: OpenroadCommand, project: &Project) -> Result<()> {
     let r = openroad::run_script(&program, &script, &dir, &project.tool_env())?;
     println!("log: {}  ({} warnings)", r.output.log.display(), r.warnings);
     if !r.errors.is_empty() {
-        return Err(eyre!("{} error(s) in the log:\n{}", r.errors.len(), r.errors.join("\n")));
+        return Err(eyre!(
+            "{} error(s) in the log:\n{}",
+            r.errors.len(),
+            r.errors.join("\n")
+        ));
     }
     Ok(())
 }

@@ -3,11 +3,11 @@
 use std::sync::Arc;
 
 use clap::Subcommand;
-use libcdept::jobs::{JobState, Listener};
 use eyre::{Result, bail, eyre};
 use libcdept::Project;
-use libcdept::sim::results::{self, RunRecord};
+use libcdept::jobs::{JobState, Listener};
 use libcdept::sim;
+use libcdept::sim::results::{self, RunRecord};
 
 #[derive(Subcommand)]
 pub enum SimCommand {
@@ -155,15 +155,25 @@ fn parse_args(items: &[String]) -> Result<std::collections::BTreeMap<String, Str
         .collect()
 }
 
-fn suite_view_of(project: &Project, library: &str, cell: &str, view: Option<String>) -> Result<String> {
+fn suite_view_of(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: Option<String>,
+) -> Result<String> {
     if let Some(view) = view {
         return Ok(view);
     }
     let found = sim::suite::suites_of(project, library, cell);
     match found.as_slice() {
         [one] => Ok(one.clone()),
-        [] => Err(eyre!("{library}/{cell} has no suite view (a view with a suite.toml)")),
-        many => Err(eyre!("{library}/{cell} has several suites ({}); pick one with --view", many.join(", "))),
+        [] => Err(eyre!(
+            "{library}/{cell} has no suite view (a view with a suite.toml)"
+        )),
+        many => Err(eyre!(
+            "{library}/{cell} has several suites ({}); pick one with --view",
+            many.join(", ")
+        )),
     }
 }
 
@@ -183,8 +193,13 @@ fn view_of(project: &Project, library: &str, cell: &str, view: Option<String>) -
         .collect();
     match tbs.as_slice() {
         [one] => Ok(one.to_string()),
-        [] => Err(eyre!("{library}/{cell} has no testbench view (a view with a setup.toml)")),
-        many => Err(eyre!("{library}/{cell} has several testbenches ({}); pick one with --view", many.join(", "))),
+        [] => Err(eyre!(
+            "{library}/{cell} has no testbench view (a view with a setup.toml)"
+        )),
+        many => Err(eyre!(
+            "{library}/{cell} has several testbenches ({}); pick one with --view",
+            many.join(", ")
+        )),
     }
 }
 
@@ -194,15 +209,31 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             let set = sim::template::TemplateSet::for_project(project);
             match action.unwrap_or(TemplatesCommand::List) {
                 TemplatesCommand::List => print!("{}", sim::template::format_list(&set)),
-                TemplatesCommand::Show { name } => print!("{}", sim::template::format_show(set.find(&name)?)?),
+                TemplatesCommand::Show { name } => {
+                    print!("{}", sim::template::format_show(set.find(&name)?)?)
+                }
             }
             Ok(())
         }
-        SimCommand::New { library, cell, view, template, args, dut } => {
+        SimCommand::New {
+            library,
+            cell,
+            view,
+            template,
+            args,
+            dut,
+        } => {
             let set = sim::template::TemplateSet::for_project(project);
             let t = set.find(&template)?;
-            let made =
-                sim::starter::create_testbench(project, &library, &cell, &view, t, &parse_args(&args)?, dut.as_deref())?;
+            let made = sim::starter::create_testbench(
+                project,
+                &library,
+                &cell,
+                &view,
+                t,
+                &parse_args(&args)?,
+                dut.as_deref(),
+            )?;
             println!("wrote {}", made.setup.display());
             if let Some(s) = &made.schematic {
                 println!("wrote {}", s.display());
@@ -213,18 +244,36 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             println!("run it with: cdept sim run {library} {cell} --view {view}");
             Ok(())
         }
-        SimCommand::Suite { library, cell, view, jobs, all_columns, no_store, json, simulator } => {
+        SimCommand::Suite {
+            library,
+            cell,
+            view,
+            jobs,
+            all_columns,
+            no_store,
+            json,
+            simulator,
+        } => {
             let view = suite_view_of(project, &library, &cell, view)?;
             let on_event: Listener = Arc::new(|e| {
                 let i = &e.info;
                 match i.state {
-                    JobState::Done => eprintln!("{:<24} done     {:.1}s", i.name, i.elapsed.as_secs_f32()),
-                    JobState::Failed => eprintln!("{:<24} failed   {:.1}s", i.name, i.elapsed.as_secs_f32()),
+                    JobState::Done => {
+                        eprintln!("{:<24} done     {:.1}s", i.name, i.elapsed.as_secs_f32())
+                    }
+                    JobState::Failed => {
+                        eprintln!("{:<24} failed   {:.1}s", i.name, i.elapsed.as_secs_f32())
+                    }
                     _ => {}
                 }
             });
-            let options =
-                sim::suite::SuiteOptions { jobs: jobs.unwrap_or(0), on_event: Some(on_event), no_store, simulator, ..Default::default() };
+            let options = sim::suite::SuiteOptions {
+                jobs: jobs.unwrap_or(0),
+                on_event: Some(on_event),
+                no_store,
+                simulator,
+                ..Default::default()
+            };
             let report = sim::suite::run(project, &library, &cell, &view, &options)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
@@ -244,13 +293,21 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             }
             Ok(())
         }
-        SimCommand::Deck { library, cell, view, simulator } => {
+        SimCommand::Deck {
+            library,
+            cell,
+            view,
+            simulator,
+        } => {
             let view = view_of(project, &library, &cell, view)?;
             let mut tb = sim::open(project, &library, &cell, &view)?;
             if let Some(name) = &simulator {
                 tb.setup.set_simulator(name)?;
             }
-            let tech = project.tech.as_ref().ok_or_else(|| eyre!("no technology snapshot"))?;
+            let tech = project
+                .tech
+                .as_ref()
+                .ok_or_else(|| eyre!("no technology snapshot"))?;
             let set = if tb.setup.models.is_empty() {
                 tech.models.default.clone().unwrap_or_default()
             } else {
@@ -258,21 +315,47 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             };
             let corner = tech.models.corner.clone().unwrap_or_default();
             let point = sim::deck::points(&tb.setup, &corner).remove(0);
-            let file = std::env::temp_dir().join(format!("cdept-deck-{}.spice", std::process::id()));
+            let file =
+                std::env::temp_dir().join(format!("cdept-deck-{}.spice", std::process::id()));
             sim::netlist_for(project, &tb.schematic, &file, &tb.setup.simulator)?;
             let netlist = std::fs::read_to_string(&file)?;
             let _ = std::fs::remove_file(&file);
             let title = format!("{library}/{cell}/{view}");
             if tb.setup.simulator == "vacask" {
                 let ready = libcdept::vacask::models::ready(project)?;
-                print!("{}", libcdept::vacask::build_point(project, &ready, &tb.setup, &set, &point, &title, &netlist)?.text);
+                print!(
+                    "{}",
+                    libcdept::vacask::build_point(
+                        project, &ready, &tb.setup, &set, &point, &title, &netlist
+                    )?
+                    .text
+                );
                 return Ok(());
             }
-            let lines = tech.models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?;
-            print!("{}", sim::build_deck(&tb.setup, &point, &title, &lines, &netlist));
+            let lines = tech
+                .models
+                .lines(&set, &point.corner, |n| project.var(n))
+                .map_err(|e| eyre!(e))?;
+            print!(
+                "{}",
+                sim::build_deck(&tb.setup, &point, &title, &lines, &netlist)
+            );
             Ok(())
         }
-        SimCommand::Run { library, cell, view, corners, jobs, runs, mode, seed, no_mc, no_store, backend, simulator } => {
+        SimCommand::Run {
+            library,
+            cell,
+            view,
+            corners,
+            jobs,
+            runs,
+            mode,
+            seed,
+            no_mc,
+            no_store,
+            backend,
+            simulator,
+        } => {
             let view = view_of(project, &library, &cell, view)?;
             let mut tb = sim::open(project, &library, &cell, &view)?;
             if let Some(name) = &simulator {
@@ -301,8 +384,12 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                     JobState::Queued => {}
                     JobState::Running if !started.lock().unwrap().insert(i.id) => {}
                     JobState::Running => eprintln!("{:<10} running", i.name),
-                    JobState::Done => eprintln!("{:<10} done     {:.1}s", i.name, i.elapsed.as_secs_f32()),
-                    JobState::Failed => eprintln!("{:<10} failed   {:.1}s", i.name, i.elapsed.as_secs_f32()),
+                    JobState::Done => {
+                        eprintln!("{:<10} done     {:.1}s", i.name, i.elapsed.as_secs_f32())
+                    }
+                    JobState::Failed => {
+                        eprintln!("{:<10} failed   {:.1}s", i.name, i.elapsed.as_secs_f32())
+                    }
                     JobState::Cancelled => eprintln!("{:<10} cancelled", i.name),
                 }
             });
@@ -322,14 +409,22 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             print!("{}", results::format_table(&records));
             let agg = results::aggregate(&records);
             println!();
-            if records.len() > 1 && (!tb.setup.sweeps.is_empty() || results.iter().any(|r| r.point.seed.is_some())) {
+            if records.len() > 1
+                && (!tb.setup.sweeps.is_empty() || results.iter().any(|r| r.point.seed.is_some()))
+            {
                 print!("{}", results::format_aggregate(&agg));
             } else {
-                println!("{} run(s): {} pass, {} fail, {} error", agg.runs, agg.pass, agg.fail, agg.error);
+                println!(
+                    "{} run(s): {} pass, {} fail, {} error",
+                    agg.runs, agg.pass, agg.fail, agg.error
+                );
             }
             if records.len() > 1 && results.iter().any(|r| r.point.seed.is_some()) {
                 println!();
-                print!("{}", sim::stats::format_report(&sim::stats::analyze(&records, 10, 3.0)));
+                print!(
+                    "{}",
+                    sim::stats::format_report(&sim::stats::analyze(&records, 10, 3.0))
+                );
             }
             if results.iter().any(|r| r.record.is_some()) {
                 println!("index: {}", results::Store::path(&project.root).display());
@@ -340,23 +435,42 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             }
             Ok(())
         }
-        SimCommand::Results { library, cell, view, all, reindex, stats, bins, sigma } => {
+        SimCommand::Results {
+            library,
+            cell,
+            view,
+            all,
+            reindex,
+            stats,
+            bins,
+            sigma,
+        } => {
             let view = view_of(project, &library, &cell, view)?;
             let mut db = results::Store::open(&project.root)?;
             if reindex {
                 println!("reindexed {} run(s)", db.reindex(&project.root)?);
             }
-            let records = if all { db.runs(&library, &cell, &view)? } else { db.latest(&library, &cell, &view)? };
+            let records = if all {
+                db.runs(&library, &cell, &view)?
+            } else {
+                db.latest(&library, &cell, &view)?
+            };
             if records.is_empty() {
                 bail!("no stored runs of {library}/{cell}/{view} (cdept sim run, or --reindex)");
             }
             print!("{}", results::format_table(&records));
             println!();
             let latest = db.latest(&library, &cell, &view)?;
-            print!("{}", results::format_aggregate(&results::aggregate(&latest)));
+            print!(
+                "{}",
+                results::format_aggregate(&results::aggregate(&latest))
+            );
             if stats {
                 println!();
-                print!("{}", sim::stats::format_report(&sim::stats::analyze(&latest, bins, sigma)));
+                print!(
+                    "{}",
+                    sim::stats::format_report(&sim::stats::analyze(&latest, bins, sigma))
+                );
             }
             Ok(())
         }

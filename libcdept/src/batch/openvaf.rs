@@ -17,7 +17,11 @@ use super::{Adapter, Job};
 pub const OPENVAF_ENV: &str = "CDEPT_OPENVAF";
 
 /// `openvaf-r` (OpenVAF-Reloaded) and `openvaf` on `PATH` (see `tools::KNOWN_TOOLS`).
-pub const ADAPTER: Adapter = Adapter { name: "OpenVAF", env_var: OPENVAF_ENV, tool: "OpenVAF" };
+pub const ADAPTER: Adapter = Adapter {
+    name: "OpenVAF",
+    env_var: OPENVAF_ENV,
+    tool: "OpenVAF",
+};
 
 /// Where compiled libraries are cached, relative to the project folder.
 pub const CACHE: &str = ".cdept/osdi";
@@ -37,8 +41,18 @@ pub struct Compile {
 
 /// The job for a compilation. The log is `<out>.log` next to the output.
 pub fn job(program: &Path, c: &Compile, env: &[(OsString, OsString)]) -> Job {
-    let dir = c.out.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let log = format!("{}.log", c.out.file_name().map(|n| n.to_string_lossy()).unwrap_or_default());
+    let dir = c
+        .out
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let log = format!(
+        "{}.log",
+        c.out
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default()
+    );
     let mut job = Job::new("OpenVAF", program, dir, &log);
     for d in &c.defines {
         job = job.args(["-D", d]);
@@ -46,14 +60,20 @@ pub fn job(program: &Path, c: &Compile, env: &[(OsString, OsString)]) -> Job {
     for i in &c.includes {
         job = job.args([OsString::from("-I"), i.as_os_str().to_owned()]);
     }
-    job.args([OsString::from("-o"), c.out.as_os_str().to_owned(), c.source.as_os_str().to_owned()]).env(env)
+    job.args([
+        OsString::from("-o"),
+        c.out.as_os_str().to_owned(),
+        c.source.as_os_str().to_owned(),
+    ])
+    .env(env)
 }
 
 /// Compile. The output must exist afterwards; an error names the source and has the
 /// compiler's last lines.
 pub fn compile(program: &Path, c: &Compile, env: &[(OsString, OsString)]) -> Result<()> {
     if let Some(dir) = c.out.parent() {
-        std::fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
+        std::fs::create_dir_all(dir)
+            .wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     }
     let _ = std::fs::remove_file(&c.out);
     let out = job(program, c, env).run_unchecked()?;
@@ -92,7 +112,9 @@ pub fn source_files(root: &Path) -> Vec<PathBuf> {
         .map(|e| e.path())
         .filter(|p| {
             p.is_file()
-                && p.extension().is_some_and(|e| matches!(e.to_str(), Some("va" | "include" | "vams" | "h" | "inc")))
+                && p.extension().is_some_and(|e| {
+                    matches!(e.to_str(), Some("va" | "include" | "vams" | "h" | "inc"))
+                })
         })
         .collect();
     files.sort();
@@ -107,11 +129,22 @@ pub fn source_files(root: &Path) -> Vec<PathBuf> {
 pub fn source_hash(program: &Path, c: &Compile) -> Result<String> {
     let mut parts: Vec<Vec<u8>> = vec![];
     for f in source_files(&c.source) {
-        parts.push(f.file_name().unwrap_or_default().as_encoded_bytes().to_vec());
+        parts.push(
+            f.file_name()
+                .unwrap_or_default()
+                .as_encoded_bytes()
+                .to_vec(),
+        );
         parts.push(std::fs::read(&f).wrap_err_with(|| format!("cannot read {}", f.display()))?);
     }
     parts.push(c.defines.join("\n").into_bytes());
-    parts.push(program.file_name().unwrap_or_default().as_encoded_bytes().to_vec());
+    parts.push(
+        program
+            .file_name()
+            .unwrap_or_default()
+            .as_encoded_bytes()
+            .to_vec(),
+    );
     Ok(hash_parts(parts.iter().map(|p| p.as_slice())))
 }
 
@@ -136,15 +169,25 @@ pub fn compile_cached(
     cache: &Path,
     env: &[(OsString, OsString)],
 ) -> Result<Cached> {
-    let stem = c.source.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "model".into());
+    let stem = c
+        .source
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "model".into());
     let osdi = cache.join(format!("{stem}.osdi"));
     if osdi.is_file() {
-        return Ok(Cached { osdi, compiled: false });
+        return Ok(Cached {
+            osdi,
+            compiled: false,
+        });
     }
     let mut c = c.clone();
     c.out = osdi.clone();
     compile(program, &c, env)?;
-    Ok(Cached { osdi, compiled: true })
+    Ok(Cached {
+        osdi,
+        compiled: true,
+    })
 }
 
 #[cfg(test)]
@@ -160,14 +203,32 @@ mod tests {
             includes: vec!["/inc".into()],
         };
         let j = job(Path::new("/x/openvaf-r"), &c, &[]);
-        let args: Vec<_> = j.args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
-        assert_eq!(args, ["-D", "__XYCE__", "-I", "/inc", "-o", "/o/psp103.osdi", "/m/psp103.va"]);
+        let args: Vec<_> = j
+            .args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "-D",
+                "__XYCE__",
+                "-I",
+                "/inc",
+                "-o",
+                "/o/psp103.osdi",
+                "/m/psp103.va"
+            ]
+        );
         assert_eq!(j.dir, Path::new("/o"));
     }
 
     #[test]
     fn hashes_differ_with_the_parts() {
-        assert_eq!(hash_parts([&b"a"[..], &b"b"[..]]), hash_parts([&b"a"[..], &b"b"[..]]));
+        assert_eq!(
+            hash_parts([&b"a"[..], &b"b"[..]]),
+            hash_parts([&b"a"[..], &b"b"[..]])
+        );
         assert_ne!(hash_parts([&b"ab"[..]]), hash_parts([&b"a"[..], &b"b"[..]]));
     }
 
@@ -177,27 +238,53 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("m.va");
         std::fs::write(&src, "module m; endmodule\n").unwrap();
-        let fake = super::super::testutil::fake(dir.path(), "openvaf", "while [ $# -gt 0 ]; do [ \"$1\" = -o ] && o=$2; shift; done; echo osdi > \"$o\"; echo ran >> \"$o.count\"");
-        let c = Compile { source: src.clone(), out: PathBuf::new(), ..Default::default() };
+        let fake = super::super::testutil::fake(
+            dir.path(),
+            "openvaf",
+            "while [ $# -gt 0 ]; do [ \"$1\" = -o ] && o=$2; shift; done; echo osdi > \"$o\"; echo ran >> \"$o.count\"",
+        );
+        let c = Compile {
+            source: src.clone(),
+            out: PathBuf::new(),
+            ..Default::default()
+        };
         let hash = source_hash(&fake, &c).unwrap();
         let cache = cache_dir(dir.path(), "tech", &hash);
         let first = compile_cached(&fake, &c, &cache, &[]).unwrap();
         assert!(first.compiled && first.osdi.is_file());
         let second = compile_cached(&fake, &c, &cache, &[]).unwrap();
         assert!(!second.compiled);
-        assert_eq!(std::fs::read_to_string(cache.join("m.osdi.count")).unwrap().lines().count(), 1);
+        assert_eq!(
+            std::fs::read_to_string(cache.join("m.osdi.count"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
         // A changed source is another cache folder.
         std::fs::write(&src, "module m2; endmodule\n").unwrap();
         assert_ne!(source_hash(&fake, &c).unwrap(), hash);
-        let broken = super::super::testutil::fake(dir.path(), "bad", "echo 'error: syntax' ; exit 1");
-        let err = compile(&broken, &Compile { source: src, out: dir.path().join("x.osdi"), ..Default::default() }, &[]).unwrap_err();
+        let broken =
+            super::super::testutil::fake(dir.path(), "bad", "echo 'error: syntax' ; exit 1");
+        let err = compile(
+            &broken,
+            &Compile {
+                source: src,
+                out: dir.path().join("x.osdi"),
+                ..Default::default()
+            },
+            &[],
+        )
+        .unwrap_err();
         assert!(format!("{err}").contains("syntax"), "{err}");
     }
 
     /// The real compiler, when there is one, on a small model.
     #[test]
     fn real_openvaf_compiles_a_resistor() {
-        let Some(program) = ADAPTER.locate() else { return };
+        let Some(program) = ADAPTER.locate() else {
+            return;
+        };
         let dir = tempfile::tempdir().unwrap();
         let va = dir.path().join("res.va");
         std::fs::write(
@@ -206,7 +293,11 @@ mod tests {
         )
         .unwrap();
         let env = crate::vacask::tool_env_for(&program);
-        let c = Compile { source: va.clone(), out: dir.path().join("res.osdi"), ..Default::default() };
+        let c = Compile {
+            source: va.clone(),
+            out: dir.path().join("res.osdi"),
+            ..Default::default()
+        };
         if let Err(e) = compile(&program, &c, &env) {
             // OpenVAF versions differ in where disciplines.vams comes from; a bad
             // include path is not what this test is about.

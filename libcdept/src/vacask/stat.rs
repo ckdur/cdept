@@ -65,7 +65,10 @@ pub struct Resolved {
 }
 
 fn base(path: &str) -> String {
-    Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// The files `section` of a converted corner file includes, in order.
@@ -114,7 +117,12 @@ pub fn resolve(lines: &[String], info: &MmInfo) -> Resolved {
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut out = vec![];
     let mut effective: Vec<String> = vec![];
-    let defs_of = |file: &str| info.files.get(&base(file)).map(|f| f.defs.clone()).unwrap_or_default();
+    let defs_of = |file: &str| {
+        info.files
+            .get(&base(file))
+            .map(|f| f.defs.clone())
+            .unwrap_or_default()
+    };
     for line in lines {
         let t = line.trim();
         let (card, rest) = t.split_once(char::is_whitespace).unwrap_or((t, ""));
@@ -142,9 +150,14 @@ pub fn resolve(lines: &[String], info: &MmInfo) -> Resolved {
                     out.push(line.clone());
                     continue;
                 };
-                let dir = Path::new(&file).parent().map(Path::to_path_buf).unwrap_or_default();
+                let dir = Path::new(&file)
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_default();
                 let incs = section_includes(&text, &section);
-                let clash = incs.iter().any(|f| defs_of(f).iter().any(|d| seen.contains(d)));
+                let clash = incs
+                    .iter()
+                    .any(|f| defs_of(f).iter().any(|d| seen.contains(d)));
                 if !clash {
                     for f in &incs {
                         seen.extend(defs_of(f));
@@ -164,7 +177,11 @@ pub fn resolve(lines: &[String], info: &MmInfo) -> Resolved {
                     }
                     seen.extend(defs);
                     effective.push(base(f));
-                    let p: PathBuf = if Path::new(f).is_absolute() { f.into() } else { dir.join(f) };
+                    let p: PathBuf = if Path::new(f).is_absolute() {
+                        f.into()
+                    } else {
+                        dir.join(f)
+                    };
                     out.push(format!(".include {}", p.display()));
                 }
             }
@@ -181,7 +198,11 @@ pub fn resolve(lines: &[String], info: &MmInfo) -> Resolved {
             uses_draws |= !info.mm.is_empty() || !info.globals.is_empty();
         }
     }
-    Resolved { lines: out, masters, uses_draws }
+    Resolved {
+        lines: out,
+        masters,
+        uses_draws,
+    }
 }
 
 fn splitmix(z: u64) -> u64 {
@@ -208,18 +229,33 @@ fn vector(len: usize, f: impl Fn(u64) -> f64) -> String {
     if len == 0 {
         return "[0.0]".into();
     }
-    format!("[{}]", (0..len as u64).map(|i| format!("{:.7e}", f(i))).collect::<Vec<_>>().join(", "))
+    format!(
+        "[{}]",
+        (0..len as u64)
+            .map(|i| format!("{:.7e}", f(i)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 /// The deck lines that define the draw vectors. Without a `seed` (a run that is not a
 /// Monte Carlo point) every draw is 0: the nominal circuit.
 pub fn draw_lines(seed: Option<u64>, nz: usize, leaves: usize, globals: usize) -> Vec<String> {
-    let mut out = vec![format!("// Monte Carlo draws{}", seed.map(|s| format!(" (seed {s})")).unwrap_or_default())];
+    let mut out = vec![format!(
+        "// Monte Carlo draws{}",
+        seed.map(|s| format!(" (seed {s})")).unwrap_or_default()
+    )];
     out.push(format!("parameters mmnz={}", nz.max(1)));
     match seed {
         Some(s) => {
-            out.push(format!("parameters mcz={}", vector(globals, |i| normal(s, GLOBAL_STREAM, i))));
-            out.push(format!("parameters mmz={}", vector(leaves * nz.max(1), |i| normal(s, INSTANCE_STREAM, i))));
+            out.push(format!(
+                "parameters mcz={}",
+                vector(globals, |i| normal(s, GLOBAL_STREAM, i))
+            ));
+            out.push(format!(
+                "parameters mmz={}",
+                vector(leaves * nz.max(1), |i| normal(s, INSTANCE_STREAM, i))
+            ));
         }
         None => {
             out.push(format!("parameters mcz=vector({}, 0.0)", globals.max(1)));
@@ -233,7 +269,12 @@ pub fn draw_lines(seed: Option<u64>, nz: usize, leaves: usize, globals: usize) -
 fn master_of(line: &str) -> Option<&str> {
     let t = line.trim();
     let (first, rest) = t.split_once(char::is_whitespace)?;
-    if first == "subckt" || first == "model" || first == "parameters" || first == "global" || first == "ground" {
+    if first == "subckt"
+        || first == "model"
+        || first == "parameters"
+        || first == "global"
+        || first == "ground"
+    {
         return None;
     }
     let rest = rest.trim_start();
@@ -255,7 +296,9 @@ pub fn structure(texts: &[&str]) -> BTreeMap<String, Vec<(String, String)>> {
                 current.clear();
             } else if let Some(m) = master_of(l) {
                 let name = l.split_whitespace().next().unwrap_or_default().to_string();
-                out.entry(current.clone()).or_default().push((name, m.to_string()));
+                out.entry(current.clone())
+                    .or_default()
+                    .push((name, m.to_string()));
             }
         }
     }
@@ -293,23 +336,28 @@ pub fn fix_param_case(netlist: &str, model_texts: &[&str]) -> String {
     let declared = declared_params(model_texts);
     let mut out = String::with_capacity(netlist.len());
     for l in netlist.lines() {
-        let fixed = master_of(l).and_then(|m| declared.get(&m.to_lowercase())).map(|params| {
-            let mut parts: Vec<String> = vec![];
-            let mut after_master = false;
-            let master = master_of(l).unwrap_or_default();
-            for tok in l.split(' ') {
-                if after_master && let Some((k, v)) = tok.split_once('=') {
-                    let actual = params.iter().find(|p| p.eq_ignore_ascii_case(k)).map_or(k, String::as_str);
-                    parts.push(format!("{actual}={v}"));
-                    continue;
+        let fixed = master_of(l)
+            .and_then(|m| declared.get(&m.to_lowercase()))
+            .map(|params| {
+                let mut parts: Vec<String> = vec![];
+                let mut after_master = false;
+                let master = master_of(l).unwrap_or_default();
+                for tok in l.split(' ') {
+                    if after_master && let Some((k, v)) = tok.split_once('=') {
+                        let actual = params
+                            .iter()
+                            .find(|p| p.eq_ignore_ascii_case(k))
+                            .map_or(k, String::as_str);
+                        parts.push(format!("{actual}={v}"));
+                        continue;
+                    }
+                    if tok == master {
+                        after_master = true;
+                    }
+                    parts.push(tok.to_string());
                 }
-                if tok == master {
-                    after_master = true;
-                }
-                parts.push(tok.to_string());
-            }
-            parts.join(" ")
-        });
+                parts.join(" ")
+            });
         out.push_str(fixed.as_deref().unwrap_or(l));
         out.push('\n');
     }
@@ -319,7 +367,10 @@ pub fn fix_param_case(netlist: &str, model_texts: &[&str]) -> String {
 /// ngspice's `@n.xdut.xm1.nsg13_lv_pmos[vds]` (a device's parameter or operating-point
 /// value) as VACASK's `p('xdut:xm1:nsg13_lv_pmos', vds)`: the names are looked up in the
 /// netlist and the model files without regard to case (SPICE has none, VACASK has).
-pub fn device_save(item: &str, structure: &BTreeMap<String, Vec<(String, String)>>) -> Result<String, String> {
+pub fn device_save(
+    item: &str,
+    structure: &BTreeMap<String, Vec<(String, String)>>,
+) -> Result<String, String> {
     let t = item.trim().trim_start_matches('@');
     let (path, var) = t
         .strip_suffix(']')
@@ -336,7 +387,16 @@ pub fn device_save(item: &str, structure: &BTreeMap<String, Vec<(String, String)
         let found = structure
             .get(&scope)
             .and_then(|list| list.iter().find(|(n, _)| n.eq_ignore_ascii_case(want)))
-            .ok_or_else(|| format!("'{item}': there is no instance '{want}' in {}", if scope.is_empty() { "the netlist".to_string() } else { format!("'{scope}'") }))?;
+            .ok_or_else(|| {
+                format!(
+                    "'{item}': there is no instance '{want}' in {}",
+                    if scope.is_empty() {
+                        "the netlist".to_string()
+                    } else {
+                        format!("'{scope}'")
+                    }
+                )
+            })?;
         names.push(found.0.clone());
         if i + 1 < parts.len() {
             scope = found.1.to_lowercase();
@@ -351,7 +411,11 @@ fn header_name(line: &str) -> Option<String> {
         return None;
     }
     let t = t.trim_start();
-    Some(t.split(|c: char| c.is_whitespace() || c == '(').next()?.to_string())
+    Some(
+        t.split(|c: char| c.is_whitespace() || c == '(')
+            .next()?
+            .to_string(),
+    )
 }
 
 /// Give the devices of a translated netlist their keys: every instance of a subcircuit
@@ -386,7 +450,9 @@ pub fn instrument(text: &str, masters: &BTreeMap<String, usize>) -> (String, usi
         if let Some(n) = memo.get(name) {
             return *n;
         }
-        let Some(insts) = users.get(name) else { return 0 };
+        let Some(insts) = users.get(name) else {
+            return 0;
+        };
         if depth > 32 {
             return 0;
         }
@@ -399,7 +465,8 @@ pub fn instrument(text: &str, masters: &BTreeMap<String, usize>) -> (String, usi
         n
     }
     let mut memo = BTreeMap::new();
-    let count = |m: &str, memo: &mut BTreeMap<String, usize>| leaves(m, masters, &users, &lines, memo, 0);
+    let count =
+        |m: &str, memo: &mut BTreeMap<String, usize>| leaves(m, masters, &users, &lines, memo, 0);
     let mut out = String::new();
     let mut current: Option<String> = None;
     let mut offset = 0usize;
@@ -482,11 +549,26 @@ mod tests {
     fn a_draw_does_not_depend_on_the_size_of_the_table() {
         let a = draw_lines(Some(3), 4, 2, 5);
         let b = draw_lines(Some(3), 4, 10, 5);
-        let first = |v: &Vec<String>| v.iter().find(|l| l.starts_with("parameters mmz=")).unwrap().clone();
+        let first = |v: &Vec<String>| {
+            v.iter()
+                .find(|l| l.starts_with("parameters mmz="))
+                .unwrap()
+                .clone()
+        };
         let (fa, fb) = (first(&a), first(&b));
-        let head = |s: &str| s.trim_start_matches("parameters mmz=[").split(", ").take(7).collect::<Vec<_>>().join(", ");
+        let head = |s: &str| {
+            s.trim_start_matches("parameters mmz=[")
+                .split(", ")
+                .take(7)
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
         assert_eq!(head(&fa), head(&fb));
-        assert!(draw_lines(None, 4, 2, 5).iter().any(|l| l.contains("vector(5, 0.0)")));
+        assert!(
+            draw_lines(None, 4, 2, 5)
+                .iter()
+                .any(|l| l.contains("vector(5, 0.0)"))
+        );
     }
 
     const NET: &str = "global VDD\nmodel cdept_c sp_capacitor\nsubckt inv (A Y VDD VSS)\n  XM2 (VDD A Y VDD) pm w=1e-6 mm_ok=1\n  XM1 (Y A VSS VSS) nm w=1e-6 mm_ok=1\nends\n\
@@ -495,7 +577,8 @@ x1 (in out VDD 0) buf\nXM9 (a b c d) nm w=1e-6\nC1 (out 0) cdept_c c=10e-15\n";
 
     #[test]
     fn every_device_of_the_flattened_circuit_gets_its_own_key() {
-        let masters: BTreeMap<String, usize> = [("pm".to_string(), 4), ("nm".to_string(), 4)].into();
+        let masters: BTreeMap<String, usize> =
+            [("pm".to_string(), 4), ("nm".to_string(), 4)].into();
         let (text, leaves) = instrument(NET, &masters);
         assert_eq!(leaves, 5, "{text}");
         for want in [
@@ -521,14 +604,20 @@ x1 (in out VDD 0) buf\nXM9 (a b c d) nm w=1e-6\nC1 (out 0) cdept_c c=10e-15\n";
         let model = "subckt npn13G2 (c b e s)\nparameters nx=1\nparameters mm_ok=0\nends\n";
         let net = "XQ1 (c b 0 0) npn13G2 Nx=2 mm_ok=1\nXQ2 (c b 0 0) other Nx=2\n";
         let out = fix_param_case(net, &[model]);
-        assert_eq!(out, "XQ1 (c b 0 0) npn13G2 nx=2 mm_ok=1\nXQ2 (c b 0 0) other Nx=2\n");
+        assert_eq!(
+            out,
+            "XQ1 (c b 0 0) npn13G2 nx=2 mm_ok=1\nXQ2 (c b 0 0) other Nx=2\n"
+        );
     }
 
     #[test]
     fn ngspice_device_saves_become_instance_outvar_pairs() {
         let model = "subckt pm (d g s b)\n  Npm_core (d g s b) psp w=1\nends\n";
         let st = structure(&[NET, model]);
-        assert_eq!(device_save("@n.x1.x1.xm2.npm_core[vds]", &st).unwrap(), "p('x1:x1:XM2:Npm_core', vds)");
+        assert_eq!(
+            device_save("@n.x1.x1.xm2.npm_core[vds]", &st).unwrap(),
+            "p('x1:x1:XM2:Npm_core', vds)"
+        );
         assert!(device_save("@n.x1.nothing.npm_core[vds]", &st).is_err());
         assert!(device_save("v(out)", &st).is_err());
     }
@@ -543,17 +632,55 @@ x1 (in out VDD 0) buf\nXM9 (a b c d) nm w=1e-6\nC1 (out 0) cdept_c c=10e-15\n";
         )
         .unwrap();
         let mut info = MmInfo::default();
-        info.files.insert("mm.lib".into(), FileInfo { defs: vec!["nmos".into()], mm: [("nmos".to_string(), vec!["w".into(), "l".into()])].into(), globals: vec![] });
-        info.files.insert("mod.lib".into(), FileInfo { defs: vec!["nmos".into()], ..Default::default() });
-        info.files.insert("stat.lib".into(), FileInfo { defs: vec![], mm: Default::default(), globals: vec!["g".into()] });
+        info.files.insert(
+            "mm.lib".into(),
+            FileInfo {
+                defs: vec!["nmos".into()],
+                mm: [("nmos".to_string(), vec!["w".into(), "l".into()])].into(),
+                globals: vec![],
+            },
+        );
+        info.files.insert(
+            "mod.lib".into(),
+            FileInfo {
+                defs: vec!["nmos".into()],
+                ..Default::default()
+            },
+        );
+        info.files.insert(
+            "stat.lib".into(),
+            FileInfo {
+                defs: vec![],
+                mm: Default::default(),
+                globals: vec!["g".into()],
+            },
+        );
         let c = corner.display().to_string();
-        let lines = vec![format!(".include {}/mm.lib", dir.path().display()), format!(".lib {c} stat"), ".vcline parameters x=1".to_string()];
+        let lines = vec![
+            format!(".include {}/mm.lib", dir.path().display()),
+            format!(".lib {c} stat"),
+            ".vcline parameters x=1".to_string(),
+        ];
         let r = resolve(&lines, &info);
         assert_eq!(r.masters["nmos"], 2);
         assert!(r.uses_draws);
-        assert!(r.lines.contains(&".vcline parameters a=1".to_string()), "{:?}", r.lines);
-        assert!(r.lines.iter().any(|l| l.starts_with(".include ") && l.ends_with("stat.lib")), "{:?}", r.lines);
-        assert!(!r.lines.iter().any(|l| l.ends_with("mod.lib")), "{:?}", r.lines);
+        assert!(
+            r.lines.contains(&".vcline parameters a=1".to_string()),
+            "{:?}",
+            r.lines
+        );
+        assert!(
+            r.lines
+                .iter()
+                .any(|l| l.starts_with(".include ") && l.ends_with("stat.lib")),
+            "{:?}",
+            r.lines
+        );
+        assert!(
+            !r.lines.iter().any(|l| l.ends_with("mod.lib")),
+            "{:?}",
+            r.lines
+        );
         assert_eq!(r.lines.last().unwrap(), ".vcline parameters x=1");
         // Without the mismatch file the section stays one line and nothing keys.
         let r = resolve(&[format!(".lib {c} tt")], &info);

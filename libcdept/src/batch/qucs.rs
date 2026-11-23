@@ -23,9 +23,16 @@ pub const QUCS_ENV: &str = "CDEPT_QUCS";
 /// Environment variable that names the S-parameter viewer.
 pub const SPAR_ENV: &str = "CDEPT_QUCS_SPAR";
 
-pub const ADAPTER: Adapter = Adapter { name: "Qucs-S", env_var: QUCS_ENV, tool: "Qucs-S" };
-pub const SPAR_ADAPTER: Adapter =
-    Adapter { name: "Qucs-S S-parameter viewer", env_var: SPAR_ENV, tool: "Qucs-S S-param viewer" };
+pub const ADAPTER: Adapter = Adapter {
+    name: "Qucs-S",
+    env_var: QUCS_ENV,
+    tool: "Qucs-S",
+};
+pub const SPAR_ADAPTER: Adapter = Adapter {
+    name: "Qucs-S S-parameter viewer",
+    env_var: SPAR_ENV,
+    tool: "Qucs-S S-param viewer",
+};
 
 /// The simulator flavour of the netlist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,7 +54,11 @@ impl Flavour {
 
     /// For a `setup.toml` `simulator` value (`xyce`, else ngspice).
     pub fn for_simulator(simulator: &str) -> Flavour {
-        if simulator.eq_ignore_ascii_case("xyce") { Flavour::Xyce } else { Flavour::Ngspice }
+        if simulator.eq_ignore_ascii_case("xyce") {
+            Flavour::Xyce
+        } else {
+            Flavour::Ngspice
+        }
     }
 }
 
@@ -64,7 +75,12 @@ pub fn export_job(
     let abs = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
     let mut job = Job::new("Qucs-S", program, dir, "qucs.log")
         .args(["-n", "-i"])
-        .args([abs(schematic).into_os_string(), "-o".into(), abs(out).into_os_string(), flavour.flag().into()])
+        .args([
+            abs(schematic).into_os_string(),
+            "-o".into(),
+            abs(out).into_os_string(),
+            flavour.flag().into(),
+        ])
         .env(env);
     job.env_defaults = vec![("QT_QPA_PLATFORM".into(), "offscreen".into())];
     job
@@ -92,7 +108,12 @@ pub fn has_devices(netlist: &str) -> bool {
 
 /// Convert `schematic` to the netlist `out`, as Qucs-S writes it (analysis included).
 /// Errors with Qucs-S's messages when it reports any or writes no devices.
-pub fn export(project: Option<&Project>, schematic: &Path, out: &Path, flavour: Flavour) -> Result<()> {
+pub fn export(
+    project: Option<&Project>,
+    schematic: &Path,
+    out: &Path,
+    flavour: Flavour,
+) -> Result<()> {
     let program = ADAPTER.require()?;
     if !schematic.is_file() {
         bail!("no schematic {}", schematic.display());
@@ -111,7 +132,11 @@ pub fn export(project: Option<&Project>, schematic: &Path, out: &Path, flavour: 
     let errs = errors(&run.text);
     let text = std::fs::read_to_string(out).unwrap_or_default();
     if !run.status.success() || !errs.is_empty() || !has_devices(&text) {
-        let why = if errs.is_empty() { "no devices in its netlist".to_string() } else { errs.join("; ") };
+        let why = if errs.is_empty() {
+            "no devices in its netlist".to_string()
+        } else {
+            errs.join("; ")
+        };
         bail!(
             "Qucs-S could not convert {}: {why}. (Parts from a library need it installed in \
              the Qucs home, see docs/QUCS.md.)",
@@ -138,7 +163,8 @@ fn tempdir(tag: &str) -> Result<PathBuf> {
 /// without `.end`; the deck adds the analyses of `setup.toml`.
 pub fn sim_netlist(netlist: &str, flavour: Flavour) -> String {
     const ANALYSIS: &[&str] = &[
-        ".ac", ".tran", ".dc", ".op", ".noise", ".tf", ".sens", ".four", ".step", ".print", ".probe", ".plot",
+        ".ac", ".tran", ".dc", ".op", ".noise", ".tf", ".sens", ".four", ".step", ".print",
+        ".probe", ".plot",
     ];
     let mut out = String::new();
     let mut control = false;
@@ -150,7 +176,9 @@ pub fn sim_netlist(netlist: &str, flavour: Flavour) -> String {
         let drop = control
             || word == ".end"
             || (flavour == Flavour::Xyce
-                && ANALYSIS.iter().any(|a| word == *a || word.starts_with(&format!("{a} "))));
+                && ANALYSIS
+                    .iter()
+                    .any(|a| word == *a || word.starts_with(&format!("{a} "))));
         if !drop {
             out.push_str(line);
             out.push('\n');
@@ -168,7 +196,12 @@ pub fn is_qucs_schematic(file: &Path) -> bool {
 }
 
 /// Netlist `schematic` for a testbench into `out`: [`export`] then [`sim_netlist`].
-pub fn netlist_for_sim(project: &Project, schematic: &Path, out: &Path, simulator: &str) -> Result<()> {
+pub fn netlist_for_sim(
+    project: &Project,
+    schematic: &Path,
+    out: &Path,
+    simulator: &str,
+) -> Result<()> {
     let flavour = Flavour::for_simulator(simulator);
     export(Some(project), schematic, out, flavour)?;
     let text = std::fs::read_to_string(out)?;
@@ -198,7 +231,9 @@ pub fn schematic_for(
         other => return Err(eyre!("schematic_kind '{other}' is not xschem or qucs")),
     };
     let entry = match view {
-        Some(name) => found.entry(name).ok_or_else(|| eyre!("cell '{cell}' has no view '{name}'"))?,
+        Some(name) => found
+            .entry(name)
+            .ok_or_else(|| eyre!("cell '{cell}' has no view '{name}'"))?,
         None => {
             let first = |f: Format| found.entries.iter().find(|e| e.format == Some(f));
             match want_qucs {
@@ -212,9 +247,16 @@ pub fn schematic_for(
     if let Some(q) = want_qucs
         && (entry.format == Some(Format::QucsSchematic)) != q
     {
-        bail!("view '{}' of '{cell}' is not a {} schematic", entry.name, kind_name(want_qucs));
+        bail!(
+            "view '{}' of '{cell}' is not a {} schematic",
+            entry.name,
+            kind_name(want_qucs)
+        );
     }
-    entry.main_file.clone().ok_or_else(|| eyre!("view '{}' of '{cell}' has no file", entry.name))
+    entry
+        .main_file
+        .clone()
+        .ok_or_else(|| eyre!("view '{}' of '{cell}' has no file", entry.name))
 }
 
 fn kind_name(q: Option<bool>) -> &'static str {
@@ -232,11 +274,18 @@ pub fn launch(project: Option<&Project>, file: Option<&Path>) -> Result<std::pro
 }
 
 /// Start the S-parameter viewer on a Touchstone file (`.s2p`, `.snp`).
-pub fn launch_spar_viewer(project: Option<&Project>, file: Option<&Path>) -> Result<std::process::Child> {
+pub fn launch_spar_viewer(
+    project: Option<&Project>,
+    file: Option<&Path>,
+) -> Result<std::process::Child> {
     spawn(&SPAR_ADAPTER, project, file)
 }
 
-fn spawn(adapter: &Adapter, project: Option<&Project>, file: Option<&Path>) -> Result<std::process::Child> {
+fn spawn(
+    adapter: &Adapter,
+    project: Option<&Project>,
+    file: Option<&Path>,
+) -> Result<std::process::Child> {
     use std::process::{Command, Stdio};
     let program = adapter.require()?;
     let mut cmd = Command::new(&program);
@@ -249,13 +298,20 @@ fn spawn(adapter: &Adapter, project: Option<&Project>, file: Option<&Path>) -> R
     if let Some(p) = project {
         cmd.envs(p.tool_env().iter().map(|(k, v)| (k, v)));
     }
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    cmd.spawn().wrap_err_with(|| format!("cannot start {} ({})", adapter.name, program.display()))
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    cmd.spawn()
+        .wrap_err_with(|| format!("cannot start {} ({})", adapter.name, program.display()))
 }
 
 /// Touchstone file (`.s1p` … `.s9p`, `.snp`): the S-parameter viewer opens these.
 pub fn is_touchstone(file: &Path) -> bool {
-    let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let ext = file
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     ext == "snp"
         || (ext.len() == 3
             && ext.starts_with('s')
@@ -277,9 +333,18 @@ mod tests {
     fn strips_the_schematics_own_analysis() {
         let n = sim_netlist(NGSPICE, Flavour::Ngspice);
         assert!(n.contains("R1 in out") && n.contains(".INCLUDE"), "{n}");
-        assert!(!n.contains("control") && !n.contains("ac lin") && !n.to_lowercase().contains(".end"), "{n}");
+        assert!(
+            !n.contains("control") && !n.contains("ac lin") && !n.to_lowercase().contains(".end"),
+            "{n}"
+        );
         let x = sim_netlist(XYCE, Flavour::Xyce);
-        assert!(x.contains("C1 0 out") && !x.contains(".ac") && !x.contains("PRINT") && !x.contains("END"), "{x}");
+        assert!(
+            x.contains("C1 0 out")
+                && !x.contains(".ac")
+                && !x.contains("PRINT")
+                && !x.contains("END"),
+            "{x}"
+        );
     }
 
     #[test]
@@ -302,18 +367,24 @@ mod tests {
             Path::new("/t"),
             &[],
         );
-        let args: Vec<_> = job.args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args: Vec<_> = job
+            .args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(args, ["-n", "-i", "/a/rc.sch", "-o", "/b/rc.cir", "--xyce"]);
         assert_eq!(job.env_defaults[0].0, "QT_QPA_PLATFORM");
     }
 
     #[test]
     fn the_setup_names_the_kind_and_the_example_is_a_qucs_testbench() {
-        let s = crate::sim::Setup::parse("schematic_kind = \"qucs\"\nsimulator = \"xyce\"").unwrap();
+        let s =
+            crate::sim::Setup::parse("schematic_kind = \"qucs\"\nsimulator = \"xyce\"").unwrap();
         assert_eq!(s.schematic_kind, "qucs");
         assert_eq!(Flavour::for_simulator(&s.simulator), Flavour::Xyce);
         assert_eq!(Flavour::for_simulator(""), Flavour::Ngspice);
-        let tb = include_str!("../../../examples/ihp-inv/libs/cells/rc_lowpass/testbench/setup.toml");
+        let tb =
+            include_str!("../../../examples/ihp-inv/libs/cells/rc_lowpass/testbench/setup.toml");
         assert_eq!(crate::sim::Setup::parse(tb).unwrap().schematic_kind, "qucs");
         let dir = tempdir("kind").unwrap();
         let sch = dir.join("rc.sch");
@@ -349,7 +420,10 @@ mod tests {
             let text = std::fs::read_to_string(&out).unwrap();
             assert!(text.contains("R1 in out") && text.contains("C1"), "{text}");
             let sim = sim_netlist(&text, fl);
-            assert!(!sim.to_lowercase().contains(".ac") && !sim.contains("control"), "{sim}");
+            assert!(
+                !sim.to_lowercase().contains(".ac") && !sim.contains("control"),
+                "{sim}"
+            );
         }
         // a broken file is an error, not a stub netlist
         let bad = dir.join("bad.sch");
@@ -358,5 +432,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    const RC: &str = include_str!("../../../examples/ihp-inv/libs/cells/rc_lowpass/schematic/rc_lowpass.sch");
+    const RC: &str =
+        include_str!("../../../examples/ihp-inv/libs/cells/rc_lowpass/schematic/rc_lowpass.sch");
 }
