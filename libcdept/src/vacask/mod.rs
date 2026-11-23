@@ -19,6 +19,7 @@ pub mod deck;
 pub mod meas;
 pub mod models;
 pub mod raw;
+pub mod stat;
 pub mod translate;
 
 use std::ffi::OsString;
@@ -79,6 +80,7 @@ pub fn build_point(
         models: &lines,
         netlist,
         defined: ready.defined.as_ref(),
+        mm: Some(&ready.stat),
         pdk: &ready.tech.pdk.name,
         notes: &ready.tech.notes,
     })
@@ -97,6 +99,17 @@ pub const MARK_MEASURE: &str = "// cdept-measure: ";
 /// `out.log` (with `vacask.stdout`). A failed analysis is an error even though VACASK
 /// exits with 0.
 pub fn run_vacask(program: &Path, deck: &str, dir: &Path, env: &[(OsString, OsString)]) -> Result<Outcome> {
+    run_vacask_watched(program, deck, dir, env, None)
+}
+
+/// [`run_vacask`], killed when `cancel` is set (a job's cancel flag).
+pub fn run_vacask_watched(
+    program: &Path,
+    deck: &str,
+    dir: &Path,
+    env: &[(OsString, OsString)],
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<Outcome> {
     std::fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     if deck.starts_with("// CDePT: this testbench cannot be written for VACASK") {
         bail!("{}", deck.lines().skip(1).map(|l| l.trim_start_matches("// ")).collect::<Vec<_>>().join("\n"));
@@ -120,7 +133,7 @@ pub fn run_vacask(program: &Path, deck: &str, dir: &Path, env: &[(OsString, OsSt
         .map(|(n, k)| (n.to_string(), k.trim().to_string()))
         .collect();
     let job = crate::batch::vacask::job(program, "deck.sim", dir, env);
-    let out = job.run_unchecked()?;
+    let out = job.run_watched(&crate::batch::Watch { cancel, timeout: None })?;
     let _ = std::fs::copy(&out.log, &log);
     let problems = crate::batch::vacask::problems(&out.text);
     let missing: Vec<&str> = analyses
@@ -138,8 +151,16 @@ pub fn run_vacask(program: &Path, deck: &str, dir: &Path, env: &[(OsString, OsSt
         );
     }
     let main = analyses.iter().find(|(_, k)| k != "op").or(analyses.first());
-    if let Some((n, _)) = main {
-        std::fs::copy(dir.join(format!("{n}.raw")), &raw).wrap_err("cannot copy the raw file")?;
+    if let Some((n, kind)) = main {
+        let file = dir.join(format!("{n}.raw"));
+        if kind == "noise" {
+            // The test templates read ngspice's noise spectra: add them to the copy.
+            let plots = raw::read(&file)?;
+            let first = plots.into_iter().next().ok_or_else(|| eyre::eyre!("empty raw file of '{n}'"))?;
+            std::fs::write(&raw, raw::write_real(&raw::with_noise_spectra(first))).wrap_err("cannot write the raw file")?;
+        } else {
+            std::fs::copy(&file, &raw).wrap_err("cannot copy the raw file")?;
+        }
     }
     let mut measures = std::collections::BTreeMap::new();
     for m in deck.lines().filter_map(|l| l.strip_prefix(MARK_MEASURE)) {

@@ -73,7 +73,15 @@ Xyce does process Monte Carlo (`simulator = "xyce"`); each run is one `.SAMPLING
 with its own `-randseed`. Mismatch and both are refused unless `mismatch_corner` or
 `both_corner` names a corner set that has transistor mismatch (the IHP Xyce models have
 none). The `xyce_mc` view shows the variables the IHP Xyce statistical files need. See
-[Other simulators](other-simulators.md). VACASK refuses Monte Carlo.
+[Other simulators](other-simulators.md).
+
+## With VACASK
+
+VACASK has no random numbers, so CDePT makes the draws: process, mismatch and both work
+as with ngspice (same corner sets, same `[montecarlo]` keys, same statistics), with CDePT's
+own seeded generator. The same seed gives the same numbers on every machine; ngspice's
+numbers for that seed are others, only the distributions agree. The design is in
+[VACASK.md](../VACASK.md#5-monte-carlo).
 
 ## See also
 

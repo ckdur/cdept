@@ -1,0 +1,85 @@
+# VACASK from the Simulation tab on examples/ihp-inv: the testbench view tb_inv/testbench
+# is switched to VACASK in the form, saved, run (the first run converts the PDK's models,
+# a minute), then run again as Monte Carlo (process, mismatch, both) with the seeded draws
+# of CDePT (docs/VACASK.md). Writes into the project: use a copy (run.sh does).
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice \
+#   CDEPT_VACASK=/opt/ext/OpenLane/bin/vacask CDEPT_XSCHEM=target/debug/cdept-xschem \
+#   CDEPT_EXAMPLE=ihp-inv cdept-gui/scripts/run.sh cdept-gui/scripts/vacask.script
+#
+# The verbs are the ones of simulation.script.
+
+panel Library Manager
+wait 0.3
+
+open cells tb_inv testbench
+sim expect_target cells/tb_inv/testbench
+sim expect_dirty no
+
+# Switch the simulator in the form and save: the setup keeps its comments and gets the key.
+sim set simulator vacask
+sim set corners tt ff ss
+sim expect_dirty yes
+sim expect_no_problem
+sim save
+sim expect_dirty no
+shell grep -q 'simulator = "vacask"' libs/cells/tb_inv/testbench/setup.toml
+shell grep -q '^# Testbench of the inverter' libs/cells/tb_inv/testbench/setup.toml
+
+# Three corners with VACASK: PASS rows, VACASK's own deck and log in the point folders.
+sim run
+sim wait
+sim expect_state finished
+sim expect_points 3
+sim expect_rows 3 PASS
+sim expect_rows 0 FAIL
+sim expect_jobs 3 done
+sim expect_file tt_27 deck.sim
+sim expect_file tt_27 out.log
+sim expect_file tt_27 tran1.raw
+
+# A spec that cannot be met: FAIL rows.
+sim set_spec tpd max 1e-13
+sim run
+sim wait
+sim expect_rows 3 FAIL
+sim expect_rows 0 PASS
+sim set_spec tpd max 3e-10
+
+# Monte Carlo with VACASK: 6 runs of each mode at the typical corner, with statistics.
+sim set corners tt
+sim mc on
+sim mc runs 6
+sim mc seed 5
+sim mc mode process
+sim expect_no_problem
+sim save
+sim run
+sim wait
+sim expect_points 6
+sim expect_rows 6 PASS
+sim expect_stats 6 tpd
+sim expect_yield tpd 6/6
+sim expect_file mc_27_r005 deck.sim
+sim mc mode mismatch
+sim run
+sim wait
+sim expect_points 6
+sim expect_rows 6 PASS
+sim expect_stats 6 tpd
+sim expect_file tt_mm_27_r005 tran1.raw
+sim mc mode both
+sim run
+sim wait
+sim expect_points 6
+sim expect_rows 6 PASS
+sim expect_file mc_mm_27_r005 tran1.raw
+
+# Back to the plain testbench: Monte Carlo off, and ngspice again.
+sim mc off
+sim set simulator ngspice
+sim save
+shell ! grep -q montecarlo libs/cells/tb_inv/testbench/setup.toml
+shell ! grep -q 'simulator = "vacask"' libs/cells/tb_inv/testbench/setup.toml
+log vacask: ok
+quit

@@ -679,8 +679,13 @@ fn element(cx: &mut Ctx, line: &str) -> Result<()> {
             text
         }
         other => {
+            let why = match other {
+                'b' => " (a behavioural source has no VACASK equivalent; run this testbench with ngspice)",
+                'f' | 'h' => " (current-controlled sources are not translated)",
+                _ => "",
+            };
             return cx.fail(format!(
-                "element '{}' ({}) is not supported by the VACASK translator",
+                "element '{}' ({}) is not supported by the VACASK translator{why}",
                 w[0],
                 other.to_ascii_uppercase()
             ));

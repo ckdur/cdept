@@ -312,6 +312,20 @@ fn lookup_vector(env: &Env, b: &Bound, candidates: &[String]) -> Result<Value> {
     )?)
 }
 
+/// The name VACASK gives a vector that ngspice names `a.b.c` (a node inside subcircuits,
+/// `a:b:c`) or `@n.a.b.c[var]` (a device's value, `a:b:c.var`).
+fn vacask_alias(name: &str) -> Option<String> {
+    if let Some(device) = name.strip_prefix('@') {
+        let (path, var) = device.strip_suffix(']')?.split_once('[')?;
+        let mut parts: Vec<&str> = path.split('.').collect();
+        if parts.len() > 1 && parts[0].len() == 1 {
+            parts.remove(0);
+        }
+        return Some(format!("{}.{}", parts.join(":"), var));
+    }
+    name.contains('.').then(|| name.replace('.', ":"))
+}
+
 fn clean_name(b: &Bound) -> Result<String> {
     Ok(b.str_or("name", "")?
         .trim()
@@ -329,19 +343,21 @@ static FUNCS: &[Func] = &[
         doc: "Node voltage from the raw file: v(\"out\") finds `v(out)` or `out`. `analysis` (tran, ac, dc, noise) or `plot` picks the plot when several have it.",
         run: |env, b| {
             let n = clean_name(b)?;
-            lookup_vector(env, b, &[format!("v({n})"), n.clone()])
+            let mut names = vec![format!("v({n})"), n.clone()];
+            names.extend(vacask_alias(&n));
+            lookup_vector(env, b, &names)
         },
     },
     Func {
         names: &["i"],
         params: &["name", "?plot", "?analysis"],
-        doc: "Branch current: i(\"vdd\") finds `i(vdd)` or `vdd#branch`. Same plot selection as v().",
+        doc: "Branch current: i(\"vdd\") finds `i(vdd)`, `vdd#branch` or (VACASK) `vdd:flow(br)`. Same plot selection as v().",
         run: |env, b| {
             let n = clean_name(b)?;
             lookup_vector(
                 env,
                 b,
-                &[format!("i({n})"), format!("{n}#branch"), n.clone()],
+                &[format!("i({n})"), format!("{n}#branch"), format!("{n}:flow(br)"), n.clone()],
             )
         },
     },

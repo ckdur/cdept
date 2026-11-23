@@ -326,6 +326,30 @@ impl Setup {
         Ok(setup)
     }
 
+    /// Run this setup with another simulator (`--simulator`, a suite's `simulator`): the
+    /// name is checked, the model set that belonged to the old simulator's default goes
+    /// back to the new simulator's, and what the new simulator cannot run is refused.
+    pub fn set_simulator(&mut self, name: &str) -> Result<()> {
+        if super::run::SimKind::of(name).is_none() {
+            bail!("simulator '{name}' is not supported (ngspice, xyce and vacask are)");
+        }
+        let name = if name == "ngspice" { "" } else { name };
+        if super::run::SimKind::of(&self.simulator) == super::run::SimKind::of(name) {
+            return Ok(());
+        }
+        if matches!(self.models.as_str(), "xyce" | "vacask") && self.models == self.simulator {
+            self.models.clear();
+        }
+        self.simulator = name.to_string();
+        if matches!(name, "xyce" | "vacask") && self.models.is_empty() {
+            self.models = name.to_string();
+        }
+        if !name.is_empty() && self.simulator_backend == "inproc" {
+            self.simulator_backend.clear();
+        }
+        super::caps::check(self)
+    }
+
     pub fn load(file: &Path) -> Result<Setup> {
         Self::load_with(file, super::template::TemplateSet::builtin())
     }
@@ -355,14 +379,12 @@ impl Setup {
                 bail!("variable '{}' is swept twice", sweep.variable);
             }
         }
-        if let Some(mc) = &self.montecarlo {
-            if mc.runs == 0 || mc.runs > 100_000 {
-                bail!("montecarlo runs must be 1..100000");
-            }
-            if self.simulator == "vacask" {
-                bail!("Monte Carlo is run with ngspice or Xyce only (the statistical models are not converted for VACASK)");
-            }
+        if let Some(mc) = &self.montecarlo
+            && (mc.runs == 0 || mc.runs > 100_000)
+        {
+            bail!("montecarlo runs must be 1..100000");
         }
+        super::caps::check(self)?;
         let word = |s: &str| !s.is_empty() && !s.contains(char::is_whitespace);
         for name in self.variables.keys().chain(self.options.keys()) {
             if !word(name) {

@@ -971,6 +971,11 @@ Options:
           ngspice as a process per point (`ngspice -b`) or in-process through libngspice ($CDEPT_LIBNGSPICE). Default: the setup's simulator_backend, else process
           
           [possible values: inproc, process]
+
+      --simulator <SIMULATOR>
+          Run with this simulator instead of the setup's (`simulator` of setup.toml)
+          
+          [possible values: ngspice, xyce, vacask]
 ```
 
 #### cdept sim results
@@ -1076,6 +1081,11 @@ Options:
 
       --json
           Print the report as JSON
+
+      --simulator <SIMULATOR>
+          Run every test with this simulator instead of the tests' (and the suite's `simulator`)
+          
+          [possible values: ngspice, xyce, vacask]
 ```
 
 #### cdept sim deck
@@ -1090,7 +1100,8 @@ Arguments:
   <CELL>     
 
 Options:
-      --view <VIEW>        
+      --view <VIEW>            
+      --simulator <SIMULATOR>  The deck for this simulator instead of the setup's [possible values: ngspice, xyce, vacask]
 ```
 
 ### cdept cace

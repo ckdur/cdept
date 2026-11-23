@@ -58,6 +58,9 @@ pub struct Generated {
     /// Converted files, compiled libraries (relative to the folder).
     pub converted: Vec<String>,
     pub compiled: Vec<String>,
+    /// What the converted files draw from the Monte Carlo vectors ([`super::stat`]).
+    #[serde(default)]
+    pub stat: super::stat::MmInfo,
 }
 
 /// A library file to convert.
@@ -84,13 +87,6 @@ pub struct Plan {
 
 fn lines_of(text: &str) -> impl Iterator<Item = &str> {
     text.lines().map(str::trim)
-}
-
-/// A corner section with statistical models (`agauss` parameters, Monte Carlo and
-/// mismatch), which are not converted.
-fn statistical(section: &str) -> bool {
-    let s = section.to_lowercase();
-    s.contains("mismatch") || s.contains("_stat") || s.ends_with("_mm")
 }
 
 /// `.lib <section>` with no file: the file defines sections.
@@ -183,7 +179,6 @@ impl Plan {
                 let file = Path::new(w.next()?).file_name()?.to_string_lossy().into_owned();
                 Some((file, w.next()?.to_string()))
             })
-            .filter(|(_, s)| !statistical(s))
             .collect();
         let mut search: Vec<PathBuf> = vec![dir.clone()];
         for s in &ngspice.search_path {
@@ -211,8 +206,8 @@ impl Plan {
             let corner = has_sections(&text);
             if corner {
                 // The files a corner file brings in are converted on their own, those
-                // of the sections some corner set uses (the mismatch sections bring the
-                // statistical models, which are not converted).
+                // of the sections some corner set uses (the statistical ones too: their
+                // `gauss()` calls read CDePT's draws, see `stat`).
                 let used: BTreeSet<&str> = used_sections
                     .iter()
                     .filter(|(f, _)| *f == base)
@@ -416,9 +411,14 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
     job.env_defaults = vec![("PYTHONDONTWRITEBYTECODE".into(), "1".into())];
     let out = job.run_unchecked()?;
     out.check().wrap_err("VACASK's model converter did not run")?;
-    let results: Vec<serde_json::Value> = serde_json::from_str(
+    let result: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(dir.join("convert-result.json")).wrap_err("the model converter wrote no result")?,
     )?;
+    let results: Vec<serde_json::Value> = result["files"].as_array().cloned().unwrap_or_default();
+    let mut stat = super::stat::MmInfo {
+        globals: result["globals"].as_array().into_iter().flatten().filter_map(|g| g.as_str().map(String::from)).collect(),
+        ..Default::default()
+    };
     let mut defined = BTreeSet::new();
     let mut converted = vec![];
     let mut builtin_osdi: BTreeSet<String> = BTreeSet::new();
@@ -429,6 +429,9 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
         let name = Path::new(src).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         if r["ok"].as_bool() == Some(true) {
             converted.push(name.clone());
+            if let Ok(info) = serde_json::from_value::<super::stat::FileInfo>(r.clone()) {
+                stat.files.insert(name.clone(), info);
+            }
             for o in r["osdi"].as_array().into_iter().flatten().filter_map(|o| o.as_str()) {
                 builtin_osdi.insert(o.to_string());
             }
@@ -489,12 +492,7 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
     let ng = &plan.ngspice;
     let ok = |file: &str| !failed.contains(file) && converted.iter().any(|c| c == file);
     let mut corners = BTreeMap::new();
-    let mut statistical_corners = vec![];
     for (name, entries) in &ng.corners {
-        if entries.iter().any(|e| e.split_whitespace().nth(1).is_some_and(statistical)) {
-            statistical_corners.push(name.as_str());
-            continue;
-        }
         let mut kept = vec![];
         let mut broken = false;
         for e in entries {
@@ -517,12 +515,6 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
             corners.insert(name.clone(), kept);
         }
     }
-    if !statistical_corners.is_empty() {
-        notes.push(format!(
-            "vacask: the corner sets {} use statistical models (agauss, mismatch), which are not converted; Monte Carlo runs with ngspice",
-            statistical_corners.join(", ")
-        ));
-    }
     let mut options = vec![];
     // SOA checks of the PSP wrappers read a global that the ngspice flow defines.
     let uses_swsoa = converted.iter().any(|f| {
@@ -530,6 +522,10 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
     });
     if uses_swsoa {
         options.push("parameters swsoa=0".to_string());
+    }
+    // Library parameters several files define alike (VACASK refuses redefinitions).
+    for (k, v) in result["shared"].as_object().into_iter().flatten() {
+        options.push(format!("parameters {k}={}", v.as_str().unwrap_or("0")));
     }
     for (letter, module) in &default_models {
         options.push(format!("model {prefix}{letter} {module}"));
@@ -558,6 +554,7 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
         notes,
         converted,
         compiled,
+        stat,
     };
     std::fs::write(&report, serde_json::to_vec_pretty(&g)?)?;
     Ok(g)
@@ -589,9 +586,14 @@ pub struct Ready {
     pub tech: Tech,
     /// Names defined by the converted files; `None` for a set that is not generated.
     pub defined: Option<BTreeSet<String>>,
+    /// What the statistical models draw (empty for a set that is not generated).
+    pub stat: super::stat::MmInfo,
 }
 
 pub fn ready(project: &Project) -> Result<Ready> {
+    // The tests of a suite ask at once: one makes the models, the others wait for them.
+    static GENERATING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = GENERATING.lock().unwrap_or_else(|e| e.into_inner());
     let tech = project
         .tech
         .as_ref()
@@ -599,7 +601,7 @@ pub fn ready(project: &Project) -> Result<Ready> {
     if let Some(set) = tech.models.sets.get(SET)
         && set.generated.is_none()
     {
-        return Ok(Ready { tech: tech.clone(), defined: None });
+        return Ok(Ready { tech: tech.clone(), defined: None, stat: Default::default() });
     }
     let plan = Plan::new(project, tech)?;
     let g = generate(project, tech, &plan)?;
@@ -620,7 +622,7 @@ pub fn ready(project: &Project) -> Result<Ready> {
     }
     tech.notes.retain(|n| !n.starts_with("vacask:"));
     tech.notes.extend(g.notes.iter().cloned());
-    Ok(Ready { tech, defined: Some(g.defined) })
+    Ok(Ready { tech, defined: Some(g.defined), stat: g.stat })
 }
 
 #[cfg(test)]
@@ -658,6 +660,55 @@ mod tests {
         let text = "subckt good(a b)\nr1 (a b) res r=1k\nends\nsubckt bad(1 2 3)\nnr (1 2) rm (\n r=rw*(v(2,4))+3\n)\nends\n// subckt x\n";
         assert_eq!(behavioural_subckts(text), ["bad"]);
         assert!(behavioural_subckts("subckt s(a)\nparameters vth=1 dv(x)=2\nends\n").is_empty());
+    }
+
+    /// The converter on canned model text (needs VACASK's ng2vc and python3: skipped
+    /// without): `gauss()`/`agauss()` become reads of the draw vectors, a parameter that
+    /// two files define alike moves into the shared list.
+    #[test]
+    fn the_converter_turns_gauss_calls_into_draw_reads() {
+        let (Ok(py), Some(python)) = (converter_dir(), crate::tools::find_in_path("python3")) else {
+            eprintln!("skipped: VACASK's converter or python3 not found");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            src.join("dev.lib"),
+            ".subckt dev d s w=1u mm_ok=0\n.param rr='agauss(1k, 10, (mm_ok != 1 ? 0 : 1))'\nR1 d s r=rr\n.ends dev\n\
+             .param nsig=1\n.param gp='gauss(2, 0.1, nsig)'\n",
+        )
+        .unwrap();
+        std::fs::write(src.join("other.lib"), ".param nsig=1\n.param gq='agauss(0, 1, 1)'\n").unwrap();
+        let out = dir.path().join("out");
+        let files: Vec<_> = ["dev.lib", "other.lib"]
+            .iter()
+            .map(|f| serde_json::json!({ "src": src.join(f), "dst": out.join(f), "corner": false }))
+            .collect();
+        let spec = serde_json::json!({ "python_path": py, "prefix": "t_", "profile": "", "sourcepath": [src],
+            "files": files, "result": dir.path().join("result.json") });
+        std::fs::write(dir.path().join("spec.json"), spec.to_string()).unwrap();
+        std::fs::write(dir.path().join("convert.py"), GLUE).unwrap();
+        let status = std::process::Command::new(python)
+            .current_dir(dir.path())
+            .args(["-I", "convert.py", "spec.json"])
+            .env("PYTHONDONTWRITEBYTECODE", "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let result: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.path().join("result.json")).unwrap()).unwrap();
+        assert_eq!(result["globals"], serde_json::json!(["gp", "gq"]), "{result}");
+        assert_eq!(result["shared"], serde_json::json!({ "nsig": "1" }), "{result}");
+        let dev = std::fs::read_to_string(out.join("dev.lib")).unwrap();
+        assert!(dev.contains("parameters mmk=-1"), "{dev}");
+        assert!(dev.contains("mmz[mmk*mmnz+0]") && dev.contains("||mmk<0"), "{dev}");
+        assert!(!dev.contains("!="), "{dev}");
+        assert!(dev.contains("mcz[0]") && !dev.contains("parameters nsig"), "{dev}");
+        let files = result["files"].as_array().unwrap();
+        assert_eq!(files[0]["mm"]["dev"], serde_json::json!(["rr"]));
+        let other = std::fs::read_to_string(out.join("other.lib")).unwrap();
+        assert!(other.contains("mcz[1]"), "{other}");
     }
 
     #[test]

@@ -25,7 +25,7 @@ fn vacask() -> Option<Simulator> {
 fn run_generic(sim: &Simulator, setup_toml: &str, netlist: &str) -> (tempfile::TempDir, sim::Outcome) {
     let setup = Setup::parse(setup_toml).unwrap();
     let point = RunPoint { corner: "tt".into(), ..Default::default() };
-    let i = deck::Inputs { setup: &setup, point: &point, title: "generic", models: &[], netlist, defined: None, pdk: "", notes: &[] };
+    let i = deck::Inputs { setup: &setup, point: &point, title: "generic", models: &[], netlist, defined: None, mm: None, pdk: "", notes: &[] };
     let d = deck::build(&i).unwrap_or_else(|e| panic!("{e:#}"));
     let dir = tempfile::tempdir().unwrap();
     let out = vacask::run_vacask(&sim.program, &d.text, dir.path(), &[]).unwrap_or_else(|e| panic!("{e:#}\n{}", d.text));
@@ -188,7 +188,7 @@ mod real_pdk {
         let tech = libcdept::tech::file::load_tech(dir.path()).unwrap().unwrap();
         let set = &tech.models.sets["vacask"];
         assert!(set.generated.is_some() && !set.osdi.is_empty() && set.corners.contains_key("tt"));
-        assert!(!set.corners.contains_key("mc"), "statistical corners are not generated");
+        assert!(set.corners.contains_key("mc") && set.corners.contains_key("tt_mm"), "statistical corners are generated too");
         assert!(tech.notes.iter().any(|n| n.starts_with("vacask:")));
         assert!(dir.path().join(".cdept/osdi").is_dir());
 
