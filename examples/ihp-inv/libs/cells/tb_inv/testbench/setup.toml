@@ -8,6 +8,11 @@ measures = [
   "tran tpd trig v(in) val=0.6 rise=1 targ v(out) val=0.6 fall=1",
 ]
 
+# The schematic's supply and pulse use {vdd}; sweep/ and montecarlo/ next to this view
+# vary it or sample around it.
+[variables]
+vdd = "1.2"
+
 [[analysis]]
 kind = "tran"
 step = "5p"

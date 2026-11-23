@@ -1,0 +1,31 @@
+# Monte Carlo of the inverter testbench: 10 independent runs at the PDK's statistical
+# corner (`mc` of the technology's models: the process parameters are drawn with
+# gauss()/agauss() in the model files). Every run has its own seed, written into the
+# deck as `setseed N` + `reset` (re-reads the circuit, drawing the parameters again), so
+# a run can be repeated: run i of base seed S has seed deck::mc_seed(S, i), kept in
+# result.json. Run it with
+#   cdept sim run cells tb_inv --view montecarlo [--runs 50 --seed 7]
+# Local (per-device) mismatch is the PDK's `_mm` corners (`tt_mm`), not `mc`.
+schematic = "cells/tb_inv"
+temperatures = [27]
+save = ["v(in)", "v(out)"]
+measures = [
+  "tran tpd trig v(in) val=0.5 rise=1 targ v(out) val=0.5 fall=1",
+]
+
+[variables]
+vdd = "1.2"
+
+[montecarlo]
+runs = 10
+seed = 1
+# corner = "mc"
+
+[[analysis]]
+kind = "tran"
+step = "5p"
+stop = "1.2n"
+
+[[spec]]
+name = "tpd"
+max = 4e-10

@@ -40,6 +40,91 @@ pub struct Setup {
     pub measures: Vec<String>,
     #[serde(rename = "spec")]
     pub specs: Vec<Spec>,
+    /// Design-variable sweeps, crossed with each other, the corners and the temperatures.
+    #[serde(rename = "sweep")]
+    pub sweeps: Vec<Sweep>,
+    /// Monte Carlo: when present, a run is `runs` independent seeded points of the
+    /// technology's statistical corner (instead of the corner grid).
+    pub montecarlo: Option<MonteCarlo>,
+}
+
+/// A sweep of one design variable (`.param`). The values are written as given:
+/// `values = ["1.0", "1.2"]` (or numbers, or `list`), or `start`/`stop`/`step`
+/// (inclusive, linear).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Sweep {
+    pub variable: String,
+    #[serde(alias = "list", deserialize_with = "strings_or_numbers")]
+    pub values: Vec<String>,
+    pub start: Option<f64>,
+    pub stop: Option<f64>,
+    pub step: Option<f64>,
+}
+
+fn strings_or_numbers<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum V {
+        S(String),
+        I(i64),
+        F(f64),
+    }
+    Ok(Vec::<V>::deserialize(d)?
+        .into_iter()
+        .map(|v| match v {
+            V::S(s) => s,
+            V::I(i) => i.to_string(),
+            V::F(f) => fmt_num(f),
+        })
+        .collect())
+}
+
+/// A number the way a deck and a folder name want it: no float noise (`1.2`, not
+/// `1.2000000000000002`).
+pub fn fmt_num(v: f64) -> String {
+    let r = (v * 1e9).round() / 1e9;
+    if r.fract() == 0.0 && r.abs() < 1e15 { format!("{}", r as i64) } else { format!("{r}") }
+}
+
+impl Sweep {
+    /// The values to run, in order.
+    pub fn expand(&self) -> Result<Vec<String>> {
+        if !self.values.is_empty() {
+            return Ok(self.values.clone());
+        }
+        let (Some(start), Some(stop), Some(step)) = (self.start, self.stop, self.step) else {
+            bail!("sweep '{}' needs `values` or start, stop and step", self.variable);
+        };
+        if !(step.is_finite() && step != 0.0) || !start.is_finite() || !stop.is_finite() {
+            bail!("sweep '{}': bad start/stop/step", self.variable);
+        }
+        if (stop - start) * step < 0.0 {
+            bail!("sweep '{}': step {step} does not lead from {start} to {stop}", self.variable);
+        }
+        let n = ((stop - start) / step + 1e-9).floor() as usize + 1;
+        if n > 10_000 {
+            bail!("sweep '{}' has {n} values", self.variable);
+        }
+        Ok((0..n).map(|i| fmt_num(start + step * i as f64)).collect())
+    }
+}
+
+/// Monte Carlo runs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MonteCarlo {
+    pub runs: u32,
+    /// The base seed; run `i` gets [`crate::sim::deck::mc_seed`]`(seed, i)`.
+    pub seed: u64,
+    /// The corner set that samples (the technology's statistical one). Empty: `mc`.
+    pub corner: String,
+}
+
+impl Default for MonteCarlo {
+    fn default() -> Self {
+        MonteCarlo { runs: 10, seed: 1, corner: String::new() }
+    }
 }
 
 /// One analysis.
@@ -116,6 +201,23 @@ impl Setup {
         if self.simulator == "xyce" && self.analyses.iter().filter(|a| !matches!(a, Analysis::Op)).count() > 1 {
             bail!("Xyce runs one analysis per deck (op may come with it); split the testbench");
         }
+        for sweep in &self.sweeps {
+            sweep.expand()?;
+            if sweep.variable.is_empty() || sweep.variable.contains(char::is_whitespace) {
+                bail!("'{}' is not a valid sweep variable", sweep.variable);
+            }
+            if self.sweeps.iter().filter(|o| o.variable == sweep.variable).count() > 1 {
+                bail!("variable '{}' is swept twice", sweep.variable);
+            }
+        }
+        if let Some(mc) = &self.montecarlo {
+            if mc.runs == 0 || mc.runs > 100_000 {
+                bail!("montecarlo runs must be 1..100000");
+            }
+            if self.simulator == "xyce" {
+                bail!("Monte Carlo is run with ngspice only (Xyce has its own .sampling, not generated yet)");
+            }
+        }
         let word = |s: &str| !s.is_empty() && !s.contains(char::is_whitespace);
         for name in self.variables.keys().chain(self.options.keys()) {
             if !word(name) {
@@ -178,6 +280,27 @@ max = 2e-10
         assert_eq!(s.analyses.len(), 2);
         assert!(matches!(&s.analyses[1], Analysis::Ac { sweep, .. } if sweep == "dec"));
         assert_eq!(s.specs[0].max, Some(2e-10));
+    }
+
+    #[test]
+    fn sweeps_and_montecarlo() {
+        let s = Setup::parse(
+            "[[sweep]]\nvariable=\"vdd\"\nvalues=[\"1.0\", 1.2, 2]\n[[sweep]]\nvariable=\"c\"\nstart=0.1\nstop=0.5\nstep=0.1\n\
+             [montecarlo]\nruns=5\nseed=7",
+        )
+        .unwrap();
+        assert_eq!(s.sweeps[0].expand().unwrap(), ["1.0", "1.2", "2"]);
+        assert_eq!(s.sweeps[1].expand().unwrap(), ["0.1", "0.2", "0.3", "0.4", "0.5"]);
+        assert_eq!(s.montecarlo, Some(MonteCarlo { runs: 5, seed: 7, corner: String::new() }));
+        let l = Setup::parse("[[sweep]]\nvariable=\"a\"\nlist=[\"x\"]").unwrap();
+        assert_eq!(l.sweeps[0].values, ["x"]);
+        assert_eq!(Sweep { variable: "a".into(), start: Some(3.0), stop: Some(1.0), step: Some(-1.0), ..Default::default() }
+            .expand().unwrap(), ["3", "2", "1"]);
+        assert!(Setup::parse("[[sweep]]\nvariable=\"a\"").is_err());
+        assert!(Setup::parse("[[sweep]]\nvariable=\"a\"\nstart=1\nstop=2\nstep=-1").is_err());
+        assert!(Setup::parse("[[sweep]]\nvariable=\"a\"\nlist=[\"1\"]\n[[sweep]]\nvariable=\"a\"\nlist=[\"2\"]").is_err());
+        assert!(Setup::parse("[montecarlo]\nruns=0").is_err());
+        assert!(Setup::parse("simulator=\"xyce\"\n[montecarlo]\nruns=2").is_err());
     }
 
     #[test]

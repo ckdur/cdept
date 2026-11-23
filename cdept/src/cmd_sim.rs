@@ -6,7 +6,8 @@ use clap::Subcommand;
 use libcdept::jobs::{JobState, Listener};
 use eyre::{Result, bail, eyre};
 use libcdept::Project;
-use libcdept::sim::{self, spec::Verdict};
+use libcdept::sim::results::{self, RunRecord};
+use libcdept::sim;
 
 #[derive(Subcommand)]
 pub enum SimCommand {
@@ -26,6 +27,33 @@ pub enum SimCommand {
         /// Simulators running at once. Default: the smaller of the points and the cores.
         #[arg(long, short = 'j')]
         jobs: Option<usize>,
+        /// Monte Carlo: this many seeded runs of the statistical corner (overrides the
+        /// setup's [montecarlo] runs, or turns Monte Carlo on).
+        #[arg(long)]
+        runs: Option<u32>,
+        /// Base seed of the Monte Carlo runs.
+        #[arg(long)]
+        seed: Option<u64>,
+        /// Run the corner/temperature/sweep grid although the setup has [montecarlo].
+        #[arg(long)]
+        no_mc: bool,
+        /// Do not write result.json / results.db.
+        #[arg(long)]
+        no_store: bool,
+    },
+    /// Show the stored results of a testbench: the latest run of every point and, over
+    /// them, pass/fail counts and min/max/mean/std of every measurement.
+    Results {
+        library: String,
+        cell: String,
+        #[arg(long)]
+        view: Option<String>,
+        /// Every stored run, not only the latest of each point.
+        #[arg(long)]
+        all: bool,
+        /// Rebuild results.db from the result.json files first.
+        #[arg(long)]
+        reindex: bool,
     },
     /// Print the deck of the first run without starting the simulator.
     Deck {
@@ -78,7 +106,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             print!("{}", sim::build_deck(&tb.setup, &point, &format!("{library}/{cell}/{view}"), &lines, &netlist));
             Ok(())
         }
-        SimCommand::Run { library, cell, view, corners, jobs } => {
+        SimCommand::Run { library, cell, view, corners, jobs, runs, seed, no_mc, no_store } => {
             let view = view_of(project, &library, &cell, view)?;
             let tb = sim::open(project, &library, &cell, &view)?;
             let simulator = sim::Simulator::for_setup(&tb.setup).ok_or_else(|| {
@@ -100,35 +128,46 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                     JobState::Cancelled => eprintln!("{:<10} cancelled", i.name),
                 }
             });
-            let options = sim::RunOptions { jobs: jobs.unwrap_or(0), on_event: Some(on_event) };
+            let options = sim::RunOptions {
+                jobs: jobs.unwrap_or(0),
+                on_event: Some(on_event),
+                mc_runs: runs,
+                mc_seed: seed,
+                no_mc,
+                no_store,
+            };
             let results = sim::run_testbench_with(project, &tb, &simulator, &corners, &options)?;
-            let mut bad = 0;
-            for r in &results {
-                match &r.outcome {
-                    Err(e) => {
-                        bad += 1;
-                        println!("{:<10} FAILED  {e:#}", r.point.name());
-                    }
-                    Ok(o) => {
-                        println!("{:<10} ok      {}", r.point.name(), o.raw.display());
-                        for (name, v) in &o.measures {
-                            println!("    {name:<16} {v:e}");
-                        }
-                        for row in &r.specs {
-                            let (word, v) = match row.verdict {
-                                Verdict::Pass => ("PASS", false),
-                                Verdict::Fail => ("FAIL", true),
-                                Verdict::Missing => ("MISSING", true),
-                            };
-                            bad += v as usize;
-                            println!("    spec {:<11} {word}", row.name);
-                        }
-                    }
-                }
+            let records: Vec<RunRecord> = results.iter().map(|r| r.run.clone()).collect();
+            print!("{}", results::format_table(&records));
+            let agg = results::aggregate(&records);
+            println!();
+            if records.len() > 1 && (!tb.setup.sweeps.is_empty() || results.iter().any(|r| r.point.seed.is_some())) {
+                print!("{}", results::format_aggregate(&agg));
+            } else {
+                println!("{} run(s): {} pass, {} fail, {} error", agg.runs, agg.pass, agg.fail, agg.error);
             }
+            if results.iter().any(|r| r.record.is_some()) {
+                println!("index: {}", results::Store::path(&project.root).display());
+            }
+            let bad = agg.fail + agg.error;
             if bad > 0 {
-                bail!("{bad} run(s) or spec(s) failed");
+                bail!("{bad} of {} run(s) failed", agg.runs);
             }
+            Ok(())
+        }
+        SimCommand::Results { library, cell, view, all, reindex } => {
+            let view = view_of(project, &library, &cell, view)?;
+            let mut db = results::Store::open(&project.root)?;
+            if reindex {
+                println!("reindexed {} run(s)", db.reindex(&project.root)?);
+            }
+            let records = if all { db.runs(&library, &cell, &view)? } else { db.latest(&library, &cell, &view)? };
+            if records.is_empty() {
+                bail!("no stored runs of {library}/{cell}/{view} (cdept sim run, or --reindex)");
+            }
+            print!("{}", results::format_table(&records));
+            println!();
+            print!("{}", results::format_aggregate(&results::aggregate(&db.latest(&library, &cell, &view)?)));
             Ok(())
         }
     }

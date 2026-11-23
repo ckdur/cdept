@@ -1,0 +1,31 @@
+# Design-variable sweep of the inverter testbench: supply 1.0 to 1.4 V in 0.1 V steps
+# (start/stop/step; `values = ["1.0", "1.2"]` works too), at two corners and two
+# temperatures: 2 x 2 x 5 = 20 runs. The schematic is the one of this cell and uses
+# {vdd}. A point's folder name carries its values (tt_27_vdd1p2). Run it with
+#   cdept sim run cells tb_inv --view sweep
+# and read it again with `cdept sim results cells tb_inv --view sweep`.
+schematic = "cells/tb_inv"
+corners = ["tt", "ss"]
+temperatures = [27, 85]
+save = ["v(in)", "v(out)"]
+measures = [
+  "tran tpd trig v(in) val=0.5 rise=1 targ v(out) val=0.5 fall=1",
+]
+
+[variables]
+vdd = "1.2"   # the default; the sweep overrides it per run
+
+[[sweep]]
+variable = "vdd"
+start = 1.0
+stop = 1.4
+step = 0.1
+
+[[analysis]]
+kind = "tran"
+step = "5p"
+stop = "1.2n"
+
+[[spec]]
+name = "tpd"
+max = 4e-10

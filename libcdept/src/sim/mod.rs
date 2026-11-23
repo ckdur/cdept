@@ -10,6 +10,7 @@
 //! measurements with the specs. Format and design: docs/SIMULATION.md.
 
 pub mod deck;
+pub mod results;
 pub mod run;
 pub mod setup;
 pub mod spec;
@@ -66,6 +67,13 @@ pub struct PointResult {
     pub point: RunPoint,
     pub outcome: Result<Outcome>,
     pub specs: Vec<spec::Row>,
+    /// When the run started (RFC 3339) and how long it took.
+    pub started: String,
+    pub duration_ms: u64,
+    /// The run's `result.json` ([`results::RunRecord`]) when it was written.
+    pub record: Option<PathBuf>,
+    /// The same as a record (point, hashes, measures, verdicts, paths), written or not.
+    pub run: results::RunRecord,
 }
 
 /// How [`run_testbench_with`] runs the points.
@@ -75,6 +83,15 @@ pub struct RunOptions {
     pub jobs: usize,
     /// Called on every job event (a point starts, finishes, fails), from worker threads.
     pub on_event: Option<crate::jobs::Listener>,
+    /// Monte Carlo runs: run this many seeded points of the statistical corner. Turns
+    /// Monte Carlo on for a setup without `[montecarlo]`, else overrides its `runs`.
+    pub mc_runs: Option<u32>,
+    /// The base seed of the Monte Carlo runs (default: the setup's, else 1).
+    pub mc_seed: Option<u64>,
+    /// Run the corner × temperature × sweep grid although the setup has `[montecarlo]`.
+    pub no_mc: bool,
+    /// Do not write `result.json` files or add to `results.db`.
+    pub no_store: bool,
 }
 
 /// Netlist the testbench's schematic (once) and run every point (or only `only`,
@@ -115,8 +132,35 @@ pub fn run_testbench_with(
         .corner
         .clone()
         .ok_or_else(|| eyre!("the technology names no default corner"))?;
-    let mut points = deck::points(&tb.setup, &default_corner);
-    if !only.is_empty() {
+    let mc = match (&tb.setup.montecarlo, options.mc_runs) {
+        _ if options.no_mc => None,
+        (None, None) => None,
+        (setup_mc, runs) => {
+            let base = setup_mc.clone().unwrap_or_default();
+            Some(setup::MonteCarlo {
+                runs: runs.unwrap_or(base.runs),
+                seed: options.mc_seed.unwrap_or(base.seed),
+                corner: if base.corner.is_empty() { "mc".into() } else { base.corner },
+            })
+        }
+    };
+    let mut points = if let Some(mc) = &mc {
+        let (_, set_models) = models.set(&set).ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
+        if set_models.corner(&mc.corner).is_none() {
+            return Err(eyre!(
+                "Monte Carlo needs the statistical corner '{}' in the models '{set}' (there are: {}); name another in [montecarlo] corner",
+                mc.corner,
+                set_models.corner_names().join(", ")
+            ));
+        }
+        if tb.setup.simulator == "xyce" {
+            return Err(eyre!("Monte Carlo is run with ngspice only"));
+        }
+        deck::mc_points(&tb.setup, &mc.corner, mc.runs, mc.seed)
+    } else {
+        deck::points(&tb.setup, &default_corner)
+    };
+    if !only.is_empty() && mc.is_none() {
         points = vec![];
         let all = deck::points(&Setup { corners: only.to_vec(), ..tb.setup.clone() }, &default_corner);
         points.extend(all);
@@ -127,7 +171,6 @@ pub fn run_testbench_with(
     let netlist = std::fs::read_to_string(&netlist_file)
         .wrap_err_with(|| format!("cannot read {}", netlist_file.display()))?;
     let (_, model_set) = models.set(&set).ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
-    let init = deck::spiceinit(model_set, |n| project.var(n)).map_err(|e| eyre!(e))?;
     let title = format!("{}/{}/{}", tb.library, tb.cell, tb.view);
     let env = project.tool_env();
     let workers = if options.jobs > 0 { options.jobs } else { Queue::default_workers().min(points.len()) };
@@ -136,11 +179,14 @@ pub fn run_testbench_with(
         let f = f.clone();
         queue.on_event(move |e| f(e));
     }
-    type Slot = Arc<Mutex<Option<Result<Outcome>>>>;
+    type Slot = Arc<Mutex<Option<(Result<Outcome>, String, u64)>>>;
     let mut slots: Vec<Slot> = vec![];
+    let mut decks: Vec<String> = vec![];
     for point in &points {
+        let init = deck::spiceinit(model_set, |n| project.var(n)).map_err(|e| eyre!(e))?;
         let lines = models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?;
         let text = deck::build(&tb.setup, point, &title, &lines, &netlist);
+        decks.push(text.clone());
         let dir = base.join(point.name());
         std::fs::create_dir_all(&dir)?;
         std::fs::write(dir.join(".spiceinit"), &init)?;
@@ -148,30 +194,61 @@ pub fn run_testbench_with(
         slots.push(slot.clone());
         let (simulator, env, log) = (simulator.clone(), env.clone(), dir.join("job.log"));
         let spec = JobSpec::func(point.name(), move |ctx| {
+            let started = chrono::Local::now().to_rfc3339();
+            let clock = std::time::Instant::now();
             let outcome = run::run_in_job(&simulator, &text, &dir, &env, ctx);
             let verdict = match &outcome {
                 Ok(_) => Ok(()),
                 Err(e) => Err(eyre!("{e:#}")),
             };
-            *slot.lock().unwrap() = Some(outcome);
+            *slot.lock().unwrap() = Some((outcome, started, clock.elapsed().as_millis() as u64));
             verdict
         })
         .log(log);
         queue.submit(spec);
     }
     queue.wait_all();
-    let results = points
-        .into_iter()
-        .zip(slots)
-        .map(|(point, slot)| {
-            let outcome = slot.lock().unwrap().take().unwrap_or_else(|| Err(eyre!("cancelled")));
-            let specs = match &outcome {
-                Ok(o) => spec::check(&tb.setup.specs, &o.measures),
-                Err(_) => vec![],
-            };
-            PointResult { point, outcome, specs }
-        })
-        .collect();
+    let mut store = if options.no_store {
+        None
+    } else {
+        results::Store::open(&project.root).map_err(|e| tracing::warn!("results database: {e:#}")).ok()
+    };
+    let mut results = vec![];
+    for ((point, slot), deck_text) in points.into_iter().zip(slots).zip(decks) {
+        let (outcome, started, duration_ms) = slot
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or_else(|| (Err(eyre!("cancelled")), chrono::Local::now().to_rfc3339(), 0));
+        let specs = match &outcome {
+            Ok(o) => spec::check(&tb.setup.specs, &o.measures),
+            Err(_) => vec![],
+        };
+        let rec = results::RunRecord::new(
+            (&tb.library, &tb.cell, &tb.view),
+            &tb.setup,
+            &deck_text,
+            &point,
+            &base.join(point.name()),
+            &outcome,
+            &specs,
+            started.clone(),
+            duration_ms,
+        );
+        let mut record = None;
+        if !options.no_store {
+            match rec.write() {
+                Ok(f) => record = Some(f),
+                Err(e) => tracing::warn!("{}: {e:#}", point.name()),
+            }
+            if let Some(db) = &mut store
+                && let Err(e) = db.insert(&rec)
+            {
+                tracing::warn!("{}: results database: {e:#}", point.name());
+            }
+        }
+        results.push(PointResult { point, outcome, specs, started, duration_ms, record, run: rec });
+    }
     Ok(results)
 }
 

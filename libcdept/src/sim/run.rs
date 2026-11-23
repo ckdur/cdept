@@ -287,7 +287,7 @@ mod tests {
              [[analysis]]\nkind=\"tran\"\nstep=\"0.1n\"\nstop=\"20n\"",
         )
         .unwrap();
-        let point = super::super::deck::RunPoint { corner: "tt".into(), temperature: None };
+        let point = super::super::deck::RunPoint { corner: "tt".into(), ..Default::default() };
         let net = "* rc\nV1 in 0 PULSE(0 1 1n 1n 1n 5n 20n)\nR1 in out 1k\nC1 out 0 1p\n.end\n";
         let deck = super::super::deck::build(&setup, &point, "rc", &[], net);
         let out = run(&sim, &deck, dir.path(), &[]).unwrap();
