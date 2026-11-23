@@ -1,0 +1,61 @@
+# Demo 2: a real PDK, IHP SG13G2 (examples/ihp-inv). Needs PDK_ROOT, KLayout, ngspice and
+# the xschem helper: run it with demo/run.sh ihp. `pause N` is scaled by DEMO_PACE; the
+# window stays open at the end.
+
+window 1500 950
+panel Libraries
+pause 2
+
+# --- The technology snapshot: what CDePT read out of the PDK --------------------------
+panel Technology
+tech page Overview
+pause 3
+tech page Layers
+pause 2
+tech page Models
+pause 3
+tech page Libraries
+pause 3
+tech page Overview
+
+# --- A PDK standard cell: its layout and its LEF abstract (read-only) -----------------
+panel Libraries
+select sg13g2_stdcell sg13g2_inv_1
+pause 2
+open sg13g2_stdcell sg13g2_inv_1 layout
+wait_frame
+pause 3
+open sg13g2_stdcell sg13g2_inv_1 abstract
+wait_frame
+pause 3.5
+
+# --- The project's own cells: schematic, layout, and the net check --------------------
+open cells inv schematic
+wait_frame
+pause 2.5
+open cells buf layout
+wait_frame
+pause 2.5
+nets_update
+pause 3.5
+
+# --- A testbench: corners from the technology, three runs, specs ----------------------
+open cells tb_inv testbench
+pause 2.5
+sim run
+sim wait
+pause 4
+
+# --- A family of tests, one table: the suite ------------------------------------------
+open cells tb_inv suite
+pause 2
+sim suite_run
+sim suite_wait
+pause 4
+
+# --- Monte Carlo: seeded process variation, statistics and yield ----------------------
+open cells tb_inv montecarlo
+pause 2
+sim run
+sim wait
+pause 5

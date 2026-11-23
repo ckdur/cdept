@@ -1,0 +1,50 @@
+# Demo 1: the made-up ("mock") technology. examples/buffer uses only xschem's generic
+# devices and generic layers, so no PDK is needed. Run it with demo/run.sh buffer.
+# `pause N` is a wait of N seconds that demo/run.sh scales (DEMO_PACE); the window stays
+# open at the end.
+
+window 1500 950
+panel Libraries
+pause 2
+
+# --- The library model: libraries, cells, views ---------------------------------------
+select logic
+pause 1.5
+select logic buf
+pause 1.5
+select logic buf schematic
+pause 2
+
+# --- The schematic in the embedded xschem; the hierarchy read from the files ----------
+open logic buf schematic
+wait_frame
+pause 2
+panel Hierarchy
+hierarchy_mode schematic files
+pause 2.5
+
+# --- The layouts in the embedded KLayout: inv is placed twice as a reference ----------
+open logic buf layout
+wait_frame
+pause 3
+hierarchy_mode layout
+pause 2.5
+
+# --- A live PCell: rdiv places rpoly twice (a KLayout library of the project) ---------
+open logic rdiv layout
+wait_frame
+pause 3
+
+# --- What uses a cell: inv is used by buf, in the schematic and in the layout ---------
+used_by logic inv
+pause 3
+
+# --- The testbench schematic, netlisted into a view of its own ------------------------
+open bench tb_buf schematic
+wait_frame
+pause 2.5
+netlist bench tb_buf spice
+pause 2
+panel Libraries
+select bench tb_buf
+pause 3
