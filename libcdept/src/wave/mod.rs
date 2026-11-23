@@ -3,9 +3,18 @@
 //! the raw file of a run point, as a separate process. UberWave has the same owner as
 //! CDePT, so its licence does not limit this; embedding it is possible later.
 //!
-//! The viewer takes one path and an optional `--analysis <name>` (`tran`, `ac`, `dc`,
-//! `noise`, `op` for a multi-plot ngspice raw file) and has no IPC yet, so what CDePT
-//! can do is open one raw file at a time. Design: docs/howto/view-waveforms.md.
+//! An older viewer takes one path and an optional `--analysis <name>` (`tran`, `ac`, `dc`,
+//! `noise`, `op` for a multi-plot ngspice raw file): one raw file at a time. A viewer
+//! with IPC protocol 1 (`--version` says `ipc 1`) takes several files and a socket
+//! ([`ipc`], [`session`]): families of run points open in one window and the calculator
+//! pushes traces into it ([`calc`]). Design: docs/howto/view-waveforms.md.
+
+#[cfg(unix)]
+pub mod calc;
+#[cfg(unix)]
+pub mod ipc;
+#[cfg(unix)]
+pub mod session;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -78,9 +87,14 @@ pub fn require(project: Option<&Project>) -> Result<PathBuf> {
     })
 }
 
-/// What the "version" column of `cdept tools` shows: the viewer has no `--version` (and
-/// a probe would open a window), so the age of the file.
+/// What the "version" column of `cdept tools` shows: the viewer's own `--version` line
+/// (with `ipc 1` when it has IPC), else, for a viewer that does not answer it (an older
+/// one: the probe never opens a window and is killed after 2 s), the age of the file.
 pub fn describe(program: &Path) -> Option<String> {
+    #[cfg(unix)]
+    if let Some(v) = session::version(program) {
+        return Some(v.line);
+    }
     let modified = std::fs::metadata(program).ok()?.modified().ok()?;
     let when: chrono::DateTime<chrono::Local> = modified.into();
     Some(format!("found, file of {}", when.format("%Y-%m-%d")))
@@ -177,7 +191,7 @@ pub fn open_raw(project: Option<&Project>, raw: &Path, analysis: Option<&str>) -
     Ok(LaunchInfo { command: line })
 }
 
-fn spawn_detached(line: &[OsString], dir: Option<&Path>, project: Option<&Project>) -> Result<()> {
+pub(crate) fn spawn_detached(line: &[OsString], dir: Option<&Path>, project: Option<&Project>) -> Result<()> {
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(&line[0]);
     cmd.args(&line[1..]);
@@ -276,8 +290,8 @@ pub fn pick_point(
             0 => Err(eyre!("{library}/{cell}/{view} has no run point with a raw file (run the testbench first)")),
             1 => Ok(all.into_iter().next().unwrap()),
             n => Err(eyre!(
-                "{library}/{cell}/{view} has {n} run points: pass --point (UberWave opens one file at a time; \
-                 File > Import adds the others). Points: {}",
+                "{library}/{cell}/{view} has {n} run points: pass --point, or --family to open them all in \
+                 one viewer. Points: {}",
                 names(&all)
             )),
         },
@@ -289,10 +303,60 @@ pub fn names(points: &[PointRaw]) -> String {
     points.iter().map(|p| p.point.as_str()).collect::<Vec<_>>().join(", ")
 }
 
-/// Open one run point (the GUI's button and script command).
-pub fn open_point(project: &Project, library: &str, cell: &str, view: &str, point: &str) -> Result<LaunchInfo> {
+/// Open one run point (the GUI's button and script command): in the viewer of the run
+/// when one runs and has IPC, else in a new one.
+#[cfg(unix)]
+pub fn open_point(project: &Project, library: &str, cell: &str, view: &str, point: &str) -> Result<session::Opened> {
     let p = pick_point(project, library, cell, view, Some(point))?;
-    open_raw(Some(project), &p.raw, None)
+    session::open_files(Some(project), &session::run_key(library, cell, view), &[(&p).into()], None, session::Mode::Open)
+}
+
+/// Open the raw file of a point already picked (the viewer of the run is reused).
+#[cfg(unix)]
+pub fn open_point_raw(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: &str,
+    point: &PointRaw,
+    analysis: Option<&str>,
+) -> Result<session::Opened> {
+    session::open_files(Some(project), &session::run_key(library, cell, view), &[point.into()], analysis, session::Mode::Open)
+}
+
+/// The points of a view to open together: `chosen` (an error for an unknown one), or all
+/// of them when empty.
+pub fn select_points(project: &Project, library: &str, cell: &str, view: &str, chosen: &[String]) -> Result<Vec<PointRaw>> {
+    let all = points(project, library, cell, view);
+    if all.is_empty() {
+        return Err(eyre!("{library}/{cell}/{view} has no run point with a raw file (run the testbench first)"));
+    }
+    if chosen.is_empty() {
+        return Ok(all);
+    }
+    chosen
+        .iter()
+        .map(|n| {
+            all.iter().find(|p| &p.point == n).cloned().ok_or_else(|| {
+                eyre!("no run point '{n}' with a raw file in {library}/{cell}/{view} (points: {})", names(&all))
+            })
+        })
+        .collect()
+}
+
+/// Open several run points in one viewer, tags = point names (the GUI's "Open family"
+/// and `cdept wave --family`).
+#[cfg(unix)]
+pub fn open_family(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: &str,
+    chosen: &[PointRaw],
+    analysis: Option<&str>,
+) -> Result<session::Opened> {
+    let files: Vec<session::ViewFile> = chosen.iter().map(Into::into).collect();
+    session::open_files(Some(project), &session::run_key(library, cell, view), &files, analysis, session::Mode::Open)
 }
 
 #[cfg(test)]

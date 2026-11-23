@@ -42,7 +42,7 @@ cdept (GUI binary, egui/eframe)
       │    ├── klayout  (helper process cdept-klayout, see KLAYOUT.md)
       │    ├── magic    (Tcl over stdin/pipe or Tcl socket script)
       │    ├── ngspice  (libngspice shared API, in-process)
-      │    ├── uberwave (launched with a raw file, libcdept/src/wave.rs; IPC needs upstream work)
+      │    ├── uberwave (launched with raw files, libcdept/src/wave/; IPC client, families and calculator traces need the viewer's `ipc-multifile` branch)
       │    └── xyce / vacask / qucs-s / netgen / cvc / yosys / openroad / … (batch)
       ├── sim/         testbench, design variables, corners, sweeps, job queue, results DB
       ├── wave/        SPICE raw reader, VCD/FST via wellen, signal model
@@ -260,22 +260,32 @@ Xyce Monte Carlo; the rest of the list below as written.
 - **UberWave** (a separate program of Symbiotic EDA, repository `uberwave`; same owner as CDePT, so its licence does not limit the integration: starting it as a process is the first step and embedding it is possible if that proves too limited; the uberWAVE project from
   the proposal): C++20/ImGui/ImPlot analog and mixed-signal viewer built for multi-GB ngspice
   raw files (memory-mapped parser, decimation, `.uwraw` cache), plus Spectre PSF. Binary
-  `UberWaveViewer`; CLI `UberWaveViewer <file.raw|psf-dir> [--analysis <name>]` (one path,
-  the first positional only); there is also a WebAssembly build. CDePT only starts it as a
+  `UberWaveViewer`; CLI `UberWaveViewer <file.raw|psf-dir> [--analysis <name>]` (one path in
+  the older builds, several files and `--ipc` in the `ipc-multifile` branch); there is also a WebAssembly build. CDePT only starts it as a
   separate process (never linked: CDePT stays MIT). Integration steps:
   1. **Done**: "Open in UberWave" on a point of the Simulation tab, and `cdept wave`; found
      through `$CDEPT_UBERWAVE`, `PATH` or a sibling build (`cdept tools`).
-  2. **Done for single points**: `cdept wave <lib> <cell> [--view] [--point]` opens the
-     `out.raw` of a run point of the results folder, with the transient analysis preselected
-     when the file has several (`--analysis`). Opening a whole family (corners, sweeps, Monte
-     Carlo) is not possible yet: UberWave takes one file (File > Import adds others by hand).
-  3. **Needs upstream work**: an IPC channel into the running viewer. UberWave would need
-     (a) a command line with several files, or a run folder, to open a family as one session;
-     (b) a control channel (a socket, a pipe or a JSON protocol) with commands to open or import
-     a file, add or remove a signal or expression, select the analysis, set the cursors and
-     the x range; and (c) queries or events that report back the cursor values and the visible
-     signals. CDePT's calculator and spec table could then follow what is on the screen.
-  4. Which side owns large-file viewing is decided: UberWave. The numbers stay in CDePT.
+  2. **Done**: `cdept wave <lib> <cell> [--view] [--point]` opens the `out.raw` of a run
+     point of the results folder, with the transient analysis preselected when the file has
+     several (`--analysis`).
+  3. **Reached on the CDePT side** (needs the viewer branch `ipc-multifile` of the `uberwave`
+     repository to be merged and built; an older viewer keeps the one-file behaviour):
+     UberWave takes several files (`UberWaveViewer [--analysis A] [--tag T ...] FILE...`),
+     `--version` prints `UberWaveViewer <version> ipc 1`, and `--ipc <socket>` starts a
+     JSON-lines server on a Unix socket (protocol 1: hello, open, import, list_files,
+     list_signals, show, hide, set_analysis, cursors, range, add_trace, remove_trace,
+     subscribe, quit). CDePT has the client (`libcdept/src/wave/ipc.rs`): `cdept wave --family`
+     and "Open family in UberWave" open all the points of a view in one viewer (tags = point
+     names), and a second open of the same run reuses the running viewer. Tested against a
+     fake server (`cdept-gui/scripts/fake-uberwave-ipc.py`) and once by hand against the
+     viewer build with IPC.
+  4. **Reached on the CDePT side**: the calculator feeds the viewer. `cdept wave ... --calc
+     EXPR` and the expression line of the Simulation tab evaluate an expression on one point
+     or on every point of a family and push waveform results as traces (`add_trace`); scalars
+     are printed. Still open: following the viewer's cursors in the spec table
+     (`subscribe` is in the client, nothing uses it yet), and showing CDePT's own measures as
+     markers.
+  5. Which side owns large-file viewing is decided: UberWave. The numbers stay in CDePT.
 - Other viewers detected for "open with": GTKWave and gaw (xschem's viewer).
 - Calculator, in two layers:
   1. Native Rust function library (`rustfft`, `ndarray`): FFT/windowing, SNR/SNDR/SFDR/THD/ENOB,

@@ -33,8 +33,20 @@ CDePT finds it, in this order:
 3. a build next to the project or next to the CDePT repository, as a convenience for
    developers: `../uberwave/build/wp5-viewer/UberWaveViewer`, or in another `build*` folder.
 
-`cdept tools` shows the result in the UberWave row. The viewer has no `--version` and
-starting it opens a window, so the version column says `found` and the date of the file.
+`cdept tools` shows the result in the UberWave row. The version column is the first line of
+`UberWaveViewer --version` (for example `UberWaveViewer 0.1.0 ipc 1`); `ipc 1` means the viewer
+has the control channel described below. CDePT asks without a display and gives the viewer 2
+seconds; an older viewer that does not know the flag does not answer in time, and the column
+says `found, file of <date>`.
+
+### A viewer with IPC
+
+Families, the reuse of a running viewer and the calculator traces need a viewer that prints
+`ipc 1` in `--version`. It comes from the branch `ipc-multifile` of the `uberwave` repository
+(build as above after `git checkout ipc-multifile`; once it is merged, any current build
+has it). With an older viewer CDePT keeps working as before: it opens the first file, says
+so, and lists the other files (**File > Import** adds them); calculator traces cannot be sent
+to it, scalar results are still printed.
 
 ## Open a run point
 
@@ -46,7 +58,7 @@ From the shell:
 
 ```bash
 cdept sim run cells tb_inv --view testbench
-cdept wave cells tb_inv --point tt_27           # the raw file of one run point
+cdept wave cells tb_inv --point tt_27           # the raw file of one run point (the viewer of the run is reused)
 cdept wave cells tb_inv --list                  # the points and their raw files
 cdept wave simulations/cells/tb_inv/testbench/tt_27/out.raw      # any raw file
 cdept wave out.raw --analysis ac                # preselect an analysis
@@ -62,15 +74,58 @@ cdept wave --list out.raw                       # analyses and signal counts, no
   folder the name goes to UberWave unchanged.
 - The viewer is started detached, with the run point's folder as its working folder, and
   keeps running after `cdept` exits.
+- Several points need `--point`, `--points` or `--family`; the error lists them.
 
-## Sweeps and Monte Carlo
+## Sweeps, corners and Monte Carlo: families
 
-A sweep, a corner grid or a Monte Carlo run has one raw file per point. UberWave opens one
-file at a time from the command line; further files are added inside it with
-**File > Import**. `cdept wave <lib> <cell> --list` prints the raw file of every point, so
-the paths can be pasted into the file dialog. Overlaying the points of a family from CDePT
-needs a multi-file command line or a connection to the running viewer, which UberWave does
-not have yet (see Phase 5 of the [roadmap](../ROADMAP.md)).
+A sweep, a corner grid or a Monte Carlo run has one raw file per point. With a viewer that has
+IPC they open together in one window, each file tagged with its point name (`tt_27`,
+`mc_27_r003`):
+
+```bash
+cdept wave cells tb_inv --view testbench --family           # every point of the view
+cdept wave cells tb_inv --view testbench --points tt_27,ss_27
+```
+
+In the GUI, **Open family in UberWave** in the Results area of the Simulation tab does the
+same. CDePT starts `UberWaveViewer --ipc <socket> --tag ... FILE...` with the socket named after
+the project and the run (`$XDG_RUNTIME_DIR/cdept-uw-<hash>.sock`, else the temporary folder).
+Opening the same run again (a point, a family, the button) finds that viewer and sends `open`
+and `import` to it instead of starting another window; the session is replaced by the files
+asked for. Another run, or another project, gets its own viewer. A socket left by a viewer that
+died is replaced.
+
+## Calculator traces
+
+The [calculator](../CALC.md) can feed the viewer: an expression is evaluated by CDePT on the raw
+file of a point and the waveform it gives is sent as a new trace (`add_trace`), next to the
+signals of the files.
+
+```bash
+cdept wave cells tb_inv --view testbench --point tt_27 --calc 'db20(v("out"))' --name out_db
+cdept wave cells tb_inv --view testbench --family --calc 'v("out") / v("in")'
+cdept wave cells tb_inv --view testbench --family --calc 'max(v("out"))'   # scalars: a table
+```
+
+- With one point and `--name`, the trace is called as given; otherwise `<name or expression> @
+  <point>`, one trace per point. Sending the same name again replaces the trace.
+- A complex waveform (an AC result) is sent as two traces, `<name> (mag dB)` (20 log10 of the
+  magnitude) and `<name> (phase)` (degrees, unwrapped).
+- Points whose value is not finite (a `db20` of zero) are left out of a trace.
+- A scalar result is printed, one line per point (`point<TAB>value`), and nothing is sent. A
+  calculator error is reported per point with its position in the expression.
+- The viewer is started on the chosen points when none of the run is open yet; a running one is
+  left as it is.
+- `--analysis` limits the expression to one analysis of the raw file, as `cdept calc --plot`.
+
+In the GUI, the Results area of the Simulation tab has an expression line with a choice of
+points (all, or one) and **Send**. Scalars and errors show under the line; typing the start of
+a function name offers matching names as buttons. The evaluation runs in the background.
+
+The protocol (UberWave's own, version 1) is one JSON object per line over the Unix socket.
+CDePT implements the client in `libcdept::wave::ipc` (`hello`, `open`, `import`,
+`list_files`, `list_signals`, `show`, `add_trace`, `get_cursors`, `set_cursors`, `quit`, ...);
+`cdept-gui/scripts/fake-uberwave-ipc.py` is a stand-in server for tests.
 
 ## See also
 

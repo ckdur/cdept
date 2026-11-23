@@ -1,0 +1,67 @@
+# UberWave families and calculator traces on examples/ihp-inv: run tb_inv (tt/ff/ss), open
+# the family in ONE viewer, open it again (the running viewer is reused), then evaluate
+# calculator expressions on a point and on every point and push the waveforms as traces.
+# The viewer is a stand-in with IPC protocol 1, fake-uberwave-ipc.py, that logs every
+# request as JSON lines into $FAKE_UBERWAVE_LOG (set it to a fresh file).
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice \
+#   CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=ihp-inv \
+#   CDEPT_UBERWAVE=$PWD/cdept-gui/scripts/fake-uberwave-ipc.py \
+#   FAKE_UBERWAVE_LOG=$(mktemp) \
+#     cdept-gui/scripts/run.sh cdept-gui/scripts/uberwave-calc.script
+#
+# `wave` commands (uberwave.rs; docs/GUI-TESTING.md):
+#   wave family <lib> <cell> <view> [point]   what "Open family in UberWave" does
+#   wave calc <lib> <cell> <view> <point|all> <expr>   what the expression line's Send does
+#   wave expect_start <text>                  the fake was started with <text> in its record
+#   wave expect_request <cmd> [text]          the fake got a <cmd> request (containing <text>)
+#   wave expect_trace <name> <n|>n>           the fake got add_trace <name> with n points
+#   wave quit_viewer <lib> <cell> <view>      send `quit` to the run's viewer
+
+shell test -x "$CDEPT_UBERWAVE"
+shell case "$CDEPT_UBERWAVE" in *fake-uberwave-ipc*) true;; *) false;; esac
+shell test -n "$FAKE_UBERWAVE_LOG"
+shell rm -f "$FAKE_UBERWAVE_LOG"
+
+panel Library Manager
+wait 0.3
+open cells tb_inv testbench
+sim expect_target cells/tb_inv/testbench
+sim run
+sim wait
+sim expect_state finished
+sim expect_points 3
+
+# The family: one viewer started with the socket, the three raw files and their tags.
+wave family cells tb_inv testbench
+wave expect_start --ipc
+wave expect_start --tag
+wave expect_start ff_27
+wave expect_start ss_27
+wave expect_start tt_27/out.raw
+
+# Again: the viewer of this run is reused (open, then import for the others).
+wave family cells tb_inv testbench
+wave expect_request open ff_27
+wave expect_request import ss_27
+wave expect_request import tt_27
+
+# A calculator expression on one point: a trace named after the expression and the point.
+wave calc cells tb_inv testbench tt_27 v("out")
+wave expect_trace v("out") @ tt_27 >10
+
+# On every point: one trace per point.
+wave calc cells tb_inv testbench all db20(v("out"))
+wave expect_trace db20(v("out")) @ ff_27 >10
+wave expect_trace db20(v("out")) @ ss_27 >10
+wave expect_trace db20(v("out")) @ tt_27 >10
+
+# A scalar goes to the log, not to the viewer; one viewer was started all along.
+wave calc cells tb_inv testbench all max(v("out"))
+shell test "$(grep -c '"start"' "$FAKE_UBERWAVE_LOG")" = 1
+shell test "$(grep -c '"cmd": "add_trace"' "$FAKE_UBERWAVE_LOG")" = 4
+
+wave quit_viewer cells tb_inv testbench
+wave expect_request quit
+log uberwave-calc: ok
+quit
