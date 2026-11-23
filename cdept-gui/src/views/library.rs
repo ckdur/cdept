@@ -205,6 +205,7 @@ fn cell_items(ui: &mut Ui, project: &Project, lib: &Library, cell: &Cell, cmds: 
             cmds.push(Cmd::Action(Action::OpenSimulation { selection, run: true }));
         }
     }
+    cmds.extend(crate::cace::menu(ui, lib, cell).map(Cmd::Dialog));
     let netlist = ui.add_enabled_ui(rw && crate::app::schematic_file(cell).is_some(), |ui| {
         ui.menu_button("Netlist to View", |ui| {
             for (label, format) in super::NETLIST_FORMATS {

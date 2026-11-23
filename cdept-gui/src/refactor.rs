@@ -529,6 +529,9 @@ fn plan_lines(app: &AppCtx) -> Result<Vec<String>, String> {
     if let Dialog::ImportSummary(lines) = dialog {
         return Ok(lines.clone());
     }
+    if let Some(lines) = crate::cace::plan_lines(app, dialog) {
+        return lines;
+    }
     let operation = operation_of(dialog).ok_or("the open dialog has no plan")?;
     let plan = refactor::plan(project, &operation, &options(app)).map_err(|e| format!("{e:#}"))?;
     Ok(plan.lines(&project.root))
@@ -758,7 +761,8 @@ const USAGE: &str = "usage: refactor rename_cell <library> <cell> <name> | copy_
                      [name] | copy_hierarchy <library> <cell> <to library> [name] | \
                      rename_view <library> <cell> <view> <name> | copy_view <library> <cell> \
                      <view> <to library> <to cell> <name> | rename_library <library> <name> \
-                     [folder] | import_files <library>";
+                     [folder] | import_files <library> | cace_import <library> <cell> | \
+                     cace_export <library> <cell> [view]";
 
 pub(crate) fn script_parse(
     name: &str,
@@ -825,6 +829,10 @@ pub(crate) fn script_parse(
                     })
                 }
                 ["import_files", _] => Dialog::ImportFiles(crate::import_files::ImportFiles::new(args[1])),
+                ["cace_import", _, _] => Dialog::CaceImport(crate::cace::CaceImport::new(args[1], args[2])),
+                ["cace_export", _, _] | ["cace_export", _, _, _] => Dialog::CaceExport(
+                    crate::cace::CaceExport::new(args[1], args[2], args.get(3).copied().unwrap_or("")),
+                ),
                 _ => return Some(Err(USAGE.into())),
             };
             Ok(ScriptCommand::Open(dialog))
@@ -882,6 +890,8 @@ pub(crate) fn script_run(
             match dialogs::open_mut(app).ok_or("no dialog is open")? {
                 Dialog::Refactor(refactor) => refactor.set(&field, &value)?,
                 Dialog::ImportFiles(import) => import.set(&field, &value)?,
+                Dialog::CaceImport(import) => import.set(&field, &value)?,
+                Dialog::CaceExport(export) => export.set(&field, &value)?,
                 Dialog::RenameCell { name, .. } if field == "name" => *name = value,
                 Dialog::CopyCell { name, .. } if field == "name" => *name = value,
                 Dialog::CopyCell { to, .. } if field == "to" => *to = value,

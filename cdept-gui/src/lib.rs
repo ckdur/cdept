@@ -2,6 +2,7 @@
 
 mod app;
 mod background;
+mod cace;
 mod dialogs;
 mod dock;
 mod engines;

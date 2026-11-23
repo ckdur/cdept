@@ -1,0 +1,84 @@
+# Import CACE Datasheet… / Export CACE Datasheet… on examples/ihp-inv: a datasheet for
+# the inverter becomes a testbench and a suite of cells/tb_inv, then the suite goes out
+# as a datasheet again. Writes to the project it is run on and next to it (../incoming):
+# use a copy (cdept-gui/scripts/run.sh does).
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_EXAMPLE=ihp-inv \
+#     cdept-gui/scripts/run.sh cdept-gui/scripts/cace.script
+#
+# Commands used here (docs/GUI-TESTING.md):
+#   refactor cace_import <library> <cell>          open Import CACE Datasheet on a cell
+#   refactor cace_export <library> <cell> [view]   open Export CACE Datasheet
+#   refactor_set file|prefix|schematic|overwrite <value>   (import)
+#   refactor_set file|view|results <value>                 (export)
+#   expect_plan <text>          a line under the fields (plan and report), or of the summary
+#   refactor_ok / refactor_fails <text> / refactor_cancel
+#
+# Exit status 0: every check passed.
+
+panel Library Manager
+wait 0.2
+
+# A datasheet outside the project: the delay at three corners, and a DRC CDePT does not run.
+shell mkdir -p ../incoming && printf '%s\n' 'name: inv' 'description: Inverter' 'PDK: ihp-sg13g2' 'cace_format: 5.2' 'paths:' '  root: ..' 'default_conditions:' '  vdd:' '    unit: V' '    typical: 1.2' 'parameters:' '  delay:' '    display: Propagation delay' '    unit: ps' '    spec:' '      tpd:' '        maximum:' '          value: 300' '    tool:' '      ngspice:' '        template: tb_inv.sch' '    conditions:' '      corner:' '        enumerate: [tt, ff, ss]' '      temperature:' '        typical: 27' '  drc:' '    tool:' '      magic_drc:' '        gds_flatten: true' > ../incoming/inv.yaml
+
+# The dialog shows the plan and the report before anything is written.
+refactor cace_import cells tb_inv
+refactor_set file ../incoming/inv.yaml
+refactor_set prefix cace_
+expect_plan create libs/cells/tb_inv/cace_delay/setup.toml
+expect_plan create libs/cells/tb_inv/cace_datasheet/suite.toml
+expect_plan corner tt, ff, ss -> corners
+expect_plan spec tpd [ps] -> [[spec]] <= 3e-10
+expect_plan vdd = 1.2 -> [variables]
+expect_plan drc: tool magic_drc: not a simulation
+expect_plan the testbench must measure tpd
+expect_not_listed cells tb_inv cace_delay
+
+refactor_ok
+expect_plan Imported 2 file(s) into cells/tb_inv.
+refactor_cancel
+expect_listed cells tb_inv cace_delay
+expect_listed cells tb_inv cace_datasheet
+organise expect_selection cells tb_inv cace_datasheet
+shell grep -q 'corners = \["tt", "ff", "ss"\]' libs/cells/tb_inv/cace_delay/setup.toml
+shell grep -q '^\[cace\]' libs/cells/tb_inv/cace_delay/setup.toml
+
+# Again: the views exist; replacing them is a choice.
+refactor cace_import cells tb_inv
+refactor_set file ../incoming/inv.yaml
+refactor_set prefix cace_
+expect_plan blocked: cells/tb_inv/cace_delay exists
+refactor_fails cannot import
+refactor_set overwrite on
+expect_plan replace libs/cells/tb_inv/cace_delay/setup.toml
+refactor_ok
+refactor_cancel
+
+# The suite out again: both parameters, the spec as it was read, no results yet.
+refactor cace_export cells tb_inv cace_datasheet
+refactor_set file ../incoming/back.yaml
+expect_plan write ../incoming/back.yaml: 2 parameter(s) of cells/tb_inv/cace_datasheet (suite)
+expect_plan has not been run: no results
+refactor_ok
+expect_plan Exported 2 parameter(s) of cells/tb_inv/cace_datasheet
+refactor_cancel
+shell grep -q 'value: 300' ../incoming/back.yaml
+shell grep -q 'gds_flatten: true' ../incoming/back.yaml
+
+# The imported testbench opens in the Simulation tab with the datasheet's corners.
+sim open cells tb_inv cace_delay
+sim expect_target cells/tb_inv/cace_delay
+sim expect_corners tt ff ss
+# Saving the form keeps [cace]; the export then has the corner the form says.
+sim set corners tt
+sim save
+shell grep -q '^\[cace\]' libs/cells/tb_inv/cace_delay/setup.toml
+refactor cace_export cells tb_inv cace_delay
+refactor_set file ../incoming/one.yaml
+expect_plan condition corner is tt in cells/tb_inv/cace_delay
+refactor_ok
+refactor_cancel
+shell grep -q 'typical: tt' ../incoming/one.yaml
+
+quit

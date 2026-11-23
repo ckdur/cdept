@@ -61,6 +61,11 @@ pub struct Setup {
     /// The template's parameters (`out = "out"`, `vdd = 1.2`), kept as text.
     #[serde(skip_serializing_if = "BTreeMap::is_empty", deserialize_with = "text_map")]
     pub template_args: BTreeMap<String, String>,
+    /// CACE data this testbench came from (`cdept cace import`): the parameter as CACE
+    /// YAML and what CDePT has no field for. Not used to run; `cdept cace export` reads
+    /// it (docs/reference/files/cace.md).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cace: Option<toml::Table>,
     /// Nets and elements the netlist must have (from the template; not a file field).
     #[serde(skip)]
     pub requires_nets: Vec<String>,

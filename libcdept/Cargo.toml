@@ -27,6 +27,8 @@ notify = "9"
 chrono.workspace = true
 libloading = "0.8"
 rusqlite = { version = "0.43.0", features = ["bundled"] }
+# CACE datasheets (YAML): libcdept::cace.
+serde_yaml_ng = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true

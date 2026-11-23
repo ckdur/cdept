@@ -1200,6 +1200,11 @@ impl View for SimulationView {
             if dirty {
                 ui.weak("(changed)");
             }
+            // CACE datasheet of this testbench with its latest results (cace.rs).
+            if ui.small_button("Export CACE…").on_hover_text("Write this testbench as a CACE datasheet").clicked() {
+                let e = crate::cace::CaceExport::new(&target.library, &target.cell, &target.view);
+                ctx.open_dialog(crate::dialogs::Dialog::CaceExport(e));
+            }
         });
         ui.horizontal(|ui| {
             if ui.add_enabled(self.form.is_some() && dirty, egui::Button::new("Save")).clicked() {

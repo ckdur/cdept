@@ -216,7 +216,8 @@ corners × temperatures × variable sweeps, Monte Carlo, measures and specs, job
 ([JOBS.md](JOBS.md)), results store (`result.json` + `results.db`), Simulation tab in the GUI.
 VACASK as a testbench simulator and OpenVAF on-demand compile (cached per technology) are
 done ([VACASK.md](VACASK.md): ihp-sg13g2 works, sky130 does not convert yet).
-Still to do: CACE import/export, SLURM/ssh, sweep/MC in the GUI form,
+CACE datasheet import/export is done ([reference/files/cace.md](reference/files/cace.md), CACE 2.x `cace_format` 5.2).
+Still to do: SLURM/ssh, sweep/MC in the GUI form,
 Xyce Monte Carlo; the rest of the list below as written.
 - Testbench view: DUT cell, analyses (op/dc/ac/tran/noise/pss if available), design
   variables, model corners (from tech.toml), temperature, saves/probes.
@@ -229,7 +230,7 @@ Xyce Monte Carlo; the rest of the list below as written.
   and other compact models in the IHP PDKs). CDePT compiles them on demand and caches them
   per tech.
 - CACE (datasheet-driven characterisation) overlaps with the spec table: import and export
-  CACE datasheets rather than inventing a second spec format. pygmid can feed gm/Id sizing
+  CACE datasheets (done) rather than inventing a second spec format. pygmid can feed gm/Id sizing
   helpers later.
 - Job queue: parallel local runs (tokio + process pool), progress, cancel. Optional SLURM/ssh
   later.
