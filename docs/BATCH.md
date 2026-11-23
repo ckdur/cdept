@@ -24,6 +24,8 @@ Code: `libcdept/src/batch/`; CLI: `cdept netgen|yosys|openroad` (`cdept/src/cmd_
 | netgen | `netgen -batch lvs "<layout> <cell>" "<schematic> <cell>" setup.tcl lvs.log` | `Verdict`, device and net counts, cells with property errors |
 | Yosys | `yosys -s synth.ys` (script written by `yosys::synth`, or yours) | netlist, `Stat` (cells, area, cells by type) |
 | OpenROAD | `openroad -no_splash -exit script.tcl` | log, `[ERROR]` lines, warning count |
+| VACASK | `vacask -qp deck.sim` | one raw file per analysis; `CDEPT_VACASK` (details: VACASK.md) |
+| OpenVAF | `openvaf-r -o x.osdi model.va` | OSDI library, cached per technology; `CDEPT_OPENVAF` |
 
 **Xyce in testbenches.** `simulator = "xyce"` in a testbench's `setup.toml` makes
 `sim::Simulator::for_setup` pick Xyce and `sim::deck::build` write the Xyce deck: no
@@ -66,7 +68,7 @@ Not tested: Yosys with a real Liberty file, OpenROAD with a design.
 
 ## Open
 
-- VACASK and Qucs-S adapters (they are detected, not run).
+- Qucs-S adapter (detected, not run). VACASK and OpenVAF: [VACASK.md](VACASK.md).
 - Xyce: AC, noise and DC decks are written but only a transient was run; plugins
   (`-plugin` from `[models.xyce] plugins`) and the OSDI options of the model set are not
   passed; `.step` for several temperatures in one run is not used (one run per point).

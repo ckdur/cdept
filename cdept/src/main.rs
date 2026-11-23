@@ -12,6 +12,7 @@ mod cmd_batch;
 mod cmd_sim;
 mod cmd_status;
 mod cmd_tech;
+mod cmd_vacask;
 
 use std::path::PathBuf;
 
@@ -142,6 +143,12 @@ enum Command {
     /// Run OpenROAD scripts (batch).
     #[command(subcommand)]
     Openroad(cmd_batch::OpenroadCommand),
+    /// VACASK models of the technology (made from its ngspice models and Verilog-A).
+    #[command(subcommand)]
+    Vacask(cmd_vacask::VacaskCommand),
+    /// OpenVAF: compile Verilog-A to OSDI, cached per technology.
+    #[command(subcommand)]
+    Openvaf(cmd_vacask::OpenvafCommand),
     /// The project's technology snapshot (tech.toml): scan the PDK, show, refresh.
     #[command(subcommand)]
     Tech(cmd_tech::TechCommand),
@@ -1193,6 +1200,15 @@ fn main() -> Result<()> {
         Command::Openroad(command) => {
             init_tracing(cli.verbose, None);
             cmd_batch::openroad(command, &open_project(cli.project)?)
+        }
+        Command::Vacask(command) => {
+            init_tracing(cli.verbose, None);
+            cmd_vacask::vacask(command, &open_project(cli.project)?)
+        }
+        Command::Openvaf(command) => {
+            init_tracing(cli.verbose, None);
+            let project = project_root(cli.project).and_then(|r| Project::load(&r).ok());
+            cmd_vacask::openvaf(command, project.as_ref())
         }
         Command::Info => {
             init_tracing(cli.verbose, None);

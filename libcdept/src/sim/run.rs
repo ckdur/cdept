@@ -15,6 +15,7 @@ pub enum SimKind {
     #[default]
     Ngspice,
     Xyce,
+    Vacask,
 }
 
 impl SimKind {
@@ -23,6 +24,7 @@ impl SimKind {
         match name {
             "" | "ngspice" => Some(SimKind::Ngspice),
             "xyce" => Some(SimKind::Xyce),
+            "vacask" => Some(SimKind::Vacask),
             _ => None,
         }
     }
@@ -50,6 +52,7 @@ impl Simulator {
                 _ => crate::tools::find_in_path("ngspice")?,
             },
             SimKind::Xyce => crate::batch::xyce::ADAPTER.locate()?,
+            SimKind::Vacask => crate::batch::vacask::ADAPTER.locate()?,
         };
         Some(Simulator { kind, program })
     }
@@ -111,6 +114,9 @@ fn run_with(
     // Xyce goes through the batch layer; it is not killed when a job is cancelled yet.
     if simulator.kind == SimKind::Xyce {
         return run_xyce(simulator, deck, dir, env);
+    }
+    if simulator.kind == SimKind::Vacask {
+        return crate::vacask::run_vacask(&simulator.program, deck, dir, env);
     }
     std::fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     let deck_file = dir.join("deck.sp");

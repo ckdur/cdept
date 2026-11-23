@@ -194,6 +194,11 @@ pub fn build(setup: &Setup, point: &RunPoint, title: &str, models: &[String], ne
     if setup.simulator == "xyce" {
         return build_xyce(setup, point, title, models, netlist);
     }
+    if setup.simulator == "vacask" {
+        // The model lines are the SPICE ones; `vacask::build_point` adds the OSDI loads.
+        let inputs = crate::vacask::deck::Inputs { setup, point, title, models, netlist, defined: None, pdk: "", notes: &[] };
+        return crate::vacask::deck::build_or_comment(&inputs);
+    }
     let mut out = String::new();
     out.push_str(&format!("* CDePT testbench {title}, run {}\n", point.name()));
     if let Some(seed) = point.seed {

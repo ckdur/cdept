@@ -1,0 +1,25 @@
+# The same testbench as ../testbench, run with VACASK. The PDK has no VACASK models, so
+# the first run makes them from its ngspice models and Verilog-A sources (converted
+# with VACASK's ng2vc, PSP103 compiled with OpenVAF into <project>/.cdept/osdi/) and
+# records them as [models.vacask] in tech.toml. Run it with
+#   cdept sim run cells tb_inv --view vacask
+# The tpd agrees with ngspice's to about 0.2 %. docs/VACASK.md has what else works.
+simulator = "vacask"
+corners = ["tt", "ff", "ss"]
+temperatures = [27]
+save = ["v(in)", "v(out)"]
+measures = [
+  "tran tpd trig v(in) val=0.6 rise=1 targ v(out) val=0.6 fall=1",
+]
+
+[variables]
+vdd = "1.2"
+
+[[analysis]]
+kind = "tran"
+step = "5p"
+stop = "1.2n"
+
+[[spec]]
+name = "tpd"
+max = 3e-10

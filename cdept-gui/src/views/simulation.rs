@@ -700,7 +700,7 @@ impl SimulationView {
         Grid::new("sim-general").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
             ui.label("Simulator");
             ComboBox::from_id_salt("sim-simulator").selected_text(&form.simulator).show_ui(ui, |ui| {
-                for name in ["ngspice", "xyce"] {
+                for name in ["ngspice", "xyce", "vacask"] {
                     ui.selectable_value(&mut form.simulator, name.to_string(), name);
                 }
             });
