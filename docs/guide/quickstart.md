@@ -210,6 +210,12 @@ simulations/cells/tb_inv/testbench/ss_27/...
 (`cdept calc --raw <file> --list` lists the vectors). The layout of the folder and the
 files are described in [Results](../reference/files/results.md).
 
+
+In the GUI the same run looks like this:
+
+![Results of a testbench run in the GUI](../_static/screenshots/sim-results.png)
+*The Simulation tab after running tb_inv: three corners, all PASS.*
+
 ## 7. Open the project in the GUI
 
 ```sh

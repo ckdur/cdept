@@ -57,6 +57,9 @@ measurements, specs and record.
   on one job queue with one combined table and one verdict
   ([suite.toml](../reference/files/suite-toml.md), [Suites](../howto/suites.md)).
 
+![A suite run in the GUI](../_static/screenshots/sim-suite.png)
+*A suite run in the GUI: one combined table.*
+
 ## The calculator
 
 Besides `.meas`, a setup can name expressions of the measurement calculator

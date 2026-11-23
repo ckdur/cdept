@@ -73,6 +73,9 @@ the setup loads, before anything runs.
 The Simulation tab shows the setup as a form, runs through the same job queue and lists the
 points with PASS/FAIL ([GUI guide](../guide/gui.md)).
 
+![The Simulation tab](../_static/screenshots/sim-setup.png)
+*The Simulation tab with the setup form of tb_inv.*
+
 ## See also
 
 - [setup.toml](../reference/files/setup-toml.md), [Results](../reference/files/results.md)

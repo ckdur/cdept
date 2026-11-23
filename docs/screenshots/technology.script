@@ -1,0 +1,25 @@
+# Screenshots of the New Project wizard (PDK list, scan summary) and the Technology
+# tab with IHP SG13G2. Needs PDK_ROOT. Writes wizard-pdk.png, wizard-summary.png,
+# technology.png. Run: scripts/gen-doc-screenshots.sh docs/screenshots/technology.script
+window 1400 900
+tech wizard
+tech pdk ihp-sg13g2
+tech folder /home/user/chips/ihp_demo
+tech name ihp_demo
+wait 0.5
+screenshot @SHOTS@/wizard-pdk.png
+tech folder $PROJECT/../ihp-project
+tech next
+tech expect_scanned
+wait 0.5
+screenshot @SHOTS@/wizard-summary.png
+tech create
+expect_project ihp_demo
+panel Technology
+tech page Overview
+wait 0.5
+screenshot @SHOTS@/technology.png
+tech page Models
+wait 0.5
+screenshot @SHOTS@/technology-models.png
+quit

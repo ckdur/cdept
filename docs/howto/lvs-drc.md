@@ -1,7 +1,8 @@
 # Run DRC, LVS and extraction
 
-CDePT runs layout checks with two sets of tools, both configured from the project's
-[technology snapshot](../concepts/technology.md):
+This page runs every layout check CDePT has on a real, clean layout: the standard cell
+`sg13g2_inv_1` of the IHP SG13G2 PDK (the same steps work for `sg13g2_nand2_1` and,
+with two extra switches, for `sky130_fd_sc_hd__inv_1`). The checks:
 
 | Check | Tool | Command | Where it is available |
 |---|---|---|---|
@@ -10,17 +11,62 @@ CDePT runs layout checks with two sets of tools, both configured from the projec
 | Net comparison with the schematic, pins | CDePT, with KLayout | `cdept layout check-nets`, `pins` | CLI and GUI, see [LINKING.md](../LINKING.md) |
 | Extraction to SPICE | Magic | `cdept magic extract` | CLI only |
 | DRC with Magic's rules | Magic | `cdept magic drc` | CLI only |
-| LEF abstract | Magic | `cdept magic lef` | CLI only |
 | LVS between two SPICE netlists | netgen | `cdept netgen lvs` | CLI only |
 
-The examples run on a copy of `examples/ihp-inv` with `PDK_ROOT=/opt/ext/OpenPDKs` and
-the tools of `/opt/ext/OpenLane/bin` on `PATH`. The inverter of that example is only
-partly wired (VDD and VSS are not connected) on purpose, so its results show failures.
 How each tool works is not repeated here: see [KLAYOUT.md](../KLAYOUT.md) section 8,
-[MAGIC.md](../MAGIC.md) and [BATCH.md](../BATCH.md).
+[MAGIC.md](../MAGIC.md) and [BATCH.md](../BATCH.md). The exit status of every check is
+non-zero when it finds problems, so the commands can gate a script or CI job. The
+examples need `PDK_ROOT=/opt/ext/OpenPDKs` and the tools of `/opt/ext/OpenLane/bin` on
+`PATH`.
 
-Exit status of every check is non-zero when it finds problems, so the commands can gate
-a script or CI job.
+## Get a standard cell into the project
+
+The PDK's cells are in the read-only library `sg13g2_stdcell`, but all 84 cells are one
+GDS file (`gds/sg13g2_stdcell.gds`) and one SPICE file. The checks of the command line
+and the Layout menu work on a file with one top cell, so cut the cell out into a cell of
+your own library. Work in a scratch copy of `examples/ihp-inv`:
+
+```sh
+cp -r examples/ihp-inv /tmp/lvs-demo && cd /tmp/lvs-demo
+L=$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell
+C=sg13g2_inv_1
+mkdir -p libs/cells/$C/layout libs/cells/$C/netlist
+cat > /tmp/cut.py <<EOF
+import pya, os
+ly = pya.Layout(); ly.read(os.environ["SRC"])
+o = pya.SaveLayoutOptions(); o.format = "GDS2"
+o.select_cell(ly.cell(os.environ["CELL"]).cell_index())
+ly.write(os.environ["OUT"], o)
+EOF
+SRC=$L/gds/sg13g2_stdcell.gds CELL=$C OUT=libs/cells/$C/layout/$C.gds klayout -b -r /tmp/cut.py
+```
+
+For the reference netlist take the cell's `.subckt` out of the PDK's SPICE file. The PDK
+writes the two transistors as subcircuit calls (`XN0 ... sg13_lv_nmos`); KLayout reads a
+netlist with no models, so they must be MOS devices (`M...`):
+
+```sh
+awk -v c=$C '$1==".subckt"&&$2==c{p=1} p{print} /^\.ends/{p=0}' \
+    $L/spice/sg13g2_stdcell.spice | sed 's/^X\([NP]\)/M\1/' > libs/cells/$C/netlist/$C.spice
+cdept ls cells        # sg13g2_inv_1 now has layout and netlist views
+```
+
+For the GUI (which compares with a schematic, not a netlist) the cell also needs a
+schematic view. The PDK has symbols only, so copy the example inverter's schematic,
+which places the same two `sg13_lv` devices, and set the widths of the cell (PMOS 1.12u,
+NMOS 0.74u, see the `.subckt`):
+
+```sh
+mkdir libs/cells/$C/schematic
+sed 's/^w=1.5u/w=1.12u/' libs/cells/inv/schematic/inv.sch > libs/cells/$C/schematic/$C.sch
+```
+
+```{warning}
+Do not check the cell in place, as `cdept layout drc sg13g2_stdcell sg13g2_inv_1`.
+CLI: KLayout fails with "Cell name sg13g2_stdcell not found" (the top cell is taken from
+the file name). GUI: Run DRC and Run LVS run on the first top cell of the file
+(`sg13g2_a21o_1`), not on the cell shown, so a "clean" result is for another cell.
+```
 
 ## What is taken from the technology
 
@@ -44,158 +90,201 @@ Program locations: `klayout` through the embedded helper; Magic is `$CDEPT_MAGIC
 ## DRC with a KLayout deck
 
 ```sh
-cdept layout drc cells inv
+cdept layout drc cells sg13g2_inv_1
 ```
 
-CDePT writes a self-contained GDS of the cell (every referenced cell filled in), runs the
-deck with `klayout -b`, and reads the report:
+CDePT writes a self-contained GDS of the cell, runs the PDK's deck
+(`ihp-sg13g2.drc`) with `klayout -b`, and reads the report:
 
 ```text
 deck    /opt/ext/OpenPDKs/ihp-sg13g2/libs.tech/klayout/tech/drc/ihp-sg13g2.drc
-layout  ~/.cache/cdept/verify/ihp-inv/cells/inv/drc/inv.gds (top cell inv)
-     1  LU.b  7.2. LU.b : Max. space from any portion of N+Activ inside PWell to an pSD-PWell tie is 20.0 um
-     5  Pin.e  Pin.e : 7.4. Pin.e: Min. metal1 enclosure of metal1:pin = 0um
-report  ~/.cache/cdept/verify/ihp-inv/cells/inv/drc/inv.lyrdb
-Error: 6 DRC violation(s) in 2 rule(s)
+layout  ~/.cache/cdept/verify/ihp-inv/cells/sg13g2_inv_1/drc/sg13g2_inv_1.gds (top cell sg13g2_inv_1)
+report  ~/.cache/cdept/verify/ihp-inv/cells/sg13g2_inv_1/drc/sg13g2_inv_1.lyrdb
+DRC clean
 ```
 
-Each line is the number of violations, the rule and its description. The exit status is 1
-when there are violations.
+`sg13g2_nand2_1` is clean as well, and so is `sky130_fd_sc_hd__inv_1` in a sky130A
+project (it runs the first deck of that technology, `sky130A_mr.drc`). No special deck
+options were needed: the cells are clean with the default deck.
 
 Options: `--view VIEW` picks the layout view when a cell has several, `--deck FILE` runs
 another deck, `-D NAME=VALUE` passes further variables to the deck (`-rd` of KLayout; the
 deck always gets `input`, `topcell` and `report`), `--dir DIR` chooses the output folder.
 
-Results land in `~/.cache/cdept/verify/<project>/<library>/<cell>/drc/`:
-
-| File | Contents |
-|---|---|
-| `<cell>.gds` | the stream that was checked |
-| `<cell>.lyrdb` | KLayout's marker database (open it in KLayout) |
-| `drc.log` | KLayout's output |
+Results land in `~/.cache/cdept/verify/<project>/<library>/<cell>/drc/`: the stream that
+was checked (`<cell>.gds`), `<cell>.lyrdb` (KLayout's marker database, open it in
+KLayout) and `drc.log`.
 
 ### In the GUI
 
-Open the cell's layout and choose **Layout > Run DRC**. The check runs in the
-background on the layout as it is now, unsaved edits included. The violations appear in a
-results panel; clicking one highlights the shapes and zooms to them. The highlights are
-markers and never part of the layout. There is no cancel button.
+Open the cell's layout and choose **Layout > Run DRC** (or the DRC button). The check
+runs in the background on the layout as it is now, unsaved edits included. Violations
+appear in a results panel; clicking one highlights the shapes and zooms to them. There is
+no cancel button.
+
+![The results panel after Run DRC on sg13g2_inv_1: "No violations."](../_static/screenshots/lvs-drc-drc.png)
+
+*Run DRC on the standard cell: the panel under the layout reports no violations.*
 
 ## LVS with a KLayout deck
 
+Against the PDK's netlist:
+
 ```sh
-cdept layout lvs cells inv
+cdept layout lvs cells sg13g2_inv_1 --netlist libs/cells/sg13g2_inv_1/netlist/sg13g2_inv_1.spice
 ```
 
-CDePT netlists the cell's schematic with xschem in LVS form, extracts the layout with the
-PDK's LVS deck and compares them:
+or, with the schematic view made above (xschem netlists it in LVS form):
+
+```sh
+cdept layout lvs cells sg13g2_inv_1
+```
 
 ```text
-layout  ~/.cache/cdept/verify/ihp-inv/cells/inv/lvs/inv.gds (top cell inv)
-netlist ~/.cache/cdept/verify/ihp-inv/cells/inv/lvs/inv.spice
-NoMatch          layout inv / schematic INV
-  Mismatch         net        - / A
-  Mismatch         net        - / VDD
-  ...
-  Mismatch         device     $1 / M1
-  Mismatch         device     $2 / M2
-report  ~/.cache/cdept/verify/ihp-inv/cells/inv/lvs/inv.lvsdb
-extracted ~/.cache/cdept/verify/ihp-inv/cells/inv/lvs/inv_extracted.cir
-Error: the layout does not match the schematic
+deck    /opt/ext/OpenPDKs/ihp-sg13g2/libs.tech/klayout/tech/lvs/sg13g2.lvs
+layout  ~/.cache/cdept/verify/ihp-inv/cells/sg13g2_inv_1/lvs/sg13g2_inv_1.gds (top cell sg13g2_inv_1)
+netlist libs/cells/sg13g2_inv_1/netlist/sg13g2_inv_1.spice
+Match            layout sg13g2_inv_1 / schematic SG13G2_INV_1
+report  .../lvs/sg13g2_inv_1.lvsdb
+extracted .../lvs/sg13g2_inv_1_extracted.cir
 ```
 
 Options are those of DRC plus `--schematic VIEW` (the schematic view, when the cell has
-several) and `--netlist FILE`, which compares with a SPICE netlist you provide instead of
-netlisting the schematic. A clean run exits 0.
+several) and `--netlist FILE`, which compares with a SPICE netlist you provide. A match
+exits 0. `sg13g2_nand2_1` matches the same way.
 
-Results land in `.../<cell>/lvs/`: the stream, `<cell>.spice` (schematic netlist in LVS
-form), `<cell>.lvsdb` (KLayout's LVS database), `<cell>_extracted.cir` (the netlist
-extracted from the layout), `lvs.log`, `summary.json` and `summary.log`. The `.lvsdb` is
-what the net highlighting in the GUI reads.
+Results land in `.../<cell>/lvs/`: the stream, `<cell>.spice` (schematic netlist, when
+there is no `--netlist`), `<cell>.lvsdb` (what the GUI's net highlighting reads),
+`<cell>_extracted.cir`, `lvs.log`, `summary.json` and `summary.log`.
 
-In the GUI use **Layout > Run LVS**. Two related checks need no deck and are quicker for
-day-to-day work: `cdept layout check-nets` (opens, shorts, unconnected terminals, pins
-without labels) and `cdept layout pins`. They are described in
-[LINKING.md](../LINKING.md) sections 8 and 9.
+In the GUI use **Layout > Run LVS**:
+
+![The results panel after Run LVS: "The layout matches the schematic."](../_static/screenshots/lvs-drc-lvs.png)
+
+*Run LVS on the same cell: the panel reports a match with the schematic.*
+
+Two related checks need no deck and are quicker for day-to-day work:
+`cdept layout check-nets` (opens, shorts, unconnected terminals, pins without labels) and
+`cdept layout pins`, described in [LINKING.md](../LINKING.md) sections 8 and 9.
+
+### The same cell in sky130A
+
+In a project made with `cdept init --technology sky130A` (add `cells = "libs/cells"` under
+`[libraries]`), cut `sky130_fd_sc_hd__inv_1` out of
+`libs.ref/sky130_fd_sc_hd/gds/sky130_fd_sc_hd.gds` the same way, and use the
+`.subckt` of `spice/sky130_fd_sc_hd.spice` (again with `X` turned into `M`). DRC is clean.
+LVS needs two deck variables, because the standard cell has no substrate tap and the
+PDK's netlist has widths such as `w=650000u`:
+
+```sh
+cdept layout lvs cells sky130_fd_sc_hd__inv_1 --netlist .../sky130_fd_sc_hd__inv_1.spice \
+    -D lvs_sub=VNB -D scale=true
+```
+
+`lvs_sub=VNB` names the substrate net after the cell's `VNB` pin (the deck's default is
+`sky130_gnd`) and `scale=true` makes the deck write sizes in the netlist's units. Without
+them the result is a mismatch of one net and the sizes, although the layout is right.
 
 ## Extraction and DRC with Magic
 
-Magic is run as a separate program in batch mode, with the PDK's start-up file.
-It reads the cell's `.mag` view, or a cell of a GDS view.
+Magic is run as a separate program in batch mode with the PDK's start-up file. It reads
+the cell's `.mag` view or a GDS view.
 
 ```sh
-cdept magic extract cells inv            # layout to SPICE
-cdept magic extract cells inv --pex c    # with capacitances
-cdept magic drc cells inv                # PDK DRC rules
-cdept magic drc cells inv --style 'drc(full)'
-cdept magic lef cells inv [--hide]       # LEF abstract
+cdept magic extract cells sg13g2_inv_1   # layout to SPICE
+cdept magic drc cells sg13g2_inv_1       # PDK DRC rules, style drc(fast)
+cdept magic drc cells sg13g2_inv_1 --style 'drc(full)'
 ```
 
 ```text
-$ cdept magic extract cells inv
-/work/ihp-inv/magic/cells/inv/inv.spice
-  .subckt nmos (3 ports)
-  .subckt pmos (2 ports)
-  .subckt inv (4 ports)
-      1 x nmos
-      1 x pmos
-$ cdept magic drc cells inv
-cells/inv: DRC clean (drc(fast))
-$ cdept magic lef cells inv
-/work/ihp-inv/magic/cells/inv/inv.lef
-  inv 5.68 x 5.22 um, 4 pins
+magic/cells/sg13g2_inv_1/sg13g2_inv_1.spice
+  .subckt sg13g2_inv_1 (4 ports)
+      1 x sg13_lv_nmos
+      1 x sg13_lv_pmos
+cells/sg13g2_inv_1: DRC clean (drc(fast))
+cells/sg13g2_inv_1: DRC clean (drc(full))
 ```
 
-`--style` takes a style name of the technology (`cdept tech show magic` lists
-`extract` and `drc`); without it the first listed style is used. `magic drc` exits with
-status 1 when the layout is not clean and prints the rules violated.
+Both styles are clean for the IHP cell and for `sky130_fd_sc_hd__inv_1`. `--style` takes a
+style name of the technology (`cdept tech show magic` lists `extract` and `drc`); `magic
+drc` exits 1 when the layout is not clean and prints the rules violated. `cdept magic lef`
+writes a LEF abstract. Results land in `<project>/magic/<library>/<cell>/`: the `.spice`
+and Magic's `.ext` files, `<cell>.drc.json` (violations by rule with boxes in micron).
+These commands have no GUI equivalent.
 
-Results land in `<project>/magic/<library>/<cell>/`: `<cell>.spice` and Magic's `.ext`
-files, `<cell>.drc.json` (violations by rule id with boxes in micron), `<cell>.lef`.
-These commands have no GUI equivalent; Magic itself can be started from the GUI's tool
-launchers.
-
-Magic's DRC rules and KLayout's deck are different checks: a layout can pass one and
-fail the other. A PDK's signoff deck is normally the KLayout one.
+Magic's rules and KLayout's deck are different checks: a layout can pass one and fail the
+other. A PDK's signoff deck is normally the KLayout one.
 
 ## LVS with netgen
 
-`cdept netgen lvs` compares two SPICE netlists: the layout's extracted netlist and the
-schematic's, each with the name of the cell to compare.
+`cdept netgen lvs` compares two SPICE netlists, each with the name of the cell:
 
 ```sh
 cdept netgen lvs <layout.spice> <cell> <schematic.spice> <cell> [--setup FILE] [--dir DIR]
 ```
 
-A typical use compares the KLayout-extracted netlist with the schematic netlist of the
-step above:
+Magic's extracted netlist against the PDK's own subcircuit (the original `X` lines are
+fine here):
 
 ```sh
-V=~/.cache/cdept/verify/ihp-inv/cells/inv/lvs
-cdept netgen lvs $V/inv_extracted.cir inv $V/inv.spice inv
+awk -v c=$C '$1==".subckt"&&$2==c{p=1} p{print} /^\.ends/{p=0}' \
+    $L/spice/sg13g2_stdcell.spice > /tmp/pdk_inv1.spice
+cdept netgen lvs magic/cells/sg13g2_inv_1/sg13g2_inv_1.spice sg13g2_inv_1 /tmp/pdk_inv1.spice sg13g2_inv_1
 ```
 
 ```text
-Netlists do not match.
+Circuits match uniquely.
 devices: layout 2, schematic 2
-nets:    layout 5, schematic 4
-log: /work/ihp-inv/batch/netgen/lvs.log
+nets:    layout 4, schematic 4
+log: <project>/batch/netgen/lvs.log
+```
+
+The sky130 cell matches the same way (6 nets). The verdict is one of `Match`,
+`PropertyErrors`, `PinMismatch`, `Mismatch` or `Unknown`; the command fails unless the
+circuits match. `Unknown` usually means a cell name is missing from one of the files; the
+log says which. The set-up file is `netgen.setup` of the snapshot unless `--setup` is
+given. The netlists need a `.subckt` for the cell: the netlist `cdept netlist` writes by
+default has the header commented out.
+
+Netgen is not interchangeable with the KLayout netlist: comparing the KLayout-extracted
+`sg13g2_inv_1_extracted.cir` with the PDK's `X`-form netlist fails with `PinMismatch`
+(different pin order, MOS devices against subcircuit calls). Compare like with like.
+
+## What a failing result looks like
+
+`examples/ihp-inv` has an inverter that is only partly wired on purpose (VDD and VSS are
+not connected). On it:
+
+```text
+$ cdept layout drc cells inv
+     1  LU.b  7.2. LU.b : Max. space from any portion of N+Activ inside PWell to an pSD-PWell tie is 20.0 um
+     5  Pin.e  Pin.e : 7.4. Pin.e: Min. metal1 enclosure of metal1:pin = 0um
+Error: 6 DRC violation(s) in 2 rule(s)
+$ cdept layout lvs cells inv
+NoMatch          layout inv / schematic INV
+  Mismatch         net        - / A
+  Mismatch         net        - / VDD
+  Mismatch         device     $1 / M1
+  Mismatch         device     $2 / M2
+Error: the layout does not match the schematic
+$ cdept netgen lvs ... 
+Netlists do not match.
 Error: LVS is not clean (Mismatch)
 ```
 
-The verdict is one of `Match`, `PropertyErrors`, `PinMismatch`, `Mismatch` or `Unknown`;
-the command exits with an error unless the circuits match. `Unknown` means netgen did not
-print a result, usually because a cell name is missing from one of the files; the log
-says which. The set-up file is `netgen.setup` of the snapshot unless `--setup` is given.
-Output goes to `<project>/batch/netgen/` (the log, `lvs.log`) unless `--dir` is given.
+Each DRC line is the number of violations, the rule and its description; the markers are in
+the `.lyrdb`. For LVS the `Mismatch` lines name the nets and devices that have no partner;
+nets that the layout lacks (`-`) usually mean missing labels or pins. All of these exit
+with status 1.
 
-The netlists must have a `.subckt` for the cell: the netlist that `cdept netlist` writes
-by default has the subcircuit header commented out, and netgen reports that it cannot
-find the cell. The LVS-form netlist written by `cdept layout lvs` (`inv.spice` above) is
-suitable. Comparing Magic's extracted netlist with a schematic netlist also needs the
-device models of both sides to have matching names; for the PDK devices of IHP the
-Magic netlist refers to `sg13_lv_nmos` and `sg13_lv_pmos` as subcircuits that no file
-defines, so netgen creates placeholder cells.
+Checks that fail for reasons other than the layout:
+
+- "Cell name X not found in input layout", or a GUI check of another cell: the cell is
+  checked in place in a multi-cell PDK library, see the warning above.
+- An LVS where the schematic side is empty (`schematic ` with no name): the netlist has no
+  matching `.subckt`, or its devices are subcircuit calls the deck cannot read; use `M`
+  lines.
+- netgen `Unknown`: a cell name is missing from a file; see its log.
 
 ## Where the results are
 
@@ -210,7 +299,6 @@ inside the project; add them to `.gitignore` unless you want to keep results und
 version control.
 
 ## See also
-
 - [Technology and the PDK](../concepts/technology.md): where the decks and styles come from
 - [tech.toml and tech.catalog.json](../reference/files/tech-toml.md)
 - [KLAYOUT.md](../KLAYOUT.md): how DRC and LVS run in KLayout, deck variables, results format

@@ -1,0 +1,17 @@
+# Screenshots of the Simulation tab on examples/ihp-inv: the testbench setup form and
+# the results table after a run (the window is tall so both are in view). Needs
+# PDK_ROOT, CDEPT_NGSPICE, CDEPT_XSCHEM. Writes sim-setup.png, sim-results.png.
+# Run: scripts/gen-doc-screenshots.sh docs/screenshots/simulation.script
+window 1400 1750
+panel Library Manager
+wait 0.3
+open cells tb_inv testbench
+sim expect_target cells/tb_inv/testbench
+wait 0.5
+screenshot @SHOTS@/sim-setup.png
+sim run
+sim wait
+sim expect_rows 3 PASS
+wait 0.5
+screenshot @SHOTS@/sim-results.png
+quit

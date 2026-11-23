@@ -97,6 +97,9 @@ Open **File > New Project...**. The wizard has two pages.
    unchecked), and the notes of the scan. *Back* returns to the first page; *Create*
    writes the files and opens the project.
 
+![New Project wizard, second page](../_static/screenshots/wizard-summary.png)
+*The second page of the wizard.*
+
 The same choices are available later: *Project Settings* has an *Installed PDKs* menu that
 fills in the technology and the PDK folder, and a *Rescan technology* check box that
 reads the PDK again when the settings are saved. The **Technology** tab shows the

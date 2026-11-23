@@ -1,0 +1,18 @@
+# Screenshots of a test template (the picker above the setup form, with a templated
+# testbench) and of a suite run (one combined table). Needs PDK_ROOT, CDEPT_NGSPICE,
+# CDEPT_XSCHEM. Writes sim-template.png, sim-suite.png.
+# Run: scripts/gen-doc-screenshots.sh docs/screenshots/sim-suite.script
+window 1400 900
+panel Library Manager
+wait 0.3
+open cells tb_inv tran_delay
+sim template_expect tran_delay
+wait 0.5
+screenshot @SHOTS@/sim-template.png
+open cells tb_inv suite
+sim suite_run
+sim suite_wait
+sim suite_expect pass
+wait 0.5
+screenshot @SHOTS@/sim-suite.png
+quit

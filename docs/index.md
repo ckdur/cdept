@@ -56,6 +56,7 @@ howto/lvs-drc
 reference/files/index
 reference/cli
 reference/environment
+reference/errata
 ```
 
 ```{toctree}

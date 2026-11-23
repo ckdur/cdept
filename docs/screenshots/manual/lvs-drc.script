@@ -1,0 +1,28 @@
+# Not run by scripts/gen-doc-screenshots.sh: it needs the prepared project of the how-to.
+# Screenshots of docs/howto/lvs-drc.md: DRC and LVS of the standard cell sg13g2_inv_1 of
+# the IHP SG13G2 PDK, as a cell of the project's own library. Needs a copy of
+# examples/ihp-inv with that cell added as the how-to describes (layout/sg13g2_inv_1.gds
+# cut out of the PDK's stdcell GDS, schematic/sg13g2_inv_1.sch). Opening the cell from the
+# PDK's library sg13g2_stdcell instead checks the wrong cell (see the how-to).
+# Run from the repository root with the PDK in the environment:
+#   PDK_ROOT=/opt/ext/OpenPDKs PDK=ihp-sg13g2 CDEPT_XSCHEM=target/debug/cdept-xschem \
+#     target/debug/cdept -p <copy of examples/ihp-inv> gui --script docs/screenshots/manual/lvs-drc.script
+
+window 1500 900
+open cells sg13g2_inv_1 layout
+wait_frame
+expect_shown sg13g2_inv_1
+layout_zoom fit
+wait 1
+
+layout_check drc
+expect_check DRC
+wait 1
+screenshot docs/_static/screenshots/lvs-drc-drc.png
+
+layout_check lvs
+expect_check LVS
+wait 1
+screenshot docs/_static/screenshots/lvs-drc-lvs.png
+
+quit

@@ -1,0 +1,38 @@
+# Screenshots of the main window on examples/ihp-inv: Libraries and Library Manager,
+# a schematic in the embedded xschem, a layout in the embedded KLayout, the Hierarchy
+# panel and the Inspector. Writes main-*.png, schematic.png, layout.png,
+# hierarchy.png, inspector.png. Run: scripts/gen-doc-screenshots.sh docs/screenshots/main.script
+window 1400 900
+wait 0.5
+screenshot @SHOTS@/main-window.png
+panel Library Manager
+wait 0.3
+select cells inv schematic
+wait 0.3
+screenshot @SHOTS@/library-manager.png
+
+open cells inv schematic
+wait_frame
+wait 0.5
+screenshot @SHOTS@/schematic.png
+
+open cells buf layout
+wait_frame
+layout_zoom fit
+wait 1
+screenshot @SHOTS@/layout.png
+
+open cells buf schematic
+wait_frame
+panel Hierarchy
+hierarchy_mode schematic files
+expect_hierarchy inv ×2 (x1, x2)
+wait 0.5
+screenshot @SHOTS@/hierarchy.png
+
+click_instance x1
+wait 0.5
+panel Inspector
+wait 0.8
+screenshot @SHOTS@/inspector.png
+quit

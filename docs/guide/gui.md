@@ -22,10 +22,14 @@ its own. The default arrangement:
 | Bottom | Console, Jobs, Problems |
 
 Above the tabs are the menu bar and a toolbar that shows the project name, the PDK in use
-(`$PDK_ROOT` and `$PDK` as resolved for the project) and buttons of the active document.
+(`$PDK_ROOT` and `$PDK` as resolved for the project), launch buttons for the external tools
+(xschem, KLayout, Magic, ngspice) and buttons of the active document.
 **Window > Reset Layout** restores the arrangement above and closes the extra windows. The
 layout, the extra windows and the list of recent projects are kept
 under `$XDG_DATA_HOME` ([Environment variables](../reference/environment.md)).
+
+![The CDePT main window with a project open](../_static/screenshots/main-window.png)
+*The main window on the example project ihp-inv: the Libraries tab on the left, the Start tab in the center, the Inspector and Tools on the right, the Console below.*
 
 ### Menus
 
@@ -53,12 +57,18 @@ external tools were found on `PATH`, with a link to the Tools tab.
 
 ## New Project wizard
 
+![New Project wizard, first page](../_static/screenshots/wizard-pdk.png)
+*First page: folder, name and the PDKs found on this machine.*
+
 File > New Project asks for a folder, a name and a PDK on one page. The list of PDKs comes from
 the places CDePT looks in (`$PDK_ROOT`, `~/.ciel`, ...); the menu "Installed PDKs" and
 the "Other folder" field add more. **Next** scans the PDK in the background and shows what
 was found (layers, decks, model corners, libraries, devices) and its notes; **Create**
 writes the project with its `tech.toml`. "No PDK" makes a bare project. It is the same as
 `cdept init --technology`; see [New project](../howto/new-project.md).
+
+![New Project wizard, second page](../_static/screenshots/wizard-summary.png)
+*Second page: what the scan of the PDK found, and its libraries.*
 
 ## Libraries and the Library Manager
 
@@ -82,6 +92,9 @@ Right-click gives the context menus:
 Rename, copy and move rewrite the references in other schematics, layouts, netlists and
 HDL files, and roll back if one fails.
 
+![The Library Manager](../_static/screenshots/library-manager.png)
+*The Library Manager: libraries, cells and views, with the Inspector showing the selected view.*
+
 ## Hierarchy, Inspector, Tools
 
 - **Hierarchy** shows the cell in front (or the one selected) as a tree, read from the
@@ -94,6 +107,12 @@ HDL files, and roll back if one fails.
 - **Tools** lists the external tools found and the embedded helpers, with the version
   and the path of each (the `cdept tools` list, plus `cdept-xschem`). Detect Tools in the
   Tools menu probes again.
+
+![The Hierarchy panel](../_static/screenshots/hierarchy.png)
+*The Hierarchy panel showing buf, which uses inv twice.*
+
+![The Inspector](../_static/screenshots/inspector.png)
+*The Inspector showing the instance x1 selected in a schematic.*
 
 ## Console, Jobs, Problems
 
@@ -128,6 +147,9 @@ pixels are drawn by the helper and the mouse and keys are sent to it. Notes:
 - Editing a schematic whose file changes on disk behind the tab asks what to do; closing a
   changed one asks to save.
 
+![A schematic in the embedded xschem](../_static/screenshots/schematic.png)
+*The schematic of inv in the embedded xschem.*
+
 What the embedded xschem can and cannot do is in [XSCHEM.md](../XSCHEM.md).
 
 ## Layout tabs
@@ -138,6 +160,9 @@ Cells and Selection" in the tab). The **Layout** menu has Place Cell (another la
 of the project), Place Library Cell (KLayout's and the PDK's PCells), Properties, Delete, Mode
 and Zoom, Run DRC, Run LVS, the schematic link actions (Generate and Update from
 Schematic, the Link, Pins and Nets panels) and Save Layout.
+
+![A layout in the embedded KLayout](../_static/screenshots/layout.png)
+*The layout of buf in the embedded KLayout, with the Layers, Cells and Selection panels.*
 
 | Key | Action |
 |---|---|
@@ -162,6 +187,9 @@ page: Overview, Layers, Layout tools (KLayout, Magic, netgen set-ups and decks),
 lists. From here you can rescan the PDK (with an offer to reopen tabs that were open),
 list or leave out a PDK library, The data is [`tech.toml`](../reference/files/tech-toml.md).
 
+![The Technology tab](../_static/screenshots/technology.png)
+*The Technology tab, Overview page, for IHP SG13G2.*
+
 ## Simulation tab
 
 Opening a testbench view (double click on it, or Simulation in the view's menu) shows
@@ -174,7 +202,19 @@ its [`setup.toml`](../reference/files/setup-toml.md) as a form and, below it, th
   comments at the top of the file and what the form does not show.
 - **Jobs** lists the simulator processes of the run with their state; **Results** shows
   one row per point with the spec columns, PASS or FAIL, and Monte Carlo statistics.
-- A suite view shows a table with one row per testbench.
+- A suite view shows one combined table of the points of all its tests.
+
+![The Simulation tab, setup form](../_static/screenshots/sim-setup.png)
+*The setup form of the testbench tb_inv.*
+
+![The Simulation tab after a run](../_static/screenshots/sim-results.png)
+*After a run: Jobs, Results with statistics, and the points with PASS rows.*
+
+![A templated testbench](../_static/screenshots/sim-template.png)
+*A testbench that starts from a test template: the picker and its parameters above the setup.*
+
+![A suite run](../_static/screenshots/sim-suite.png)
+*A suite run: the tests listed, and one table with a row per point.*
 
 Details of the model are in [Simulation](../concepts/simulation.md).
 
