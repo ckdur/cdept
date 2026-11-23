@@ -110,6 +110,16 @@ lists each inner cell as a cell of the library, with the file as its view. These
 **member views** cannot be renamed, copied or deleted on their own because the file
 belongs to all the cells in it.
 
+### Bringing files in
+
+Files from outside the project become cells and views with `cdept import-files` or
+**Import Files…** in the Library Manager: a file that holds many cells is taken apart
+(one cell per GDS top structure, `.subckt`, LEF macro, Liberty cell or Verilog module),
+cells of the same name from several files become views of one cell, and what cannot come
+in is reported. It is planned first and written all or nothing like the other refactors;
+see [Import design files into a library](../howto/import-files.md). This is different from
+`cdept import`, which proposes a project file for a design folder.
+
 ## Library layouts
 
 A library definition has a `layout` that says how the folder maps to cells and views. It

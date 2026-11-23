@@ -1,0 +1,70 @@
+# Import Files…: files from outside the project become cells and views of a library.
+# Imports a GDS and a SPICE file into examples/buffer. Writes to the project it is run
+# on and next to it (../incoming): use a copy (cdept-gui/scripts/run.sh does).
+#
+#   cdept-gui/scripts/run.sh cdept-gui/scripts/import-files.script
+#
+# Commands used here (docs/GUI-TESTING.md):
+#   refactor import_files <library>   open the Import Files dialog on a library
+#   refactor_set add <file>           add a file to its list (relative to the project)
+#   refactor_set prefix|split|on_clash|clear <value>
+#   expect_plan <text>                a line of the dialog's plan, or of the summary
+#   refactor_ok                       Import; the summary dialog opens
+#   refactor_cancel                   close the dialog
+#
+# Exit status 0: every check passed.
+
+panel Library Manager
+wait 0.2
+
+# Files that are not in the project: buf's layout (it places inv) and a netlist.
+shell mkdir -p ../incoming && cp libs/logic/buf/layout/buf.gds ../incoming/cells.gds
+shell printf '* demo\n.subckt inv A Y\nR1 A Y 1k\n.ends\n.subckt buf A Y\nX1 A Y inv\nX2 A Y missing\n.ends\n' > ../incoming/cells.spice
+shell printf 'hello' > ../incoming/notes.txt
+
+# The dialog shows the plan before anything is written.
+refactor import_files logic
+refactor_set add ../incoming/cells.gds
+refactor_set add ../incoming/cells.spice
+refactor_set add ../incoming/notes.txt
+refactor_set prefix imp_
+expect_plan imp_buf/layout/imp_buf.gds
+expect_plan imp_buf/netlist/imp_buf.spice
+expect_plan imp_inv/netlist/imp_inv.spice
+expect_plan 'missing' is used and not defined
+expect_plan notes.txt: unknown format
+expect_not_listed logic imp_buf
+
+# Import: one cell with both views, one with a netlist only.
+refactor_ok
+expect_plan 3 view(s) of 2 cell(s) imported
+expect_plan problem:
+refactor_cancel
+expect_listed logic imp_buf layout
+expect_listed logic imp_buf netlist
+expect_listed logic imp_inv netlist
+organise expect_selection logic imp_buf layout
+
+# The same files again: the views exist, nothing is left to import.
+refactor import_files logic
+refactor_set add ../incoming/cells.gds
+refactor_set prefix imp_
+expect_plan the library has it already
+refactor_fails nothing to import
+# Under another name instead.
+refactor_set on_clash rename
+expect_plan imp_buf_1/layout/imp_buf_1.gds
+refactor_ok
+refactor_cancel
+expect_listed logic imp_buf_1 layout
+
+# Without splitting the file is one cell named after it.
+refactor import_files logic
+refactor_set add ../incoming/cells.spice
+refactor_set split off
+expect_plan cells/netlist/cells.spice
+refactor_ok
+refactor_cancel
+expect_listed logic cells netlist
+
+quit

@@ -54,6 +54,16 @@ Technology snapshot (`tech.toml` + `tech.catalog.json`, design in [TECH.md](TECH
       KLayout job.
 - Never read `/opt/ext/OpenPDKs/XFAB` (NDA); discovery only stats its subfolders.
 
+### Import files (SYMBI-64, 2026-11-23, [howto](howto/import-files.md))
+`libcdept::importer`, `cdept import-files`, Library Manager "Import Files…". Open:
+- [ ] Not split: OASIS (copied whole), VHDL, Verilog-A, Magic, Qucs, xschem (one file, one
+      cell). A schematic that places symbols of a library the project lacks is not
+      followed.
+- [ ] Verilog dependencies are found by words of the module body, not by parsing
+      instances; Liberty/LEF splitting is textual (no `.lib` `include` or `ifdef`).
+- [ ] An imported GDS gets no `.gds.json` sidecar; the GUI file field adds one file at a
+      time (the native chooser picks one).
+
 ### Phase 4 (first slice, 2026-11-23, [SIMULATION.md](SIMULATION.md))
 `cdept sim run|deck`, `setup.toml` testbench view, deck builder, ngspice batch, specs. Open: see
 SIMULATION.md §4 (GUI, job queue, sweeps, results DB). `libcdept/tests/sim.rs` needs

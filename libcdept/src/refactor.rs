@@ -97,6 +97,9 @@ pub enum Operation {
         new: String,
         folder: bool,
     },
+    /// Files from outside the project come into a library as cells and views; the
+    /// plan is made by [`crate::importer`].
+    Import { library: String, summary: String },
 }
 
 impl fmt::Display for Operation {
@@ -158,6 +161,7 @@ impl fmt::Display for Operation {
                 "rename library {library} to {new}{}",
                 if *folder { " (with its folder)" } else { "" }
             ),
+            Operation::Import { library, summary } => write!(f, "import into {library}: {summary}"),
         }
     }
 }
@@ -231,7 +235,7 @@ pub struct Plan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Step {
+pub(crate) enum Step {
     MakeDir(PathBuf),
     Move {
         from: PathBuf,
@@ -261,6 +265,27 @@ struct Write {
 }
 
 impl Plan {
+    /// A plan made outside this module, from file system steps (see [`crate::importer`]).
+    pub(crate) fn from_steps(
+        operation: Operation,
+        changes: Vec<Change>,
+        notes: Vec<String>,
+        result: ViewId,
+        steps: Vec<Step>,
+    ) -> Plan {
+        Plan {
+            operation,
+            changes,
+            blockers: Vec::new(),
+            notes,
+            result,
+            steps,
+            writes: Vec::new(),
+            delete: None,
+            reload: false,
+        }
+    }
+
     /// The plan as text, for a dry run. Paths are shown relative to `root`.
     pub fn lines(&self, root: &Path) -> Vec<String> {
         let show = |p: &Path| p.strip_prefix(root).unwrap_or(p).display().to_string();
@@ -1572,7 +1597,7 @@ fn not_in_a_collection(project: &Project, operation: &Operation) -> Result<()> {
             cell,
             view,
         } => (library, cell, Some(view)),
-        Operation::RenameLibrary { .. } => return Ok(()),
+        Operation::RenameLibrary { .. } | Operation::Import { .. } => return Ok(()),
     };
     let Some(found) = project.library(library).and_then(|l| l.cell(cell)) else {
         return Ok(());
@@ -1852,6 +1877,9 @@ pub fn plan_with(
             view(src, cell(src, name)?, old)?;
             delete = Some((lib.clone(), name.clone(), Some(old.clone())));
             result = ViewId::new(lib, name, "");
+        }
+        Operation::Import { .. } => {
+            bail!("an import is planned with importer::plan_import");
         }
         Operation::RenameLibrary {
             library: old,

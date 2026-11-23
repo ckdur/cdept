@@ -77,6 +77,10 @@ pub enum Dialog {
     Problems,
     /// Move a cell, rename or copy a view, rename a library (refactor.rs).
     Refactor(crate::refactor::Refactor),
+    /// Bring files from outside the project into a library (import_files.rs).
+    ImportFiles(crate::import_files::ImportFiles),
+    /// What an import did: one line each.
+    ImportSummary(Vec<String>),
 }
 
 impl Dialog {
@@ -158,12 +162,15 @@ impl Dialog {
             Self::LibraryProperties(_) => "Library Properties",
             Self::Problems => "Project Problems",
             Self::Refactor(refactor) => refactor.title(),
+            Self::ImportFiles(_) => "Import Files",
+            Self::ImportSummary(_) => "Import Finished",
         }
     }
 
     fn confirm_label(&self) -> &'static str {
         match self {
-            Self::Error(_) | Self::Problems => "Close",
+            Self::Error(_) | Self::Problems | Self::ImportSummary(_) => "Close",
+            Self::ImportFiles(_) => "Import",
             Self::LibraryProperties(_) => "Save",
             Self::Refactor(refactor) => refactor.confirm_label(),
             Self::NewLibrary { .. } | Self::NewCell { .. } | Self::NewView { .. } => "Create",
@@ -227,7 +234,10 @@ pub(crate) fn show(ctx: &Context, app: &mut AppCtx) {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
         ui.add_space(10.0);
-        let is_error = matches!(state.dialog, Dialog::Error(_) | Dialog::Problems);
+        let is_error = matches!(
+            state.dialog,
+            Dialog::Error(_) | Dialog::Problems | Dialog::ImportSummary(_)
+        );
         ui.horizontal(|ui| {
             if ui.button(state.dialog.confirm_label()).clicked() {
                 outcome = Outcome::Confirm;
@@ -367,6 +377,12 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
         }
         Dialog::Problems => crate::library_dialog::problems_body(ui, app),
         Dialog::Refactor(refactor) => crate::refactor::body(ui, refactor, app, focus),
+        Dialog::ImportFiles(import) => crate::import_files::body(ui, import, app),
+        Dialog::ImportSummary(lines) => {
+            for line in lines {
+                ui.label(egui::RichText::new(line.as_str()).small());
+            }
+        }
         Dialog::ProjectSettings(settings) => {
             grid.show(ui, |ui| {
                 field(ui, "Name", &mut settings.name);
@@ -583,8 +599,11 @@ pub(crate) fn pdk_text(value: &Option<libcdept::Resolved>) -> String {
 }
 
 fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
-    if matches!(dialog, Dialog::Error(_)) {
+    if matches!(dialog, Dialog::Error(_) | Dialog::ImportSummary(_)) {
         return Ok(());
+    }
+    if let Dialog::ImportFiles(import) = dialog {
+        return crate::import_files::apply(app, import);
     }
     if let Dialog::ProjectSettings(settings) = dialog {
         return app.change_settings(settings);
@@ -625,6 +644,9 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
     let selection = match dialog {
         Dialog::Error(_) | Dialog::FixLinks { .. } | Dialog::ProjectSettings(_) => return Ok(()),
         Dialog::LibraryProperties(_) | Dialog::Problems => return Ok(()),
+        Dialog::ImportFiles(_) | Dialog::ImportSummary(_) => {
+            unreachable!("handled by crate::import_files above")
+        }
         Dialog::RenameCell { .. } | Dialog::CopyCell { .. } | Dialog::Refactor(_) => {
             unreachable!("handled by crate::refactor above")
         }
