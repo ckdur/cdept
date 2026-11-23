@@ -30,6 +30,7 @@ Commands:
   yosys         Synthesis with Yosys (batch)
   openroad      Run OpenROAD scripts (batch)
   qucs          Qucs-S: schematic to SPICE netlist (headless), open in Qucs-S, S-parameter viewer
+  wave          Open the waveforms of a run point (or a raw file) in UberWave, the waveform viewer
   vacask        VACASK models of the technology (made from its ngspice models and Verilog-A)
   openvaf       OpenVAF: compile Verilog-A to OSDI, cached per technology
   tech          The project's technology snapshot (tech.toml): scan the PDK, show, refresh
@@ -1266,6 +1267,24 @@ Usage: cdept qucs spar [OPTIONS] <FILE>
 
 Arguments:
   <FILE>  
+```
+
+### cdept wave
+
+```text
+Open the waveforms of a run point (or a raw file) in UberWave, the waveform viewer
+
+Usage: cdept wave [OPTIONS] <FIRST> [CELL]
+
+Arguments:
+  <FIRST>  A raw file (ngspice or Xyce) or a Spectre PSF folder; or a library, followed by the cell of a testbench whose run point is opened
+  [CELL]   The cell, to open the raw file of a run point of its testbench
+
+Options:
+      --analysis <ANALYSIS>  The analysis to preselect (`tran`, `ac`, `dc`, `noise`, `op`; a PSF analysis name). Default: the transient one when the file has several
+      --view <VIEW>          The testbench view. Default: the only view of the cell that has results
+      --point <POINT>        The run point (a folder of simulations/<lib>/<cell>/<view>/). Default: the only one
+      --list                 Do not start the viewer: for a file, print its analyses and signal counts (CDePT's own reader); for a cell, the raw files of all its run points
 ```
 
 ### cdept vacask

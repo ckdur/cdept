@@ -430,7 +430,7 @@ pub const KNOWN_TOOLS: &[ToolSpec] = &[
         phase: Some(5),
         locate: Locate::Bin(&["UberWaveViewer", "uberwave"]),
         version_args: &[],
-        note: Some("large ngspice raw / Spectre PSF; `UberWaveViewer <file> [--analysis <name>]`"),
+        note: Some("the waveform viewer (separate GPL program): `cdept wave`; `$CDEPT_UBERWAVE`; docs/howto/view-waveforms.md"),
     },
     ToolSpec {
         name: "Surfer",
@@ -520,6 +520,13 @@ pub fn detect_all() -> Vec<ToolInfo> {
 }
 
 pub fn detect(spec: &ToolSpec) -> ToolInfo {
+    // UberWave: `$CDEPT_UBERWAVE`, PATH, a sibling build; no version flag (a probe
+    // would open a window), so the file's date.
+    if spec.name == "UberWave" {
+        let path = crate::wave::locate(None);
+        let version = path.as_deref().and_then(crate::wave::describe);
+        return ToolInfo { spec: *spec, path, version };
+    }
     let (path, version) = match spec.locate {
         Locate::Bin(names) => {
             let path = names.iter().find_map(|b| find_in_path(b));

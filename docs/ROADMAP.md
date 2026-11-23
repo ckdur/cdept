@@ -22,7 +22,7 @@ Source of scope: NLnet proposal "Chip Design Project Tool (CDePT)". Budget: ~750
 | Virtuoso Schematic Editor       | Launch + control                       | xschem (primary), Qucs-S             |
 | Virtuoso Layout Suite L/XL      | Launch + control, cross-probe, SDL     | KLayout (primary), Magic             |
 | ADE L/XL/Assembler/Explorer     | Simulation Environment                 | ngspice (shared lib), Xyce, VACASK, OpenVAF |
-| ViVA waveform + Calculator      | Waveform Viewer + Calculator           | own egui plot, UberWave (large analog), Surfer/wellen |
+| ViVA waveform + Calculator      | Waveform Viewer + Calculator           | UberWave (separate viewer, launched), Surfer; calculator in CDePT |
 | Assura/PVS/Calibre DRC/LVS/PEX  | Signoff dashboard                      | KLayout DRC/LVS, Magic, netgen, CVC, KLayout-PEX |
 | Abstract Generator / Liberate   | Mixed-signal utilities                 | Magic LEF, lctime/CharLib, OpenSTA   |
 | AMS Designer                    | Co-simulation                          | ngspice XSPICE d_cosim + Verilator/Icarus, cocotb + spicebind |
@@ -42,7 +42,7 @@ cdept (GUI binary, egui/eframe)
       │    ├── klayout  (helper process cdept-klayout, see KLAYOUT.md)
       │    ├── magic    (Tcl over stdin/pipe or Tcl socket script)
       │    ├── ngspice  (libngspice shared API, in-process)
-      │    ├── uberwave (launch with a file; IPC to agree with the uberWAVE team)
+      │    ├── uberwave (launched with a raw file, libcdept/src/wave.rs; IPC needs upstream work)
       │    └── xyce / vacask / qucs-s / netgen / cvc / yosys / openroad / … (batch)
       ├── sim/         testbench, design variables, corners, sweeps, job queue, results DB
       ├── wave/        SPICE raw reader, VCD/FST via wellen, signal model
@@ -241,23 +241,30 @@ Xyce Monte Carlo; the rest of the list below as written.
 ### Phase 5: Waveform Viewer + Calculator (~150 h)
 - Readers: SPICE raw (binary and ascii, ngspice and Xyce flavours; small custom parser),
   CSV, digital VCD/FST/GHW via `wellen`.
-- Analog viewer: `egui_plot` (or a custom plot widget for large data with min/max decimation),
-  multiple strips, cursors and deltas, log axes, Bode/magnitude-phase, eye diagram, overlay of
-  sweep families, mixed analog and digital in one window.
-- Digital: embed or interoperate with Surfer (egui, Rust, `libsurfer`, Waveform Control
-  Protocol).
-- **UberWave** (the uberWAVE project from the proposal, `gitlab.symbioticeda.com/Juan_25/uberwave`):
-  C++20/ImGui/ImPlot analog and mixed-signal viewer built for multi-GB ngspice raw files
-  (memory-mapped parser, decimation, `.uwraw` cache), plus Spectre PSF. Binary
-  `UberWaveViewer`; CLI `UberWaveViewer <file.raw|psf-dir> [--analysis <name>]`; there is
-  also a WebAssembly build. Integration plan:
-  1. Phase 3/5: "Open in UberWave" for any result (launch with the file), detected like other tools.
-  2. Results DB: point UberWave at a run directory, with the analysis preselected.
-  3. With the uberWAVE team: an IPC channel (open file, add signal, set cursors, report
-     cursor values back), so CDePT's calculator and UberWave's plots stay in sync. Today the
-     viewer has no IPC, only the CLI.
-  4. Decide which side owns large-file viewing. Our own egui plot then covers small
-     results, calculator output and the spec table, and UberWave handles the large transients.
+- **Decision: CDePT builds no waveform viewer of its own.** The analog viewer (egui plot,
+  strips, cursors, Bode, eye diagrams, overlay of sweep families) is UberWave; digital
+  VCD/FST/GHW viewing is Surfer or GTKWave, started the same way. What CDePT keeps is the
+  raw reader (`libcdept/src/raw`, used by the calculator, `[[output]]` and the listing of a
+  file's analyses) and the numbers: measures, the calculator and the spec table.
+- **UberWave** (a separate GPL-2.0 program, repository `uberwave`; the uberWAVE project from
+  the proposal): C++20/ImGui/ImPlot analog and mixed-signal viewer built for multi-GB ngspice
+  raw files (memory-mapped parser, decimation, `.uwraw` cache), plus Spectre PSF. Binary
+  `UberWaveViewer`; CLI `UberWaveViewer <file.raw|psf-dir> [--analysis <name>]` (one path,
+  the first positional only); there is also a WebAssembly build. CDePT only starts it as a
+  separate process (never linked: CDePT stays MIT). Integration steps:
+  1. **Done**: "Open in UberWave" on a point of the Simulation tab, and `cdept wave`; found
+     through `$CDEPT_UBERWAVE`, `PATH` or a sibling build (`cdept tools`).
+  2. **Done for single points**: `cdept wave <lib> <cell> [--view] [--point]` opens the
+     `out.raw` of a run point of the results folder, with the transient analysis preselected
+     when the file has several (`--analysis`). Opening a whole family (corners, sweeps, Monte
+     Carlo) is not possible yet: UberWave takes one file (File > Import adds others by hand).
+  3. **Needs upstream work**: an IPC channel into the running viewer. UberWave would need
+     (a) a command line with several files, or a run folder, to open a family as one session;
+     (b) a control channel (a socket, a pipe or a JSON protocol) with commands to open or import
+     a file, add or remove a signal or expression, select the analysis, set the cursors and
+     the x range; and (c) queries or events that report back the cursor values and the visible
+     signals. CDePT's calculator and spec table could then follow what is on the screen.
+  4. Which side owns large-file viewing is decided: UberWave. The numbers stay in CDePT.
 - Other viewers detected for "open with": GTKWave and gaw (xschem's viewer).
 - Calculator, in two layers:
   1. Native Rust function library (`rustfft`, `ndarray`): FFT/windowing, SNR/SNDR/SFDR/THD/ENOB,

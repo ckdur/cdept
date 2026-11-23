@@ -57,6 +57,7 @@ const TOOL_VARS: &[&str] = &[
     "CDEPT_OPENROAD",
     "CDEPT_YOSYS",
     "CDEPT_QUCS",
+    "CDEPT_UBERWAVE",
     "CDEPT_PYTHON",
     "CDEPT_OPENVAF",
 ];

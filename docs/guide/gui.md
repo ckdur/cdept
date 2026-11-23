@@ -228,6 +228,10 @@ its [`setup.toml`](../reference/files/setup-toml.md) as a form and, below it, th
 ![A suite run](../_static/screenshots/sim-suite.png)
 *A suite run: the tests listed, and one table with a row per point.*
 
+Each point of the Results list has **Open in UberWave**, which starts the separate UberWave
+viewer on the point's raw file ([View waveforms](../howto/view-waveforms.md)); CDePT has no
+waveform viewer of its own.
+
 Details of the model are in [Simulation](../concepts/simulation.md).
 
 ## Scripting and testing the GUI

@@ -15,6 +15,7 @@ mod pdkscan;
 mod refactor;
 mod script;
 mod state;
+mod uberwave;
 mod views;
 
 use std::path::PathBuf;

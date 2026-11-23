@@ -1116,7 +1116,6 @@ impl SimulationView {
             .and_then(|f| f.setup().ok())
             .map(|s| s.specs)
             .unwrap_or_default();
-        let _ = project;
         self.stats_ui(ui);
         let many = self.results.len() > 6;
         egui::CollapsingHeader::new(format!("Points ({})", self.results.len())).default_open(!many).show(ui, |ui| {
@@ -1125,6 +1124,14 @@ impl SimulationView {
                 ui.strong(&row.name);
                 if ui.small_button("Open folder").clicked() {
                     super::technology::open_outside(&row.dir);
+                }
+                if row.error.is_none()
+                    && ui
+                        .small_button("Open in UberWave")
+                        .on_hover_text("Open this point's out.raw in the UberWave waveform viewer")
+                        .clicked()
+                {
+                    crate::uberwave::open_run_dir(project, &row.dir);
                 }
                 if ui.small_button("Open log").clicked() {
                     let log = ["out.log", "job.log"].iter().map(|f| row.dir.join(f)).find(|f| f.is_file());
