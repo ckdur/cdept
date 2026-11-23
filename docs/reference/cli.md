@@ -405,7 +405,7 @@ Usage: cdept layout [OPTIONS] <COMMAND>
 Commands:
   refs          Check the references of a cell's layout to cells of other views
   export        Write a self-contained GDS (or OASIS) of a cell's layout, with every referenced cell filled in, e.g. for DRC, LVS and tape-out
-  png           Draw a cell's layout into a PNG file
+  png           Draw a cell's layout into a PNG file. `--view` may also name a LEF abstract view (drawn read-only, with the cell's macro as top)
   drc           Run the PDK's DRC deck on a cell's layout (KLayout in batch mode)
   lvs           Compare a cell's layout with its schematic, with the PDK's LVS deck
   link          Generate or update a cell's layout from its schematic (Layout XL style)
@@ -456,7 +456,7 @@ Options:
 #### cdept layout png
 
 ```text
-Draw a cell's layout into a PNG file
+Draw a cell's layout into a PNG file. `--view` may also name a LEF abstract view (drawn read-only, with the cell's macro as top)
 
 Usage: cdept layout png [OPTIONS] <LIBRARY> <CELL>
 
@@ -1340,7 +1340,7 @@ Usage: cdept tech [OPTIONS] <COMMAND>
 Commands:
   scan     Scan a PDK and write the project's technology snapshot
   show     Show the snapshot: a summary, or one section
-  refresh  Scan the project's PDK again and say what changed, then write the snapshot
+  refresh  Scan the project's PDK again, say what changed, then replace the snapshot
   notes    What the scan could not find or had to guess, and whether the snapshot is still the PDK's
   devices  Print a draft device map made from the scan: which KLayout PCell each xschem symbol of the PDK becomes when a layout is generated from a schematic (docs/LINKING.md). For PDKs CDePT ships no map for. The matches are guesses: check them, save the file in the project and name it in `[klayout] devices`
   help     Print this message or the help of the given subcommand(s)
@@ -1368,6 +1368,9 @@ Options:
 
       --print
           Print tech.toml instead of writing anything (needs no project)
+
+  -y, --yes
+          Replace an existing tech.toml without asking (scripts, no terminal)
 ```
 
 #### cdept tech show
@@ -1388,13 +1391,21 @@ Options:
 #### cdept tech refresh
 
 ```text
-Scan the project's PDK again and say what changed, then write the snapshot
+Scan the project's PDK again, say what changed, then replace the snapshot.
+
+tech.toml is replaced as a whole: what was edited by hand in it is lost (the old file is kept as tech.toml.bak). The differences are shown and, on a terminal, confirmed; without a terminal give --yes.
 
 Usage: cdept tech refresh [OPTIONS]
 
 Options:
-      --files-only         Read files only: do not start KLayout (PCells) or xschem (xschemrc)
-      --dry-run            Only say what would change
+      --files-only
+          Read files only: do not start KLayout (PCells) or xschem (xschemrc)
+
+      --dry-run
+          Only say what would change
+
+  -y, --yes
+          Replace tech.toml without asking (scripts, no terminal)
 ```
 
 #### cdept tech notes

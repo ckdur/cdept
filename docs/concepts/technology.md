@@ -168,24 +168,58 @@ that cannot be read is a warning, not an error: the project opens without a snap
 
 ## Hand edits and refresh
 
-`cdept tech refresh` scans the PDK again, lists what changes (`~ klayout.tech: a -> b`,
-`+ magic.rc: ...`) and then **replaces the whole file**. `--dry-run` stops after the list.
-Hand edits of `tech.toml` are therefore lost:
+`tech.toml` is read as it is. Edit it by hand (the files of a library, a Liberty corner,
+the model corner, a library's `enabled`) and the edit applies the next time the project
+is opened. The PDK is not asked again: the file is the source of truth for the PDK's
+files, and the scan only fills it in the first time.
+
+For a reference library, `[refs.library.files]` lists the GDS, SPICE, CDL, LEF, Verilog
+and Liberty files. The file listed for a format is the main file of the views of that
+format. Listing another GDS, dropping a Liberty corner or adding a SPICE file changes
+which file a tool opens. A library with no `files` table (an older `tech.toml`, a
+hand-made PDK, a PDK without a LibreLane or OpenLane configuration) is read from its
+folders.
+
+`cdept tech refresh` is the other direction: it updates from the PDK and **drops
+everything inside `tech.toml`**. Before it writes, it says so, lists how the new scan
+differs from the file (the PDK's changes and your hand edits together; `-` lines are
+what the file has now), and asks:
 
 ```text
-$ cdept tech refresh --dry-run
+$ cdept tech refresh
 scanning /opt/ext/OpenPDKs/ihp-sg13g2 ...
+differences between the current tech.toml and the PDK now (changes made by hand are among them, `-` lines are what is lost):
 ~ models.corner: ff -> tt
+warning: tech.toml is replaced as a whole by what the PDK says now: ... The old file is kept as tech.toml.bak ...
+Replace tech.toml? [y/N]
 ```
 
-Where a lasting change is needed, use `cdept.toml`: it wins over the snapshot and a
-refresh never touches it. It has keys for the xschem start-up file, the `[klayout]`
-settings (path, technology, layer properties, decks, device map) and the libraries. For
-a PDK whose layout the scan does not understand, `tech.toml` may be written by hand: every
-key is optional and paths may be absolute.
+Without a terminal (a script, a pipe) refresh refuses; give `--yes` to replace the file.
+`--dry-run` only lists the differences. The same applies to `cdept tech scan` over an
+existing `tech.toml`, and to Rescan in the Technology tab, which shows the warning and the
+differences in a dialog before it replaces anything. The previous file is kept as
+`tech.toml.bak` next to it (one copy, replaced by the next refresh); copy your edits back
+from there. The first scan of a project has no file to replace and asks nothing.
 
-Not everything has a place in `cdept.toml` yet. Choosing another model corner or
-disabling a PDK library is an edit of `tech.toml`, which a refresh resets.
+Where an edit should survive refreshes, use `cdept.toml`: it wins over the snapshot and a
+refresh never touches it. It has keys for the xschem start-up file, the `[klayout]`
+settings (path, technology, layer properties, decks, device map) and the libraries.
+
+### Warnings about files
+
+When a project is opened, CDePT checks the files `tech.toml` names:
+
+- `tech.toml: library sg13g2_stdcell names gds <path>, which does not exist`: the file
+  `files` lists is not on disk, because the PDK was moved or updated or the entry has a
+  typo. The views of that format fall back to what the library's folders hold. Run
+  `cdept tech refresh` to make the file again from the PDK (this replaces `tech.toml`),
+  or correct the path by hand.
+- `tech.toml is out of date (the PDK's configuration changed since the scan)`: the
+  LibreLane or OpenLane `config.tcl` files of the PDK are not the ones the scan read.
+  The same remedies apply.
+
+These are warnings only: nothing is changed for you, and you decide whether the file or
+the PDK is right. They show in `cdept info` and in the Problems list of the GUI.
 
 ## Hand-made and NDA PDKs
 

@@ -150,6 +150,10 @@ pub struct Library {
     pub error: Option<String>,
     /// Cells, sorted by name.
     pub cells: Vec<Cell>,
+    /// Reference libraries: the files that are the main file of a view before the
+    /// others (the files `tech.toml` names for the library); empty: the folder scan
+    /// alone decides. Set by the project, not read from the PDK here.
+    pub preferred: std::collections::BTreeSet<PathBuf>,
 }
 
 impl Library {
@@ -180,7 +184,7 @@ impl Library {
         let cells = match self.layout {
             LibraryLayout::Cells => scan_cells(&self.path),
             LibraryLayout::Flat => scan_flat(&self.path, cache),
-            LibraryLayout::Ref => scan_ref(&self.path, cache),
+            LibraryLayout::Ref => scan_ref(&self.path, cache, &self.preferred),
         };
         match cells {
             Ok(cells) => self.cells = cells,
@@ -688,10 +692,13 @@ fn ref_view(folder: &str, tool: Option<&str>, format: Format) -> (String, ViewKi
     (name, kind)
 }
 
-fn scan_ref(library: &Path, cache: &Cache) -> Result<Vec<Cell>> {
-    // The files the PDK's LibreLane/OpenLane configuration names for this library
-    // decide which file is a view's main file, before guessing from the names.
-    let preferred = crate::tech::librelane::library_files(library);
+fn scan_ref(
+    library: &Path,
+    cache: &Cache,
+    preferred: &std::collections::BTreeSet<PathBuf>,
+) -> Result<Vec<Cell>> {
+    // The files `tech.toml` names for this library decide which file is a view's main
+    // file, before guessing from the names.
     let mut found = Vec::new();
     let mut add = |folder: &str, tool: Option<&str>, name: String, path: PathBuf| {
         let Some((stem, _)) = Format::split_name(&name) else {
@@ -738,7 +745,7 @@ fn scan_ref(library: &Path, cache: &Cache) -> Result<Vec<Cell>> {
             }
         }
     }
-    Ok(assemble(found, cache, false, &preferred))
+    Ok(assemble(found, cache, false, preferred))
 }
 
 /// A cell a file gives: its name and, when the file is a collection, the same name
@@ -1050,6 +1057,7 @@ mod tests {
             defined_in: PathBuf::new(),
             error: None,
             cells: Vec::new(),
+            preferred: Default::default(),
         };
         lib.scan();
         lib
@@ -1588,7 +1596,7 @@ mod tests {
     }
 
     #[test]
-    fn the_flow_configuration_names_the_main_file_of_a_view() {
+    fn the_preferred_files_name_the_main_file_of_a_view() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("demo/libs.ref/std");
         let write = |name: &str, text: &str| {
@@ -1605,16 +1613,18 @@ mod tests {
                 .and_then(|f| f.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_default()
         };
-        // No configuration: the typical corner by its name.
+        // Nothing preferred: the typical corner by its name.
         let mut lib = library(&root, LibraryLayout::Ref);
         lib.scan_with(&Cache::off());
         assert_eq!(main(&lib), "std_tt_1p8V_25C.lib");
-        // The configuration says another one.
+        // The snapshot names another one; a configuration in the PDK is not read.
         write(
             "libs.tech/librelane/config.tcl",
             "set ::env(CELL_LIBS) [dict create]\n\
-             dict set ::env(CELL_LIBS) \"*_ff\" \"$::env(PDK_ROOT)/$::env(PDK)/libs.ref/std/lib/std_ff_1p8V_25C.lib\"\n",
+             dict set ::env(CELL_LIBS) \"*_tt\" \"$::env(PDK_ROOT)/$::env(PDK)/libs.ref/std/lib/std_tt_1p8V_25C.lib\"\n",
         );
+        lib.preferred
+            .insert(root.join("lib/std_ff_1p8V_25C.lib"));
         lib.scan_with(&Cache::off());
         assert_eq!(main(&lib), "std_ff_1p8V_25C.lib");
     }

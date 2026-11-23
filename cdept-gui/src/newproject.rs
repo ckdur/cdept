@@ -604,6 +604,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut AppCtx) {
             pdkscan::want_rescan(false);
         }
         pdkscan::poll(app, ctx);
+        pdkscan::replace_ui(ctx, app);
         pdkscan::restart_offer_ui(ctx, app);
     }
     if app
@@ -779,9 +780,27 @@ pub(crate) fn script(app: &mut AppCtx, ctx: &egui::Context, args: &[String]) -> 
         "rescan" => {
             return pdkscan::start_rescan(app, ctx, rest.first().is_none_or(|w| w != "files"));
         }
+        "expect_replace_question" => {
+            return if app.tech.confirm.is_some() {
+                Ok(())
+            } else {
+                Err("tech.toml is not being asked about".into())
+            };
+        }
+        "answer" => {
+            let yes = on_off(rest.first())?;
+            return if pdkscan::answer_replace(app, yes) {
+                Ok(())
+            } else {
+                Err("no question about replacing tech.toml is open".into())
+            };
+        }
         "expect_rescanned" => {
             if app.tech.rescan.is_some() || app.tech.pending {
                 return Err("the technology is still being scanned".into());
+            }
+            if app.tech.confirm.is_some() {
+                return Err("the question about replacing tech.toml is not answered".into());
             }
             return match &app.tech.last {
                 Some(Ok(_)) => Ok(()),

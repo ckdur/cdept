@@ -24,6 +24,8 @@
 #   tech expect_line <text>         a line of the summary has this text
 #   tech page <name>                a page of the Technology tab (Layers, Models, …)
 #   tech rescan [files]             Rescan of the open project; expect_rescanned
+#   tech expect_replace_question    "Replace tech.toml?" (warning and differences) is shown
+#   tech answer <yes|no>            answer it; a rescan replaces tech.toml as a whole
 #   tech expect_offer <on|off>      "The technology changed: reopen tabs?" is shown
 #   tech restart <on|off>           answer it
 
@@ -87,6 +89,8 @@ tcl_expect ihp-sg13g2 set PDK
 
 # --- Rescan while a tab is open: offer to reopen it ------------------------------------
 tech rescan files
+tech expect_replace_question
+tech answer yes
 tech expect_rescanned
 tech expect_offer on
 tech restart on

@@ -51,6 +51,7 @@ can point anywhere, and a read-only library (a PDK's) usually lives outside it.
 | `cdept.toml` | `cdept init`, `cdept lib ...`, the GUI, by hand | yes | [cdept.toml](cdept-toml.md) |
 | `cdept.local.toml` | `cdept init --pdk-root`, the PDK scan, Project Settings, by hand | no (CDePT adds it to `.gitignore` inside a git repository) | [cdept.local.toml](cdept-local-toml.md) |
 | `tech.toml` | `cdept init --technology`, `cdept tech scan` and `refresh`, the New Project wizard | yes | [tech.toml](tech-toml.md) |
+| `tech.toml.bak` | the scan, before it replaces `tech.toml` (one copy, replaced by the next scan) | no | [tech.toml](tech-toml.md) |
 | `tech.catalog.json` | the same scan | optional; it can always be made again with `cdept tech refresh` | [TECH.md](../../TECH.md) section 5 |
 | `categories.toml` | `cdept category ...`, the Library Manager | yes | [Category files](categories.md) |
 | `templates/*.toml` | by hand | yes | [test-template.md](test-template.md) |

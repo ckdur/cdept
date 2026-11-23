@@ -292,6 +292,7 @@ mod tests {
             defined_in: PathBuf::new(),
             error: None,
             cells: Vec::new(),
+            preferred: Default::default(),
         };
         let cells = library(LibraryLayout::Cells);
         assert_eq!(

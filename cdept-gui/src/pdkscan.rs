@@ -249,9 +249,22 @@ pub struct TechState {
     pub(crate) page: Option<String>,
     /// A rescan was asked for where the egui context was not at hand.
     pub(crate) pending: bool,
+    /// A finished rescan waits for the answer to "Replace tech.toml?".
+    pub(crate) confirm: Option<Replacing>,
     /// Counts the changes of the project's technology, so views can drop what they
     /// keep of it.
     pub(crate) generation: u64,
+}
+
+/// A scan that would replace the project's `tech.toml`, held until it is agreed.
+pub struct Replacing {
+    root: PathBuf,
+    pdk: PdkDir,
+    tech: Tech,
+    catalog: Catalog,
+    elapsed: f32,
+    /// How the new scan differs from the file now (the hand edits are among them).
+    changes: Vec<String>,
 }
 
 impl TechState {
@@ -329,17 +342,101 @@ pub fn poll(app: &mut AppCtx, ctx: &egui::Context) {
         return;
     };
     let (root, job) = (root.clone(), app.tech.rescan.take().expect("checked").1);
-    let outcome = apply(app, &root, &job.pdk, &tech, &catalog);
+    let elapsed = job.elapsed().as_secs_f32();
+    // An existing tech.toml is replaced as a whole: say so and ask first.
+    if tech::file::exists(&root)
+        && let Some(project) = app.project.as_ref().filter(|p| p.root == root)
+    {
+        let old_catalog = project.catalog().ok().flatten().unwrap_or_default();
+        let changes = match &project.tech {
+            Some(old) => tech::report::changes((old, &old_catalog), (&tech, &catalog)),
+            None => Vec::new(),
+        };
+        app.tech.confirm = Some(Replacing {
+            root,
+            pdk: job.pdk.clone(),
+            tech,
+            catalog,
+            elapsed,
+            changes,
+        });
+        return;
+    }
+    finish(app, &root, &job.pdk, &tech, &catalog, elapsed);
+}
+
+fn finish(app: &mut AppCtx, root: &std::path::Path, pdk: &PdkDir, tech: &Tech, catalog: &Catalog, elapsed: f32) {
+    let outcome = apply(app, root, pdk, tech, catalog);
     match &outcome {
         Ok(name) => tracing::info!(
             target: "cdept::tech",
-            "technology of {name} scanned in {:.1} s: {} note(s)",
-            job.elapsed().as_secs_f32(),
+            "technology of {name} scanned in {elapsed:.1} s: {} note(s)",
             tech.notes.len()
         ),
         Err(e) => tracing::error!(target: "cdept::tech", "the technology was not saved: {e}"),
     }
     app.tech.last = Some(outcome);
+}
+
+/// Answer the question about replacing `tech.toml` (the dialog or a script).
+/// `false` when none was asked.
+pub fn answer_replace(app: &mut AppCtx, yes: bool) -> bool {
+    let Some(r) = app.tech.confirm.take() else {
+        return false;
+    };
+    if yes {
+        finish(app, &r.root, &r.pdk, &r.tech, &r.catalog, r.elapsed);
+    } else {
+        tracing::info!(target: "cdept::tech", "{} was not replaced", tech::TECH_FILE);
+        app.tech.last = Some(Err(format!("{} was not replaced", tech::TECH_FILE)));
+    }
+    true
+}
+
+/// The question "Replace tech.toml?": it is replaced as a whole.
+pub fn replace_ui(ctx: &egui::Context, app: &mut AppCtx) {
+    let Some(r) = &app.tech.confirm else {
+        return;
+    };
+    let mut answer = None;
+    let response = egui::Modal::new(egui::Id::new("cdept-tech-replace")).show(ctx, |ui| {
+        ui.set_width(560.0);
+        ui.heading(format!("Replace {}?", tech::TECH_FILE));
+        ui.add_space(6.0);
+        ui.label(tech::file::replace_warning());
+        ui.add_space(6.0);
+        if r.changes.is_empty() {
+            ui.label(format!("Nothing differs from the current {}.", tech::TECH_FILE));
+        } else {
+            ui.label(
+                "Differences between the file and the PDK now (changes made by hand are \
+                 among them; `-` lines are what the file has and would be lost):",
+            );
+            egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                for line in r.changes.iter().take(200) {
+                    ui.monospace(line);
+                }
+                if r.changes.len() > 200 {
+                    ui.weak(format!("… and {} more", r.changes.len() - 200));
+                }
+            });
+        }
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            if ui.button("Replace").clicked() {
+                answer = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                answer = Some(false);
+            }
+        });
+    });
+    if response.should_close() {
+        answer.get_or_insert(false);
+    }
+    if let Some(yes) = answer {
+        answer_replace(app, yes);
+    }
 }
 
 /// Make a scan's result the technology of the open project (if it still is the

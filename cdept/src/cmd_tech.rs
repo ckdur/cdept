@@ -32,6 +32,9 @@ pub enum TechCommand {
         /// Print tech.toml instead of writing anything (needs no project).
         #[arg(long)]
         print: bool,
+        /// Replace an existing tech.toml without asking (scripts, no terminal).
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// Show the snapshot: a summary, or one section.
     Show {
@@ -44,7 +47,11 @@ pub enum TechCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Scan the project's PDK again and say what changed, then write the snapshot.
+    /// Scan the project's PDK again, say what changed, then replace the snapshot.
+    ///
+    /// tech.toml is replaced as a whole: what was edited by hand in it is lost (the
+    /// old file is kept as tech.toml.bak). The differences are shown and, on a
+    /// terminal, confirmed; without a terminal give --yes.
     Refresh {
         /// Read files only: do not start KLayout (PCells) or xschem (xschemrc).
         #[arg(long)]
@@ -52,6 +59,9 @@ pub enum TechCommand {
         /// Only say what would change.
         #[arg(long)]
         dry_run: bool,
+        /// Replace tech.toml without asking (scripts, no terminal).
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// What the scan could not find or had to guess, and whether the snapshot is
     /// still the PDK's.
@@ -109,6 +119,47 @@ pub fn scan(pdk: &PdkDir, helpers: bool, project: Option<&Project>) -> (Tech, Ca
         );
     }
     tech::scan(&ctx)
+}
+
+/// The differences between the file now and a fresh scan. They are the PDK's changes
+/// and the hand edits together: the file does not say which is which.
+fn print_changes(changes: &[String]) {
+    if changes.is_empty() {
+        println!("nothing differs from the current {}", tech::TECH_FILE);
+        return;
+    }
+    println!(
+        "differences between the current {} and the PDK now (changes made by hand \
+         are among them, `-` lines are what is lost):",
+        tech::TECH_FILE
+    );
+    for line in changes {
+        println!("{line}");
+    }
+}
+
+/// Say that the file is replaced as a whole and ask (`Replace tech.toml? [y/N]`);
+/// `yes` agrees beforehand. Without a terminal and without `yes` it refuses.
+fn confirm_replace(yes: bool) -> Result<()> {
+    use std::io::{BufRead, IsTerminal, Write};
+    println!("warning: {}", file::replace_warning());
+    if yes {
+        return Ok(());
+    }
+    if !std::io::stdin().is_terminal() {
+        bail!(
+            "{} is not replaced: there is no terminal to ask; give --yes to replace it",
+            tech::TECH_FILE
+        );
+    }
+    print!("Replace {}? [y/N] ", tech::TECH_FILE);
+    std::io::stdout().flush().ok();
+    let mut answer = String::new();
+    std::io::stdin().lock().read_line(&mut answer)?;
+    if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        bail!("{} not replaced", tech::TECH_FILE);
+    }
+    Ok(())
 }
 
 /// What a scan found, for the terminal: the summary, then the notes.
@@ -237,6 +288,7 @@ pub fn run(command: TechCommand, project: Option<Project>) -> Result<()> {
             pdk_root,
             files_only,
             print,
+            yes,
         } => {
             let found = match (&pdk, &project) {
                 (Some(name), _) => find_pdk(name, pdk_root.as_deref(), project.as_ref())?,
@@ -262,6 +314,15 @@ pub fn run(command: TechCommand, project: Option<Project>) -> Result<()> {
                 return Ok(());
             }
             let mut project = need(project)?;
+            if file::exists(&project.root) {
+                let old_catalog = project.catalog()?.unwrap_or_default();
+                let changes = match &project.tech {
+                    Some(old) => report::changes((old, &old_catalog), (&tech, &catalog)),
+                    None => Vec::new(),
+                };
+                print_changes(&changes);
+                confirm_replace(yes)?;
+            }
             project.set_technology(&found, &tech, &catalog)?;
             println!(
                 "wrote {} and {}",
@@ -322,6 +383,7 @@ pub fn run(command: TechCommand, project: Option<Project>) -> Result<()> {
         TechCommand::Refresh {
             files_only,
             dry_run,
+            yes,
         } => {
             let mut project = need(project)?;
             let pdk = project
@@ -341,14 +403,12 @@ pub fn run(command: TechCommand, project: Option<Project>) -> Result<()> {
                 Some(old) => report::changes((old, &old_catalog), (&tech, &catalog)),
                 None => vec!["+ the project had no snapshot".into()],
             };
-            if changes.is_empty() {
-                println!("nothing changed");
-            }
-            for line in &changes {
-                println!("{line}");
-            }
+            print_changes(&changes);
             if dry_run {
                 return Ok(());
+            }
+            if file::exists(&project.root) {
+                confirm_replace(yes)?;
             }
             // Written also when nothing changed: the files may have been edited.
             project.set_technology(&pdk, &tech, &catalog)?;

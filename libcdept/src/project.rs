@@ -532,6 +532,10 @@ impl Project {
                     library.layout = LibraryLayout::from_name(&entry.layout)
                         .unwrap_or_else(|| LibraryLayout::detect(&folder));
                     library.path = folder;
+                    if library.layout == LibraryLayout::Ref {
+                        let warnings = self.apply_library_files(&mut library, &tech);
+                        self.warnings.extend(warnings);
+                    }
                     library.scan();
                 }
                 Err(e) => library.error = Some(e),
@@ -541,6 +545,35 @@ impl Project {
             }
             self.libraries.push(library);
         }
+    }
+
+    /// The files `tech.toml` names for a reference library (`[[refs.library]] files`)
+    /// are the preferred main files of its views, as they stand in the file. A file
+    /// that is not there is a warning; the folder scan decides that format.
+    fn apply_library_files(&self, library: &mut Library, tech: &crate::tech::Tech) -> Vec<String> {
+        let mut warnings = Vec::new();
+        let Some(files) = tech
+            .refs
+            .libraries
+            .iter()
+            .find(|entry| self.snapshot_path(&entry.path, false).as_deref() == Some(&library.path))
+            .and_then(|entry| entry.files.as_ref())
+        else {
+            return warnings;
+        };
+        let (found, missing) = files.existing(|path| self.snapshot_path(path, false));
+        library.preferred = found;
+        for (format, file) in missing {
+            warnings.push(format!(
+                "{}: library {} names {format} {file}, which does not exist; the PDK may \
+                 have moved or been updated: run `cdept tech refresh` (this replaces {}, \
+                 see its warning) or correct the file",
+                crate::tech::TECH_FILE,
+                library.name,
+                crate::tech::TECH_FILE
+            ));
+        }
+        warnings
     }
 
     /// `[xschem] rc`: one file or a list. A file that cannot be found is left out,
@@ -920,6 +953,17 @@ impl Project {
         };
         changed("commit", &tech.pdk.commit, &now.commit)
             .or_else(|| changed("version", &tech.pdk.version, &now.version))
+            .or_else(|| self.config_changed(tech))
+    }
+
+    /// The PDK's LibreLane/OpenLane configuration files are not the ones the scan
+    /// read (their contents were recorded as `[refs.digital] config_hash`).
+    fn config_changed(&self, tech: &crate::tech::Tech) -> Option<String> {
+        let digital = tech.refs.digital.as_ref()?;
+        let then = digital.config_hash.as_ref()?;
+        let now = crate::tech::refs::config_hash(digital, |path| self.snapshot_path(path, false));
+        (now.as_ref() != Some(then))
+            .then(|| "the PDK's configuration changed since the scan".to_string())
     }
 
     /// Make `pdk` the PDK of this project: write the snapshot (`tech.toml` and
@@ -1138,7 +1182,10 @@ impl Project {
                     .ok_or_else(|| eyre!("{}: `libraries` must be a table", file.display()))?;
                 for (name, item) in table.iter() {
                     match self.define(name, item, file, dir) {
-                        Ok(library) => self.libraries.push(library),
+                        Ok((library, warnings)) => {
+                            self.libraries.push(library);
+                            self.warnings.extend(warnings);
+                        }
                         Err(e) => self.warnings.push(format!("{}: {e}", file.display())),
                     }
                 }
@@ -1180,7 +1227,13 @@ impl Project {
         Ok(())
     }
 
-    fn define(&self, name: &str, item: &Item, file: &Path, dir: &Path) -> Result<Library, String> {
+    fn define(
+        &self,
+        name: &str,
+        item: &Item,
+        file: &Path,
+        dir: &Path,
+    ) -> Result<(Library, Vec<String>), String> {
         if self.library(name).is_some() {
             return Err(format!("library '{name}' is already defined; ignored"));
         }
@@ -1196,16 +1249,23 @@ impl Project {
         let mut library = new_library(name, Path::new(path), file);
         library.layout = layout.unwrap_or_default();
         library.read_only = read_only;
+        let mut warnings = Vec::new();
         // A library that cannot be resolved stays listed, with its error.
         match self.resolve(path, dir) {
             Ok(folder) => {
                 library.layout = layout.unwrap_or_else(|| LibraryLayout::detect(&folder));
                 library.path = folder;
+                if library.layout == LibraryLayout::Ref
+                    && self.tech_in_use
+                    && let Some(tech) = self.tech.clone()
+                {
+                    warnings = self.apply_library_files(&mut library, &tech);
+                }
                 library.scan();
             }
             Err(e) => library.error = Some(e),
         }
-        Ok(library)
+        Ok((library, warnings))
     }
 }
 
@@ -1252,6 +1312,7 @@ fn new_library(name: &str, path: &Path, defined_in: &Path) -> Library {
         defined_in: defined_in.to_path_buf(),
         error: None,
         cells: Vec::new(),
+        preferred: Default::default(),
     }
 }
 
@@ -2004,6 +2065,133 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
         assert_eq!(prims.path, project.root.join("own_pr"));
         assert!(!prims.read_only);
         assert_eq!(project.libraries.len(), 1);
+    }
+
+    /// A PDK with a reference library of two Liberty corners, and a snapshot that
+    /// names `file` as its Liberty file.
+    fn ref_snapshot(pdks: &Path, liberty: &[&str]) -> (PdkDir, Tech) {
+        let (pdk, mut tech, _) = snapshot_fixture(pdks);
+        let lib = pdk.refs().join("cells");
+        fs::create_dir_all(lib.join("lib")).unwrap();
+        for corner in ["tt", "ff", "ss"] {
+            fs::write(
+                lib.join(format!("lib/cells_{corner}.lib")),
+                "library (cells) {\n  cell (inv) {\n    area : 1.0 ;\n  }\n}\n",
+            )
+            .unwrap();
+        }
+        tech.refs.libraries.push(crate::tech::refs::RefLibrary {
+            name: "cells".into(),
+            path: pdk.portable(&lib),
+            layout: "ref".into(),
+            enabled: true,
+            files: Some(crate::tech::refs::LibraryFiles {
+                source: "librelane config".into(),
+                liberty: liberty
+                    .iter()
+                    .map(|name| crate::tech::refs::LibertyRef {
+                        corner: (*name).into(),
+                        file: pdk.portable(&lib.join(format!("lib/{name}"))),
+                    })
+                    .collect(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        (pdk, tech)
+    }
+
+    fn main_liberty(project: &Project) -> Option<String> {
+        let lib = project.library("cells")?;
+        let entry = lib.cell("inv")?.entries.iter().find(|e| e.kind == crate::ViewKind::Liberty)?;
+        entry
+            .main_file
+            .as_ref()
+            .map(|f| f.file_name().unwrap().to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn the_files_of_the_snapshot_pick_the_main_file_and_follow_hand_edits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (pdk, mut tech) = ref_snapshot(&tmp.path().join("pdks"), &["cells_ss.lib"]);
+        let root = tmp.path().join("p");
+        let mut project =
+            Project::create_for_pdk(&root, None, &pdk, &tech, &Catalog::default()).unwrap();
+        assert!(project.warnings.is_empty(), "{:?}", project.warnings);
+        // The snapshot names the slow corner: that one, not the typical one.
+        assert_eq!(main_liberty(&project).as_deref(), Some("cells_ss.lib"));
+
+        // Edited by hand: another corner, written back and read again.
+        let file = &mut tech.refs.libraries[0].files.as_mut().unwrap().liberty[0];
+        file.file = pdk.portable(&pdk.refs().join("cells/lib/cells_ff.lib"));
+        crate::tech::file::save(&root, &tech, &Catalog::default()).unwrap();
+        project.reload().unwrap();
+        assert_eq!(main_liberty(&project).as_deref(), Some("cells_ff.lib"));
+
+        // Without `files` the folder scan decides, as before: the typical corner.
+        tech.refs.libraries[0].files = None;
+        crate::tech::file::save(&root, &tech, &Catalog::default()).unwrap();
+        project.reload().unwrap();
+        assert_eq!(main_liberty(&project).as_deref(), Some("cells_tt.lib"));
+        assert!(project.warnings.is_empty(), "{:?}", project.warnings);
+    }
+
+    #[test]
+    fn a_file_the_snapshot_names_that_is_gone_is_a_warning() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (pdk, mut tech) = ref_snapshot(&tmp.path().join("pdks"), &["cells_gone.lib"]);
+        tech.refs.libraries[0].files.as_mut().unwrap().gds =
+            vec![pdk.portable(&pdk.refs().join("cells/gds/cells.gds"))];
+        let root = tmp.path().join("p");
+        let project =
+            Project::create_for_pdk(&root, None, &pdk, &tech, &Catalog::default()).unwrap();
+        let warnings = project.warnings.join("\n");
+        assert!(warnings.contains("library cells names liberty"), "{warnings}");
+        assert!(warnings.contains("cells_gone.lib, which does not exist"), "{warnings}");
+        assert!(warnings.contains("names gds"), "{warnings}");
+        assert!(warnings.contains("cdept tech refresh"), "{warnings}");
+        // The folder scan still gives the view.
+        assert_eq!(main_liberty(&project).as_deref(), Some("cells_tt.lib"));
+    }
+
+    #[test]
+    fn a_changed_pdk_configuration_is_a_warning() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (pdk, mut tech) = ref_snapshot(&tmp.path().join("pdks"), &["cells_tt.lib"]);
+        let config = pdk.tech("librelane").join("config.tcl");
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(&config, "set ::env(A) 1\n").unwrap();
+        tech.refs.digital = Some(crate::tech::refs::Digital {
+            flow: "librelane".into(),
+            config: pdk.portable(&config),
+            ..Default::default()
+        });
+        let digital = tech.refs.digital.as_mut().unwrap();
+        digital.config_hash = crate::tech::refs::config_hash(digital, |p| p.resolve_in(&pdk).ok());
+        let root = tmp.path().join("p");
+        let mut project =
+            Project::create_for_pdk(&root, None, &pdk, &tech, &Catalog::default()).unwrap();
+        assert!(project.warnings.is_empty(), "{:?}", project.warnings);
+        fs::write(&config, "set ::env(A) 2\n").unwrap();
+        project.reload().unwrap();
+        let warnings = project.warnings.join("\n");
+        assert!(warnings.contains("configuration changed since the scan"), "{warnings}");
+    }
+
+    #[test]
+    fn saving_a_snapshot_over_one_keeps_a_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (pdk, tech) = ref_snapshot(&tmp.path().join("pdks"), &["cells_tt.lib"]);
+        let root = tmp.path().join("p");
+        Project::create_for_pdk(&root, None, &pdk, &tech, &Catalog::default()).unwrap();
+        assert!(!root.join(crate::tech::file::BACKUP_FILE).exists());
+        let first = fs::read_to_string(root.join("tech.toml")).unwrap();
+        let mut other = tech.clone();
+        other.klayout.tech = Some("other".into());
+        crate::tech::file::save(&root, &other, &Catalog::default()).unwrap();
+        let backup = fs::read_to_string(root.join(crate::tech::file::BACKUP_FILE)).unwrap();
+        assert_eq!(backup, first);
+        assert!(fs::read_to_string(root.join("tech.toml")).unwrap().contains("other"));
     }
 
     #[test]

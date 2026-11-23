@@ -22,9 +22,10 @@ const HEADER: &str = "\
 # or the environment). The long lists (layers, PCells, symbols, cells) are next to
 # this file in tech.catalog.json.
 #
-# Made by `cdept init --technology {pdk}`; made again by `cdept tech refresh`, which
-# replaces the whole file. To change a setting for good, set it in cdept.toml: what is
-# written there wins over this file.
+# Made by `cdept init --technology {pdk}`. This file is read as it is: edit it by hand
+# (the files of a library, a corner, ...) and the edit applies. `cdept tech refresh`
+# makes it again from the PDK and replaces the whole file (the old one is kept as
+# tech.toml.bak). What cdept.toml sets wins over this file.
 ";
 
 /// The snapshot file of the project in `dir`.
@@ -283,9 +284,36 @@ pub fn catalog_text(catalog: &Catalog) -> Result<String> {
     Ok(text)
 }
 
-/// Write `tech.toml` and `tech.catalog.json` into the project folder `dir`.
+/// The copy of the previous `tech.toml` that [`save`] leaves next to it (one
+/// generation, replaced by the next save).
+pub const BACKUP_FILE: &str = "tech.toml.bak";
+
+/// What a scan over an existing `tech.toml` does, for the person to read before
+/// agreeing: the whole file is replaced.
+pub fn replace_warning() -> String {
+    format!(
+        "{TECH_FILE} is replaced as a whole by what the PDK says now: everything in it \
+         that was edited by hand (the files of a library, a corner, a device map, ...) is \
+         lost. The old file is kept as {BACKUP_FILE} (one copy, replaced by the next \
+         scan)."
+    )
+}
+
+/// Does the project folder `dir` have a `tech.toml` a scan would replace?
+pub fn exists(dir: &Path) -> bool {
+    tech_file(dir).is_file()
+}
+
+/// Write `tech.toml` and `tech.catalog.json` into the project folder `dir`. An
+/// existing `tech.toml` is first copied to [`BACKUP_FILE`].
 pub fn save(dir: &Path, tech: &Tech, catalog: &Catalog) -> Result<()> {
-    write(&tech_file(dir), &tech_text(tech)?)?;
+    let file = tech_file(dir);
+    if file.is_file() {
+        let backup = dir.join(BACKUP_FILE);
+        fs::copy(&file, &backup)
+            .wrap_err_with(|| format!("cannot write {}", backup.display()))?;
+    }
+    write(&file, &tech_text(tech)?)?;
     write(&catalog_file(dir), &catalog_text(catalog)?)
 }
 

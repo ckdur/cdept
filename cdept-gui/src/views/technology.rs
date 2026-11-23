@@ -917,7 +917,8 @@ impl TechnologyView {
             if ui
                 .add_enabled(!running && can, egui::Button::new("⟳ Rescan"))
                 .on_hover_text(
-                    "Read the PDK's files again and write tech.toml and tech.catalog.json",
+                    "Update from the PDK: read its files again and replace tech.toml and \
+                     tech.catalog.json as a whole (hand edits are lost; asks first)",
                 )
                 .on_disabled_hover_text(if running {
                     "A scan is running"

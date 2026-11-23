@@ -120,6 +120,63 @@ pub struct LibertyRef {
 }
 
 impl LibraryFiles {
+    /// The files that exist, and the entries that name nothing there as
+    /// `(format, as written)`. `resolve` turns an entry into a path on this machine
+    /// (`None`: not possible, which counts as missing). A pattern
+    /// (`…/lef/*.lef`) stands for the files of that folder with that extension.
+    pub fn existing(
+        &self,
+        resolve: impl Fn(&TechPath) -> Option<PathBuf>,
+    ) -> (BTreeSet<PathBuf>, Vec<(&'static str, String)>) {
+        let mut found = BTreeSet::new();
+        let mut missing = Vec::new();
+        let liberty: Vec<TechPath> = self.liberty.iter().map(|l| l.file.clone()).collect();
+        let lists: [(&'static str, &[TechPath]); 7] = [
+            ("gds", &self.gds),
+            ("spice", &self.spice),
+            ("cdl", &self.cdl),
+            ("lef", &self.lef),
+            ("tech_lef", &self.tech_lef),
+            ("verilog", &self.verilog),
+            ("liberty", &liberty),
+        ];
+        for (format, list) in lists {
+            for entry in list {
+                let mut matched = false;
+                match resolve(entry) {
+                    Some(path)
+                        if path
+                            .file_name()
+                            .is_some_and(|n| n.to_string_lossy().contains('*')) =>
+                    {
+                        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                        let (head, tail) = name.split_once('*').unwrap_or((&name, ""));
+                        let dir = path.parent().unwrap_or(Path::new("."));
+                        for item in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                            let file = item.file_name().to_string_lossy().into_owned();
+                            if item.path().is_file()
+                                && file.starts_with(head)
+                                && file.ends_with(tail)
+                            {
+                                found.insert(item.path());
+                                matched = true;
+                            }
+                        }
+                    }
+                    Some(path) if path.is_file() => {
+                        found.insert(path);
+                        matched = true;
+                    }
+                    _ => {}
+                }
+                if !matched {
+                    missing.push((format, entry.0.clone()));
+                }
+            }
+        }
+        (found, missing)
+    }
+
     /// The files of every format, as `(format, lines)`; a Liberty line is
     /// `corner = file`.
     pub fn formats(&self) -> Vec<(&'static str, Vec<String>)> {
@@ -190,6 +247,30 @@ pub struct Digital {
     /// The libraries with a set-up of their own: name → its `config.tcl`.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub libraries: BTreeMap<String, TechPath>,
+    /// A fingerprint of those `config.tcl` files as the scan read them. A project
+    /// compares it with the files now to say that the PDK's configuration changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_hash: Option<String>,
+}
+
+/// The fingerprint of the digital flow's `config.tcl` files (FNV-1a over names and
+/// contents); `None` when one cannot be read.
+pub fn config_hash(
+    digital: &Digital,
+    resolve: impl Fn(&TechPath) -> Option<PathBuf>,
+) -> Option<String> {
+    let mut hash = 0xcbf29ce484222325u64;
+    let mut eat = |bytes: &[u8]| {
+        for b in bytes {
+            hash ^= u64::from(*b);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    };
+    for path in std::iter::once(&digital.config).chain(digital.libraries.values()) {
+        eat(path.as_str().as_bytes());
+        eat(&std::fs::read(resolve(path)?).ok()?);
+    }
+    Some(format!("{hash:016x}"))
 }
 
 impl RefsTech {
@@ -608,6 +689,7 @@ fn library(
         defined_in: PathBuf::new(),
         error: None,
         cells: Vec::new(),
+        preferred: config.map(|c| c.files()).unwrap_or_default(),
     };
     lib.scan_with(cache);
     if let Some(error) = &lib.error {
@@ -1101,6 +1183,7 @@ fn digital(pdk: &PdkDir) -> Option<(Digital, FlowSettings)> {
             digital.libraries.insert(name, pdk.portable(&config));
         }
     }
+    digital.config_hash = config_hash(&digital, |path| path.resolve_in(pdk).ok());
     Some((digital, all))
 }
 

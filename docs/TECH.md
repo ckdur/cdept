@@ -22,7 +22,7 @@ myproject/
 | File | Written by | Edited by hand | Schema |
 |---|---|---|---|
 | `cdept.toml` | `cdept init`, the GUI | yes, comments are kept | (project file) |
-| `tech.toml` | the scan (`cdept init --technology`, `cdept tech scan/refresh`, the New Project wizard) | possible, but a refresh replaces the file: lasting changes go into `cdept.toml` | `cdept-tech`, version 1 |
+| `tech.toml` | the scan (`cdept init --technology`, `cdept tech scan/refresh`, the New Project wizard) | yes, and the edit applies; a refresh replaces the whole file (after a warning, with `tech.toml.bak` kept) | `cdept-tech`, version 1 |
 | `tech.catalog.json` | the scan | no; it can always be made again | `cdept-tech-catalog`, version 1 |
 | `cdept.local.toml` | `cdept init --pdk-root`, Project Settings, the scan | yes, comments are kept | (two keys) |
 
@@ -325,8 +325,12 @@ still show it) and a warning says to refresh. Other warnings at load:
 
 - `$PDK_ROOT` is not set, or the PDK is not in that folder: set `pdk_root` in
   `cdept.local.toml`;
-- the PDK on this machine is another version or commit than the one scanned
-  (`Project::snapshot_stale`): run `cdept tech refresh`.
+- the PDK on this machine is another version or commit than the one scanned, or its
+  LibreLane/OpenLane `config.tcl` files differ from those read (`[refs.digital]
+  config_hash`) (`Project::snapshot_stale`): run `cdept tech refresh`;
+- a file `[[refs.library]] files` names is not on disk: the folders decide that format.
+  `[refs.library.files]` is what the views' main files follow; the PDK's configuration
+  is read by the scan only (docs/concepts/technology.md, "Hand edits and refresh").
 
 ### Libraries the PDK brings
 
@@ -364,9 +368,9 @@ the library in `cdept.toml`.
 
 ```
 cdept init [DIR] --technology <pdk|folder> [--pdk-root DIR] [--no-scan] [--files-only]
-cdept tech scan [PDK] [--pdk-root DIR] [--files-only] [--print]
+cdept tech scan [PDK] [--pdk-root DIR] [--files-only] [--print] [--yes]
 cdept tech show [SECTION] [--catalog] [--json]
-cdept tech refresh [--files-only] [--dry-run]
+cdept tech refresh [--files-only] [--dry-run] [--yes]
 cdept tech notes
 cdept tech devices [-o FILE]    # draft device map (symbol → PCell) from the scan
 cdept info                      # PDK, PDK_ROOT and their source, the snapshot, [env]
@@ -382,7 +386,10 @@ cdept pdk ls | info | versions | enable     # PDKs on this machine (§3, discove
   `--print` only prints `tech.toml` and needs no project.
 - `tech refresh` scans the project's PDK again and lists what changes before writing
   (`~ klayout.tech: a → b`, `+ magic.rc: …`, `~ catalog klayout.layers: 205 → 207
-  entries`); `--dry-run` stops there.
+  entries`); `--dry-run` stops there. The file is replaced as a whole, so it warns that
+  hand edits are lost, copies the old file to `tech.toml.bak` and asks `Replace
+  tech.toml? [y/N]`; `--yes` skips the question, and without a terminal it is required.
+  `tech scan` over an existing `tech.toml` does the same.
 - `tech show` prints the summary; `tech show klayout` that section as it is in
   `tech.toml`; `--catalog` the section's lists as JSON.
 
@@ -461,7 +468,7 @@ device names and model corner names are in it.
   a refresh undoes. A place in `cdept.toml` for it (e.g. `[technology] libraries =
   […]`) would make it last.
 - **A refresh replaces `tech.toml`.** Hand edits are lost; `cdept tech refresh` lists
-  what changes first. Lasting overrides exist only for what `cdept.toml` has keys for
+  what differs and asks first, and keeps `tech.toml.bak`. Lasting overrides exist only for what `cdept.toml` has keys for
   (xschem rc, the `[klayout]` settings, libraries).
 - **Which deck, which corner.** The first DRC and LVS deck and `models.corner` are the
   defaults; there is no project setting yet for "use the second deck" other than

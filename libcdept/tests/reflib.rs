@@ -254,6 +254,7 @@ fn library(path: &Path) -> libcdept::Library {
         defined_in: PathBuf::new(),
         error: None,
         cells: Vec::new(),
+        preferred: Default::default(),
     }
 }
 

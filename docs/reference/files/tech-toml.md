@@ -29,8 +29,9 @@ The idea behind them is in [Technology and the PDK](../../concepts/technology.md
 - The snapshot is *used* only for the PDK it was made for (`pdk.name` equals the
   project's `technology`). See
   [When the snapshot is not used](../../concepts/technology.md#when-the-snapshot-is-not-used).
-- `tech.toml` is replaced as a whole by `cdept tech refresh`. Lasting changes belong in
-  `cdept.toml`.
+- `tech.toml` is read as it is: hand edits apply. `cdept tech refresh` replaces it as a
+  whole, after a warning and a confirmation; the old file is kept as `tech.toml.bak`.
+  See [Hand edits and refresh](../../concepts/technology.md#hand-edits-and-refresh).
 
 ## Top level
 
@@ -301,10 +302,12 @@ A `[[refs.library]]` table has the library keys `name`, `path`, `layout`, `role`
 `[refs.library.files]` says which file is the library's GDS, SPICE netlist, CDL, LEF and
 Verilog model. The PDK's LibreLane or OpenLane configuration names them (`CELL_GDS`,
 `CELL_LEFS`, `TECH_LEFS`, `CELL_LIBS`, `PAD_GDS`, ...); for a format it does not name, or a
-PDK without such a configuration, the files are those the library's folders hold. A
-format with more than eight files (one per cell) is written as the pattern they share
-(`$PDK_ROOT/.../lef/*.lef`). A file the configuration names that is not on disk is left
-out, with a note.
+PDK without such a configuration, the files are those the library's folders hold. The scan
+writes this table; after that, **the table is yours**: edit it by hand and the edit
+applies. `cdept tech refresh` resets it. A format with more than eight files (one per
+cell) is written as the pattern they share (`$PDK_ROOT/.../lef/*.lef`). A file the table
+names that is not on disk is a warning when the project is opened (and the folders decide
+that format).
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -319,9 +322,10 @@ out, with a note.
 | `power_pins` | list of strings | `[]` | Power pins of the cells, when the configuration says (`SCL_POWER_PINS`, `STD_CELL_POWER_PINS`, `VDD_PIN`). |
 | `ground_pins` | list of strings | `[]` | Ground pins. |
 
-When a reference library is read, the files the configuration names are the main files of
-the cells' views (the GDS, LEF, Liberty file that a tool opens), before a guess from the
-file names.
+When a reference library is read, the files this table lists are the main files of the
+cells' views (the GDS, LEF, Liberty file that a tool opens), before a guess from the file
+names. The LibreLane or OpenLane configuration itself is read only by the scan, never when
+a project is opened. A library without the table is read from its folders.
 
 `[refs.digital]` says what LibreLane or OpenLane is told about the PDK:
 
@@ -335,6 +339,7 @@ file names.
 | `corners` | list of strings | `[]` | `STA_CORNERS`. |
 | `rcx_rules` | list of path | `[]` | Parasitic extraction rules (OpenRCX). |
 | `[refs.digital.libraries]` | table of path | `{}` | Libraries with a set-up of their own: name to their `config.tcl`. |
+| `config_hash` | string | | A fingerprint of those `config.tcl` files as the scan read them. When they differ now, opening the project warns that the PDK's configuration changed since the scan. Remove it to switch the check off. |
 
 ```toml
 [refs]

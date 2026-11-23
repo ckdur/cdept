@@ -23,9 +23,13 @@ Generated folders are not ignored by git
   `.cdept/` are left for you to decide ([project folders](files/project-folders.md)).
 
 `tech refresh` replaces hand edits
-: A scan rewrites `tech.toml`. Corner sets added by hand (the `mc_mm` set of the
-  `ihp-inv` example) and other edits are lost. Keep hand-made parts in files the
-  snapshot points to, or put them back after a refresh.
+: `tech.toml` is read as it is, so hand edits apply, but a refresh (and `tech scan` over
+  an existing file, and Rescan in the GUI) replaces the whole file. It says so, shows the
+  differences and asks first (`--yes` skips the question; without a terminal it is
+  required). Corner sets added by hand (the `mc_mm` set of the `ihp-inv` example) are
+  lost when you agree; the old file is kept as `tech.toml.bak` to copy them back from.
+  The differences list the PDK's changes and your edits together: the file does not
+  record which is which.
 
 `tech.toml` library `enabled = false` has no counterpart in `cdept.toml`
 : An error message about a PDK library suggests `enabled = false` in the project file,
