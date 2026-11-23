@@ -62,9 +62,12 @@ fn snapshot_tech_lef(project: &Project, lef: &Path) -> Option<PathBuf> {
         if !lef.starts_with(&folder) {
             continue;
         }
-        let files: Vec<PathBuf> = library
-            .techlef
+        // The files of the LibreLane configuration first, then the folder scan's.
+        let configured = library.files.as_ref().map(|f| f.tech_lef.as_slice());
+        let files: Vec<PathBuf> = configured
+            .unwrap_or_default()
             .iter()
+            .chain(library.techlef.iter())
             .filter_map(|file| project.tech_path(file))
             .filter(|file| file.is_file())
             .collect();
