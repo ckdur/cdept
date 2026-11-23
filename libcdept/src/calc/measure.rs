@@ -605,6 +605,33 @@ pub fn integrate_noise(w: &Waveform, squared: bool) -> Result<f64> {
     Ok(total.sqrt())
 }
 
+/// The tone frequency for coherent sampling: `m * fs / n` with the odd integer `m`
+/// nearest to `fin * n / fs` (and coprime with `n`), so `n` samples hold exactly `m`
+/// cycles and no window is needed.
+pub fn coherent_frequency(fin: f64, fs: f64, n: f64) -> Result<f64> {
+    if !(fin > 0.0 && fs > 0.0 && n >= 4.0) || !(fin.is_finite() && fs.is_finite() && n.is_finite()) {
+        eyre::bail!("coherent needs fin > 0, fs > 0 and n >= 4 (got {fin}, {fs}, {n})");
+    }
+    if fin >= fs / 2.0 {
+        eyre::bail!("coherent: the tone {fin} Hz is not below fs/2 = {} Hz", fs / 2.0);
+    }
+    let n = n.round() as u64;
+    let gcd = |mut a: u64, mut b: u64| {
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        a
+    };
+    let target = (fin * n as f64 / fs).round().max(1.0) as u64;
+    let ok = |m: u64| m % 2 == 1 && gcd(m, n) == 1 && (m as f64) < n as f64 / 2.0;
+    let m = (0..n)
+        .flat_map(|d| [target.checked_sub(d), Some(target + d)])
+        .flatten()
+        .find(|m| *m >= 1 && ok(*m))
+        .ok_or_else(|| eyre::eyre!("coherent: no coherent tone below fs/2 for n = {n}"))?;
+    Ok(m as f64 * fs / n as f64)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

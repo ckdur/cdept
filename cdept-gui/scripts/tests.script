@@ -1,0 +1,82 @@
+# Test templates and suites in the Simulation tab on examples/ihp-inv: a templated
+# testbench opens with its parameters, an edit re-expands it, the file keeps only the
+# template and the user's own fields, and the suite view runs all its tests into one
+# table. Writes into the project: use a copy (run.sh does).
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice \
+#   CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=ihp-inv \
+#     cdept-gui/scripts/run.sh cdept-gui/scripts/tests.script
+#
+# `sim <verb> …` (views/testlib.rs), besides those of simulation.script:
+#   template_set <name|none> [k=v …]   pick a template (the form's own additions go)
+#   template_arg <k> <v|->             set / unset one parameter (a bad one: the tab's problem)
+#   template_expect <name|none>        the form's template
+#   template_expect_output|spec <name> the expanded setup has it
+#   template_expect_file <text> / template_expect_not_file <text>   the text that would be saved
+#   suite_run | suite_wait | suite_expect <pass|fail> | suite_expect_rows <n>
+
+panel Library Manager
+wait 0.3
+
+# A templated testbench: the form shows the expanded setup, the file stays short.
+open cells tb_inv tran_delay
+sim expect_target cells/tb_inv/tran_delay
+sim template_expect tran_delay
+sim template_expect_output tpd_rise
+sim template_expect_spec tpd
+sim expect_dirty no
+sim expect_no_problem
+sim expect_corners tt ff ss
+sim template_expect_file template = "tran_delay"
+sim template_expect_not_file tpd_rise
+
+# A parameter edit re-expands the template; a wrong value is the tab's problem.
+sim template_arg tpd_max 50p
+sim expect_dirty yes
+sim template_expect_file tpd_max = "50p"
+sim template_arg thresh half
+sim expect_problem not a number
+sim template_arg bogus 1
+sim template_arg inverting maybe
+sim expect_problem one of
+sim revert
+sim expect_dirty no
+
+# Own additions stay with the template: a corner set, a spec; saving writes both.
+sim set corners tt
+sim add_spec t_rise 0 4e-10
+sim template_expect_file corners = ["tt"]
+sim save
+shell grep -q '^template = "tran_delay"' libs/cells/tb_inv/tran_delay/setup.toml
+shell grep -q 'corners = \["tt"\]' libs/cells/tb_inv/tran_delay/setup.toml
+shell ! grep -q 'expr' libs/cells/tb_inv/tran_delay/setup.toml
+sim run
+sim wait
+sim expect_state finished
+sim expect_points 1
+sim expect_rows 0 FAIL
+
+# Another template: the ac testbench's picker, then none (the expansion stays as plain fields).
+open cells tb_inv_ac ac_response
+sim template_expect ac_response
+sim template_expect_output ugbw
+sim template_arg margins false
+sim template_expect_not_file name = "pm"
+sim template_set dc_transfer
+sim template_expect dc_transfer
+sim template_expect_output vtrip
+sim template_set none
+sim template_expect none
+sim template_expect_output vtrip
+sim revert
+
+# A suite opens in the same tab and runs its tests together.
+open cells tb_inv suite
+sim expect_target cells/tb_inv/suite
+sim suite_run
+sim suite_wait
+sim suite_expect pass
+sim suite_expect_rows 12
+shell test -f simulations/cells/tb_inv/suite/suite.json
+log tests: ok
+quit

@@ -244,7 +244,13 @@ pub fn build(setup: &Setup, point: &RunPoint, title: &str, models: &[String], ne
     let mut taken = vec![false; setup.measures.len()];
     for a in &setup.analyses {
         let (command, kind) = analysis_command(a);
-        out.push_str(&format!("{command}\nwrite {RAW_FILE} all\n"));
+        out.push_str(&format!("{command}\n"));
+        if matches!(a, Analysis::Noise { .. }) {
+            // ngspice leaves two plots: noise1 (the spectra) and noise2 (the totals), and
+            // `write` takes the current one: keep both.
+            out.push_str(&format!("setplot noise1\nwrite {RAW_FILE} all\nsetplot noise2\n"));
+        }
+        out.push_str(&format!("write {RAW_FILE} all\n"));
         for (i, m) in setup.measures.iter().enumerate() {
             if !taken[i] && m.split_whitespace().next().is_some_and(|w| w.eq_ignore_ascii_case(kind)) {
                 taken[i] = true;

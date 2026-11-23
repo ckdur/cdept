@@ -18,6 +18,7 @@ pub(crate) mod search;
 pub(crate) mod simulation;
 mod start;
 pub(crate) mod technology;
+mod testlib;
 mod tools;
 pub(crate) mod vcs;
 

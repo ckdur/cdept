@@ -1,0 +1,149 @@
+# Transient: propagation delay, edge times, slew, overshoot.
+name = "tran_delay"
+description = "Transient pulse response: propagation delay rise/fall, rise/fall time, slew rate and overshoot of out for a pulse on in."
+requires_nets = ["${in}", "${out}"]
+plot = ['v("${in}")', 'v("${out}")']
+stimulus = "pulse(0 {vdd} 200p 50p 50p 400p 1n)"
+
+[[param]]
+name = "in"
+type = "net"
+default = "in"
+doc = "The input net (driven by a pulse in the schematic)."
+
+[[param]]
+name = "out"
+type = "net"
+default = "out"
+doc = "The output net."
+
+[[param]]
+name = "vdd"
+type = "number"
+default = "1.2"
+unit = "V"
+doc = "Supply voltage (design variable vdd); the output swing is taken as 0..vdd."
+
+[[param]]
+name = "inverting"
+type = "choice"
+choices = ["yes", "no"]
+default = "yes"
+doc = "Whether out falls when in rises."
+
+[[param]]
+name = "thresh"
+type = "number"
+default = "0.5"
+doc = "Delay threshold as a fraction of vdd."
+
+[[param]]
+name = "step"
+type = "number"
+default = "5p"
+unit = "s"
+doc = "Maximum time step."
+
+[[param]]
+name = "stop"
+type = "number"
+default = "1.2n"
+unit = "s"
+doc = "End time; it must hold both edges of the stimulus."
+
+[[param]]
+name = "tpd_max"
+type = "number"
+optional = true
+unit = "s"
+doc = "Spec: largest allowed average propagation delay."
+
+[[param]]
+name = "t_rise_max"
+type = "number"
+optional = true
+unit = "s"
+doc = "Spec: largest allowed 10-90 % rise time."
+
+[[param]]
+name = "t_fall_max"
+type = "number"
+optional = true
+unit = "s"
+doc = "Spec: largest allowed 90-10 % fall time."
+
+[[param]]
+name = "overshoot_max"
+type = "number"
+optional = true
+unit = "%"
+doc = "Spec: largest allowed overshoot beyond the rails, percent of vdd."
+
+[[derived]]
+name = "in_edge_out_rise"
+from = "inverting"
+map = { yes = "fall", no = "rise" }
+doc = "The input edge that makes the output rise."
+
+[[derived]]
+name = "in_edge_out_fall"
+from = "inverting"
+map = { yes = "rise", no = "fall" }
+doc = "The input edge that makes the output fall."
+
+[setup]
+[setup.variables]
+vdd = "${vdd}"
+
+[[setup.analysis]]
+kind = "tran"
+step = "${step}"
+stop = "${stop}"
+
+[[setup.output]]
+name = "tpd_rise"
+expr = 'delay(v("${in}"), v("${out}"), level=${vdd} * ${thresh}, trig_edge="${in_edge_out_rise}", targ_edge="rise")'
+
+[[setup.output]]
+name = "tpd_fall"
+expr = 'delay(v("${in}"), v("${out}"), level=${vdd} * ${thresh}, trig_edge="${in_edge_out_fall}", targ_edge="fall")'
+
+[[setup.output]]
+name = "tpd"
+expr = '(tpd_rise + tpd_fall) / 2'
+
+[[setup.output]]
+name = "t_rise"
+expr = 'rise_time(v("${out}"), vlow=0, vhigh=${vdd})'
+
+[[setup.output]]
+name = "t_fall"
+expr = 'fall_time(v("${out}"), vlow=0, vhigh=${vdd})'
+
+[[setup.output]]
+name = "slew_rise"
+expr = 'slew(v("${out}"), "rise", vlow=0, vhigh=${vdd})'
+
+[[setup.output]]
+name = "slew_fall"
+expr = 'slew(v("${out}"), "fall", vlow=0, vhigh=${vdd})'
+
+[[setup.output]]
+name = "overshoot"
+expr = '100 * max(max(max(v("${out}")) - ${vdd}, 0 - min(v("${out}"))), 0) / ${vdd}'
+
+[[setup.spec]]
+name = "tpd"
+max = "${tpd_max}"
+
+[[setup.spec]]
+name = "t_rise"
+max = "${t_rise_max}"
+
+[[setup.spec]]
+name = "t_fall"
+max = "${t_fall_max}"
+
+[[setup.spec]]
+name = "overshoot"
+max = "${overshoot_max}"

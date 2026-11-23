@@ -55,6 +55,51 @@ pub enum SimCommand {
         #[arg(long)]
         reindex: bool,
     },
+    /// List the test templates (built-in, the technology's and the project's), or show one.
+    ///
+    /// A `setup.toml` picks a template with `template = "ac_response"` and
+    /// `[template_args]` (docs/TESTS.md).
+    Templates {
+        #[command(subcommand)]
+        action: Option<TemplatesCommand>,
+    },
+    /// Create a testbench view from a template: a setup.toml, and with --dut a starter
+    /// schematic that instantiates the DUT with the template's sources.
+    New {
+        library: String,
+        cell: String,
+        view: String,
+        #[arg(long)]
+        template: String,
+        /// A template parameter, `name=value` (repeat).
+        #[arg(long = "arg", value_name = "NAME=VALUE")]
+        args: Vec<String>,
+        /// The DUT, `library/cell` (needs its xschem symbol): write the cell's schematic.
+        #[arg(long)]
+        dut: Option<String>,
+    },
+    /// Run a suite (a view with a suite.toml): its testbenches together, one table.
+    ///
+    /// Exits non-zero when a test cannot run, a run fails or a spec fails or is missing.
+    Suite {
+        library: String,
+        cell: String,
+        /// The suite view. Default: the only one of the cell.
+        #[arg(long)]
+        view: Option<String>,
+        /// Simulators running at once. Default: the cores.
+        #[arg(long, short = 'j')]
+        jobs: Option<usize>,
+        /// A column for every measurement, not only the ones with a spec.
+        #[arg(long)]
+        all_columns: bool,
+        /// Do not write result.json / results.db / suite.json.
+        #[arg(long)]
+        no_store: bool,
+        /// Print the report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the deck of the first run without starting the simulator.
     Deck {
         library: String,
@@ -62,6 +107,37 @@ pub enum SimCommand {
         #[arg(long)]
         view: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+pub enum TemplatesCommand {
+    /// List the templates.
+    List,
+    /// Document one: parameters, outputs, default specs, requirements.
+    Show { name: String },
+}
+
+fn parse_args(items: &[String]) -> Result<std::collections::BTreeMap<String, String>> {
+    items
+        .iter()
+        .map(|a| {
+            a.split_once('=')
+                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                .ok_or_else(|| eyre!("--arg wants name=value, not '{a}'"))
+        })
+        .collect()
+}
+
+fn suite_view_of(project: &Project, library: &str, cell: &str, view: Option<String>) -> Result<String> {
+    if let Some(view) = view {
+        return Ok(view);
+    }
+    let found = sim::suite::suites_of(project, library, cell);
+    match found.as_slice() {
+        [one] => Ok(one.clone()),
+        [] => Err(eyre!("{library}/{cell} has no suite view (a view with a suite.toml)")),
+        many => Err(eyre!("{library}/{cell} has several suites ({}); pick one with --view", many.join(", "))),
+    }
 }
 
 fn view_of(project: &Project, library: &str, cell: &str, view: Option<String>) -> Result<String> {
@@ -87,6 +163,60 @@ fn view_of(project: &Project, library: &str, cell: &str, view: Option<String>) -
 
 pub fn run(command: SimCommand, project: &Project) -> Result<()> {
     match command {
+        SimCommand::Templates { action } => {
+            let set = sim::template::TemplateSet::for_project(project);
+            match action.unwrap_or(TemplatesCommand::List) {
+                TemplatesCommand::List => print!("{}", sim::template::format_list(&set)),
+                TemplatesCommand::Show { name } => print!("{}", sim::template::format_show(set.find(&name)?)?),
+            }
+            Ok(())
+        }
+        SimCommand::New { library, cell, view, template, args, dut } => {
+            let set = sim::template::TemplateSet::for_project(project);
+            let t = set.find(&template)?;
+            let made =
+                sim::starter::create_testbench(project, &library, &cell, &view, t, &parse_args(&args)?, dut.as_deref())?;
+            println!("wrote {}", made.setup.display());
+            if let Some(s) = &made.schematic {
+                println!("wrote {}", s.display());
+            }
+            for n in &made.notes {
+                println!("note: {n}");
+            }
+            println!("run it with: cdept sim run {library} {cell} --view {view}");
+            Ok(())
+        }
+        SimCommand::Suite { library, cell, view, jobs, all_columns, no_store, json } => {
+            let view = suite_view_of(project, &library, &cell, view)?;
+            let on_event: Listener = Arc::new(|e| {
+                let i = &e.info;
+                match i.state {
+                    JobState::Done => eprintln!("{:<24} done     {:.1}s", i.name, i.elapsed.as_secs_f32()),
+                    JobState::Failed => eprintln!("{:<24} failed   {:.1}s", i.name, i.elapsed.as_secs_f32()),
+                    _ => {}
+                }
+            });
+            let options =
+                sim::suite::SuiteOptions { jobs: jobs.unwrap_or(0), on_event: Some(on_event), no_store, ..Default::default() };
+            let report = sim::suite::run(project, &library, &cell, &view, &options)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", sim::suite::format_report(&report, all_columns));
+            }
+            let s = report.summary();
+            if !s.ok() {
+                bail!(
+                    "suite {library}/{cell}/{view}: {} failed, {} errored run(s), {} failing and {} missing spec(s), {} test(s) did not run",
+                    s.fail,
+                    s.error,
+                    s.spec_fail,
+                    s.spec_missing,
+                    s.test_errors
+                );
+            }
+            Ok(())
+        }
         SimCommand::Deck { library, cell, view } => {
             let view = view_of(project, &library, &cell, view)?;
             let tb = sim::open(project, &library, &cell, &view)?;

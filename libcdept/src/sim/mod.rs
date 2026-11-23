@@ -14,6 +14,9 @@ pub mod results;
 pub mod run;
 pub mod setup;
 pub mod spec;
+pub mod starter;
+pub mod suite;
+pub mod template;
 
 pub use deck::{RunPoint, build as build_deck};
 pub use run::{Outcome, Simulator, run, run_in_job};
@@ -51,7 +54,7 @@ pub fn open(project: &Project, library: &str, cell: &str, view: &str) -> Result<
     if !file.is_file() {
         return Err(eyre!("{library}/{cell}/{view} is not a testbench (no {})", setup::SETUP_FILE));
     }
-    let setup = Setup::load(&file)?;
+    let setup = Setup::load_with(&file, &template::TemplateSet::for_project(project))?;
     let (sch_lib, sch_cell) = match setup.schematic.split_once('/') {
         Some((l, c)) => (l.to_string(), c.to_string()),
         None if setup.schematic.is_empty() => (library.to_string(), cell.to_string()),
@@ -177,6 +180,7 @@ pub fn run_testbench_with(
     netlist_for(project, &tb.schematic, &netlist_file, &tb.setup.simulator)?;
     let netlist = std::fs::read_to_string(&netlist_file)
         .wrap_err_with(|| format!("cannot read {}", netlist_file.display()))?;
+    template::check_netlist(&tb.setup, &netlist)?;
     let (_, model_set) = models.set(&set).ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
     let title = format!("{}/{}/{}", tb.library, tb.cell, tb.view);
     let env = project.tool_env();

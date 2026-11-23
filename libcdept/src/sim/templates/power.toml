@@ -1,0 +1,127 @@
+# Supply current and power over a transient.
+name = "power"
+description = "Power: average and peak supply current, average and peak power and energy per cycle over a transient window."
+requires_elements = ["${supply}"]
+plot = ['i("${supply}")']
+stimulus = "pulse(0 {vdd} 200p 50p 50p 400p 1n)"
+
+[[param]]
+name = "supply"
+type = "string"
+default = "vdd"
+doc = "Name of the supply voltage source whose current is measured."
+
+[[param]]
+name = "vdd"
+type = "number"
+default = "1.2"
+unit = "V"
+doc = "Supply voltage (design variable vdd)."
+
+[[param]]
+name = "step"
+type = "number"
+default = "5p"
+unit = "s"
+doc = "Maximum time step."
+
+[[param]]
+name = "stop"
+type = "number"
+default = "1.2n"
+unit = "s"
+doc = "End time."
+
+[[param]]
+name = "t_from"
+type = "number"
+default = "0"
+unit = "s"
+doc = "Start of the averaging window (skip the start-up)."
+
+[[param]]
+name = "t_to"
+type = "number"
+default = "${stop}"
+unit = "s"
+doc = "End of the averaging window."
+
+[[param]]
+name = "period"
+type = "number"
+default = "1n"
+unit = "s"
+doc = "Period of the activity; the energy per cycle is the average power times this."
+
+[[param]]
+name = "i_avg_max"
+type = "number"
+optional = true
+unit = "A"
+doc = "Spec: largest allowed average supply current."
+
+[[param]]
+name = "i_peak_max"
+type = "number"
+optional = true
+unit = "A"
+doc = "Spec: largest allowed peak supply current."
+
+[[param]]
+name = "p_avg_max"
+type = "number"
+optional = true
+unit = "W"
+doc = "Spec: largest allowed average power."
+
+[[param]]
+name = "e_cycle_max"
+type = "number"
+optional = true
+unit = "J"
+doc = "Spec: largest allowed energy per cycle."
+
+[setup]
+[setup.variables]
+vdd = "${vdd}"
+
+[[setup.analysis]]
+kind = "tran"
+step = "${step}"
+stop = "${stop}"
+
+[[setup.output]]
+name = "i_avg"
+expr = '-avg(i("${supply}"), from=${t_from}, to=${t_to})'
+
+[[setup.output]]
+name = "i_peak"
+expr = '-min(i("${supply}"), from=${t_from}, to=${t_to})'
+
+[[setup.output]]
+name = "p_avg"
+expr = '${vdd} * i_avg'
+
+[[setup.output]]
+name = "p_peak"
+expr = '${vdd} * i_peak'
+
+[[setup.output]]
+name = "e_cycle"
+expr = 'p_avg * ${period}'
+
+[[setup.spec]]
+name = "i_avg"
+max = "${i_avg_max}"
+
+[[setup.spec]]
+name = "i_peak"
+max = "${i_peak_max}"
+
+[[setup.spec]]
+name = "p_avg"
+max = "${p_avg_max}"
+
+[[setup.spec]]
+name = "e_cycle"
+max = "${e_cycle_max}"

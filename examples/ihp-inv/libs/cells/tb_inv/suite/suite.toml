@@ -1,0 +1,14 @@
+# The inverter's family of tests, run together over shared corners and temperatures:
+#   cdept sim suite cells tb_inv
+description = "IHP SG13G2 inverter: delay, DC transfer, power and AC response"
+corners = ["tt", "ff", "ss"]
+temperatures = [27]
+
+[[test]]
+view = "tran_delay"
+[[test]]
+view = "dc_transfer"
+[[test]]
+view = "power"
+[[test]]
+view = "tb_inv_ac/ac_response"

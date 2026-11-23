@@ -1,0 +1,11 @@
+# DC transfer curve of the inverter: trip point, peak gain, linearity, from the test
+# template dc_transfer (docs/TESTS.md). Vin is swept 0..vdd. Run it with
+#   cdept sim run cells tb_inv --view dc_transfer
+template = "dc_transfer"
+corners = ["tt", "ff", "ss"]
+temperatures = [27]
+
+[template_args]
+gain_min = 3
+vtrip_min = 0.45
+vtrip_max = 0.75

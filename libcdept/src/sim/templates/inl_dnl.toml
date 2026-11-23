@@ -1,0 +1,121 @@
+# Converter linearity: INL and DNL from code edges (DC sweep) or a ramp histogram.
+name = "inl_dnl"
+description = "Converter linearity: largest INL and DNL in LSB of an output code, from a DC sweep of the input (edge method) or from a ramp in time (histogram method)."
+plot = ['${code}']
+
+[[param]]
+name = "code"
+type = "string"
+default = 'v("code")'
+doc = "Calculator expression for the output code as a waveform, e.g. v(\"code\") of a behavioural DAC/ADC node or v(\"d0\") + 2*v(\"d1\") + 4*v(\"d2\") for logic bits."
+
+[[param]]
+name = "method"
+type = "choice"
+choices = ["edge", "hist"]
+default = "edge"
+doc = "edge: DC sweep of the input, transitions at code-0.5 crossings; hist: the code sampled over a uniform ramp, widths from counts."
+
+[[param]]
+name = "src"
+type = "string"
+default = "vin"
+doc = "edge method: the swept voltage source."
+
+[[param]]
+name = "start"
+type = "number"
+default = "0"
+unit = "V"
+doc = "edge method: sweep start."
+
+[[param]]
+name = "stop"
+type = "number"
+default = "1.2"
+unit = "V"
+doc = "edge method: sweep stop."
+
+[[param]]
+name = "step"
+type = "number"
+default = "1m"
+unit = "V"
+doc = "edge method: sweep step (fine enough for the narrowest code)."
+
+[[param]]
+name = "tstep"
+type = "number"
+default = "1n"
+unit = "s"
+doc = "hist method: transient step; the schematic's input is a ramp over the whole run."
+
+[[param]]
+name = "tstop"
+type = "number"
+default = "1m"
+unit = "s"
+doc = "hist method: end of the ramp."
+
+[[param]]
+name = "lsb"
+type = "number"
+optional = true
+doc = "LSB in code units; default the end-point step."
+
+[[param]]
+name = "inl_max"
+type = "number"
+optional = true
+unit = "LSB"
+doc = "Spec: largest allowed |INL|."
+
+[[param]]
+name = "dnl_max"
+type = "number"
+optional = true
+unit = "LSB"
+doc = "Spec: largest allowed |DNL|."
+
+[setup]
+[[setup.analysis]]
+when = "method=edge"
+kind = "dc"
+source = "${src}"
+start = "${start}"
+stop = "${stop}"
+step = "${step}"
+
+[[setup.analysis]]
+when = "method=hist"
+kind = "tran"
+step = "${tstep}"
+stop = "${tstop}"
+
+[[setup.output]]
+when = "!lsb"
+name = "inl_lsb"
+expr = 'inl_max(${code}, method="${method}")'
+
+[[setup.output]]
+when = "!lsb"
+name = "dnl_lsb"
+expr = 'dnl_max(${code}, method="${method}")'
+
+[[setup.output]]
+when = "lsb"
+name = "inl_lsb"
+expr = 'inl_max(${code}, method="${method}", lsb=${lsb})'
+
+[[setup.output]]
+when = "lsb"
+name = "dnl_lsb"
+expr = 'dnl_max(${code}, method="${method}", lsb=${lsb})'
+
+[[setup.spec]]
+name = "inl_lsb"
+max = "${inl_max}"
+
+[[setup.spec]]
+name = "dnl_lsb"
+max = "${dnl_max}"

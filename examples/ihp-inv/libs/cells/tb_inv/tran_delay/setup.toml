@@ -1,0 +1,14 @@
+# Delay, edge times, slew and overshoot of the inverter, from the test template
+# tran_delay (docs/TESTS.md; `cdept sim templates show tran_delay`). The schematic is
+# the one of this cell (pulse on `in`, 10 fF on `out`). Run it with
+#   cdept sim run cells tb_inv --view tran_delay
+template = "tran_delay"
+corners = ["tt", "ff", "ss"]
+temperatures = [27]
+
+[template_args]
+vdd = 1.2
+tpd_max = "300p"      # spec: average propagation delay
+t_rise_max = "300p"
+t_fall_max = "300p"
+overshoot_max = 10    # percent of vdd beyond the rails

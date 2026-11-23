@@ -1,0 +1,102 @@
+# AC transfer from a supply or common-mode stimulus: PSRR or CMRR at one frequency.
+name = "psrr_cmrr"
+description = "Supply or common-mode rejection: AC transfer from the stimulus net to out at one frequency, and PSRR/CMRR in dB when the differential gain is given."
+requires_nets = ["${out}", "${stim}"]
+plot = ['db20(v("${out}") / v("${stim}"))']
+stimulus = "dc {vbias}"
+starter_variables = { vbias = "0.6" }
+
+[[param]]
+name = "mode"
+type = "choice"
+choices = ["psrr", "cmrr"]
+default = "psrr"
+doc = "psrr: the AC stimulus (`ac 1`) is on the supply; cmrr: it is on the common-mode input."
+
+[[param]]
+name = "out"
+type = "net"
+default = "out"
+doc = "The output net."
+
+[[param]]
+name = "stim"
+type = "net"
+default = "vdd"
+doc = "The net that carries the AC stimulus: the supply (psrr) or the common-mode input node (cmrr)."
+
+[[param]]
+name = "adm_db"
+type = "number"
+optional = true
+unit = "dB"
+doc = "The differential (signal) gain in dB, e.g. the gain_db of an ac_response test; with it the rejection in dB is reported."
+
+[[param]]
+name = "f"
+type = "number"
+default = "1k"
+unit = "Hz"
+doc = "Frequency of the figure."
+
+[[param]]
+name = "fstart"
+type = "number"
+default = "10"
+unit = "Hz"
+doc = "First frequency of the sweep."
+
+[[param]]
+name = "fstop"
+type = "number"
+default = "1G"
+unit = "Hz"
+doc = "Last frequency of the sweep."
+
+[[param]]
+name = "points"
+type = "int"
+default = "10"
+doc = "Points per decade."
+
+[[param]]
+name = "rejection_min"
+type = "number"
+optional = true
+unit = "dB"
+doc = "Spec: smallest allowed PSRR / CMRR (needs adm_db)."
+
+[setup]
+[[setup.analysis]]
+kind = "ac"
+sweep = "dec"
+points = "${points}"
+start = "${fstart}"
+stop = "${fstop}"
+
+[[setup.output]]
+name = "xfer_db"
+expr = 'db20(value_at(v("${out}") / v("${stim}"), ${f}))'
+plot = "ac"
+
+[[setup.output]]
+when = "adm_db"
+name = "rejection_db"
+expr = '${adm_db} - xfer_db'
+
+[[setup.output]]
+when = "mode=psrr"
+name = "psrr_db"
+expr = '-xfer_db'
+plot = "ac"
+
+[[setup.output]]
+when = "mode=cmrr"
+name = "cm_gain_db"
+expr = 'xfer_db'
+plot = "ac"
+
+[[setup.spec]]
+when = "adm_db"
+name = "rejection_db"
+min = "${rejection_min}"

@@ -1,0 +1,13 @@
+# Supply current, power and energy per cycle of the inverter driving 10 fF with a 1 ns
+# pulse, from the test template power (docs/TESTS.md). The window is the first full
+# period after the pulse starts. Run it with
+#   cdept sim run cells tb_inv --view power
+template = "power"
+corners = ["tt", "ff", "ss"]
+temperatures = [27, 85]
+
+[template_args]
+t_from = "200p"
+t_to = "1.2n"
+period = "1n"
+i_peak_max = "1m"

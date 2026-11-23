@@ -1,0 +1,17 @@
+# AC response of the inverter biased near its trip point (vbias), from the test template
+# ac_response (docs/TESTS.md). Created with
+#   cdept sim new cells tb_inv_ac ac_response --template ac_response --dut cells/inv --arg inverting=yes
+# then the spec arguments below added. Run it with: cdept sim run cells tb_inv_ac --view ac_response
+template = "ac_response"
+
+[template_args]
+inverting = "yes"
+gain_db_min = 15
+bw_min = "100meg"
+ugbw_min = "1G"
+pm_min = 60
+
+# design variables the schematic's sources use as {name}
+[variables]
+vbias = "0.6"
+vdd = "1.2"

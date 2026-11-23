@@ -39,18 +39,18 @@ impl Target {
 pub(crate) fn testbench_of(project: &Project, selection: &Selection) -> Option<Target> {
     let library = project.library(selection.library.as_deref()?)?;
     let cell = library.cell(selection.cell.as_deref()?)?;
-    let is_tb = |name: &str| cell.entry(name).is_some_and(|e| e.kind == ViewKind::Testbench);
+    let is_tb = |name: &str| cell.entry(name).is_some_and(is_testbench);
     let view = match &selection.view {
         Some(view) if is_tb(view) => view.clone(),
         Some(_) => return None,
-        None => cell.entries.iter().find(|e| e.kind == ViewKind::Testbench)?.name.clone(),
+        None => cell.entries.iter().find(|e| is_testbench(e))?.name.clone(),
     };
     Some(Target { library: library.name.clone(), cell: cell.name.clone(), view })
 }
 
 /// Is this view a testbench (has a `setup.toml`)?
 pub(crate) fn is_testbench(entry: &libcdept::Entry) -> bool {
-    entry.kind == ViewKind::Testbench
+    entry.kind == ViewKind::Testbench || super::testlib::is_suite_entry(entry)
 }
 
 // --- the form ----------------------------------------------------------------------
@@ -90,9 +90,9 @@ impl AnalysisForm {
 
 /// The editable part of a `setup.toml`.
 #[derive(Debug, Clone, PartialEq)]
-struct Form {
+pub(super) struct Form {
     /// As loaded: what the form does not show goes back as it was.
-    base: Setup,
+    pub(super) base: Setup,
     simulator: String,
     models: String,
     schematic: String,
@@ -118,7 +118,7 @@ fn number(value: &str) -> String {
 }
 
 impl Form {
-    fn of(setup: &Setup) -> Result<Form, String> {
+    pub(super) fn of(setup: &Setup) -> Result<Form, String> {
         // Through the table: the analyses' fields are those of the file.
         let table = toml::Table::try_from(setup).map_err(|e| e.to_string())?;
         let text = |t: &toml::Table, k: &str| match t.get(k) {
@@ -178,7 +178,7 @@ impl Form {
     }
 
     /// The text of the file this form stands for (validated by `Setup::parse`).
-    fn to_text(&self) -> Result<String, String> {
+    pub(super) fn to_text(&self) -> Result<String, String> {
         use toml::Value;
         let mut table = toml::Table::try_from(&self.base).map_err(|e| e.to_string())?;
         let mut set = |key: &str, value: Value| {
@@ -243,18 +243,19 @@ impl Form {
         }
         set("spec", Value::Array(specs));
         prune(&mut table);
+        super::testlib::minimize_for(&mut table, &self.base.template, &self.base.template_args);
         let text = toml::to_string_pretty(&table).map_err(|e| e.to_string())?;
-        Setup::parse(&text).map_err(|e| format!("{e:#}"))?;
+        super::testlib::parse(&text).map_err(|e| format!("{e:#}"))?;
         Ok(text)
     }
 
     fn setup(&self) -> Result<Setup, String> {
-        Setup::parse(&self.to_text()?).map_err(|e| format!("{e:#}"))
+        super::testlib::parse(&self.to_text()?).map_err(|e| format!("{e:#}"))
     }
 }
 
 /// Leave out what is empty (a missing key is the default), at the top and in tables.
-fn prune(table: &mut toml::Table) {
+pub(super) fn prune(table: &mut toml::Table) {
     use toml::Value;
     table.retain(|_, v| {
         match v {
@@ -330,12 +331,12 @@ pub(crate) enum RunState {
 #[derive(Default)]
 pub struct SimulationView {
     target: Option<Target>,
-    form: Option<Form>,
+    pub(super) form: Option<Form>,
     /// What the file says (canonical text), to know whether the form changed.
     saved: String,
     header: String,
     /// Why the form is not valid, or why the file could not be read or written.
-    problem: Option<String>,
+    pub(super) problem: Option<String>,
     queue: Option<Arc<Queue>>,
     run: Option<Run>,
     results: Vec<PointRow>,
@@ -345,7 +346,9 @@ pub struct SimulationView {
     only: Vec<String>,
     /// Run as soon as the testbench is loaded (the Library Manager's Run).
     run_when_loaded: bool,
-    egui: Option<egui::Context>,
+    pub(super) egui: Option<egui::Context>,
+    /// Test templates and suites (testlib.rs).
+    pub(super) tests: super::testlib::TestsUi,
 }
 
 impl SimulationView {
@@ -365,11 +368,17 @@ impl SimulationView {
         self.target = Some(target.clone());
         self.form = None;
         self.problem = None;
+        super::testlib::use_project(project);
+        self.tests.suite = None;
+        if super::testlib::is_suite(project, &target.library, &target.cell, &target.view) {
+            self.open_suite(project, &target);
+            return;
+        }
         let loaded = Self::path(project, &target)
             .ok_or_else(|| format!("{} is not a view of the project", target.text()))
             .and_then(|file| {
                 let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-                let setup = Setup::parse(&text).map_err(|e| format!("{e:#}"))?;
+                let setup = super::testlib::parse(&text).map_err(|e| format!("{e:#}"))?;
                 Ok((text, Form::of(&setup)?))
             });
         match loaded {
@@ -931,6 +940,10 @@ impl View for SimulationView {
             );
             return;
         };
+        if self.suite_active() {
+            self.suite_ui(ui, &project);
+            return;
+        }
         let running = self.state() == RunState::Running;
         if running {
             ui.ctx().request_repaint_after(Duration::from_millis(250));
@@ -992,6 +1005,18 @@ impl View for SimulationView {
         }
         ui.separator();
         ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            let template = self.form.as_ref().map(|f| (f.base.template.clone(), f.base.template_args.clone()));
+            if let Some((name, args)) = template {
+                let mut change = None;
+                egui::CollapsingHeader::new("Test template").default_open(!name.is_empty()).show(ui, |ui| {
+                    change = self.tests.template_ui(ui, (&name, &args));
+                });
+                if let Some(change) = change
+                    && let Err(e) = self.apply_template(change)
+                {
+                    self.problem = Some(e);
+                }
+            }
             if self.form.is_some() {
                 egui::CollapsingHeader::new("Setup").default_open(true).show(ui, |ui| self.editor(ui, &project));
             }
@@ -1012,6 +1037,9 @@ pub(crate) fn script(
     let project = app.project.clone().ok_or("no project is open")?;
     view.poll();
     let arg = |i: usize| args.get(i).map(String::as_str).ok_or_else(|| "missing argument".to_string());
+    if super::testlib::is_command(arg(0)?) {
+        return super::testlib::script(view, app, args);
+    }
     let yes = |s: &str| matches!(s, "yes" | "on" | "true");
     fn form(view: &mut SimulationView) -> Result<&mut Form, String> {
         view.form.as_mut().ok_or_else(|| "no testbench is open".to_string())
@@ -1156,7 +1184,7 @@ pub(crate) fn script(
 pub(crate) fn patient(args: &[String]) -> bool {
     matches!(
         args.first().map(String::as_str),
-        Some("wait" | "expect_state" | "expect_rows" | "expect_points" | "expect_jobs" | "expect_file")
+        Some("wait" | "suite_wait" | "suite_expect" | "suite_expect_rows" | "expect_state" | "expect_rows" | "expect_points" | "expect_jobs" | "expect_file")
     )
 }
 

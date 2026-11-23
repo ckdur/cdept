@@ -1,0 +1,111 @@
+# Step response / start-up: settling, overshoot, final value.
+name = "startup_settle"
+description = "Step or start-up response of out: settling time to a tolerance, overshoot, undershoot, rise time and final value."
+requires_nets = ["${out}"]
+plot = ['v("${out}")']
+stimulus = "pulse(0 {vdd} 100p 10p 10p 5n 10n)"
+
+[[param]]
+name = "out"
+type = "net"
+default = "out"
+doc = "The output net."
+
+[[param]]
+name = "tol"
+type = "number"
+default = "0.02"
+doc = "Settling band as a fraction of the step (0.02 = 2 %)."
+
+[[param]]
+name = "t_step"
+type = "number"
+default = "0"
+unit = "s"
+doc = "When the step (or the supply ramp) starts; settling time is counted from here."
+
+[[param]]
+name = "step"
+type = "number"
+default = "10p"
+unit = "s"
+doc = "Maximum time step."
+
+[[param]]
+name = "stop"
+type = "number"
+default = "10n"
+unit = "s"
+doc = "End time; long enough for the output to settle."
+
+[[param]]
+name = "target"
+type = "number"
+optional = true
+unit = "V"
+doc = "Expected final value; reports the final error against it."
+
+[[param]]
+name = "settle_max"
+type = "number"
+optional = true
+unit = "s"
+doc = "Spec: largest allowed settling time."
+
+[[param]]
+name = "overshoot_max"
+type = "number"
+optional = true
+unit = "%"
+doc = "Spec: largest allowed overshoot, percent of the step."
+
+[[param]]
+name = "final_err_max"
+type = "number"
+optional = true
+unit = "V"
+doc = "Spec: largest allowed |final value - target| (needs target)."
+
+[setup]
+[[setup.analysis]]
+kind = "tran"
+step = "${step}"
+stop = "${stop}"
+
+[[setup.output]]
+name = "final_value"
+expr = 'value_at(v("${out}"), xmax(v("${out}")))'
+
+[[setup.output]]
+name = "settle_time"
+expr = 'settling_time(v("${out}"), tol=${tol}, from=${t_step}) - ${t_step}'
+
+[[setup.output]]
+name = "overshoot_pct"
+expr = 'overshoot(clip(v("${out}"), ${t_step}, xmax(v("${out}"))))'
+
+[[setup.output]]
+name = "undershoot_pct"
+expr = 'undershoot(clip(v("${out}"), ${t_step}, xmax(v("${out}"))))'
+
+[[setup.output]]
+name = "t_rise"
+expr = 'rise_time(clip(v("${out}"), ${t_step}, xmax(v("${out}"))))'
+
+[[setup.output]]
+when = "target"
+name = "final_err"
+expr = 'abs(final_value - ${target})'
+
+[[setup.spec]]
+name = "settle_time"
+max = "${settle_max}"
+
+[[setup.spec]]
+name = "overshoot_pct"
+max = "${overshoot_max}"
+
+[[setup.spec]]
+when = "target"
+name = "final_err"
+max = "${final_err_max}"

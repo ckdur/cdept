@@ -1,0 +1,109 @@
+# Noise analysis: spot noise, integrated noise, input-referred.
+name = "noise"
+description = "Noise: output and input-referred spot noise at one frequency and integrated noise over a band."
+requires_nets = ["${out}"]
+requires_elements = ["${src}"]
+plot = ['sig("onoise_spectrum")', 'sig("inoise_spectrum")']
+stimulus = "dc {vbias}"
+starter_variables = { vbias = "0.6" }
+
+[[param]]
+name = "out"
+type = "net"
+default = "out"
+doc = "The output net."
+
+[[param]]
+name = "src"
+type = "string"
+default = "vin"
+doc = "The input source the noise is referred to."
+
+[[param]]
+name = "fstart"
+type = "number"
+default = "10"
+unit = "Hz"
+doc = "First frequency of the analysis."
+
+[[param]]
+name = "fstop"
+type = "number"
+default = "1G"
+unit = "Hz"
+doc = "Last frequency of the analysis."
+
+[[param]]
+name = "points"
+type = "int"
+default = "20"
+doc = "Points per decade."
+
+[[param]]
+name = "fspot"
+type = "number"
+default = "1k"
+unit = "Hz"
+doc = "Frequency of the spot-noise figures."
+
+[[param]]
+name = "flo"
+type = "number"
+default = "${fstart}"
+unit = "Hz"
+doc = "Lower edge of the integration band."
+
+[[param]]
+name = "fhi"
+type = "number"
+default = "${fstop}"
+unit = "Hz"
+doc = "Upper edge of the integration band."
+
+[[param]]
+name = "spot_in_max"
+type = "number"
+optional = true
+unit = "V/sqrt(Hz)"
+doc = "Spec: largest allowed input-referred spot noise."
+
+[[param]]
+name = "int_out_max"
+type = "number"
+optional = true
+unit = "V"
+doc = "Spec: largest allowed integrated output noise."
+
+[setup]
+[[setup.analysis]]
+kind = "noise"
+output = "v(${out})"
+source = "${src}"
+sweep = "dec"
+points = "${points}"
+start = "${fstart}"
+stop = "${fstop}"
+
+[[setup.output]]
+name = "spot_out"
+expr = 'spot_noise(sig("onoise_spectrum"), ${fspot})'
+
+[[setup.output]]
+name = "spot_in"
+expr = 'spot_noise(sig("inoise_spectrum"), ${fspot})'
+
+[[setup.output]]
+name = "int_out"
+expr = 'integrate_noise(sig("onoise_spectrum"), ${flo}, ${fhi})'
+
+[[setup.output]]
+name = "int_in"
+expr = 'integrate_noise(sig("inoise_spectrum"), ${flo}, ${fhi})'
+
+[[setup.spec]]
+name = "spot_in"
+max = "${spot_in_max}"
+
+[[setup.spec]]
+name = "int_out"
+max = "${int_out_max}"

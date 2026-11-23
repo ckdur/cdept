@@ -1,0 +1,99 @@
+# Operating point: node voltages, supply current and power. docs/TESTS.md.
+name = "dc_op"
+description = "Operating point: the output node voltage, the supply current and the power."
+requires_nets = ["${out}"]
+requires_elements = ["${supply}"]
+plot = ['v("${out}")']
+
+[[param]]
+name = "out"
+type = "net"
+default = "out"
+doc = "The node whose voltage is reported (vout)."
+
+[[param]]
+name = "node2"
+type = "net"
+optional = true
+doc = "A second node to report (v2), e.g. a bias node."
+
+[[param]]
+name = "supply"
+type = "string"
+default = "vdd"
+doc = "Name of the supply voltage source (its current is read)."
+
+[[param]]
+name = "vdd"
+type = "number"
+default = "1.2"
+unit = "V"
+doc = "Supply voltage; sets the design variable vdd, which the schematic's supply uses as {vdd}."
+
+[[param]]
+name = "vout_min"
+type = "number"
+optional = true
+unit = "V"
+doc = "Spec: lowest allowed vout."
+
+[[param]]
+name = "vout_max"
+type = "number"
+optional = true
+unit = "V"
+doc = "Spec: highest allowed vout."
+
+[[param]]
+name = "isupply_max"
+type = "number"
+optional = true
+unit = "A"
+doc = "Spec: highest allowed supply current."
+
+[[param]]
+name = "power_max"
+type = "number"
+optional = true
+unit = "W"
+doc = "Spec: highest allowed power."
+
+[setup]
+[setup.variables]
+vdd = "${vdd}"
+
+[[setup.analysis]]
+kind = "op"
+
+[[setup.output]]
+name = "vout"
+expr = 'max(v("${out}"))'
+plot = "op"
+
+[[setup.output]]
+when = "node2"
+name = "v2"
+expr = 'max(v("${node2}"))'
+plot = "op"
+
+[[setup.output]]
+name = "isupply"
+expr = '-max(i("${supply}"))'
+plot = "op"
+
+[[setup.output]]
+name = "power"
+expr = '${vdd} * isupply'
+
+[[setup.spec]]
+name = "vout"
+min = "${vout_min}"
+max = "${vout_max}"
+
+[[setup.spec]]
+name = "isupply"
+max = "${isupply_max}"
+
+[[setup.spec]]
+name = "power"
+max = "${power_max}"

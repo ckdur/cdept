@@ -1,0 +1,138 @@
+# Spectral figures of a sine response: THD, SNDR, SFDR, ENOB, with coherent sampling.
+name = "thd_fft"
+description = "Spectral purity of out for a sine on in: THD, SNDR, SFDR and ENOB over N samples; the tone frequency is made coherent with fs and N."
+requires_nets = ["${out}"]
+plot = ['v("${out}")', 'db20(fft(v("${out}"), window="rect", n=${n}, from=${t_skip}, to=${t_end}))']
+stimulus = "sin({vbias} {vamp} {fin})"
+starter_variables = { vbias = "0.6", vamp = "10m" }
+
+[[param]]
+name = "out"
+type = "net"
+default = "out"
+doc = "The output net."
+
+[[param]]
+name = "tone"
+type = "number"
+default = "10meg"
+unit = "Hz"
+doc = "Wanted tone frequency; the one used (`fin`) is the nearest coherent one: m * fs / n with m odd."
+
+[[param]]
+name = "fs"
+type = "number"
+default = "1G"
+unit = "Hz"
+doc = "Sampling rate of the analysis (the transient step is 1/fs)."
+
+[[param]]
+name = "n"
+type = "int"
+default = "1024"
+doc = "Number of samples analysed (a power of two)."
+
+[[param]]
+name = "t_skip"
+type = "number"
+default = "0"
+unit = "s"
+doc = "Time to let the circuit settle before the analysed window."
+
+[[param]]
+name = "harmonics"
+type = "int"
+default = "5"
+doc = "Harmonics counted as distortion (2nd to this one)."
+
+[[param]]
+name = "thd_max"
+type = "number"
+optional = true
+unit = "dB"
+doc = "Spec: largest allowed THD (negative, e.g. -40)."
+
+[[param]]
+name = "sndr_min"
+type = "number"
+optional = true
+unit = "dB"
+doc = "Spec: smallest allowed SNDR."
+
+[[param]]
+name = "sfdr_min"
+type = "number"
+optional = true
+unit = "dB"
+doc = "Spec: smallest allowed SFDR."
+
+[[param]]
+name = "enob_min"
+type = "number"
+optional = true
+unit = "bit"
+doc = "Spec: smallest allowed ENOB."
+
+[[derived]]
+name = "fin"
+expr = "coherent(tone, fs, n)"
+doc = "The coherent tone frequency; the schematic's sine source uses {fin}."
+
+[[derived]]
+name = "tstep"
+expr = "1 / fs"
+doc = "Transient step."
+
+[[derived]]
+name = "t_end"
+expr = "t_skip + n / fs"
+doc = "End of the analysed window (and of the transient)."
+
+[setup]
+[setup.variables]
+fin = "${fin}"
+
+[[setup.analysis]]
+kind = "tran"
+step = "${tstep}"
+stop = "${t_end}"
+
+[[setup.output]]
+name = "fin_hz"
+expr = '${fin}'
+
+[[setup.output]]
+name = "thd_db"
+expr = 'thd(v("${out}"), fund=${fin}, harmonics=${harmonics}, window="rect", n=${n}, from=${t_skip}, to=${t_end})'
+
+[[setup.output]]
+name = "thd_pct"
+expr = 'thd_percent(v("${out}"), fund=${fin}, harmonics=${harmonics}, window="rect", n=${n}, from=${t_skip}, to=${t_end})'
+
+[[setup.output]]
+name = "sndr_db"
+expr = 'sndr(v("${out}"), fund=${fin}, harmonics=${harmonics}, window="rect", n=${n}, from=${t_skip}, to=${t_end})'
+
+[[setup.output]]
+name = "sfdr_db"
+expr = 'sfdr(v("${out}"), fund=${fin}, harmonics=${harmonics}, window="rect", n=${n}, from=${t_skip}, to=${t_end})'
+
+[[setup.output]]
+name = "enob"
+expr = 'enob(v("${out}"), fund=${fin}, harmonics=${harmonics}, window="rect", n=${n}, from=${t_skip}, to=${t_end})'
+
+[[setup.spec]]
+name = "thd_db"
+max = "${thd_max}"
+
+[[setup.spec]]
+name = "sndr_db"
+min = "${sndr_min}"
+
+[[setup.spec]]
+name = "sfdr_db"
+min = "${sfdr_min}"
+
+[[setup.spec]]
+name = "enob"
+min = "${enob_min}"

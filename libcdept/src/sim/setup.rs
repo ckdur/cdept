@@ -54,6 +54,44 @@ pub struct Setup {
     /// Monte Carlo: when present, a run is `runs` independent seeded points of the
     /// technology's statistical corner (instead of the corner grid).
     pub montecarlo: Option<MonteCarlo>,
+    /// A test template (docs/TESTS.md) this setup starts from: its analyses, outputs and
+    /// specs are laid under the fields written here. Built-in or `<project>/templates/`.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub template: String,
+    /// The template's parameters (`out = "out"`, `vdd = 1.2`), kept as text.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty", deserialize_with = "text_map")]
+    pub template_args: BTreeMap<String, String>,
+    /// Nets and elements the netlist must have (from the template; not a file field).
+    #[serde(skip)]
+    pub requires_nets: Vec<String>,
+    #[serde(skip)]
+    pub requires_elements: Vec<String>,
+    /// What the template suggests to plot (not a file field).
+    #[serde(skip)]
+    pub plot_hints: Vec<String>,
+}
+
+fn text_map<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BTreeMap<String, String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum V {
+        S(String),
+        I(i64),
+        F(f64),
+        B(bool),
+    }
+    Ok(BTreeMap::<String, V>::deserialize(d)?
+        .into_iter()
+        .map(|(k, v)| {
+            let v = match v {
+                V::S(s) => s,
+                V::I(i) => i.to_string(),
+                V::F(f) => fmt_num(f),
+                V::B(b) => b.to_string(),
+            };
+            (k, v)
+        })
+        .collect())
 }
 
 /// A sweep of one design variable (`.param`). The values are written as given:
@@ -199,7 +237,16 @@ pub struct Spec {
 
 impl Setup {
     pub fn parse(text: &str) -> Result<Setup> {
-        let mut setup: Setup = toml::from_str(text).wrap_err("not a valid testbench setup")?;
+        Self::parse_with(text, super::template::TemplateSet::builtin())
+    }
+
+    /// [`Setup::parse`] with a set of test templates to pick from (a project's).
+    pub fn parse_with(text: &str, templates: &super::template::TemplateSet) -> Result<Setup> {
+        let resolved = super::template::resolve(text, templates)?;
+        let mut setup: Setup = toml::from_str(&resolved.text).wrap_err("not a valid testbench setup")?;
+        setup.requires_nets = resolved.requires_nets;
+        setup.requires_elements = resolved.requires_elements;
+        setup.plot_hints = resolved.plot;
         setup.check()?;
         // The technology's default models are for its default simulator (ngspice).
         if setup.simulator == "xyce" && setup.models.is_empty() {
@@ -209,9 +256,13 @@ impl Setup {
     }
 
     pub fn load(file: &Path) -> Result<Setup> {
+        Self::load_with(file, super::template::TemplateSet::builtin())
+    }
+
+    pub fn load_with(file: &Path, templates: &super::template::TemplateSet) -> Result<Setup> {
         let text = std::fs::read_to_string(file)
             .wrap_err_with(|| format!("cannot read {}", file.display()))?;
-        Self::parse(&text).wrap_err_with(|| file.display().to_string())
+        Self::parse_with(&text, templates).wrap_err_with(|| file.display().to_string())
     }
 
     fn check(&self) -> Result<()> {

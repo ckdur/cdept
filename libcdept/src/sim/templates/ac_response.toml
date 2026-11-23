@@ -1,0 +1,158 @@
+# Small-signal frequency response: gain, bandwidth, unity-gain frequency, margins.
+name = "ac_response"
+description = "AC response of out over in: DC gain, -3 dB bandwidth, unity-gain frequency, phase margin, gain margin and peaking."
+requires_nets = ["${in}", "${out}"]
+plot = ['db20(v("${out}") / v("${in}"))', 'phase(v("${out}") / v("${in}"))']
+stimulus = "dc {vbias} ac 1"
+starter_variables = { vbias = "0.6" }
+
+[[param]]
+name = "in"
+type = "net"
+default = "in"
+doc = "The input net; its source must carry an AC magnitude (`ac 1`)."
+
+[[param]]
+name = "out"
+type = "net"
+default = "out"
+doc = "The output net."
+
+[[param]]
+name = "inverting"
+type = "choice"
+choices = ["no", "yes"]
+default = "no"
+doc = "yes: the stage inverts, so the response is taken as -out/in and the phase starts near 0 (needed for the margins)."
+
+[[param]]
+name = "fstart"
+type = "number"
+default = "10"
+unit = "Hz"
+doc = "First frequency; the gain here is the DC gain."
+
+[[param]]
+name = "fstop"
+type = "number"
+default = "100G"
+unit = "Hz"
+doc = "Last frequency."
+
+[[param]]
+name = "points"
+type = "int"
+default = "20"
+doc = "Points per decade."
+
+[[param]]
+name = "margins"
+type = "bool"
+default = "true"
+doc = "Also report the phase margin (needs a unity-gain crossing)."
+
+[[param]]
+name = "gain_margin"
+type = "bool"
+default = "false"
+doc = "Also report the gain margin (needs the phase to reach -180 degrees)."
+
+[[param]]
+name = "gain_db_min"
+type = "number"
+optional = true
+unit = "dB"
+doc = "Spec: smallest allowed DC gain."
+
+[[param]]
+name = "bw_min"
+type = "number"
+optional = true
+unit = "Hz"
+doc = "Spec: smallest allowed -3 dB bandwidth."
+
+[[param]]
+name = "ugbw_min"
+type = "number"
+optional = true
+unit = "Hz"
+doc = "Spec: smallest allowed unity-gain frequency."
+
+[[param]]
+name = "pm_min"
+type = "number"
+optional = true
+unit = "deg"
+doc = "Spec: smallest allowed phase margin."
+
+[[param]]
+name = "peaking_max"
+type = "number"
+optional = true
+unit = "dB"
+doc = "Spec: largest allowed gain peaking."
+
+[[derived]]
+name = "sign"
+from = "inverting"
+map = { no = "1", yes = "-1" }
+
+[setup]
+[[setup.analysis]]
+kind = "ac"
+sweep = "dec"
+points = "${points}"
+start = "${fstart}"
+stop = "${fstop}"
+
+[[setup.output]]
+name = "gain_db"
+expr = 'db20(value_at(${sign} * v("${out}") / v("${in}"), ${fstart}))'
+plot = "ac"
+
+[[setup.output]]
+name = "bw_3db"
+expr = 'bandwidth(${sign} * v("${out}") / v("${in}"))'
+plot = "ac"
+
+[[setup.output]]
+name = "ugbw"
+expr = 'ugbw(${sign} * v("${out}") / v("${in}"))'
+plot = "ac"
+
+[[setup.output]]
+when = "margins"
+name = "pm"
+expr = 'phase_margin(${sign} * v("${out}") / v("${in}"))'
+plot = "ac"
+
+[[setup.output]]
+when = "gain_margin"
+name = "gm"
+expr = 'gain_margin(${sign} * v("${out}") / v("${in}"))'
+plot = "ac"
+
+[[setup.output]]
+name = "peaking_db"
+expr = 'max(db20(${sign} * v("${out}") / v("${in}"))) - gain_db'
+plot = "ac"
+
+[[setup.spec]]
+name = "gain_db"
+min = "${gain_db_min}"
+
+[[setup.spec]]
+name = "bw_3db"
+min = "${bw_min}"
+
+[[setup.spec]]
+name = "ugbw"
+min = "${ugbw_min}"
+
+[[setup.spec]]
+name = "pm"
+min = "${pm_min}"
+
+[[setup.spec]]
+name = "peaking_db"
+max = "${peaking_max}"

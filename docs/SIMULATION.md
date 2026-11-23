@@ -198,3 +198,7 @@ Simulation** in the context menu of a view or of a cell opens it and runs at onc
 ## 8. Calculator outputs
 
 `[[output]] name = ".." expr = ".."` (optional `plot`) are expressions of the measurement calculator evaluated on each run's `out.raw`; their numbers are measures next to the `.meas` ones, specs may name them, `result.json` flags them (`calc`, `calc_errors`). Language and functions: [CALC.md](CALC.md).
+
+## 9. Test templates and suites
+
+A setup can start from a ready-made test (`template = "tran_delay"` with `[template_args]`; fields written in the setup override it), and a `suite.toml` view runs several testbenches together with one combined table: see [TESTS.md](TESTS.md).

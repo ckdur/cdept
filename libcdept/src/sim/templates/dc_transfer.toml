@@ -1,0 +1,133 @@
+# DC sweep of the input: transfer curve, gain, trip point, linearity.
+name = "dc_transfer"
+description = "DC transfer curve: end levels, trip point, peak gain and linearity error of out against the swept source."
+requires_nets = ["${in}", "${out}"]
+requires_elements = ["${src}"]
+plot = ['v("${out}")', 'derivative(v("${out}"))']
+
+[[param]]
+name = "in"
+type = "net"
+default = "in"
+doc = "The input net (the swept source drives it)."
+
+[[param]]
+name = "out"
+type = "net"
+default = "out"
+doc = "The output net."
+
+[[param]]
+name = "src"
+type = "string"
+default = "vin"
+doc = "Name of the voltage source that is swept (the schematic's input source; its DC value is overridden)."
+
+[[param]]
+name = "vdd"
+type = "number"
+default = "1.2"
+unit = "V"
+doc = "Supply voltage (design variable vdd)."
+
+[[param]]
+name = "start"
+type = "number"
+default = "0"
+unit = "V"
+doc = "Sweep start."
+
+[[param]]
+name = "stop"
+type = "number"
+default = "${vdd}"
+unit = "V"
+doc = "Sweep stop (default the supply)."
+
+[[param]]
+name = "step"
+type = "number"
+default = "10m"
+unit = "V"
+doc = "Sweep step."
+
+[[param]]
+name = "level"
+type = "number"
+default = "0.5"
+doc = "Output level, as a fraction of vdd, that counts as the trip point (vtrip)."
+
+[[param]]
+name = "gain_min"
+type = "number"
+optional = true
+doc = "Spec: smallest allowed peak |dVout/dVin|."
+
+[[param]]
+name = "vtrip_min"
+type = "number"
+optional = true
+unit = "V"
+doc = "Spec: lowest allowed trip point."
+
+[[param]]
+name = "vtrip_max"
+type = "number"
+optional = true
+unit = "V"
+doc = "Spec: highest allowed trip point."
+
+[[param]]
+name = "lin_err_max"
+type = "number"
+optional = true
+unit = "%"
+doc = "Spec: largest allowed deviation from the end-point line, percent of the output swing."
+
+[setup]
+[setup.variables]
+vdd = "${vdd}"
+
+[[setup.analysis]]
+kind = "dc"
+source = "${src}"
+start = "${start}"
+stop = "${stop}"
+step = "${step}"
+
+[[setup.output]]
+name = "vout_start"
+expr = 'value_at(v("${out}"), xmin(v("${out}")))'
+
+[[setup.output]]
+name = "vout_end"
+expr = 'value_at(v("${out}"), xmax(v("${out}")))'
+
+[[setup.output]]
+name = "vtrip"
+expr = 'cross(v("${out}"), ${vdd} * ${level}, "either")'
+
+[[setup.output]]
+name = "vm"
+expr = 'cross(v("${out}") - xaxis(v("${out}")), 0, "either")'
+
+[[setup.output]]
+name = "gain_max"
+expr = 'max(abs(derivative(v("${out}"))))'
+
+[[setup.output]]
+name = "lin_err"
+expr = '100 * max(abs(v("${out}") - (vout_start + (vout_end - vout_start) * (xaxis(v("${out}")) - xmin(v("${out}"))) / (xmax(v("${out}")) - xmin(v("${out}")))))) / abs(vout_end - vout_start)'
+
+[[setup.spec]]
+name = "gain_max"
+min = "${gain_min}"
+
+[[setup.spec]]
+name = "vtrip"
+min = "${vtrip_min}"
+max = "${vtrip_max}"
+
+[[setup.spec]]
+name = "lin_err"
+max = "${lin_err_max}"
