@@ -2,7 +2,6 @@
 //! with progress per section, and the rescan of the open project's technology.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -273,15 +272,19 @@ impl TechState {
     }
 }
 
-/// The Project Settings dialog asks for a rescan when it is confirmed.
-static RESCAN_WANTED: AtomicBool = AtomicBool::new(false);
+// The Project Settings dialog asks for a rescan when it is confirmed. The window and the
+// dialog run on the UI thread, so the wish is per thread: tests that draw dialogs in
+// parallel do not see each other's.
+thread_local! {
+    static RESCAN_WANTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 pub fn want_rescan(wanted: bool) {
-    RESCAN_WANTED.store(wanted, Ordering::SeqCst);
+    RESCAN_WANTED.with(|w| w.set(wanted));
 }
 
 pub fn rescan_wanted() -> bool {
-    RESCAN_WANTED.load(Ordering::SeqCst)
+    RESCAN_WANTED.with(|w| w.get())
 }
 
 /// Scan the open project's PDK again, in the background. `ctx` is needed to wake the
@@ -312,7 +315,7 @@ pub fn start_rescan(app: &mut AppCtx, ctx: &egui::Context, helpers: bool) -> Res
 /// dialog asked for it. Needs the egui context, so the scan itself starts with the
 /// next frame ([`poll`]).
 pub fn after_settings(app: &mut AppCtx, pdk_changed: bool) {
-    let wanted = RESCAN_WANTED.swap(false, Ordering::SeqCst);
+    let wanted = RESCAN_WANTED.with(|w| w.replace(false));
     let has_pdk = app
         .project
         .as_ref()
