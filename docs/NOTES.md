@@ -467,3 +467,4 @@ SIMULATION.md §4 (GUI, job queue, sweeps, results DB). `libcdept/tests/sim.rs` 
 
 ### 2.6 Standing risks from the roadmap
 See ROADMAP §4: per-tool IPC (Phase 3), PDK heterogeneity, large waveforms, scope creep.
+- Magic batch adapter (`libcdept/src/magic/`, `cdept magic extract|drc|lef`, docs/MAGIC.md): extraction, DRC, LEF, GDS import through Tcl on stdin; real tests need Magic and a PDK in /opt/ext and skip otherwise.

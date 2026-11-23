@@ -5,6 +5,7 @@ mod cmd_find;
 mod cmd_import;
 mod cmd_lib;
 mod cmd_ls;
+mod cmd_magic;
 mod cmd_pdk;
 mod cmd_sim;
 mod cmd_status;
@@ -121,6 +122,9 @@ enum Command {
     /// The PDKs installed on this machine and their versions (ciel).
     #[command(subcommand)]
     Pdk(cmd_pdk::PdkCommand),
+    /// Magic in batch mode: extraction, DRC, LEF export.
+    #[command(subcommand)]
+    Magic(cmd_magic::MagicCommand),
     /// Testbenches: decks and ngspice runs with corners and specs.
     #[command(subcommand)]
     Sim(cmd_sim::SimCommand),
@@ -1154,6 +1158,10 @@ fn main() -> Result<()> {
                 None => None,
             };
             cmd_tech::run(command, project)
+        }
+        Command::Magic(command) => {
+            init_tracing(cli.verbose, None);
+            cmd_magic::run(command, &open_project(cli.project)?)
         }
         Command::Sim(command) => {
             init_tracing(cli.verbose, None);
