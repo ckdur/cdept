@@ -10,10 +10,12 @@
 //! measurements with the specs. Format and design: docs/SIMULATION.md.
 
 pub mod deck;
+pub mod mc;
 pub mod results;
 pub mod run;
 pub mod setup;
 pub mod spec;
+pub mod stats;
 
 pub use deck::{RunPoint, build as build_deck};
 pub use run::{Outcome, Simulator, run, run_in_job};
@@ -91,6 +93,8 @@ pub struct RunOptions {
     pub mc_seed: Option<u64>,
     /// Run the corner × temperature × sweep grid although the setup has `[montecarlo]`.
     pub no_mc: bool,
+    /// What the Monte Carlo runs draw (default: the setup's, else process variation).
+    pub mc_mode: Option<setup::McMode>,
     /// Do not write `result.json` files or add to `results.db`.
     pub no_store: bool,
     /// Put the points on this queue (a UI's, shown live) instead of a private one. Then
@@ -147,23 +151,35 @@ pub fn run_testbench_with(
             Some(setup::MonteCarlo {
                 runs: runs.unwrap_or(base.runs),
                 seed: options.mc_seed.unwrap_or(base.seed),
-                corner: if base.corner.is_empty() { "mc".into() } else { base.corner },
+                mode: options.mc_mode.unwrap_or(base.mode),
+                ..base
             })
         }
     };
-    let mut points = if let Some(mc) = &mc {
-        let (_, set_models) = models.set(&set).ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
-        if set_models.corner(&mc.corner).is_none() {
-            return Err(eyre!(
-                "Monte Carlo needs the statistical corner '{}' in the models '{set}' (there are: {}); name another in [montecarlo] corner",
-                mc.corner,
-                set_models.corner_names().join(", ")
-            ));
+    // The corner sets (and switches) the Monte Carlo mode draws from.
+    let mc_plan = match &mc {
+        Some(mc) => {
+            let (_, set_models) = models.set(&set).ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
+            let mentions = |corner: &str, word: &str| {
+                set_models.corner(corner).is_some_and(|libs| {
+                    libs.iter().any(|l| {
+                        l.file
+                            .resolve(|n| project.var(n))
+                            .ok()
+                            .and_then(|p| std::fs::read(p).ok())
+                            .is_some_and(|t| String::from_utf8_lossy(&t).to_ascii_lowercase().contains(word))
+                    })
+                })
+            };
+            let known = |c: &str| set_models.corner(c).is_some();
+            let plan = mc::plan(mc, &set, tb.setup.simulator == "xyce", known, mentions)
+                .map_err(|e| eyre!("{e} (there are: {})", set_models.corner_names().join(", ")))?;
+            Some(plan)
         }
-        if tb.setup.simulator == "xyce" {
-            return Err(eyre!("Monte Carlo is run with ngspice only"));
-        }
-        deck::mc_points(&tb.setup, &mc.corner, mc.runs, mc.seed)
+        None => None,
+    };
+    let mut points = if let (Some(mc), Some(plan)) = (&mc, &mc_plan) {
+        deck::mc_points(&tb.setup, &plan.label, mc.runs, mc.seed)
     } else {
         deck::points(&tb.setup, &default_corner)
     };
@@ -203,7 +219,17 @@ pub fn run_testbench_with(
             break;
         }
         let init = deck::spiceinit(model_set, |n| project.var(n)).map_err(|e| eyre!(e))?;
-        let lines = models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?;
+        let lines = match &mc_plan {
+            Some(plan) => {
+                let mut all = vec![];
+                for c in &plan.corners {
+                    all.extend(models.lines(&set, c, |n| project.var(n)).map_err(|e| eyre!(e))?);
+                }
+                all.extend(plan.extra.iter().cloned());
+                all
+            }
+            None => models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?,
+        };
         let text = deck::build(&tb.setup, point, &title, &lines, &netlist);
         decks.push(text.clone());
         let dir = base.join(point.name());
@@ -211,7 +237,11 @@ pub fn run_testbench_with(
         std::fs::write(dir.join(".spiceinit"), &init)?;
         let slot: Slot = Arc::default();
         slots.push(slot.clone());
-        let (simulator, env, log) = (simulator.clone(), env.clone(), dir.join("job.log"));
+        let mut env = env.clone();
+        if let Some(args) = deck::xyce_args(&tb.setup, point, model_set, |n| project.var(n)).map_err(|e| eyre!(e))? {
+            env.push((run::XYCE_ARGS_ENV.into(), args.into()));
+        }
+        let (simulator, log) = (simulator.clone(), dir.join("job.log"));
         let spec = JobSpec::func(point.name(), move |ctx| {
             let started = chrono::Local::now().to_rfc3339();
             let clock = std::time::Instant::now();

@@ -31,6 +31,9 @@ pub enum SimCommand {
         /// setup's [montecarlo] runs, or turns Monte Carlo on).
         #[arg(long)]
         runs: Option<u32>,
+        /// What the Monte Carlo runs draw: process, mismatch or both (default: the setup's).
+        #[arg(long)]
+        mode: Option<sim::setup::McMode>,
         /// Base seed of the Monte Carlo runs.
         #[arg(long)]
         seed: Option<u64>,
@@ -54,6 +57,16 @@ pub enum SimCommand {
         /// Rebuild results.db from the result.json files first.
         #[arg(long)]
         reindex: bool,
+        /// Statistics of the latest runs: percentiles (p5/p50/p95), text histograms and
+        /// the yield per spec (measured, and estimated from mean and sigma).
+        #[arg(long)]
+        stats: bool,
+        /// Histogram bins for --stats.
+        #[arg(long, default_value_t = 10)]
+        bins: usize,
+        /// Sigmas of the mean +- k sigma yield estimate for --stats.
+        #[arg(long, default_value_t = 3.0)]
+        sigma: f64,
     },
     /// Print the deck of the first run without starting the simulator.
     Deck {
@@ -106,7 +119,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             print!("{}", sim::build_deck(&tb.setup, &point, &format!("{library}/{cell}/{view}"), &lines, &netlist));
             Ok(())
         }
-        SimCommand::Run { library, cell, view, corners, jobs, runs, seed, no_mc, no_store } => {
+        SimCommand::Run { library, cell, view, corners, jobs, runs, mode, seed, no_mc, no_store } => {
             let view = view_of(project, &library, &cell, view)?;
             let tb = sim::open(project, &library, &cell, &view)?;
             let simulator = sim::Simulator::for_setup(&tb.setup).ok_or_else(|| {
@@ -133,6 +146,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                 on_event: Some(on_event),
                 mc_runs: runs,
                 mc_seed: seed,
+                mc_mode: mode,
                 no_mc,
                 no_store,
                 ..Default::default()
@@ -147,6 +161,10 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             } else {
                 println!("{} run(s): {} pass, {} fail, {} error", agg.runs, agg.pass, agg.fail, agg.error);
             }
+            if records.len() > 1 && results.iter().any(|r| r.point.seed.is_some()) {
+                println!();
+                print!("{}", sim::stats::format_report(&sim::stats::analyze(&records, 10, 3.0)));
+            }
             if results.iter().any(|r| r.record.is_some()) {
                 println!("index: {}", results::Store::path(&project.root).display());
             }
@@ -156,7 +174,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             }
             Ok(())
         }
-        SimCommand::Results { library, cell, view, all, reindex } => {
+        SimCommand::Results { library, cell, view, all, reindex, stats, bins, sigma } => {
             let view = view_of(project, &library, &cell, view)?;
             let mut db = results::Store::open(&project.root)?;
             if reindex {
@@ -168,7 +186,12 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             }
             print!("{}", results::format_table(&records));
             println!();
-            print!("{}", results::format_aggregate(&results::aggregate(&db.latest(&library, &cell, &view)?)));
+            let latest = db.latest(&library, &cell, &view)?;
+            print!("{}", results::format_aggregate(&results::aggregate(&latest)));
+            if stats {
+                println!();
+                print!("{}", sim::stats::format_report(&sim::stats::analyze(&latest, bins, sigma)));
+            }
             Ok(())
         }
     }

@@ -88,5 +88,48 @@ sim revert
 sim menu_run cells tb_inv testbench
 sim wait
 sim expect_rows 3 PASS
+
+# Sweeps and Monte Carlo in the form: a bad number is caught, the file keeps its
+# comments and the other keys, 6 mismatch runs x 2 supplies = 12 points with statistics.
+sim add_sweep vdd 1.1 1.3
+sim mc on
+sim mc runs many
+sim expect_problem whole number
+sim mc runs 6
+sim mc seed 5
+sim mc mode mismatch
+sim expect_no_problem
+sim expect_dirty yes
+sim save
+shell grep -q 'variable = "vdd"' libs/cells/tb_inv/testbench/setup.toml
+shell grep -q 'mode = "mismatch"' libs/cells/tb_inv/testbench/setup.toml
+shell grep -q "\"ss\"" libs/cells/tb_inv/testbench/setup.toml
+shell grep -q '^# Testbench of the inverter' libs/cells/tb_inv/testbench/setup.toml
+sim run
+sim wait
+sim expect_points 12
+sim expect_rows 12 PASS
+sim expect_stats 12 tpd
+sim expect_yield tpd 12/12
+sim expect_file tt_mm_27_vdd1p3_r005 out.log
+
+# "Run N now": 4 runs without touching the file, then the plain grid once.
+sim run_mc 4
+sim wait
+sim expect_points 8
+sim expect_stats 8 tpd
+shell grep -q 'runs = 6' libs/cells/tb_inv/testbench/setup.toml
+sim expect_dirty no
+sim run_grid
+sim wait
+sim expect_points 6
+sim expect_rows 6 PASS
+
+# Back to process variation; Monte Carlo off removes the table, the sweeps stay.
+sim mc mode process
+sim mc off
+sim save
+shell ! grep -q montecarlo libs/cells/tb_inv/testbench/setup.toml
+shell grep -q 'variable = "vdd"' libs/cells/tb_inv/testbench/setup.toml
 log simulation: ok
 quit

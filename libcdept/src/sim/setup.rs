@@ -118,6 +118,45 @@ impl Sweep {
     }
 }
 
+/// What a Monte Carlo run draws.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McMode {
+    /// Global process variation (the technology's statistical corner, `mc`).
+    #[default]
+    Process,
+    /// Local per-device mismatch (the technology's `tt_mm` corner).
+    Mismatch,
+    /// Both (the technology's `mc_mm` corner, or `mc` with the mismatch switch on).
+    Both,
+}
+
+impl McMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            McMode::Process => "process",
+            McMode::Mismatch => "mismatch",
+            McMode::Both => "both",
+        }
+    }
+}
+
+impl std::str::FromStr for McMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<McMode, String> {
+        match s {
+            "process" => Ok(McMode::Process),
+            "mismatch" => Ok(McMode::Mismatch),
+            "both" => Ok(McMode::Both),
+            other => Err(format!("Monte Carlo mode '{other}' is not process, mismatch or both")),
+        }
+    }
+}
+
+fn is_process(m: &McMode) -> bool {
+    *m == McMode::Process
+}
+
 /// Monte Carlo runs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -125,13 +164,32 @@ pub struct MonteCarlo {
     pub runs: u32,
     /// The base seed; run `i` gets [`crate::sim::deck::mc_seed`]`(seed, i)`.
     pub seed: u64,
-    /// The corner set that samples (the technology's statistical one). Empty: `mc`.
+    /// The corner set that samples process variation (the technology's statistical
+    /// one). Empty: `mc`.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub corner: String,
+    /// What is drawn: `process` (default), `mismatch` or `both` ([`crate::sim::mc`]).
+    #[serde(skip_serializing_if = "is_process")]
+    pub mode: McMode,
+    /// The corner set for `mismatch`. Empty: `tt_mm`.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub mismatch_corner: String,
+    /// The corner set for `both`. Empty: `mc_mm`, else `corner` with the model's
+    /// mismatch switch (`mc_mm_switch`) set.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub both_corner: String,
 }
 
 impl Default for MonteCarlo {
     fn default() -> Self {
-        MonteCarlo { runs: 10, seed: 1, corner: String::new() }
+        MonteCarlo {
+            runs: 10,
+            seed: 1,
+            corner: String::new(),
+            mode: McMode::Process,
+            mismatch_corner: String::new(),
+            both_corner: String::new(),
+        }
     }
 }
 
@@ -230,13 +288,10 @@ impl Setup {
                 bail!("variable '{}' is swept twice", sweep.variable);
             }
         }
-        if let Some(mc) = &self.montecarlo {
-            if mc.runs == 0 || mc.runs > 100_000 {
-                bail!("montecarlo runs must be 1..100000");
-            }
-            if self.simulator == "xyce" {
-                bail!("Monte Carlo is run with ngspice only (Xyce has its own .sampling, not generated yet)");
-            }
+        if let Some(mc) = &self.montecarlo
+            && (mc.runs == 0 || mc.runs > 100_000)
+        {
+            bail!("montecarlo runs must be 1..100000");
         }
         let word = |s: &str| !s.is_empty() && !s.contains(char::is_whitespace);
         for name in self.variables.keys().chain(self.options.keys()) {
@@ -322,7 +377,7 @@ max = 2e-10
         .unwrap();
         assert_eq!(s.sweeps[0].expand().unwrap(), ["1.0", "1.2", "2"]);
         assert_eq!(s.sweeps[1].expand().unwrap(), ["0.1", "0.2", "0.3", "0.4", "0.5"]);
-        assert_eq!(s.montecarlo, Some(MonteCarlo { runs: 5, seed: 7, corner: String::new() }));
+        assert_eq!(s.montecarlo, Some(MonteCarlo { runs: 5, seed: 7, ..Default::default() }));
         let l = Setup::parse("[[sweep]]\nvariable=\"a\"\nlist=[\"x\"]").unwrap();
         assert_eq!(l.sweeps[0].values, ["x"]);
         assert_eq!(Sweep { variable: "a".into(), start: Some(3.0), stop: Some(1.0), step: Some(-1.0), ..Default::default() }
@@ -331,7 +386,11 @@ max = 2e-10
         assert!(Setup::parse("[[sweep]]\nvariable=\"a\"\nstart=1\nstop=2\nstep=-1").is_err());
         assert!(Setup::parse("[[sweep]]\nvariable=\"a\"\nlist=[\"1\"]\n[[sweep]]\nvariable=\"a\"\nlist=[\"2\"]").is_err());
         assert!(Setup::parse("[montecarlo]\nruns=0").is_err());
-        assert!(Setup::parse("simulator=\"xyce\"\n[montecarlo]\nruns=2").is_err());
+        // Xyce does Monte Carlo through `.sampling`.
+        assert!(Setup::parse("simulator=\"xyce\"\n[montecarlo]\nruns=2").is_ok());
+        let m = Setup::parse("[montecarlo]\nmode=\"both\"\nmismatch_corner=\"ss_mm\"").unwrap().montecarlo.unwrap();
+        assert_eq!((m.mode, m.mismatch_corner.as_str()), (McMode::Both, "ss_mm"));
+        assert!(Setup::parse("[montecarlo]\nmode=\"local\"").is_err());
     }
 
     #[test]

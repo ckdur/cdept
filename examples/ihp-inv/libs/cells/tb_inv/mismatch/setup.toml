@@ -1,0 +1,29 @@
+# Local (per-device) mismatch Monte Carlo of the inverter: the PDK's `tt_mm` corner set
+# (the `agauss()` offsets of every transistor instance with mm_ok=1; the process stays
+# typical). Every run has its own seed (`setseed N` + `reset`), so a run repeats.
+#   cdept sim run cells tb_inv --view mismatch [--runs 50 --seed 7]
+# `mode = "process"` (the default) is the global `mc` corner set (view montecarlo),
+# `mode = "both"` draws both (view both; needs the corner set `mc_mm` of tech.toml).
+schematic = "cells/tb_inv"
+temperatures = [27]
+save = ["v(in)", "v(out)"]
+measures = [
+  "tran tpd trig v(in) val=0.5 rise=1 targ v(out) val=0.5 fall=1",
+]
+
+[variables]
+vdd = "1.2"
+
+[montecarlo]
+runs = 20
+seed = 1
+mode = "mismatch"
+
+[[analysis]]
+kind = "tran"
+step = "5p"
+stop = "1.2n"
+
+[[spec]]
+name = "tpd"
+max = 4e-10
