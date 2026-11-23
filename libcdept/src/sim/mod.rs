@@ -241,11 +241,12 @@ pub fn run_testbench_with(
             .unwrap()
             .take()
             .unwrap_or_else(|| (Err(eyre!("cancelled")), chrono::Local::now().to_rfc3339(), 0));
+        let (outcome, calc_errors) = crate::calc::sim::apply(&tb.setup, &point, outcome);
         let specs = match &outcome {
             Ok(o) => spec::check(&tb.setup.specs, &o.measures),
             Err(_) => vec![],
         };
-        let rec = results::RunRecord::new(
+        let mut rec = results::RunRecord::new(
             (&tb.library, &tb.cell, &tb.view),
             &tb.setup,
             &deck_text,
@@ -256,6 +257,7 @@ pub fn run_testbench_with(
             started.clone(),
             duration_ms,
         );
+        crate::calc::sim::mark(&mut rec, &tb.setup, calc_errors);
         let mut record = None;
         if !options.no_store {
             match rec.write() {

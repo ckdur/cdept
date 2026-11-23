@@ -266,6 +266,7 @@ Xyce Monte Carlo, VACASK; the rest of the list below as written.
      parser (`winnow`/`chumsky`). Optional Python scripting via `pyo3` (numpy/scipy) for
      power users.
 - Expressions can be saved as testbench outputs (feeds the Phase 4 spec table).
+- Built 2026-11-23 (no GUI yet): raw reader, native function library, expression language, `[[output]]`, `cdept calc` ([CALC.md](CALC.md)). Open: jitter/PSD, CSV/VCD, panel in the GUI.
 - **Milestone:** SAR-ADC transient → FFT → ENOB in the GUI with no Python written.
 
 ### Phase 6: Schematic ↔ Layout coherence, "XL-lite" (~100 h)

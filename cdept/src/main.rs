@@ -1,5 +1,6 @@
 //! `cdept`: opens the GUI by default; subcommands run headless.
 
+mod cmd_calc;
 mod cmd_cell;
 mod cmd_find;
 mod cmd_import;
@@ -149,6 +150,8 @@ enum Command {
     /// The project's technology snapshot (tech.toml): scan the PDK, show, refresh.
     #[command(subcommand)]
     Tech(cmd_tech::TechCommand),
+    /// Evaluate a calculator expression on a SPICE raw file (`cdept calc --functions` lists them).
+    Calc(cmd_calc::CalcArgs),
     /// Search the libraries: cells and views by name, kind, format and category,
     /// optionally inside the files (see `cdept find --help` for the query words).
     Find(cmd_find::FindArgs),
@@ -1536,6 +1539,7 @@ fn main() -> Result<()> {
             let project = project_root(cli.project).and_then(|root| Project::load(&root).ok());
             cmd_pdk::run(command, project.as_ref())
         }
+        Command::Calc(args) => cmd_calc::run(args),
         Command::Find(args) => {
             init_tracing(cli.verbose, None);
             cmd_find::find(&open_project(cli.project)?, args)

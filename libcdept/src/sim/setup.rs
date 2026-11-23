@@ -44,6 +44,10 @@ pub struct Setup {
     pub measures: Vec<String>,
     #[serde(rename = "spec")]
     pub specs: Vec<Spec>,
+    /// Calculator expressions evaluated on each run's raw file ([`crate::calc`]); their
+    /// numbers are measurements like `.meas` ones (specs may name them).
+    #[serde(rename = "output")]
+    pub outputs: Vec<Output>,
     /// Design-variable sweeps, crossed with each other, the corners and the temperatures.
     #[serde(rename = "sweep")]
     pub sweeps: Vec<Sweep>,
@@ -171,6 +175,18 @@ fn dec() -> String {
     "dec".into()
 }
 
+/// A measurement computed by the calculator from the run's waveforms:
+/// `[[output]] name = "gain" expr = "db20(value_at(v(\"out\")/v(\"in\"), 1k))"`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Output {
+    pub name: String,
+    /// The expression (docs/CALC.md); it must give a number.
+    pub expr: String,
+    /// Look only in this plot of the raw file: `tran`, `ac`, … or part of its name.
+    pub plot: String,
+}
+
 /// A bound on a measurement.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -236,6 +252,17 @@ impl Setup {
                 && min > max
             {
                 bail!("spec '{}': min {min} is above max {max}", spec.name);
+            }
+        }
+        for (i, o) in self.outputs.iter().enumerate() {
+            if !word(&o.name) {
+                bail!("'{}' is not a valid output name", o.name);
+            }
+            if self.outputs[..i].iter().any(|p| p.name.eq_ignore_ascii_case(&o.name)) {
+                bail!("output '{}' is defined twice", o.name);
+            }
+            if let Err(e) = crate::calc::parse(&o.expr) {
+                bail!("output '{}': {}", o.name, e.render(&o.expr));
             }
         }
         for a in &self.analyses {
@@ -305,6 +332,17 @@ max = 2e-10
         assert!(Setup::parse("[[sweep]]\nvariable=\"a\"\nlist=[\"1\"]\n[[sweep]]\nvariable=\"a\"\nlist=[\"2\"]").is_err());
         assert!(Setup::parse("[montecarlo]\nruns=0").is_err());
         assert!(Setup::parse("simulator=\"xyce\"\n[montecarlo]\nruns=2").is_err());
+    }
+
+    #[test]
+    fn outputs_are_checked_when_the_setup_loads() {
+        let s = Setup::parse("[[output]]\nname=\"gain\"\nexpr=\"db20(v(\\\"out\\\"))\"\nplot=\"ac\"").unwrap();
+        assert_eq!((s.outputs[0].name.as_str(), s.outputs[0].plot.as_str()), ("gain", "ac"));
+        let e = Setup::parse("[[output]]\nname=\"g\"\nexpr=\"max(\"").unwrap_err();
+        assert!(format!("{e:#}").contains("output 'g'"), "{e:#}");
+        assert!(Setup::parse("[[output]]\nname=\"g\"\nexpr=\"1\"\n[[output]]\nname=\"G\"\nexpr=\"2\"").is_err());
+        assert!(Setup::parse("[[output]]\nname=\"a b\"\nexpr=\"1\"").is_err());
+        assert!(Setup::parse("[[output]]\nname=\"a\"\nexpr=\"1\"\nbogus=1").is_err());
     }
 
     #[test]

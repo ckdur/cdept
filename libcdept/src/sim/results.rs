@@ -89,6 +89,12 @@ pub struct RunRecord {
     pub status: Status,
     pub error: Option<String>,
     pub measures: BTreeMap<String, f64>,
+    /// The measures that came from the calculator (`[[output]]`), not `.meas`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calc: Vec<String>,
+    /// Outputs that failed, with the message.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub calc_errors: BTreeMap<String, String>,
     pub specs: Vec<SpecRecord>,
     /// RFC 3339, local time.
     pub started: String,
@@ -171,6 +177,8 @@ impl RunRecord {
             status,
             error,
             measures,
+            calc: vec![],
+            calc_errors: BTreeMap::new(),
             specs,
             started,
             duration_ms,
@@ -296,8 +304,10 @@ pub fn format_table(records: &[RunRecord]) -> String {
     };
     let width = records.iter().map(|r| r.point.name.len()).max().unwrap_or(5).max(5);
     let mut out = format!("{:<width$}  {:<6}", "point", "result");
+    let is_calc = |n: &str| records.iter().any(|r| r.calc.iter().any(|c| c == n));
     for n in &names {
-        out.push_str(&format!("  {n:>12}"));
+        let label = if is_calc(n) { format!("{n}*") } else { n.to_string() };
+        out.push_str(&format!("  {label:>12}"));
     }
     out.push('\n');
     for r in records {
@@ -315,6 +325,12 @@ pub fn format_table(records: &[RunRecord]) -> String {
             out.push_str(&format!("   {}", e.lines().next().unwrap_or("")));
         }
         out.push('\n');
+        for (k, e) in &r.calc_errors {
+            out.push_str(&format!("  ! output {k}: {e}\n"));
+        }
+    }
+    if names.iter().any(|n| is_calc(n)) {
+        out.push_str("* calculator output\n");
     }
     out
 }
@@ -564,6 +580,8 @@ mod tests {
             status: Status::Ok,
             error: None,
             measures,
+            calc: vec![],
+            calc_errors: BTreeMap::new(),
             specs: vec![SpecRecord { name: "tpd".into(), value: tpd, min: None, max: Some(max), verdict }],
             started: started.into(),
             duration_ms: 12,
