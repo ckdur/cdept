@@ -6,7 +6,7 @@ drawing, file handling, netlisting and attribute evaluation are exactly xschem's
 
 Status (2026-11-17): **step 0 done** — the helper builds from the submodule with xschem's
 sources unmodified and runs headless (load, netlist, SVG, instance list). Steps 1–5 are
-open. How to build and update it: [`cdept-xschem/README.md`](../cdept-xschem/README.md).
+open. How to build and update it: [`cdept-xschem/README.md`](https://github.com/ckdur/cdept/blob/main/cdept-xschem/README.md).
 
 Decided: helper process (so `cdept` stays MIT), submodule pinned to the commit the
 asic-all image builds (`8952fb28`, xschem 3.4.8RC), no patches to xschem unless
