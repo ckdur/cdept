@@ -479,3 +479,4 @@ See ROADMAP §4: per-tool IPC (Phase 3), PDK heterogeneity, large waveforms, sco
 ### 2.7 ngspice in-process (2026-11-23)
 `libcdept::ngspice` loads libngspice with dlopen (`$CDEPT_LIBNGSPICE`), one Session at a time; `cdept ngspice live`; `run_deck` is Outcome-compatible but not wired into sim yet. See [NGSPICE.md](NGSPICE.md).
 - Magic batch adapter (`libcdept/src/magic/`, `cdept magic extract|drc|lef`, docs/MAGIC.md): extraction, DRC, LEF, GDS import through Tcl on stdin; real tests need Magic and a PDK in /opt/ext and skip otherwise.
+- Simulation tab (`cdept-gui/src/views/simulation.rs`, 2026-11-23): setup.toml form + Run/Cancel on `sim::RunOptions { queue, cancel }` + jobs list + results table; one tab, one testbench at a time; Jobs panel still a placeholder. See SIMULATION.md §5, `scripts/simulation.script`.

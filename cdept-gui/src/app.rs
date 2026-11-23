@@ -45,7 +45,8 @@ fn embedded_format(format: Option<Format>) -> bool {
 
 /// Whether a view opens in a document tab: schematics, symbols and layouts do.
 pub(crate) fn has_viewer(entry: &Entry) -> bool {
-    embedded_format(entry.format) && entry.main_file.is_some()
+    crate::views::simulation::is_testbench(entry)
+        || embedded_format(entry.format) && entry.main_file.is_some()
 }
 
 /// The xschem schematic of a cell: the view named `schematic` if it is one, else the
@@ -258,6 +259,14 @@ impl CdeptApp {
 
     /// Open a view of a cell in a document tab, or show the tab it is already in.
     fn open_view(&mut self, ctx: &Context, selection: Selection) {
+        // A testbench opens in the Simulation tab.
+        let is_testbench = self.ctx.project.as_ref().is_some_and(|p| {
+            selection.view.is_some()
+                && crate::views::simulation::testbench_of(p, &selection).is_some()
+        });
+        if is_testbench {
+            return self.apply(ctx, Action::OpenSimulation { selection, run: false });
+        }
         if let (Some(library), Some(cell), Some(view)) =
             (selection.library, selection.cell, selection.view)
         {
@@ -427,6 +436,11 @@ impl CdeptApp {
     /// `tech …` of a test script: the New Project wizard and the technology.
     pub(crate) fn script_tech(&mut self, ctx: &Context, args: &[String]) -> Result<(), String> {
         crate::newproject::script(&mut self.ctx, ctx, args)
+    }
+
+    /// `sim …` of a test script (views/simulation.rs).
+    pub(crate) fn script_sim(&mut self, args: &[String]) -> Result<(), String> {
+        crate::views::simulation::script(self.views.simulation_mut(), &mut self.ctx, args)
     }
 
     /// `organise …` of a test script: Go to Cell, categories, Import Project, and the
@@ -1306,6 +1320,25 @@ impl CdeptApp {
                 format,
             } => self.netlist_to_view(ctx, &library, &cell, format),
             Action::DetectTools => self.ctx.tools.start_detection(ctx),
+            Action::OpenSimulation { selection, run } => {
+                let target = self
+                    .ctx
+                    .project
+                    .as_ref()
+                    .and_then(|p| crate::views::simulation::testbench_of(p, &selection));
+                match (target, self.ctx.project.as_ref()) {
+                    (Some(target), Some(project)) => {
+                        self.views.simulation_mut().open(project, target, run);
+                        let win = self.layout.open_tab(Tab::Simulation);
+                        Self::focus(ctx, win);
+                    }
+                    _ => tracing::info!(
+                        target: "cdept::sim",
+                        "{}: no testbench view to simulate",
+                        selection.cell.as_deref().unwrap_or("selection")
+                    ),
+                }
+            }
             Action::UsedBy(selection) => {
                 if let (Some(library), Some(cell)) = (selection.library, selection.cell) {
                     self.ctx.refactor.show = Some(crate::refactor::Show {

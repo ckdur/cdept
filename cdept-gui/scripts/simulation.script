@@ -1,0 +1,92 @@
+# The Simulation tab on examples/ihp-inv: the testbench view tb_inv opens in it, the
+# setup is edited and saved, a run goes through the job queue, the results table.
+# Writes into the project (setup.toml, simulations/): use a copy (run.sh does).
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice \
+#   CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=ihp-inv \
+#     cdept-gui/scripts/run.sh cdept-gui/scripts/simulation.script
+#
+# `sim <verb> …` (views/simulation.rs):
+#   open <lib> <cell> <view>         show a testbench (as a double click does)
+#   menu_open|menu_run <lib> <cell> [<view>]   the Library Manager's context menu
+#   set <field> <value>              simulator, models, schematic, corners, temperatures,
+#                                    measures (` ; ` between lines); add_variable <n> <v>;
+#                                    add_spec <name> [min] [max]; set_spec <name> <min|max> <v>
+#   save | revert | run [corner…] | cancel
+#   expect_corners <name>…           the form offers these corners (from tech.toml)
+#   expect_dirty|expect_problem|expect_no_problem|expect_target|expect_state
+#   wait                             until the run ended (tried for 2 minutes)
+#   expect_rows <n> <PASS|FAIL|MISSING>   spec rows of the results; expect_points <n>
+#   expect_jobs <n> [state]          jobs of the run in the queue
+#   expect_file <point> <file>       a file of a run point's folder
+
+panel Library Manager
+wait 0.3
+
+# Double-clicking the testbench view opens the Simulation tab, not an editor.
+open cells tb_inv testbench
+sim expect_target cells/tb_inv/testbench
+sim expect_state idle
+sim expect_dirty no
+# The corners come from the technology snapshot.
+sim expect_corners tt ff ss
+sim expect_no_problem
+
+# An editor that validates: a bad number, a min above max (the schema's), then fine.
+sim set temperatures abc
+sim expect_dirty yes
+sim expect_problem not a number
+sim set temperatures 27
+sim add_spec tpd 5e-10 1e-10
+sim expect_problem above max
+sim revert
+sim expect_dirty no
+
+# Edit and save: only the typical corner, a looser spec; the file stays valid.
+sim set corners tt
+sim set_spec tpd max 4e-10
+sim expect_dirty yes
+sim save
+sim expect_dirty no
+shell grep -q 'corners = \["tt"\]' libs/cells/tb_inv/testbench/setup.toml
+shell grep -q '^# Testbench of the inverter' libs/cells/tb_inv/testbench/setup.toml
+
+# Run one corner, three of them.
+sim run
+sim wait
+sim expect_state finished
+sim expect_points 1
+sim expect_rows 1 PASS
+sim expect_jobs 1 done
+sim expect_file tt_27 out.log
+sim expect_file tt_27 deck.sp
+sim set corners tt ff ss
+sim run
+sim wait
+sim expect_points 3
+sim expect_rows 3 PASS
+sim expect_rows 0 FAIL
+sim expect_jobs 3 done
+
+# A spec that cannot be met: FAIL rows, colored red in the table.
+sim set_spec tpd max 1e-13
+sim run
+sim wait
+sim expect_rows 3 FAIL
+sim expect_rows 0 PASS
+
+# Cancel right after Run: nothing finishes as PASS.
+sim set_spec tpd max 4e-10
+sim run
+sim cancel
+sim wait
+sim expect_state finished
+sim expect_rows 0 PASS
+
+# Run from the cell's context menu: opens the tab and runs the saved setup.
+sim revert
+sim menu_run cells tb_inv
+sim wait
+sim expect_rows 3 PASS
+log simulation: ok
+quit

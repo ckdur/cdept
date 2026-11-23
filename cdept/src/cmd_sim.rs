@@ -100,7 +100,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                     JobState::Cancelled => eprintln!("{:<10} cancelled", i.name),
                 }
             });
-            let options = sim::RunOptions { jobs: jobs.unwrap_or(0), on_event: Some(on_event) };
+            let options = sim::RunOptions { jobs: jobs.unwrap_or(0), on_event: Some(on_event), ..Default::default() };
             let results = sim::run_testbench_with(project, &tb, &simulator, &corners, &options)?;
             let mut bad = 0;
             for r in &results {

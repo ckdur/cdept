@@ -75,6 +75,12 @@ pub struct RunOptions {
     pub jobs: usize,
     /// Called on every job event (a point starts, finishes, fails), from worker threads.
     pub on_event: Option<crate::jobs::Listener>,
+    /// Put the points on this queue (a UI's, shown live) instead of a private one. Then
+    /// `jobs` and `on_event` do nothing (listen on the queue itself) and only this
+    /// run's jobs are waited for.
+    pub queue: Option<std::sync::Arc<crate::jobs::Queue>>,
+    /// Set to stop the run: checked after the netlist, before each point is queued.
+    pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 /// Netlist the testbench's schematic (once) and run every point (or only `only`,
@@ -131,14 +137,26 @@ pub fn run_testbench_with(
     let title = format!("{}/{}/{}", tb.library, tb.cell, tb.view);
     let env = project.tool_env();
     let workers = if options.jobs > 0 { options.jobs } else { Queue::default_workers().min(points.len()) };
-    let queue = Queue::new(workers);
-    if let Some(f) = &options.on_event {
-        let f = f.clone();
-        queue.on_event(move |e| f(e));
-    }
+    let own;
+    let queue: &Queue = match &options.queue {
+        Some(q) => q,
+        None => {
+            own = Queue::new(workers);
+            if let Some(f) = &options.on_event {
+                let f = f.clone();
+                own.on_event(move |e| f(e));
+            }
+            &own
+        }
+    };
+    let cancelled = || options.cancel.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed));
+    let mut ids = vec![];
     type Slot = Arc<Mutex<Option<Result<Outcome>>>>;
     let mut slots: Vec<Slot> = vec![];
     for point in &points {
+        if cancelled() {
+            break;
+        }
         let lines = models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?;
         let text = deck::build(&tb.setup, point, &title, &lines, &netlist);
         let dir = base.join(point.name());
@@ -157,9 +175,11 @@ pub fn run_testbench_with(
             verdict
         })
         .log(log);
-        queue.submit(spec);
+        ids.push(queue.submit(spec));
     }
-    queue.wait_all();
+    for id in ids {
+        queue.wait(id);
+    }
     let results = points
         .into_iter()
         .zip(slots)

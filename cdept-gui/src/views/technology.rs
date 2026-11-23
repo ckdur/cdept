@@ -321,7 +321,7 @@ pub(crate) enum Ask {
 }
 
 /// Open a file or folder with the desktop's program for it.
-fn open_outside(path: &Path) {
+pub(crate) fn open_outside(path: &Path) {
     let program = if cfg!(target_os = "macos") {
         "open"
     } else if cfg!(windows) {

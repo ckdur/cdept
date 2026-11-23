@@ -110,6 +110,8 @@ pub enum Tab {
     Problems,
     /// What CDePT knows about the project's PDK (the technology snapshot).
     Technology,
+    /// The testbench being edited and run (docs/SIMULATION.md §5).
+    Simulation,
     /// Search across the libraries.
     Search,
     /// An opened view of a cell (see [`Documents`]).
@@ -127,7 +129,7 @@ pub enum Area {
 
 impl Tab {
     /// The fixed tabs, in the order the Window menu lists them.
-    pub const ALL: [Tab; 11] = [
+    pub const ALL: [Tab; 12] = [
         Tab::Start,
         Tab::LibraryManager,
         Tab::Libraries,
@@ -138,12 +140,17 @@ impl Tab {
         Tab::Jobs,
         Tab::Problems,
         Tab::Technology,
+        Tab::Simulation,
         Tab::Search,
     ];
 
     pub fn area(self) -> Area {
         match self {
-            Tab::Start | Tab::LibraryManager | Tab::Technology | Tab::Document(_) => Area::Center,
+            Tab::Start
+            | Tab::LibraryManager
+            | Tab::Technology
+            | Tab::Simulation
+            | Tab::Document(_) => Area::Center,
             Tab::Libraries | Tab::Hierarchy => Area::Left,
             Tab::Inspector | Tab::Tools => Area::Right,
             Tab::Console | Tab::Jobs | Tab::Problems | Tab::Search => Area::Bottom,
@@ -545,7 +552,7 @@ mod tests {
             let n = state.iter_all_tabs().filter(|(_, t)| **t == tab).count();
             let expected = usize::from(!matches!(
                 tab,
-                Tab::LibraryManager | Tab::Technology | Tab::Search
+                Tab::LibraryManager | Tab::Technology | Tab::Simulation | Tab::Search
             ));
             assert_eq!(n, expected, "{tab:?}");
         }

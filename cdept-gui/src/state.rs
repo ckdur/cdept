@@ -132,6 +132,9 @@ pub enum Action {
     DetectTools,
     /// Show the users of a cell in the Hierarchy panel.
     UsedBy(Selection),
+    /// Open a testbench view (or the first testbench of a cell) in the Simulation tab;
+    /// with `run` start its simulation at once.
+    OpenSimulation { selection: Selection, run: bool },
     /// Start the open documents again (not those with unsaved changes), so they run
     /// with the project's present technology.
     RestartDocuments,

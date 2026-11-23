@@ -28,6 +28,8 @@ const SETTLE_FRAMES: u32 = 3;
 /// xschem reports (a title, a dialog) arrives a moment after its answer, and a
 /// background job (hierarchy, netlist, preview) has to start an xschem first.
 const PATIENCE: Duration = Duration::from_secs(8);
+/// `sim wait`: a simulation netlists with xschem and runs every corner.
+const SIM_PATIENCE: Duration = Duration::from_secs(120);
 /// Steps of a drag between its two ends.
 const DRAG_STEPS: u32 = 8;
 /// While waiting for an answer of xschem, how often to send it another request. A
@@ -102,6 +104,8 @@ enum Command {
     Layout(LayoutCommand),
     /// `tech <verb> …`: the New Project wizard and the technology (newproject.rs).
     Tech(Vec<String>),
+    /// `sim <verb> …`: the Simulation tab (views/simulation.rs).
+    Sim(Vec<String>),
     /// `organise <verb> …`: Go to Cell, Search, categories, Import Project (import.rs).
     Organise(Vec<String>),
     /// Changes on disk, git marks, the trash (background/script.rs).
@@ -220,6 +224,9 @@ impl Command {
         if let Command::Definitions(command) = self {
             return command.patient();
         }
+        if let Command::Sim(args) = self {
+            return crate::views::simulation::patient(args);
+        }
         matches!(
             self,
             Command::Menu(_)
@@ -270,6 +277,14 @@ impl Command {
                         | LayoutCommand::ExpectPin(..),
                 )
         ) || matches!(self, Command::Disk(command) if command.patient())
+    }
+
+    /// How long a patient command is tried again. A simulation takes a while.
+    fn patience(&self) -> Duration {
+        match self {
+            Command::Sim(args) if args.first().map(String::as_str) == Some("wait") => SIM_PATIENCE,
+            _ => PATIENCE,
+        }
     }
 }
 
@@ -583,6 +598,7 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
         "check_picture" => Command::CheckPicture,
         "log" => Command::Log(rest.to_string()),
         "tech" => Command::Tech(args.iter().map(|word| word.to_string()).collect()),
+        "sim" => Command::Sim(args.iter().map(|word| word.to_string()).collect()),
         "organise" => Command::Organise(args.iter().map(|word| word.to_string()).collect()),
         "quit" => Command::Quit,
         "mode" => Command::Layout(LayoutCommand::Mode(text()?)),
@@ -1004,7 +1020,7 @@ impl Script {
         match self.start(app, ctx, command.clone()) {
             Ok(()) => self.give_up = None,
             Err(message) => {
-                let give_up = *self.give_up.get_or_insert(Instant::now() + PATIENCE);
+                let give_up = *self.give_up.get_or_insert(Instant::now() + command.patience());
                 if command.patient() && Instant::now() < give_up {
                     // Not yet: the same command again in the next frame.
                     self.commands.push_front((line, command));
@@ -1858,6 +1874,7 @@ impl Script {
             Command::Layout(command) => self.layout_command(app, command)?,
             Command::Log(text) => tracing::info!(target: "cdept::script", "{text}"),
             Command::Tech(args) => app.script_tech(ctx, &args)?,
+            Command::Sim(args) => app.script_sim(&args)?,
             Command::Organise(args) => app.script_organise(ctx, &args)?,
             Command::Disk(command) => {
                 let mut requests = Vec::new();

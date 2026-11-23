@@ -2,7 +2,7 @@
 
 Status 2026-11-23: a testbench view, the deck CDePT builds, batch ngspice runs over
 corners × temperatures, `.meas` results against specs. Code: `libcdept/src/sim/`, CLI
-`cdept sim`. Not built yet: GUI, job queue, sweeps of design variables, Monte Carlo,
+`cdept sim`; the Simulation tab (§5). Not built yet: sweeps of design variables, Monte Carlo,
 Xyce/VACASK, results database, waveform viewer (Phase 5).
 
 ## 1. The testbench view
@@ -73,9 +73,33 @@ is tested with stand-in scripts.
 
 ## 4. Open
 
-- GUI: testbench editor, run button, results panel. Job queue (parallel points, cancel).
+- GUI: the editor shows the fields of §1 that exist today (new fields of the schema are kept as they are in the file but not edited until the form learns them); the Jobs panel is still a placeholder (the jobs are listed in the Simulation tab).
 - Sweeps of `[variables]`, Monte Carlo (`mc` corner sets exist in the snapshot).
 - Only the first measurement value per name is kept (`.meas` inside sweeps repeats it).
 - Raw file reader (Phase 5); `out.raw` holds several plots when there are several analyses.
 - Post-layout: swap the DUT for the extracted netlist (Phase 7).
 - Xyce/VACASK through the same deck builder; OpenVAF for Verilog-A.
+
+## 5. The Simulation tab (GUI)
+
+`Tab::Simulation`, `cdept-gui/src/views/simulation.rs`. Double-clicking a testbench view
+in the Library Manager (or Open / Simulation in its context menu) shows it there; **Run
+Simulation** in the context menu of a view or of a cell opens it and runs at once.
+
+- **Setup.** A form over `sim::Setup`: simulator, model set, schematic, corners (the
+  boxes are the corners of the model set in the project's `tech.toml`; a corner the
+  technology lacks is shown with `?`), temperatures, `[variables]`, `[options]`,
+  analyses (per kind), measures, `.save`, specs. The form is validated live with
+  `Setup::parse` (the message is under the buttons). Save writes `setup.toml` again
+  (keys sorted, empty ones left out, comment lines before the first key kept; comments
+  elsewhere are lost), Revert reads it again. Run saves first.
+- **Run / Cancel.** A thread calls `sim::run_testbench_with` with the tab's own
+  `jobs::Queue` and a cancel flag (`RunOptions::queue`, `RunOptions::cancel`); the
+  queue's events wake the window. Cancel stops the netlisting from queuing points and
+  cancels the queued and running jobs.
+- **Jobs.** One row per run point from `Queue::snapshot`: state, progress, elapsed, the
+  last line of the job log (hover for more), the error of a failed job.
+- **Results.** Per point a table of the specs (value, bound, PASS green / FAIL red /
+  MISSING amber) and the other measures; **Open folder** and **Open log** hand the
+  point's folder or `out.log` to the desktop (`xdg-open`).
+- Test: `cdept-gui/scripts/simulation.script` (docs/GUI-TESTING.md).
