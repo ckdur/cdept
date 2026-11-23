@@ -41,14 +41,23 @@ cdept sim run cells tb_inv --view vacask
 - VACASK reads its own netlist format and OSDI models. The first run converts the
   technology's ngspice models and compiles the Verilog-A with OpenVAF into
   `<project>/.cdept/osdi/` and records them as `[models.vacask]` in tech.toml.
-- Works on ihp-sg13g2 (tpd within about 0.2 % of ngspice on the example). Not on
-  sky130A: its MOS models do not convert, and the run says "has no usable VACASK models".
-- Monte Carlo is refused when the setup loads (the statistical models are not converted).
+- Works on ihp-sg13g2: the inverter's tests, the OTA suite and the test templates agree
+  with ngspice (most measurements within 0.1 %, transient edges within a few percent; the
+  table is in [VACASK.md](../VACASK.md#6-parity-with-ngspice)). Not on sky130A/B: VACASK's
+  converter does not read its MOS models, and the run says "has no usable VACASK models".
+- Any testbench runs with it without editing the file: `cdept sim run cells tb_inv
+  --simulator vacask` (also `sim deck` and `sim suite`, and `simulator = "vacask"` in a
+  `suite.toml`).
+- Monte Carlo works (process, mismatch, both): CDePT makes the random draws itself, seeded
+  by `seed` and the run, so a run repeats; ngspice's draws for the same seed are other
+  numbers of the same distribution ([Monte Carlo](monte-carlo.md)).
 - Netlist limits (B, K, F/H sources, `.ic`, `.include` of model files) are listed in
-  [VACASK.md](../VACASK.md).
-- `.meas` is not available in VACASK: the setup's `measures` are evaluated by CDePT with a
-  subset (`trig`/`targ`, `max`, `min`, `pp`, `avg`, `rms`, `integ`, `find ... at=`);
-  calculator `[[output]]` expressions work on its raw files.
+  [VACASK.md](../VACASK.md); the varicap `sg13_hv_svaricap` is refused by name.
+- `.meas` is not available in VACASK: the setup's `measures` are evaluated by CDePT on
+  the raw file (`trig`/`targ`, `max`, `min`, `pp`, `avg`, `rms`, `integ`, `find ... at=`,
+  `find ... when`); calculator `[[output]]` expressions work on its raw files, noise and
+  AC (complex) included.
+- A cancelled run point kills VACASK.
 
 ## Qucs-S schematics
 

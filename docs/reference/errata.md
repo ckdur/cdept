@@ -61,9 +61,13 @@ Xyce, Monte Carlo and mismatch
   samples. See [other simulators](../howto/other-simulators.md).
 
 VACASK
-: Monte Carlo is refused. The PDK's models convert for IHP SG13G2 but not for sky130A;
-  devices such as `bondpad` and the varicap are not converted. Needs OpenVAF on first
-  use.
+: The PDK's models convert for IHP SG13G2 (Monte Carlo too: process, mismatch and both,
+  with CDePT's own draws) but not for sky130A (VACASK's converter has no `M` cards, binned
+  models or BSIM4; [VACASK.md](../VACASK.md#2-models-the-pdks-have-no-vacask-ones)). The varicap `sg13_hv_svaricap` is
+  refused by name (its resistor reads a node voltage). `B`, `F`/`H` sources and `.ic` in the
+  testbench netlist are refused, so a testbench that uses them (`flash3/inl_dnl`) runs
+  with ngspice only. Transient edge measurements differ from ngspice's by a few percent at
+  default tolerances (different step control). Needs OpenVAF on first use.
 
 Fractional temperatures in folder names
 : `27.5` becomes the folder suffix `27p5`.

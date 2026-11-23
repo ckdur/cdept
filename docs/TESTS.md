@@ -271,7 +271,12 @@ missing net failing the suite; skipped without ngspice, the helper or the PDK);
 `libcdept/tests/real_ota.rs` loads the OTA's views, suite and the `ac_load` template
 without a PDK (`mod hermetic`) and runs the OTA suite at tt, 27 C (all specs pass, gain,
 UGBW and phase margin in windows), the load sweep and the flash ADC for real
-(`mod real_pdk`); GUI: `cdept-gui/scripts/tests.script` and `cdept-gui/scripts/ota.script`
+(`mod real_pdk`); `libcdept/tests/real_vacask.rs` runs the inverter's tests and the OTA
+suite at the typical corner with VACASK and ngspice and compares every measurement
+(tolerances per measurement, observed differences in [VACASK.md](VACASK.md#6-parity-with-ngspice)),
+the PDK's devices (run, or refused by name), and Monte Carlo on VACASK (statistics against
+ngspice's, the seed repeating, the three modes; `cdept-gui/scripts/vacask.script` is the
+form's side of it; skipped without VACASK, OpenVAF, python3, ngspice, the helper or the PDK); GUI: `cdept-gui/scripts/tests.script` and `cdept-gui/scripts/ota.script`
 (the OTA suite from the Simulation tab, 90 PASS rows).
 
 Checked by hand on the inverter, not in the tests: `dc_op`, `noise` (spot 14 uV/sqrt(Hz)

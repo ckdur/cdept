@@ -71,7 +71,9 @@ the waveforms of the raw file. The language and the function library are defined
 
 `simulator` in the setup selects the engine. ngspice is the default; Xyce runs one
 analysis per deck and supports process Monte Carlo; VACASK runs OSDI models converted from
-the technology's ngspice models. The limits of each are in
+the technology's ngspice models, with Monte Carlo drawn by CDePT. `--simulator` on
+`cdept sim run`, `sim deck` and `sim suite` runs a testbench with another engine without
+editing it. The limits of each are in
 [Other simulators](../howto/other-simulators.md) and the tool pages
 [NGSPICE.md](../NGSPICE.md), [VACASK.md](../VACASK.md) and [QUCS.md](../QUCS.md).
 

@@ -24,6 +24,7 @@ name = "ac"
 | `description` | string | empty | Shown in the report. |
 | `corners` | array of strings | empty | When not empty, replaces the `corners` of every test. |
 | `temperatures` | array of numbers (deg C) | empty | When not empty, replaces the `temperatures` of every test. |
+| `simulator` | `"ngspice"`, `"xyce"`, `"vacask"` | empty | When not empty, runs every test with this simulator instead of its own (`cdept sim suite --simulator` wins over it). A test the simulator cannot run is reported as a test that did not run, with the reason. |
 | `test` | array of tables | required | The tests, run in this order. |
 
 ### `[[test]]`

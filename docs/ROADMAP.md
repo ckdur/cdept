@@ -217,7 +217,11 @@ Done 2026-11-23 ([SIMULATION.md](SIMULATION.md)): testbench view, deck, ngspice 
 corners × temperatures × variable sweeps, Monte Carlo, measures and specs, job queue
 ([JOBS.md](JOBS.md)), results store (`result.json` + `results.db`), Simulation tab in the GUI.
 VACASK as a testbench simulator and OpenVAF on-demand compile (cached per technology) are
-done ([VACASK.md](VACASK.md): ihp-sg13g2 works, sky130 does not convert yet).
+done ([VACASK.md](VACASK.md)). SYMBI-78 (2026-11-24) brought VACASK to ngspice's level on
+ihp-sg13g2: Monte Carlo (process, mismatch, both, with CDePT's own seeded draws), the test
+templates and the OTA suite agree with ngspice, `--simulator` on `sim run|deck|suite`,
+`SimKind::capabilities()`, cancel. Still to do: sky130 (VACASK's converter reads no `M` cards or
+binned BSIM4), the varicap `sg13_hv_svaricap` (Verilog-A resistor), `B` sources.
 Milestone reached 2026-11-23 ([TESTS.md](TESTS.md) §6): the 5-transistor OTA of
 `examples/ihp-inv` (`cells/ota5t`, IHP SG13G2, 1.2 V, 20 uA bias, 100 fF) runs as a suite
 from the Simulation tab over five corners (tt/ff/ss/fs/sf) and three temperatures
