@@ -294,6 +294,23 @@ mc = [
     "cornerMOSlv.lib mos_tt_stat",
     "cornerRES.lib res_stat",
 ]
+# Written by hand (the PDK has no corner with both; `cdept tech refresh` drops it):
+# process variation and MOS mismatch. ngspice keeps the first definition of a
+# subcircuit, so the mismatch device models are included before the statistical
+# corner, whose own (mismatch-free) models are then ignored.
+mc_mm = [
+    "sg13g2_moslv_mismatch.lib",
+    "sg13g2_moslv_mod_mismatch.lib",
+    "sg13g2_moshv_mismatch.lib",
+    "sg13g2_moshv_mod_mismatch.lib",
+    "cornerCAP.lib cap_typ_stat",
+    "cornerDIO.lib dio_tt_stat",
+    "cornerHBT.lib hbt_typ_stat",
+    "cornerMOSCAP.lib moscap_tt_stat",
+    "cornerMOShv.lib mos_tt_stat",
+    "cornerMOSlv.lib mos_tt_stat",
+    "cornerRES.lib res_stat",
+]
 sf = [
     "cornerCAP.lib cap_typ",
     "cornerDIO.lib dio_tt",

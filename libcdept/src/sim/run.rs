@@ -9,6 +9,10 @@ use eyre::{Result, WrapErr, bail};
 /// Environment variable that names the ngspice program (else `PATH` is searched).
 pub const NGSPICE_ENV: &str = "CDEPT_NGSPICE";
 
+/// Environment entry a Xyce run reads extra command-line arguments from (one per line;
+/// [`super::deck::xyce_args`]): the model plugins and the Monte Carlo seed.
+pub const XYCE_ARGS_ENV: &str = "CDEPT_XYCE_ARGS";
+
 /// Which simulator a program is. The deck and the command line differ.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SimKind {
@@ -155,7 +159,14 @@ fn run_xyce(
     for old in [&raw, &log, &dir.join(format!("{name}.mt0"))] {
         let _ = std::fs::remove_file(old);
     }
-    let job = crate::batch::xyce::job(&simulator.program, name, dir, env);
+    let mut job = crate::batch::xyce::job(&simulator.program, name, dir, env);
+    if let Some((_, extra)) = env.iter().rev().find(|(k, _)| *k == XYCE_ARGS_ENV) {
+        // Before the deck: Xyce wants its options first.
+        let extra: Vec<std::ffi::OsString> =
+            extra.to_string_lossy().lines().filter(|l| !l.is_empty()).map(Into::into).collect();
+        let at = job.args.len().saturating_sub(1);
+        job.args.splice(at..at, extra);
+    }
     let out = job.run_unchecked()?;
     let text = std::fs::read_to_string(&log).unwrap_or_default();
     if !out.status.success() || !raw.is_file() {

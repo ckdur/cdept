@@ -1,0 +1,36 @@
+# Monte Carlo with Xyce: each run is one `.SAMPLING useExpr=true` sample with its own
+# `-randseed` (the same seed repeats, another changes the gauss() draws of the IHP
+# `mos_tt_stat` models). Process variation only: the PDK's Xyce models have no
+# transistor mismatch sections.
+#   cdept sim run cells tb_inv --view xyce_mc [--runs 50 --seed 7]
+# Needs Xyce ($CDEPT_XYCE or PATH). The model plugins (PSP103) are passed with -plugin
+# from tech.toml. The PDK's Xyce statistical files leave `sg13g2_*_pmos_vfbo_mm` and the
+# hv equivalents undefined (the _stat sections define `sg13g2_*_vfbo` instead), which
+# Xyce rejects; the [variables] below tie them to the drawn parameters.
+schematic = "cells/tb_inv"
+simulator = "xyce"
+temperatures = [27]
+save = ["v(in)", "v(out)"]
+measures = [
+  "tran tpd trig v(in) val=0.5 rise=1 targ v(out) val=0.5 fall=1",
+]
+
+[variables]
+vdd = "1.2"
+sg13g2_lv_nmos_vfbo_mm = "sg13g2_lv_nmos_vfbo"
+sg13g2_lv_pmos_vfbo_mm = "sg13g2_lv_pmos_vfbo"
+sg13g2_hv_nmos_vfbo_mm = "sg13g2_hv_nmos_vfbo"
+sg13g2_hv_pmos_vfbo_mm = "sg13g2_hv_pmos_vfbo"
+
+[montecarlo]
+runs = 8
+seed = 1
+
+[[analysis]]
+kind = "tran"
+step = "5p"
+stop = "1.2n"
+
+[[spec]]
+name = "tpd"
+max = 4e-10
