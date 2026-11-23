@@ -139,6 +139,102 @@ fn montecarlo_runs_are_independent_and_repeatable() {
     assert!(grid[0].record.is_none());
 }
 
+fn tpds(rs: &[sim::PointResult]) -> Vec<f64> {
+    rs.iter().map(|r| r.outcome.as_ref().unwrap_or_else(|e| panic!("{}: {e:#}", r.point.name())).measures["tpd"]).collect()
+}
+
+/// Mismatch (tt_mm: per-device agauss) and process + mismatch (mc_mm) draw per run
+/// seed: the runs differ, the same base seed repeats, another changes them, and the
+/// three modes give three different sets of numbers.
+#[test]
+fn mismatch_and_combined_monte_carlo_follow_the_seed() {
+    use libcdept::sim::setup::McMode;
+    let Some((_dir, project, simulator)) = open_example() else { return };
+    let tb = sim::open(&project, "cells", "tb_inv", "mismatch").unwrap();
+    let run = |mode: McMode, seed: u64| {
+        let o = RunOptions { mc_runs: Some(4), mc_mode: Some(mode), mc_seed: Some(seed), no_store: true, ..Default::default() };
+        sim::run_testbench_with(&project, &tb, &simulator, &[], &o).unwrap()
+    };
+    let mm = run(McMode::Mismatch, 1);
+    assert_eq!(mm[0].point.name(), "tt_mm_27_r000");
+    let a = tpds(&mm);
+    let mut distinct = a.clone();
+    distinct.dedup();
+    assert_eq!(distinct.len(), 4, "{a:?}");
+    assert_eq!(tpds(&run(McMode::Mismatch, 1)), a);
+    assert_ne!(tpds(&run(McMode::Mismatch, 2)), a);
+    let both = run(McMode::Both, 1);
+    assert_eq!(both[0].point.name(), "mc_mm_27_r000");
+    let b = tpds(&both);
+    assert_eq!(tpds(&run(McMode::Both, 1)), b);
+    assert_ne!(tpds(&run(McMode::Both, 2)), b);
+    let process = tpds(&run(McMode::Process, 1));
+    assert!(process != a && process != b && a != b);
+    // A model set without a corner with both is an error that says what to do.
+    let mut project2 = project.clone();
+    if let Some(tech) = project2.tech.as_mut() {
+        for set in tech.models.sets.values_mut() {
+            set.corners.remove("mc_mm");
+        }
+    }
+    let o = RunOptions { mc_runs: Some(2), mc_mode: Some(McMode::Both), no_store: true, ..Default::default() };
+    let err = sim::run_testbench_with(&project2, &tb, &simulator, &[], &o).err().map(|e| format!("{e:#}")).unwrap_or_default();
+    assert!(err.contains("both_corner"), "{err}");
+}
+
+/// Statistics over a Monte Carlo run: percentiles, histogram, yield.
+#[test]
+fn statistics_of_a_montecarlo_run() {
+    let Some((_dir, project, simulator)) = open_example() else { return };
+    let mut tb = sim::open(&project, "cells", "tb_inv", "montecarlo").unwrap();
+    let o = RunOptions { mc_runs: Some(12), no_store: true, ..Default::default() };
+    let probe = tpds(&sim::run_testbench_with(&project, &tb, &simulator, &[], &o).unwrap());
+    let mut sorted = probe.clone();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    // A spec in the middle of the distribution: half the runs pass.
+    tb.setup.specs[0].max = Some((sorted[5] + sorted[6]) / 2.0);
+    let results = sim::run_testbench_with(&project, &tb, &simulator, &[], &o).unwrap();
+    let records: Vec<_> = results.iter().map(|r| r.run.clone()).collect();
+    let report = sim::stats::analyze(&records, 6, 3.0);
+    assert_eq!((report.runs, report.pass), (12, 6));
+    let spec = &report.specs[0];
+    assert_eq!((spec.pass, spec.total), (6, 12));
+    assert_eq!(spec.within_k_sigma, Some(false));
+    let g = spec.gaussian.unwrap();
+    assert!((0.2..0.8).contains(&g), "{g}");
+    let d = &report.measures["tpd"];
+    assert_eq!(d.histogram.counts.iter().sum::<usize>(), 12);
+    assert!(d.stats.min <= d.p5 && d.p5 <= d.p50 && d.p50 <= d.p95 && d.p95 <= d.stats.max);
+    let text = sim::stats::format_report(&report);
+    assert!(text.contains("6/12") && text.contains("50.0%") && text.contains('#'), "{text}");
+}
+
+/// Xyce Monte Carlo: one `.SAMPLING` sample per run with `-randseed`. Skipped without
+/// Xyce (CDEPT_XYCE or PATH).
+#[test]
+fn xyce_montecarlo_follows_the_seed() {
+    let Some(xyce) = Simulator::find_kind(sim::run::SimKind::Xyce) else {
+        eprintln!("skipped: Xyce not found");
+        return;
+    };
+    let Some((_dir, project, _)) = open_example() else { return };
+    let tb = sim::open(&project, "cells", "tb_inv", "xyce_mc").unwrap();
+    let run = |seed: u64| {
+        let o = RunOptions { mc_runs: Some(3), mc_seed: Some(seed), no_store: true, ..Default::default() };
+        sim::run_testbench_with(&project, &tb, &xyce, &[], &o).unwrap()
+    };
+    let a = tpds(&run(1));
+    let mut distinct = a.clone();
+    distinct.dedup();
+    assert_eq!(distinct.len(), 3, "{a:?}");
+    assert_eq!(tpds(&run(1)), a);
+    assert_ne!(tpds(&run(2)), a);
+    // Mismatch needs a corner of its own: the PDK's Xyce models have none for the MOS.
+    let o = RunOptions { mc_runs: Some(2), mc_mode: Some(sim::setup::McMode::Mismatch), no_store: true, ..Default::default() };
+    let err = sim::run_testbench_with(&project, &tb, &xyce, &[], &o).err().map(|e| format!("{e:#}")).unwrap_or_default();
+    assert!(err.contains("mismatch_corner"), "{err}");
+}
+
 /// `[[output]]` expressions run on the raw file of every point: the calculator's delay
 /// equals the simulator's own `.meas`, a spec may name the output, and the record flags
 /// where it came from.

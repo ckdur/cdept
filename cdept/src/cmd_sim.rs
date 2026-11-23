@@ -31,6 +31,9 @@ pub enum SimCommand {
         /// setup's [montecarlo] runs, or turns Monte Carlo on).
         #[arg(long)]
         runs: Option<u32>,
+        /// What the Monte Carlo runs draw: process, mismatch or both (default: the setup's).
+        #[arg(long)]
+        mode: Option<sim::setup::McMode>,
         /// Base seed of the Monte Carlo runs.
         #[arg(long)]
         seed: Option<u64>,
@@ -54,6 +57,16 @@ pub enum SimCommand {
         /// Rebuild results.db from the result.json files first.
         #[arg(long)]
         reindex: bool,
+        /// Statistics of the latest runs: percentiles (p5/p50/p95), text histograms and
+        /// the yield per spec (measured, and estimated from mean and sigma).
+        #[arg(long)]
+        stats: bool,
+        /// Histogram bins for --stats.
+        #[arg(long, default_value_t = 10)]
+        bins: usize,
+        /// Sigmas of the mean +- k sigma yield estimate for --stats.
+        #[arg(long, default_value_t = 3.0)]
+        sigma: f64,
     },
     /// List the test templates (built-in, the technology's and the project's), or show one.
     ///
@@ -228,23 +241,30 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             };
             let corner = tech.models.corner.clone().unwrap_or_default();
             let point = sim::deck::points(&tb.setup, &corner).remove(0);
-            let lines = tech.models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?;
             let file = std::env::temp_dir().join(format!("cdept-deck-{}.spice", std::process::id()));
             sim::netlist_for(project, &tb.schematic, &file, &tb.setup.simulator)?;
             let netlist = std::fs::read_to_string(&file)?;
             let _ = std::fs::remove_file(&file);
-            print!("{}", sim::build_deck(&tb.setup, &point, &format!("{library}/{cell}/{view}"), &lines, &netlist));
+            let title = format!("{library}/{cell}/{view}");
+            if tb.setup.simulator == "vacask" {
+                let ready = libcdept::vacask::models::ready(project)?;
+                print!("{}", libcdept::vacask::build_point(project, &ready, &tb.setup, &set, &point, &title, &netlist)?.text);
+                return Ok(());
+            }
+            let lines = tech.models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?;
+            print!("{}", sim::build_deck(&tb.setup, &point, &title, &lines, &netlist));
             Ok(())
         }
-        SimCommand::Run { library, cell, view, corners, jobs, runs, seed, no_mc, no_store } => {
+        SimCommand::Run { library, cell, view, corners, jobs, runs, mode, seed, no_mc, no_store } => {
             let view = view_of(project, &library, &cell, view)?;
             let tb = sim::open(project, &library, &cell, &view)?;
             let simulator = sim::Simulator::for_setup(&tb.setup).ok_or_else(|| {
                 eyre!(
-                    "the simulator '{}' was not found: put it on PATH or set {} (ngspice) or {} (Xyce)",
+                    "the simulator '{}' was not found: put it on PATH or set {} (ngspice), {} (Xyce) or {} (VACASK)",
                     tb.setup.simulator,
                     sim::run::NGSPICE_ENV,
-                    libcdept::batch::xyce::XYCE_ENV
+                    libcdept::batch::xyce::XYCE_ENV,
+                    libcdept::batch::vacask::VACASK_ENV
                 )
             })?;
             // One line per point as it starts and ends (the events come from worker threads).
@@ -263,6 +283,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                 on_event: Some(on_event),
                 mc_runs: runs,
                 mc_seed: seed,
+                mc_mode: mode,
                 no_mc,
                 no_store,
                 ..Default::default()
@@ -277,6 +298,10 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             } else {
                 println!("{} run(s): {} pass, {} fail, {} error", agg.runs, agg.pass, agg.fail, agg.error);
             }
+            if records.len() > 1 && results.iter().any(|r| r.point.seed.is_some()) {
+                println!();
+                print!("{}", sim::stats::format_report(&sim::stats::analyze(&records, 10, 3.0)));
+            }
             if results.iter().any(|r| r.record.is_some()) {
                 println!("index: {}", results::Store::path(&project.root).display());
             }
@@ -286,7 +311,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             }
             Ok(())
         }
-        SimCommand::Results { library, cell, view, all, reindex } => {
+        SimCommand::Results { library, cell, view, all, reindex, stats, bins, sigma } => {
             let view = view_of(project, &library, &cell, view)?;
             let mut db = results::Store::open(&project.root)?;
             if reindex {
@@ -298,7 +323,12 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             }
             print!("{}", results::format_table(&records));
             println!();
-            print!("{}", results::format_aggregate(&results::aggregate(&db.latest(&library, &cell, &view)?)));
+            let latest = db.latest(&library, &cell, &view)?;
+            print!("{}", results::format_aggregate(&results::aggregate(&latest)));
+            if stats {
+                println!();
+                print!("{}", sim::stats::format_report(&sim::stats::analyze(&latest, bins, sigma)));
+            }
             Ok(())
         }
     }

@@ -1,0 +1,27 @@
+# Process variation and per-device mismatch together (`mode = "both"`): the corner set
+# `mc_mm` of tech.toml (the PDK has none; see the comment there). 20 seeded runs:
+#   cdept sim run cells tb_inv --view both [--runs 50 --seed 7]
+schematic = "cells/tb_inv"
+temperatures = [27]
+save = ["v(in)", "v(out)"]
+measures = [
+  "tran tpd trig v(in) val=0.5 rise=1 targ v(out) val=0.5 fall=1",
+]
+
+[variables]
+vdd = "1.2"
+
+[montecarlo]
+runs = 20
+mode = "both"
+seed = 1
+
+
+[[analysis]]
+kind = "tran"
+step = "5p"
+stop = "1.2n"
+
+[[spec]]
+name = "tpd"
+max = 4e-10

@@ -751,6 +751,10 @@ impl Project {
     /// `$PDK_ROOT` and `$PDK` from [`Project::pdk`], then `[env]` of the user's local
     /// file, the rest from the environment.
     pub fn var(&self, name: &str) -> Option<String> {
+        // `$CDEPT_PROJECT` in a snapshot's paths: the project folder (generated files live there).
+        if name == "CDEPT_PROJECT" {
+            return Some(self.root.to_string_lossy().into_owned());
+        }
         match self.pdk.var(name) {
             Some(value) => Some(value.to_string()),
             None => self

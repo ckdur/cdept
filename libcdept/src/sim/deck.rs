@@ -194,6 +194,11 @@ pub fn build(setup: &Setup, point: &RunPoint, title: &str, models: &[String], ne
     if setup.simulator == "xyce" {
         return build_xyce(setup, point, title, models, netlist);
     }
+    if setup.simulator == "vacask" {
+        // The model lines are the SPICE ones; `vacask::build_point` adds the OSDI loads.
+        let inputs = crate::vacask::deck::Inputs { setup, point, title, models, netlist, defined: None, pdk: "", notes: &[] };
+        return crate::vacask::deck::build_or_comment(&inputs);
+    }
     let mut out = String::new();
     out.push_str(&format!("* CDePT testbench {title}, run {}\n", point.name()));
     if let Some(seed) = point.seed {
@@ -268,6 +273,35 @@ pub fn build(setup: &Setup, point: &RunPoint, title: &str, models: &[String], ne
     out
 }
 
+/// The extra command-line arguments Xyce needs for a run, one per line, or None for
+/// ngspice: `-plugin` with the model set's plugin libraries (the IHP PSP103 and R3
+/// models are plugins; without them Xyce knows no `YPSP103_VA` device) and
+/// `-randseed` for a Monte Carlo point. Passed to [`super::run`] in
+/// [`super::run::XYCE_ARGS_ENV`].
+pub fn xyce_args(
+    setup: &Setup,
+    point: &RunPoint,
+    set: &crate::tech::models::ModelSet,
+    var: impl Fn(&str) -> Option<String> + Copy,
+) -> Result<Option<String>, String> {
+    if setup.simulator != "xyce" {
+        return Ok(None);
+    }
+    let mut args: Vec<String> = vec![];
+    let plugins = set
+        .plugins
+        .iter()
+        .map(|p| p.resolve(var).map(|p| p.display().to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    if !plugins.is_empty() {
+        args.extend(["-plugin".into(), plugins.join(",")]);
+    }
+    if let Some(seed) = point.seed {
+        args.extend(["-randseed".into(), seed.to_string()]);
+    }
+    Ok(Some(args.join("\n")))
+}
+
 /// Options for Xyce are `.options <package> name=value`: the setup writes
 /// `package.name`, a bare name goes to `device`.
 fn xyce_options(setup: &Setup) -> Vec<String> {
@@ -301,11 +335,23 @@ pub fn build_xyce(setup: &Setup, point: &RunPoint, title: &str, models: &[String
         out.push_str(&format!(".temp {t}\n"));
     }
     let variables = merged_variables(setup, point);
+    if let Some(seed) = point.seed {
+        // Xyce draws gauss()/agauss() parameters only under `.SAMPLING useExpr=true`
+        // (one sample per run; `-randseed` is given on the command line, [`xyce_args`]).
+        // The IHP statistical models scale their sigma by `mc_ok`.
+        out.push_str(&format!("* Monte Carlo seed {seed} (-randseed), one .SAMPLING sample\n"));
+        if !variables.contains_key("mc_ok") {
+            out.push_str(".param mc_ok=1\n");
+        }
+    }
     if !variables.is_empty() {
         out.push_str("* design variables\n");
         for (name, value) in &variables {
             out.push_str(&format!(".param {name}={value}\n"));
         }
+    }
+    if point.seed.is_some() {
+        out.push_str(".SAMPLING\n+useExpr=true\n.options SAMPLES numsamples=1 SAMPLE_TYPE=MC\n");
     }
     for line in xyce_options(setup) {
         out.push_str(&line);
@@ -450,5 +496,23 @@ mod tests {
         // With `save`, those are what is printed.
         let s2 = Setup { save: vec!["v(out)".into()], ..s };
         assert!(build(&s2, &p, "t", &[], "").contains(".print tran v(out)\n"));
+    }
+
+    #[test]
+    fn xyce_montecarlo_samples_one_seeded_run() {
+        let s = Setup::parse("simulator=\"xyce\"\n[[analysis]]\nkind=\"op\"").unwrap();
+        let p = mc_points(&s, "mc", 2, 5).remove(1);
+        let deck = build(&s, &p, "t", &[".lib /m/x.lib mos_tt_stat".into()], "R1 a b 1k\n");
+        assert!(deck.contains(&format!("* Monte Carlo seed {} (-randseed)", p.seed.unwrap())), "{deck}");
+        assert!(deck.contains(".param mc_ok=1\n"));
+        assert!(deck.contains(".SAMPLING\n+useExpr=true\n.options SAMPLES numsamples=1 SAMPLE_TYPE=MC\n"));
+        // The user's own mc_ok wins; a grid point has no sampling.
+        let own = Setup::parse("simulator=\"xyce\"\n[variables]\nmc_ok=\"2\"").unwrap();
+        assert!(!build(&own, &p, "t", &[], "").contains(".param mc_ok=1"));
+        assert!(!build(&s, &points(&s, "tt")[0], "t", &[], "").contains(".SAMPLING"));
+        // No plugins and no seed for ngspice; the seed for Xyce.
+        let set = crate::tech::models::ModelSet::default();
+        assert_eq!(xyce_args(&Setup::default(), &p, &set, |_| None).unwrap(), None);
+        assert_eq!(xyce_args(&s, &p, &set, |_| None).unwrap().unwrap(), format!("-randseed\n{}", p.seed.unwrap()));
     }
 }

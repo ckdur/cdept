@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use egui::{Color32, ComboBox, Grid, RichText, ScrollArea, TextEdit, Ui};
 use libcdept::jobs::{JobInfo, JobState, Queue};
+use libcdept::sim::setup::McMode;
 use libcdept::sim::spec::{Row, Verdict};
 use libcdept::sim::{self, RunOptions, Setup, Simulator};
 use libcdept::{Project, ViewKind};
@@ -106,6 +107,26 @@ pub(super) struct Form {
     analyses: Vec<AnalysisForm>,
     /// name, min, max
     specs: Vec<(String, String, String)>,
+    sweeps: Vec<SweepForm>,
+    /// `[montecarlo]` is present.
+    mc: bool,
+    mc_runs: String,
+    mc_seed: String,
+    mc_mode: McMode,
+    mc_corner: String,
+    mc_mismatch_corner: String,
+    mc_both_corner: String,
+}
+
+/// One `[[sweep]]`: a list of values, or start/stop/step.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct SweepForm {
+    variable: String,
+    /// Separated by commas or spaces.
+    values: String,
+    start: String,
+    stop: String,
+    step: String,
 }
 
 fn lines(text: &str) -> Vec<String> {
@@ -174,6 +195,27 @@ impl Form {
                     )
                 })
                 .collect(),
+            sweeps: setup
+                .sweeps
+                .iter()
+                .map(|s| {
+                    let n = |v: Option<f64>| v.map(sim::setup::fmt_num).unwrap_or_default();
+                    SweepForm {
+                        variable: s.variable.clone(),
+                        values: s.values.join(", "),
+                        start: n(s.start),
+                        stop: n(s.stop),
+                        step: n(s.step),
+                    }
+                })
+                .collect(),
+            mc: setup.montecarlo.is_some(),
+            mc_runs: setup.montecarlo.as_ref().map_or("10".into(), |m| m.runs.to_string()),
+            mc_seed: setup.montecarlo.as_ref().map_or("1".into(), |m| m.seed.to_string()),
+            mc_mode: setup.montecarlo.as_ref().map_or(McMode::Process, |m| m.mode),
+            mc_corner: setup.montecarlo.as_ref().map(|m| m.corner.clone()).unwrap_or_default(),
+            mc_mismatch_corner: setup.montecarlo.as_ref().map(|m| m.mismatch_corner.clone()).unwrap_or_default(),
+            mc_both_corner: setup.montecarlo.as_ref().map(|m| m.both_corner.clone()).unwrap_or_default(),
         })
     }
 
@@ -242,6 +284,50 @@ impl Form {
             specs.push(Value::Table(t));
         }
         set("spec", Value::Array(specs));
+        let mut sweeps = Vec::new();
+        for s in &self.sweeps {
+            let mut t = toml::Table::new();
+            t.insert("variable".into(), string(&s.variable));
+            let values: Vec<Value> =
+                s.values.split([',', ' ']).filter(|w| !w.is_empty()).map(|w| Value::String(w.into())).collect();
+            if !values.is_empty() {
+                t.insert("values".into(), Value::Array(values));
+            }
+            for (key, value) in [("start", &s.start), ("stop", &s.stop), ("step", &s.step)] {
+                let value = value.trim();
+                if !value.is_empty() {
+                    let v: f64 = value
+                        .parse()
+                        .map_err(|_| format!("sweep '{}': {key} '{value}' is not a number", s.variable))?;
+                    t.insert(key.into(), Value::Float(v));
+                }
+            }
+            sweeps.push(Value::Table(t));
+        }
+        set("sweep", Value::Array(sweeps));
+        if self.mc {
+            let whole = |what: &str, v: &str| -> Result<Value, String> {
+                v.trim().parse::<i64>().map(Value::Integer).map_err(|_| format!("Monte Carlo {what} '{v}' is not a whole number"))
+            };
+            let mut t = toml::Table::new();
+            t.insert("runs".into(), whole("runs", &self.mc_runs)?);
+            t.insert("seed".into(), whole("seed", &self.mc_seed)?);
+            if self.mc_mode != McMode::Process {
+                t.insert("mode".into(), Value::String(self.mc_mode.name().into()));
+            }
+            for (key, value) in [
+                ("corner", &self.mc_corner),
+                ("mismatch_corner", &self.mc_mismatch_corner),
+                ("both_corner", &self.mc_both_corner),
+            ] {
+                if !value.trim().is_empty() {
+                    t.insert(key.into(), string(value));
+                }
+            }
+            set("montecarlo", Value::Table(t));
+        } else {
+            table.remove("montecarlo");
+        }
         prune(&mut table);
         super::testlib::minimize_for(&mut table, &self.base.template, &self.base.template_args);
         let text = toml::to_string_pretty(&table).map_err(|e| e.to_string())?;
@@ -305,6 +391,17 @@ pub(crate) struct PointRow {
     pub measures: Vec<(String, f64)>,
     pub specs: Vec<Row>,
     pub dir: PathBuf,
+    /// The stored record of the run (for the statistics).
+    pub record: sim::results::RunRecord,
+}
+
+/// What one run does differently from the file, without editing it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Now {
+    /// Monte Carlo with this many runs (turns it on when the file has no `[montecarlo]`).
+    pub mc_runs: Option<u32>,
+    /// Run the corner/temperature/sweep grid although the file has `[montecarlo]`.
+    pub no_mc: bool,
 }
 
 type Slot = Arc<Mutex<Option<Result<Vec<PointRow>, String>>>>;
@@ -346,6 +443,10 @@ pub struct SimulationView {
     only: Vec<String>,
     /// Run as soon as the testbench is loaded (the Library Manager's Run).
     run_when_loaded: bool,
+    /// The "run N now" box of the toolbar (empty: the setup's own).
+    now_runs: String,
+    /// Statistics of the last run's points (histograms, percentiles, yield).
+    stats: Option<sim::stats::Report>,
     pub(super) egui: Option<egui::Context>,
     /// Test templates and suites (testlib.rs).
     pub(super) tests: super::testlib::TestsUi,
@@ -360,6 +461,7 @@ impl SimulationView {
     /// Show this testbench: read its `setup.toml` (changes of the form are dropped).
     pub(crate) fn open(&mut self, project: &Project, target: Target, run: bool) {
         self.results.clear();
+        self.stats = None;
         self.run_error = None;
         self.only.clear();
         if self.state() != RunState::Running {
@@ -469,6 +571,11 @@ impl SimulationView {
     /// Save, then run the testbench (corners `only`, or all of the setup) in the
     /// background.
     pub(crate) fn start(&mut self, project: &Project, only: Vec<String>) -> Result<(), String> {
+        self.start_with(project, only, Now::default())
+    }
+
+    /// [`Self::start`] with Monte Carlo overrides ([`Now`]).
+    pub(crate) fn start_with(&mut self, project: &Project, only: Vec<String>, now: Now) -> Result<(), String> {
         if self.state() == RunState::Running {
             return Err("a simulation is running".into());
         }
@@ -479,6 +586,7 @@ impl SimulationView {
         let setup = self.form.as_ref().ok_or("the setup is not valid")?.setup()?;
         let queue = self.queue();
         self.results.clear();
+        self.stats = None;
         self.run_error = None;
         self.only = only.clone();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -494,7 +602,7 @@ impl SimulationView {
         let project = project.clone();
         let egui = self.egui.clone();
         std::thread::spawn(move || {
-            let result = run_target(&project, &target, &setup, &only, queue, cancel);
+            let result = run_target(&project, &target, &setup, &only, &now, queue, cancel);
             *done.lock().unwrap() = Some(result);
             if let Some(ctx) = egui {
                 ctx.request_repaint();
@@ -539,6 +647,8 @@ impl SimulationView {
             Ok(rows) => {
                 let (pass, bad) = tally(&rows);
                 tracing::info!(target: "cdept::sim", "simulation done: {pass} spec(s) pass, {bad} do not");
+                let records: Vec<_> = rows.iter().map(|r| r.record.clone()).collect();
+                self.stats = (records.len() > 1).then(|| sim::stats::analyze(&records, 10, 3.0));
                 self.results = rows;
             }
             Err(e) => {
@@ -577,6 +687,7 @@ fn run_target(
     target: &Target,
     setup: &Setup,
     only: &[String],
+    now: &Now,
     queue: Arc<Queue>,
     cancel: Arc<AtomicBool>,
 ) -> Result<Vec<PointRow>, String> {
@@ -589,7 +700,13 @@ fn run_target(
             tb.setup.simulator
         )
     })?;
-    let options = RunOptions { queue: Some(queue), cancel: Some(cancel), ..Default::default() };
+    let options = RunOptions {
+        queue: Some(queue),
+        cancel: Some(cancel),
+        mc_runs: now.mc_runs,
+        no_mc: now.no_mc,
+        ..Default::default()
+    };
     let results = sim::run_testbench_with(project, &tb, &simulator, only, &options).map_err(|e| format!("{e:#}"))?;
     let base = sim::runs_dir(project, &target.library, &target.cell, &target.view);
     Ok(results
@@ -600,6 +717,7 @@ fn run_target(
             error: r.outcome.as_ref().err().map(|e| format!("{e:#}")),
             measures: r.outcome.as_ref().map(|o| o.measures.iter().map(|(k, v)| (k.clone(), *v)).collect()).unwrap_or_default(),
             specs: r.specs,
+            record: r.run,
         })
         .collect())
 }
@@ -709,7 +827,7 @@ impl SimulationView {
         Grid::new("sim-general").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
             ui.label("Simulator");
             ComboBox::from_id_salt("sim-simulator").selected_text(&form.simulator).show_ui(ui, |ui| {
-                for name in ["ngspice", "xyce"] {
+                for name in ["ngspice", "xyce", "vacask"] {
                     ui.selectable_value(&mut form.simulator, name.to_string(), name);
                 }
             });
@@ -830,6 +948,129 @@ impl SimulationView {
         if ui.small_button("＋ Add spec").clicked() {
             form.specs.push((String::new(), String::new(), String::new()));
         }
+
+        ui.add_space(4.0);
+        ui.strong("Sweeps  ([[sweep]]: a design variable, crossed with the corners and temperatures)");
+        let mut remove = None;
+        Grid::new("sim-sweeps").num_columns(6).show(ui, |ui| {
+            for (i, s) in form.sweeps.iter_mut().enumerate() {
+                ui.add(TextEdit::singleline(&mut s.variable).desired_width(90.0).hint_text("variable"));
+                ui.add(TextEdit::singleline(&mut s.values).desired_width(170.0).hint_text("values: 1.0, 1.2, 1.4"));
+                ui.add(TextEdit::singleline(&mut s.start).desired_width(60.0).hint_text("start"));
+                ui.add(TextEdit::singleline(&mut s.stop).desired_width(60.0).hint_text("stop"));
+                ui.add(TextEdit::singleline(&mut s.step).desired_width(60.0).hint_text("step"));
+                if ui.small_button("✖").on_hover_text("Remove").clicked() {
+                    remove = Some(i);
+                }
+                ui.end_row();
+            }
+        });
+        if let Some(i) = remove {
+            form.sweeps.remove(i);
+        }
+        if ui.small_button("＋ Add sweep").clicked() {
+            form.sweeps.push(SweepForm::default());
+        }
+        let points = Setup::parse(&form.to_text().unwrap_or_default())
+            .map(|s| sim::deck::sweep_combinations(&s).len())
+            .unwrap_or(1);
+        if points > 1 {
+            ui.weak(format!("{points} sweep points per corner and temperature"));
+        }
+
+        ui.add_space(4.0);
+        ui.checkbox(&mut form.mc, "Monte Carlo  ([montecarlo]: seeded runs instead of the corner grid)");
+        if form.mc {
+            Grid::new("sim-mc").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                ui.label("Runs / seed");
+                ui.horizontal(|ui| {
+                    ui.add(TextEdit::singleline(&mut form.mc_runs).desired_width(60.0));
+                    ui.add(TextEdit::singleline(&mut form.mc_seed).desired_width(90.0));
+                });
+                ui.end_row();
+                ui.label("Draws").on_hover_text(
+                    "process: global variation (the statistical corner), mismatch: per-device, both: together",
+                );
+                ComboBox::from_id_salt("sim-mc-mode").selected_text(form.mc_mode.name()).show_ui(ui, |ui| {
+                    for mode in [McMode::Process, McMode::Mismatch, McMode::Both] {
+                        ui.selectable_value(&mut form.mc_mode, mode, mode.name());
+                    }
+                });
+                ui.end_row();
+                ui.label("Corner").on_hover_text("process corner set; empty: mc");
+                ui.horizontal(|ui| {
+                    ui.add(TextEdit::singleline(&mut form.mc_corner).desired_width(80.0).hint_text("mc"));
+                    ui.add(TextEdit::singleline(&mut form.mc_mismatch_corner).desired_width(80.0).hint_text("mismatch: tt_mm"));
+                    ui.add(TextEdit::singleline(&mut form.mc_both_corner).desired_width(80.0).hint_text("both: mc_mm"));
+                });
+                ui.end_row();
+            });
+        }
+    }
+
+    /// Statistics of the run: percentiles, a text histogram per measurement, the yield.
+    fn stats_ui(&mut self, ui: &mut Ui) {
+        let Some(report) = &self.stats else { return };
+        if report.measures.is_empty() && report.specs.is_empty() {
+            return;
+        }
+        egui::CollapsingHeader::new(format!("Statistics ({} runs)", report.runs)).default_open(true).show(ui, |ui| {
+            if !report.measures.is_empty() {
+                Grid::new("sim-stats").striped(true).num_columns(8).show(ui, |ui| {
+                    for h in ["measure", "p5", "p50", "p95", "min", "max", "mean", "std"] {
+                        ui.strong(h);
+                    }
+                    ui.end_row();
+                    for (name, d) in &report.measures {
+                        ui.label(name);
+                        for v in [d.p5, d.p50, d.p95, d.stats.min, d.stats.max, d.stats.mean, d.stats.std] {
+                            ui.label(engineering(v));
+                        }
+                        ui.end_row();
+                    }
+                });
+            }
+            for (name, d) in &report.measures {
+                ui.add_space(2.0);
+                ui.weak(name);
+                let full = d.histogram.counts.iter().copied().max().unwrap_or(0);
+                let mut text = String::new();
+                for (i, n) in d.histogram.counts.iter().enumerate() {
+                    let (lo, hi) = d.histogram.edges(i);
+                    text.push_str(&format!(
+                        "{:>10} .. {:>10} {:>4} {}\n",
+                        engineering(lo),
+                        engineering(hi),
+                        n,
+                        sim::stats::bar(*n, full, 30)
+                    ));
+                }
+                ui.label(RichText::new(text.trim_end()).monospace().small());
+            }
+            if !report.specs.is_empty() {
+                ui.add_space(2.0);
+                Grid::new("sim-yield").striped(true).num_columns(5).show(ui, |ui| {
+                    for h in ["spec", "pass", "yield", "gaussian", &format!("mean±{}σ", report.k)] {
+                        ui.strong(h);
+                    }
+                    ui.end_row();
+                    for s in &report.specs {
+                        let verdict = if s.pass == s.total { Verdict::Pass } else { Verdict::Fail };
+                        ui.label(format!("{} {}", s.name, bound(&sim::Spec { name: s.name.clone(), min: s.min, max: s.max })));
+                        ui.label(RichText::new(format!("{}/{}", s.pass, s.total)).color(verdict_color(ui, verdict)));
+                        ui.label(format!("{:.1} %", s.fraction() * 100.0));
+                        ui.label(s.gaussian.map_or("—".into(), |g| format!("{:.2} %", g * 100.0)));
+                        ui.label(match s.within_k_sigma {
+                            Some(true) => "inside",
+                            Some(false) => "outside",
+                            None => "—",
+                        });
+                        ui.end_row();
+                    }
+                });
+                ui.label(format!("all specs: {}/{} runs ({:.1} %)", report.pass, report.runs, report.fraction() * 100.0));
+            }
+        });
     }
 
     fn jobs_ui(&mut self, ui: &mut Ui) {
@@ -876,6 +1117,9 @@ impl SimulationView {
             .map(|s| s.specs)
             .unwrap_or_default();
         let _ = project;
+        self.stats_ui(ui);
+        let many = self.results.len() > 6;
+        egui::CollapsingHeader::new(format!("Points ({})", self.results.len())).default_open(!many).show(ui, |ui| {
         for row in &self.results {
             ui.horizontal(|ui| {
                 ui.strong(&row.name);
@@ -913,6 +1157,7 @@ impl SimulationView {
                 }
             });
         }
+        });
     }
 }
 
@@ -974,6 +1219,24 @@ impl View for SimulationView {
             if ui.add_enabled(running, egui::Button::new("■ Cancel")).clicked() {
                 ask = Some("cancel");
             }
+            ui.separator();
+            ui.add(TextEdit::singleline(&mut self.now_runs).desired_width(44.0).hint_text("N"))
+                .on_hover_text("Monte Carlo runs for this run only (the file is not changed)");
+            if ui
+                .add_enabled(self.form.is_some() && !running, egui::Button::new("▶ Run N MC"))
+                .on_hover_text("Run this many seeded Monte Carlo runs now (the setup's mode, seed and corners)")
+                .clicked()
+            {
+                ask = Some("run_mc");
+            }
+            if self.form.as_ref().is_some_and(|f| f.mc)
+                && ui
+                    .add_enabled(!running, egui::Button::new("▶ Grid"))
+                    .on_hover_text("Run the corner/temperature/sweep grid this once, without Monte Carlo")
+                    .clicked()
+            {
+                ask = Some("run_grid");
+            }
             if running && let Some(run) = &self.run {
                 ui.spinner();
                 ui.label(format!("{:.0} s", run.started.elapsed().as_secs_f32()));
@@ -990,6 +1253,19 @@ impl View for SimulationView {
             Some("revert") => self.revert(&project),
             Some("run") => {
                 if let Err(e) = self.start(&project, Vec::new()) {
+                    self.problem = Some(e);
+                }
+            }
+            Some("run_mc") => match self.now_runs.trim().parse::<u32>() {
+                Ok(n) if n > 0 => {
+                    if let Err(e) = self.start_with(&project, Vec::new(), Now { mc_runs: Some(n), no_mc: false }) {
+                        self.problem = Some(e);
+                    }
+                }
+                _ => self.problem = Some("N is the number of Monte Carlo runs (a whole number above 0)".into()),
+            },
+            Some("run_grid") => {
+                if let Err(e) = self.start_with(&project, Vec::new(), Now { mc_runs: None, no_mc: true }) {
                     self.problem = Some(e);
                 }
             }
@@ -1067,6 +1343,62 @@ pub(crate) fn script(
             Ok(())
         }
         "run" => view.start(&project, args[1..].to_vec()),
+        // run_mc <n>: n Monte Carlo runs now, the file untouched; run_grid: no Monte Carlo.
+        "run_mc" => {
+            let n: u32 = arg(1)?.parse().map_err(|_| "not a number")?;
+            view.start_with(&project, Vec::new(), Now { mc_runs: Some(n), no_mc: false })
+        }
+        "run_grid" => view.start_with(&project, Vec::new(), Now { mc_runs: None, no_mc: true }),
+        // add_sweep <variable> <value>…  (or start <a> stop <b> step <c> after the name)
+        "add_sweep" => {
+            let words = &args[2.min(args.len())..];
+            let mut s = SweepForm { variable: arg(1)?.into(), ..Default::default() };
+            if words.first().map(String::as_str) == Some("start") && words.len() == 6 {
+                (s.start, s.stop, s.step) = (words[1].clone(), words[3].clone(), words[5].clone());
+            } else {
+                s.values = words.join(", ");
+            }
+            form(view)?.sweeps.push(s);
+            Ok(())
+        }
+        // mc <on|off|runs|seed|mode|corner|mismatch_corner|both_corner> [value]
+        "mc" => {
+            let f = form(view)?;
+            let value = args[2.min(args.len())..].join(" ");
+            match arg(1)? {
+                "on" => f.mc = true,
+                "off" => f.mc = false,
+                "runs" => f.mc_runs = value,
+                "seed" => f.mc_seed = value,
+                "mode" => f.mc_mode = value.parse()?,
+                "corner" => f.mc_corner = value,
+                "mismatch_corner" => f.mc_mismatch_corner = value,
+                "both_corner" => f.mc_both_corner = value,
+                other => return Err(format!("unknown Monte Carlo field '{other}'")),
+            }
+            Ok(())
+        }
+        // expect_yield <spec> <pass>/<total>: the statistics' yield of a spec.
+        "expect_yield" => {
+            let report = view.stats.as_ref().ok_or("no statistics (one run, or none yet)")?;
+            let s = report.specs.iter().find(|s| s.name == arg(1).unwrap_or("")).ok_or("no such spec in the statistics")?;
+            let have = format!("{}/{}", s.pass, s.total);
+            if have == arg(2)? { Ok(()) } else { Err(format!("yield {have}")) }
+        }
+        // expect_stats <runs> <measure>: statistics over this many runs, with a histogram
+        // whose counts add up and p5 <= p50 <= p95 for the measurement.
+        "expect_stats" => {
+            let n: usize = arg(1)?.parse().map_err(|_| "not a number")?;
+            let report = view.stats.as_ref().ok_or("no statistics")?;
+            let d = report.measures.get(arg(2)?).ok_or("no such measurement")?;
+            let ok = report.runs == n
+                && d.histogram.counts.iter().sum::<usize>() == d.stats.count
+                && d.stats.min <= d.p5
+                && d.p5 <= d.p50
+                && d.p50 <= d.p95
+                && d.p95 <= d.stats.max;
+            if ok { Ok(()) } else { Err(format!("{} runs, {:?}", report.runs, d)) }
+        }
         "cancel" => {
             view.cancel();
             Ok(())
@@ -1184,7 +1516,7 @@ pub(crate) fn script(
 pub(crate) fn patient(args: &[String]) -> bool {
     matches!(
         args.first().map(String::as_str),
-        Some("wait" | "suite_wait" | "suite_expect" | "suite_expect_rows" | "expect_state" | "expect_rows" | "expect_points" | "expect_jobs" | "expect_file")
+        Some("wait" | "suite_wait" | "suite_expect" | "suite_expect_rows" | "expect_state" | "expect_rows" | "expect_points" | "expect_jobs" | "expect_file" | "expect_yield" | "expect_stats")
     )
 }
 
@@ -1233,5 +1565,34 @@ max = 3e-10
         assert_eq!(back.specs[0].max, Some(1e-9));
         assert!(!text.contains("simulator"), "{text}");
         assert_eq!(header_comment(SETUP), "# a comment\n\n");
+    }
+
+    #[test]
+    fn sweeps_and_montecarlo_round_trip() {
+        let text = format!(
+            "{SETUP}\n[[sweep]]\nvariable = \"vdd\"\nvalues = [\"1.0\", \"1.2\"]\n[[sweep]]\nvariable = \"c\"\nstart = 1.0\nstop = 3.0\nstep = 1.0\n\
+             [montecarlo]\nruns = 7\nseed = 3\nmode = \"both\"\nboth_corner = \"mc_mm\"\n"
+        );
+        let setup = Setup::parse(&text).unwrap();
+        let mut form = Form::of(&setup).unwrap();
+        assert_eq!(form.setup().unwrap(), setup);
+        assert_eq!((form.sweeps[0].values.as_str(), form.sweeps[1].step.as_str()), ("1.0, 1.2", "1"));
+        assert!(form.mc && form.mc_mode == McMode::Both && form.mc_runs == "7");
+        form.mc_runs = "12".into();
+        form.mc_mode = McMode::Mismatch;
+        form.sweeps[0].values = "0.9 1.1 1.3".into();
+        form.sweeps[1].start = "x".into();
+        assert!(form.to_text().unwrap_err().contains("not a number"));
+        form.sweeps.pop();
+        let back = form.setup().unwrap();
+        assert_eq!(back.sweeps.len(), 1);
+        assert_eq!(back.sweeps[0].values, ["0.9", "1.1", "1.3"]);
+        let mc = back.montecarlo.unwrap();
+        assert_eq!((mc.runs, mc.seed, mc.mode, mc.both_corner.as_str()), (12, 3, McMode::Mismatch, "mc_mm"));
+        form.mc_runs = "many".into();
+        assert!(form.to_text().unwrap_err().contains("whole number"));
+        form.mc = false;
+        assert!(form.setup().unwrap().montecarlo.is_none());
+        assert!(!form.to_text().unwrap().contains("montecarlo"));
     }
 }
