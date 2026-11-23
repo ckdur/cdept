@@ -75,8 +75,13 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
         SimCommand::Run { library, cell, view, corners } => {
             let view = view_of(project, &library, &cell, view)?;
             let tb = sim::open(project, &library, &cell, &view)?;
-            let simulator = sim::Simulator::find().ok_or_else(|| {
-                eyre!("ngspice not found: put it on PATH or set {}", sim::run::NGSPICE_ENV)
+            let simulator = sim::Simulator::for_setup(&tb.setup).ok_or_else(|| {
+                eyre!(
+                    "the simulator '{}' was not found: put it on PATH or set {} (ngspice) or {} (Xyce)",
+                    tb.setup.simulator,
+                    sim::run::NGSPICE_ENV,
+                    libcdept::batch::xyce::XYCE_ENV
+                )
             })?;
             let results = sim::run_testbench(project, &tb, &simulator, &corners)?;
             let mut bad = 0;

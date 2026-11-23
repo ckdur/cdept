@@ -105,6 +105,9 @@ pub fn spiceinit(
 /// text xschem wrote for the testbench schematic. The netlist's own `.end` is dropped
 /// (the deck ends once, at the end); everything else of it is kept, code blocks too.
 pub fn build(setup: &Setup, point: &RunPoint, title: &str, models: &[String], netlist: &str) -> String {
+    if setup.simulator == "xyce" {
+        return build_xyce(setup, point, title, models, netlist);
+    }
     let mut out = String::new();
     out.push_str(&format!("* CDePT testbench {title}, run {}\n", point.name()));
     out.push_str("* models\n");
@@ -161,6 +164,87 @@ pub fn build(setup: &Setup, point: &RunPoint, title: &str, models: &[String], ne
     out
 }
 
+/// Options for Xyce are `.options <package> name=value`: the setup writes
+/// `package.name`, a bare name goes to `device`.
+fn xyce_options(setup: &Setup) -> Vec<String> {
+    let mut by_pkg: std::collections::BTreeMap<&str, Vec<String>> = Default::default();
+    for (k, v) in &setup.options {
+        let (pkg, name) = k.split_once('.').unwrap_or(("device", k));
+        by_pkg.entry(pkg).or_default().push(format!("{name}={v}"));
+    }
+    by_pkg.into_iter().map(|(p, items)| format!(".options {p} {}", items.join(" "))).collect()
+}
+
+/// Xyce reads `TRIG`, `TARG`, `VAL`, `RISE`, … in upper case only; the rest of a
+/// measurement is case-blind, so all of it is written that way.
+fn xyce_measure(m: &str) -> String {
+    m.to_uppercase()
+}
+
+/// The deck for Xyce. It differs from the ngspice one in having no `.control` block
+/// (Xyce runs the analysis its card names and writes the `.print` variables to the
+/// raw file given on its command line), in its `.options` packages, in `.print` for
+/// `save` (every voltage with `v(*)` when `save` is empty) and in upper-case `.meas`.
+/// A `.control` … `.endc` block of the netlist is dropped.
+pub fn build_xyce(setup: &Setup, point: &RunPoint, title: &str, models: &[String], netlist: &str) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("* CDePT testbench {title}, run {} (Xyce)\n* models\n", point.name()));
+    for line in models {
+        out.push_str(line);
+        out.push('\n');
+    }
+    if let Some(t) = point.temperature {
+        out.push_str(&format!(".temp {t}\n"));
+    }
+    if !setup.variables.is_empty() {
+        out.push_str("* design variables\n");
+        for (name, value) in &setup.variables {
+            out.push_str(&format!(".param {name}={value}\n"));
+        }
+    }
+    for line in xyce_options(setup) {
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out.push_str("* netlist\n");
+    let mut control = false;
+    for line in netlist.lines() {
+        let word = line.trim().to_ascii_lowercase();
+        if word.starts_with(".control") {
+            control = true;
+        }
+        if !control && word != ".end" {
+            out.push_str(line);
+            out.push('\n');
+        }
+        if word.starts_with(".endc") {
+            control = false;
+        }
+    }
+    let vars = if setup.save.is_empty() { "v(*)".to_string() } else { setup.save.join(" ") };
+    let mut taken = vec![false; setup.measures.len()];
+    for a in &setup.analyses {
+        let (command, kind) = analysis_command(a);
+        out.push_str(&format!(".{command}\n"));
+        if kind != "op" {
+            out.push_str(&format!(".print {kind} {vars}\n"));
+        }
+        for (i, m) in setup.measures.iter().enumerate() {
+            if !taken[i] && m.split_whitespace().next().is_some_and(|w| w.eq_ignore_ascii_case(kind)) {
+                taken[i] = true;
+                out.push_str(&format!(".meas {}\n", xyce_measure(m)));
+            }
+        }
+    }
+    for (i, m) in setup.measures.iter().enumerate() {
+        if !taken[i] {
+            out.push_str(&format!(".meas {}\n", xyce_measure(m)));
+        }
+    }
+    out.push_str(".end\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,5 +285,29 @@ mod tests {
         assert!(deck.contains(".options reltol=1e-4"));
         assert_eq!(deck.lines().filter(|l| *l == ".end").count(), 1, "{deck}");
         assert!(deck.trim_end().ends_with(".end"));
+    }
+    #[test]
+    fn xyce_deck_has_no_control_block() {
+        let s = Setup::parse(
+            "simulator=\"xyce\"\nmeasures=[\"tran d trig v(in) val=1 rise=1 targ v(out) val=1 rise=1\"]\n\
+             [variables]\nvdd=\"1.8\"\n[options]\n\"timeint.reltol\"=\"1e-4\"\ntnom=\"27\"\n\
+             [[analysis]]\nkind=\"tran\"\nstep=\"1n\"\nstop=\"1u\"",
+        )
+        .unwrap();
+        let p = RunPoint { corner: "tt".into(), temperature: None };
+        let net = "** sch\nR1 a b 1k\n.control\nrun\n.endc\n.end\n";
+        let deck = build(&s, &p, "b/tb", &[".lib /m/x.lib tt".into()], net);
+        let at = |needle: &str| deck.find(needle).unwrap_or_else(|| panic!("no {needle} in\n{deck}"));
+        assert!(!deck.contains(".control") && !deck.contains("write out.raw") && !deck.contains("\nrun\n"), "{deck}");
+        assert!(at(".lib /m/x.lib tt") < at(".param vdd=1.8"));
+        assert!(at(".param vdd=1.8") < at("R1 a b 1k"));
+        assert!(at("R1 a b 1k") < at(".tran 1n 1u"));
+        assert!(at(".tran 1n 1u") < at(".print tran v(*)"));
+        assert!(at(".print tran v(*)") < at(".meas TRAN D TRIG V(IN) VAL=1 RISE=1 TARG V(OUT) VAL=1 RISE=1"));
+        assert!(deck.contains(".options device tnom=27") && deck.contains(".options timeint reltol=1e-4"), "{deck}");
+        assert_eq!(deck.lines().filter(|l| *l == ".end").count(), 1);
+        // With `save`, those are what is printed.
+        let s2 = Setup { save: vec!["v(out)".into()], ..s };
+        assert!(build(&s2, &p, "t", &[], "").contains(".print tran v(out)\n"));
     }
 }

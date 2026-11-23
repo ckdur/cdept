@@ -17,7 +17,10 @@ pub struct Setup {
     pub schematic: String,
     /// The schematic view when the cell has several. Empty: the first xschem one.
     pub schematic_view: String,
-    /// The simulator. Only `ngspice` is run today.
+    /// The simulator: `ngspice` (also when empty) or `xyce`. With Xyce one analysis is
+    /// run (plus `op`), options are written `package.name` (`timeint.reltol`; a bare
+    /// name goes to `device`) and the model set is the technology's `xyce` one unless
+    /// `models` names another.
     pub simulator: String,
     /// The model set of `[models]` in tech.toml. Empty: the technology's default.
     pub models: String,
@@ -91,8 +94,12 @@ pub struct Spec {
 
 impl Setup {
     pub fn parse(text: &str) -> Result<Setup> {
-        let setup: Setup = toml::from_str(text).wrap_err("not a valid testbench setup")?;
+        let mut setup: Setup = toml::from_str(text).wrap_err("not a valid testbench setup")?;
         setup.check()?;
+        // The technology's default models are for its default simulator (ngspice).
+        if setup.simulator == "xyce" && setup.models.is_empty() {
+            setup.models = "xyce".into();
+        }
         Ok(setup)
     }
 
@@ -103,8 +110,11 @@ impl Setup {
     }
 
     fn check(&self) -> Result<()> {
-        if !self.simulator.is_empty() && self.simulator != "ngspice" {
-            bail!("simulator '{}' is not supported yet (ngspice is)", self.simulator);
+        if !matches!(self.simulator.as_str(), "" | "ngspice" | "xyce") {
+            bail!("simulator '{}' is not supported yet (ngspice and xyce are)", self.simulator);
+        }
+        if self.simulator == "xyce" && self.analyses.iter().filter(|a| !matches!(a, Analysis::Op)).count() > 1 {
+            bail!("Xyce runs one analysis per deck (op may come with it); split the testbench");
         }
         let word = |s: &str| !s.is_empty() && !s.contains(char::is_whitespace);
         for name in self.variables.keys().chain(self.options.keys()) {
@@ -173,7 +183,10 @@ max = 2e-10
     #[test]
     fn rejects_mistakes() {
         assert!(Setup::parse("typo = 1").is_err());
-        assert!(Setup::parse("simulator = \"xyce\"").is_err());
+        assert!(Setup::parse("simulator = \"spectre\"").is_err());
+        assert!(Setup::parse("simulator = \"xyce\"\n[[analysis]]\nkind=\"tran\"\nstep=\"1n\"\nstop=\"1u\"\n[[analysis]]\nkind=\"op\"").is_ok());
+        assert!(Setup::parse("simulator = \"xyce\"\n[[analysis]]\nkind=\"tran\"\nstep=\"1n\"\nstop=\"1u\"\n[[analysis]]\nkind=\"ac\"\npoints=1\nstart=\"1\"\nstop=\"2\"").is_err());
+        assert_eq!(Setup::parse("simulator = \"xyce\"").unwrap().models, "xyce");
         assert!(Setup::parse("[[spec]]\nname = \"a\"").is_err());
         assert!(Setup::parse("[[spec]]\nname = \"a\"\nmin = 2\nmax = 1").is_err());
         assert!(Setup::parse("[[analysis]]\nkind = \"tran\"\nstep = \"\"\nstop = \"1n\"").is_err());
