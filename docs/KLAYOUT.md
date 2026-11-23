@@ -362,3 +362,39 @@ Unknown method → `ok: false`, error "unknown method …".
   violations / mismatch. GUI: Layout › Run DRC / Run LVS (background), results panel,
   a click highlights (`markers`) and zooms.
 - Highlights: helper method `markers`, `pya.Marker` objects.
+
+## 9. LEF abstracts (read-only)
+A view of kind `abstract` whose main file is a `.lef` (a standard cell or macro library
+LEF) opens in the same layout tab, read-only. The LEF stays the view's main file;
+nothing is converted, and no sidecar or GDS is written.
+
+- **Reference table.** `refs::resolve` on a `.lef` returns a table with one file
+  (`read_only`), no references, no PCells, no pin rules and `lef: {tech_lef?}`
+  (`libcdept::klayout::lef::LefInfo`). Everything that sends a table (open, preview,
+  `layout png`) therefore works unchanged. The cell of a multi-macro file is the view's
+  `Entry::member`: the tab shows it with `show_cell`, previews pass `cell`.
+- **Technology LEF** (layers, units), first match wins (`lef::tech_lef`): the `techlef`
+  files of the snapshot's `[[refs.library]]` whose folder holds the LEF (nominal corner
+  preferred); else a `*tech*.lef` / `*.tlef` next to the file or in the library's
+  `techlef/`, `lef/` or `tech/` folder (`find_tech_lef`: IHP `sg13g2_tech.lef`, sky130
+  `techlef/*__nom.tlef`); else none (layers are numbered by the order the LEF names
+  them). The helper reads it first (`LEFDEFReaderConfiguration.lef_files`).
+- **Layer mapping** (`cdept_klayout/lef.py`): when the project's KLayout technology has
+  a LEF/DEF layer map (`<lefdef><map-file>`; IHP `sg13g2.map`), its reader settings are
+  used: layers get the PDK's GDS numbers (pins `8/2`, obstructions `8/4`, boundary
+  `189/4` for IHP), and the technology's `.lyp` is loaded, so the colours are the PDK's.
+  A technology without one (sky130A's `.lyt` has none) gets KLayout's defaults: layers
+  numbered in order of appearance, pins / labels / obstructions on datatype 2 / 1 / 3,
+  the macro boundary on layer 1; colours are taken by layer name from the `.lyp` where it
+  has them (`met1.drawing`), else from a fixed palette.
+- **Layers panel.** One layer per layer and purpose, named `<LEF layer> pin`, `… label`,
+  `… obstruction`, plus `macro boundary`; layers with nothing drawn are not listed.
+  Obstructions are hatched (hollow when the technology gives pins a hatch), the
+  boundary is a thick light outline.
+- **Read-only.** The helper opens the view non-editable whatever `editable` says and
+  refuses `save` and `export` ("LEF abstract: read-only"). The tab (`views/layout/readonly.rs`)
+  disables the edit modes, Place Cell, Delete, Undo/Redo and Save, shows the notice on
+  open and refuses `mode`, `save`, `place` and `place_library` from keys or scripts.
+  Navigation, zoom, layers and cells panels, rulers, selection and properties (look only)
+  work. DEF is not read yet.
+- **CLI.** `cdept layout png <lib> <cell> --view <lef view>`.

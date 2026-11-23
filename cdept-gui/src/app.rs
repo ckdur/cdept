@@ -34,12 +34,18 @@ const LAUNCHERS: [&str; 4] = ["xschem", "KLayout", "Magic", "ngspice"];
 
 const DETACHED_SIZE: [f32; 2] = [1000.0, 700.0];
 
-/// The formats that open in a document tab: xschem schematics and symbols, and layouts
-/// (KLayout).
+/// The formats that open in a document tab: xschem schematics and symbols, layouts
+/// (KLayout) and LEF abstracts (KLayout, read-only).
 fn embedded_format(format: Option<Format>) -> bool {
     matches!(
         format,
-        Some(Format::XschemSchematic | Format::XschemSymbol | Format::Gds | Format::Oasis)
+        Some(
+            Format::XschemSchematic
+                | Format::XschemSymbol
+                | Format::Gds
+                | Format::Oasis
+                | Format::Lef
+        )
     )
 }
 
@@ -188,12 +194,14 @@ impl CdeptApp {
             return false;
         };
         match Format::of_file(&file) {
-            Some(Format::Gds | Format::Oasis) => {
+            Some(Format::Gds | Format::Oasis | Format::Lef) => {
                 // Layouts of read-only libraries open for looking only.
                 // One cell of a file that holds several (a standard-cell GDS) too:
-                // the file belongs to all of them.
+                // the file belongs to all of them. A LEF abstract never opens for
+                // editing.
                 let member = crate::views::layout_member_of(project, &doc);
                 let editable = member.is_none()
+                    && Format::of_file(&file) != Some(Format::Lef)
                     && project
                         .library(&doc.library)
                         .is_none_or(|library| !library.read_only);

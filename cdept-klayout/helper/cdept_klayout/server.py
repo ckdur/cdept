@@ -15,6 +15,7 @@ import pya
 
 from .document import RefTable
 from . import properties
+from . import lef
 from . import link
 from . import pins
 from . import pcells
@@ -278,7 +279,6 @@ class Server:
 
     def _temporary(self, refs, technology=None, layer_properties=None):
         """A document and view of their own (previews, exports), not shown."""
-        from .document import Document
         view = pya.LayoutView(False)
         index = view.create_layout(False)
         cv = view.cellview(index)
@@ -286,13 +286,16 @@ class Server:
             cv.technology = technology
         table = RefTable(refs)
         pcells.sync(table.pcells)
-        doc = Document(cv.layout(), table).load()
+        doc = lef.open_document(cv.layout(), table, technology, layer_properties).load()
         top = doc.top_cell()
         if top is not None:
             cv.cell = top
-        if layer_properties:
-            view.load_layer_props(layer_properties, True)
-        view.add_missing_layers()
+        if getattr(doc, "abstract", False):
+            lef.style(view, doc.layout, doc.mapping, doc.layer_properties)
+        else:
+            if layer_properties:
+                view.load_layer_props(layer_properties, True)
+            view.add_missing_layers()
         self.editor._style_marker(view)
         view.max_hier()
         return doc, view

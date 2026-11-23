@@ -8,8 +8,10 @@
 //! - [`Session`]: a helper per layout tab, never blocking, restarted when it stops.
 //! - [`service::Service`]: a background helper for previews and exports.
 //! - [`verify`]: DRC and LVS with the PDK's decks, KLayout in batch mode.
+//! - [`lef`]: LEF abstract views, read-only (docs/KLAYOUT.md §9).
 
 mod engine;
+pub mod lef;
 pub mod protocol;
 pub mod service;
 pub mod session;

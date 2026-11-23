@@ -320,7 +320,8 @@ enum LayoutCommand {
         #[arg(long)]
         view: Option<String>,
     },
-    /// Draw a cell's layout into a PNG file.
+    /// Draw a cell's layout into a PNG file. `--view` may also name a LEF abstract view
+    /// (drawn read-only, with the cell's macro as top).
     Png {
         library: String,
         cell: String,
@@ -1003,6 +1004,27 @@ fn layout_view(
         .ok_or_else(|| eyre!("cell '{cell}' has no GDS or OASIS view '{view}'"))
 }
 
+/// The file `cdept layout png` draws: [`layout_view`], or a LEF abstract named with
+/// `--view` (drawn read-only by KLayout's LEF reader, docs/KLAYOUT.md §9).
+fn picture_view(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+) -> Result<PathBuf> {
+    if let Some(view) = view
+        && let Some(entry) = project
+            .library(library)
+            .and_then(|lib| lib.cell(cell))
+            .and_then(|c| c.entry(view))
+        && entry.format == Some(Format::Lef)
+        && let Some(file) = &entry.main_file
+    {
+        return Ok(file.clone());
+    }
+    layout_view(project, library, cell, view)
+}
+
 /// `cdept layout link`: generate or update the layout from the schematic.
 fn layout_link(
     mut project: Project,
@@ -1418,7 +1440,7 @@ fn main() -> Result<()> {
                     size: (width, height),
                     view,
                 } => {
-                    let file = layout_view(&project, &library, &cell, view.as_deref())?;
+                    let file = picture_view(&project, &library, &cell, view.as_deref())?;
                     let refs = libcdept::layout::refs::resolve(&project, &file);
                     let output = output.unwrap_or_else(|| PathBuf::from(format!("{cell}.png")));
                     let mut engine = KlayoutEngine::for_project(&project)?;

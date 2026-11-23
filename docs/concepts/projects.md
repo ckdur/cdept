@@ -65,7 +65,7 @@ the format of its main file and decides which tool opens it.
 | `netlist` | SPICE (`.spice`, `.spi`, `.sp`, `.cir`, `.ckt`), CDL (`.cdl`) |
 | `testbench` | a folder with a `setup.toml`: a simulation set-up, see [Simulation](simulation.md) |
 | `hdl` | Verilog (`.v`), SystemVerilog (`.sv`), VHDL (`.vhd`, `.vhdl`), Verilog-A (`.va`) |
-| `abstract` | LEF (`.lef`) |
+| `abstract` | LEF (`.lef`); opens read-only in the embedded KLayout, see [KLAYOUT.md](../KLAYOUT.md) |
 | `liberty` | Liberty (`.lib`) |
 | `pcell` | a KLayout parametrised cell written in Python (`<cell>.pcell.py`), see [KLAYOUT.md](../KLAYOUT.md) |
 | `config` | reserved name for configuration views |

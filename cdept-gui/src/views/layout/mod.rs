@@ -18,6 +18,7 @@ mod pcell;
 mod pins;
 mod place;
 mod properties;
+mod readonly;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -298,6 +299,7 @@ impl LayoutView {
             member: None,
         };
         view.find_link_source();
+        view.announce_abstract();
         view
     }
 
@@ -417,6 +419,9 @@ impl LayoutView {
 
     /// Save the layout; the outcome is fetched with [`take_done`](Self::take_done).
     pub fn save(&mut self) -> u64 {
+        if let Some(id) = self.refuse_change() {
+            return id;
+        }
         self.call(method::SAVE, json!({}), Pending::Save)
     }
 
@@ -429,6 +434,9 @@ impl LayoutView {
     /// Place the cell of the layout file `file`, which the helper loads as an external
     /// cell, and switch to instance mode.
     pub fn place(&mut self, project: &Project, cell: &str, file: &Path) -> u64 {
+        if let Some(id) = self.refuse_change() {
+            return id;
+        }
         let table = refs::resolve(project, file);
         // What the helper knows already, and everything the new cell needs.
         self.refs.files.extend(table.files.clone());
@@ -453,6 +461,9 @@ impl LayoutView {
     }
 
     pub fn set_mode(&mut self, name: &str) {
+        if !readonly::mode_is_safe(name) && self.refuse_change().is_some() {
+            return;
+        }
         self.mode = name.to_string();
         self.quiet(method::MODE, json!({"name": name}));
     }
@@ -736,6 +747,9 @@ impl LayoutView {
             Shortcut::Save => {
                 if self.editable {
                     self.save();
+                } else {
+                    // A LEF abstract says why; other read-only layouts stay silent.
+                    let _ = self.refuse_change();
                 }
             }
             Shortcut::ZoomFit => self.zoom("fit"),
@@ -1077,7 +1091,7 @@ impl LayoutView {
             }
             if !self.editable {
                 ui.separator();
-                ui.weak("read-only");
+                ui.weak(self.read_only_note());
             }
             self.in_place_status(ui);
             if self.nets.probing {

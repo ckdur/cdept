@@ -359,6 +359,9 @@ impl LayoutView {
     /// Instance mode with a cell or PCell of a KLayout library; `values` are PCell
     /// parameters (the others keep their defaults).
     pub fn place_library(&mut self, library: &str, cell: &str, values: Map<String, Value>) -> u64 {
+        if let Some(id) = self.refuse_change() {
+            return id;
+        }
         self.mode = "instance".into();
         self.call(
             method::PLACE_LIBRARY,
