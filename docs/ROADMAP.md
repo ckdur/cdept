@@ -195,6 +195,9 @@ Original to-do (kept for the record):
   results and gaps: [KLAYOUT.md](KLAYOUT.md). PCell views in CDePT libraries.
   Schematic ↔ layout linking (Layout XL style): device map, generate/update, check,
   cross-probing, nets (opens, shorts, flylines, net probing) ([LINKING.md](LINKING.md)).
+- *Done 2026-11-23:* process supervisor/job queue ([JOBS.md](JOBS.md)); Magic batch ([MAGIC.md](MAGIC.md));
+  in-process libngspice ([NGSPICE.md](NGSPICE.md)); Xyce, netgen, yosys, OpenROAD ([BATCH.md](BATCH.md)).
+  Not done: VACASK, Qucs-S, Magic GUI socket server, supervisor restart/limits.
 - **Magic:** `magic -dnull -noconsole` with Tcl over a pipe for batch (ext, LEF, DRC). For the
   GUI, source a Tcl socket-server script.
 - **ngspice:** in-process via `libngspice` (shared API: `ngSpice_Init`, `ngSpice_Command`,
@@ -208,8 +211,11 @@ Original to-do (kept for the record):
 - **Milestone:** double-click a view to open it in the correct tool. Netlist any cell from CDePT.
 
 ### Phase 4: Simulation Environment, "ADE-lite" (~120 h)
-First slice done 2026-11-23: testbench view, deck, ngspice batch over corners × temperatures,
-measures and specs ([SIMULATION.md](SIMULATION.md)). The rest below is still to do.
+Done 2026-11-23 ([SIMULATION.md](SIMULATION.md)): testbench view, deck, ngspice and Xyce batch runs,
+corners × temperatures × variable sweeps, Monte Carlo, measures and specs, job queue
+([JOBS.md](JOBS.md)), results store (`result.json` + `results.db`), Simulation tab in the GUI.
+Still to do: OpenVAF on-demand compile, CACE import/export, SLURM/ssh, sweep/MC in the GUI form,
+Xyce Monte Carlo, VACASK; the rest of the list below as written.
 - Testbench view: DUT cell, analyses (op/dc/ac/tran/noise/pss if available), design
   variables, model corners (from tech.toml), temperature, saves/probes.
 - Netlisting pipeline: xschem netlist → wrapper with includes, `.param` and `.control`.
