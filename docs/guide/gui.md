@@ -210,8 +210,13 @@ its [`setup.toml`](../reference/files/setup-toml.md) as a form and, below it, th
 - The toolbar has **Save**, **Revert**, **Run**, **Cancel**, and **Run N MC** and **Grid**
   for Monte Carlo and the full grid.
 - The form edits the test template and its parameters, corners, temperatures, design
-  variables, options, analyses, measures, saves, specs and sweeps. Saving keeps the
-  comments at the top of the file and what the form does not show.
+  variables, options, analyses, measures, saves, specs, sweeps and Monte Carlo. The
+  Sweeps section checks each row as you type, the Monte Carlo section offers the modes and
+  corner sets the simulator and the model set allow, and a line under the toolbar counts
+  the run points (a warning above 500). What a template declares is shown read-only with
+  an Override button. Saving keeps the comments and layout of every key that did not
+  change, and what the form does not show
+  ([corners and sweeps](../howto/corners-and-sweeps.md), [Monte Carlo](../howto/monte-carlo.md)).
 - **Jobs** lists the simulator processes of the run with their state; **Results** shows
   one row per point with the spec columns, PASS or FAIL, and Monte Carlo statistics.
 - A suite view shows one combined table of the points of all its tests.

@@ -47,6 +47,12 @@ pub(super) fn parse(text: &str) -> eyre::Result<Setup> {
     })
 }
 
+/// The templates the form validates with (tests).
+#[cfg(test)]
+pub(super) fn use_templates(set: TemplateSet) {
+    TEMPLATES.with(|t| *t.borrow_mut() = Some(set));
+}
+
 fn set() -> TemplateSet {
     TEMPLATES.with(|t| t.borrow().clone()).unwrap_or_else(|| TemplateSet::builtin().clone())
 }
@@ -79,7 +85,8 @@ pub(crate) fn minimize(full: &mut toml::Table, base: &toml::Table) {
                     full.insert(k, Value::Array(left));
                 }
             }
-            (Value::Table(vt), Value::Table(bt)) => {
+            // `[montecarlo]` of the setup replaces the template's as a whole: all or nothing.
+            (Value::Table(vt), Value::Table(bt)) if k != "montecarlo" => {
                 let left: toml::Table = vt.iter().filter(|(n, x)| bt.get(*n) != Some(*x)).map(|(n, x)| (n.clone(), x.clone())).collect();
                 if left.is_empty() {
                     full.remove(&k);

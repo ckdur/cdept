@@ -19,6 +19,8 @@
 #   expect_rows <n> <PASS|FAIL|MISSING>   spec rows of the results; expect_points <n>
 #   expect_jobs <n> [state]          jobs of the run in the queue
 #   expect_file <point> <file>       a file of a run point's folder
+#   add_sweep <var> <values…>, mc on|off|runs|seed|mode…, run_mc <n>, run_grid, expect_plan <n>:
+#                                    the Sweeps and Monte Carlo sections (see sweeps.script)
 
 panel Library Manager
 wait 0.3
@@ -129,7 +131,7 @@ sim expect_rows 6 PASS
 sim mc mode process
 sim mc off
 sim save
-shell ! grep -q montecarlo libs/cells/tb_inv/testbench/setup.toml
+shell ! grep -q '^\[montecarlo' libs/cells/tb_inv/testbench/setup.toml
 shell grep -q 'variable = "vdd"' libs/cells/tb_inv/testbench/setup.toml
 log simulation: ok
 quit

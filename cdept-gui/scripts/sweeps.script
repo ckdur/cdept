@@ -1,0 +1,112 @@
+# The Simulation tab's sweeps and Monte Carlo sections on examples/ihp-inv: a vdd sweep
+# and Monte Carlo are added in the form, the file keeps its comments, the run makes the
+# points the form announces, bad values and simulators that cannot do Monte Carlo are
+# caught. Writes into the project (setup.toml, simulations/): use a copy (run.sh does).
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice \
+#   CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=ihp-inv \
+#     cdept-gui/scripts/run.sh cdept-gui/scripts/sweeps.script
+#
+# `sim <verb> …` of this file (views/simulation/sweeps.rs; the others are in simulation.script):
+#   add_sweep <var> <v>…|<a>:<b>:<c>  a row of the Sweeps section; set_sweep <i> variable|values <v…>
+#   remove_sweep <i> | override_sweep <var>   (the second: an own copy of the template's)
+#   mc on|off | set_mc runs|seed|mode|corner|mismatch_corner|both_corner|corners <v> | set_mc override
+#   expect_sweep <i> <var> <values…>  expect_inherited <n sweeps> mc|nomc   expect_mc on|off
+#   expect_plan <n>                   run points announced next to the Run button
+#   expect_mc_note [text…]            the inline reason Monte Carlo cannot run (none: no text)
+
+panel Library Manager
+wait 0.3
+open cells tb_inv testbench
+sim expect_target cells/tb_inv/testbench
+sim expect_dirty no
+# 3 corners x 1 temperature, no sweep
+sim expect_plan 3
+sim expect_inherited 0 nomc
+sim expect_mc_note
+
+# A vdd sweep: the plan is 3 corners x 3 supplies. The row is checked as you type.
+sim add_sweep vdd 1.08,1.2,1.32
+sim expect_sweep 0 vdd 1.08 1.2 1.32
+sim expect_dirty yes
+sim expect_plan 9
+sim set_sweep 0 values 1.08,abc
+sim expect_problem value 'abc' is not a number
+sim set_sweep 0 values 1.32:1.08:0.12
+sim expect_problem does not lead from
+sim set_sweep 0 values 1.08:1.32:0.12
+sim expect_no_problem
+sim expect_plan 9
+sim set_sweep 0 values
+sim expect_problem needs `values` or start, stop and step
+sim set_sweep 0 values 1.08,1.2,1.32
+sim add_sweep vdd 1
+sim expect_problem swept twice
+sim remove_sweep 1
+sim expect_no_problem
+sim add_sweep c_load
+sim expect_problem needs `values`
+sim remove_sweep 1
+
+# Monte Carlo: 5 runs of the process corner: 1 temperature x 3 supplies x 5 runs.
+sim mc on
+sim set_mc runs 5
+sim set_mc seed 3
+sim set_mc mode process
+sim expect_no_problem
+sim expect_plan 15
+sim expect_mc_note
+sim save
+sim expect_dirty no
+shell grep -q 'variable = "vdd"' libs/cells/tb_inv/testbench/setup.toml
+shell grep -q 'runs = 5' libs/cells/tb_inv/testbench/setup.toml
+# The comments and the other keys are still there.
+shell grep -q '^# Testbench of the inverter' libs/cells/tb_inv/testbench/setup.toml
+shell grep -q '^# The schematic.s supply and pulse' libs/cells/tb_inv/testbench/setup.toml
+shell grep -q 'corners = \["tt", "ff", "ss"\]' libs/cells/tb_inv/testbench/setup.toml
+
+sim run
+sim wait
+sim expect_state finished
+sim expect_points 15
+sim expect_rows 15 PASS
+sim expect_stats 15 tpd
+
+# Revert drops what was not saved; the saved sweep is in the form after a reload.
+sim set_mc runs 9
+sim expect_plan 27
+sim expect_dirty yes
+sim revert
+sim expect_dirty no
+sim expect_plan 15
+sim expect_sweep 0 vdd 1.08 1.2 1.32
+
+# Grid: the plain corner grid, 3 corners x 3 supplies
+sim run_grid
+sim wait
+sim expect_points 9
+sim expect_rows 9 PASS
+
+# VACASK cannot do Monte Carlo (its models are not converted): said in the form.
+sim set simulator vacask
+sim expect_problem VACASK
+sim expect_mc_note VACASK
+sim set simulator ngspice
+sim expect_no_problem
+# Xyce: process only, unless a corner set with mismatch is named.
+sim set simulator xyce
+sim set_mc mode mismatch
+sim expect_mc_note mismatch_corner
+sim set_mc mode process
+sim expect_mc_note
+sim revert
+sim expect_dirty no
+
+# Monte Carlo off removes the table, the sweep stays, the comments stay.
+sim mc off
+sim save
+shell ! grep -q '^\[montecarlo' libs/cells/tb_inv/testbench/setup.toml
+shell grep -q 'variable = "vdd"' libs/cells/tb_inv/testbench/setup.toml
+shell grep -q '^# Testbench of the inverter' libs/cells/tb_inv/testbench/setup.toml
+log sweeps: ok
+quit

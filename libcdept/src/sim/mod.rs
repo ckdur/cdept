@@ -124,6 +124,33 @@ pub fn run_testbench(
     run_testbench_with(project, tb, simulator, only, &RunOptions::default())
 }
 
+/// The corner sets (and switches) a Monte Carlo setup draws from in the model set `set`
+/// of `models`; the error says what is missing and which corner sets there are. The
+/// Simulation tab's form asks it before a run.
+pub fn monte_carlo_plan(
+    project: &Project,
+    models: &crate::tech::models::ModelsTech,
+    set: &str,
+    simulator: &str,
+    mc: &setup::MonteCarlo,
+) -> Result<mc::Plan> {
+    let (_, set_models) = models.set(set).ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
+    let mentions = |corner: &str, word: &str| {
+        set_models.corner(corner).is_some_and(|libs| {
+            libs.iter().any(|l| {
+                l.file
+                    .resolve(|n| project.var(n))
+                    .ok()
+                    .and_then(|p| std::fs::read(p).ok())
+                    .is_some_and(|t| String::from_utf8_lossy(&t).to_ascii_lowercase().contains(word))
+            })
+        })
+    };
+    let known = |c: &str| set_models.corner(c).is_some();
+    mc::plan(mc, set, simulator == "xyce", known, mentions)
+        .map_err(|e| eyre!("{e} (there are: {})", set_models.corner_names().join(", ")))
+}
+
 /// [`run_testbench`] with options.
 pub fn run_testbench_with(
     project: &Project,
@@ -171,24 +198,7 @@ pub fn run_testbench_with(
     }
     // The corner sets (and switches) the Monte Carlo mode draws from.
     let mc_plan = match &mc {
-        Some(mc) => {
-            let (_, set_models) = models.set(&set).ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
-            let mentions = |corner: &str, word: &str| {
-                set_models.corner(corner).is_some_and(|libs| {
-                    libs.iter().any(|l| {
-                        l.file
-                            .resolve(|n| project.var(n))
-                            .ok()
-                            .and_then(|p| std::fs::read(p).ok())
-                            .is_some_and(|t| String::from_utf8_lossy(&t).to_ascii_lowercase().contains(word))
-                    })
-                })
-            };
-            let known = |c: &str| set_models.corner(c).is_some();
-            let plan = mc::plan(mc, &set, tb.setup.simulator == "xyce", known, mentions)
-                .map_err(|e| eyre!("{e} (there are: {})", set_models.corner_names().join(", ")))?;
-            Some(plan)
-        }
+        Some(mc) => Some(monte_carlo_plan(project, models, &set, &tb.setup.simulator, mc)?),
         None => None,
     };
     let mut points = if let (Some(mc), Some(plan)) = (&mc, &mc_plan) {

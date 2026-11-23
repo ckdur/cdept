@@ -681,6 +681,15 @@ impl TemplateSet {
         })
     }
 
+    /// A set of templates given as text (for tests that need one with sweeps).
+    pub fn from_texts(texts: &[&str]) -> Result<TemplateSet> {
+        let mut set = TemplateSet::default();
+        for t in texts {
+            set.add(Template::parse(t, Origin::Builtin)?);
+        }
+        Ok(set)
+    }
+
     /// Built-in, then the technology's, then the project's.
     pub fn for_project(project: &Project) -> TemplateSet {
         let mut set = Self::builtin().clone();

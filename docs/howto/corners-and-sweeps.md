@@ -40,6 +40,25 @@ Sweeps cross with each other, the corners and the temperatures; the first varies
 Each point is a separate simulator run with its own measurements and verdicts. A point's
 folder carries the values: `tt_27_cload1f_vdd1p2`.
 
+## From the form
+
+The Simulation tab's setup form has a **Sweeps** section: one row per `[[sweep]]`, with the
+variable name (the **...** button next to it lists the setup's `[variables]`) and the values as
+text. Write the values as SPICE numbers separated by commas or spaces (`1.08, 1.2, 1.32`,
+`10f 100f`), or as a range `start:stop:step` (`0.9:1.3:0.1`, inclusive, plain numbers). The row
+is checked as you type with the messages of the file's own check: `value 'x' is not a number`,
+`needs values or start, stop and step`, `variable 'vdd' is swept twice`. The line under
+the toolbar says how many points a run makes (`180 run points = 1 temperature x 9 sweep
+points x 20 runs`) and warns above 500.
+
+![Sweeps and Monte Carlo in the Simulation tab](../_static/screenshots/sim-sweeps.png)
+
+Saving writes the tables into `setup.toml` and leaves the comments and the other keys as they
+were. When the testbench uses a [test template](../reference/files/setup-toml.md) that declares sweeps,
+they are listed first, read-only, as `from template <name>`; the **Override** button copies
+one into your own rows, and a row of the same variable replaces the template's (only your
+own rows are written to the file).
+
 ## Run and read
 
 ```bash

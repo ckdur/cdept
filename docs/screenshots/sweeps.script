@@ -1,0 +1,18 @@
+# Screenshot of the Sweeps and Monte Carlo sections of the Simulation tab on
+# examples/ihp-inv: a vdd sweep, 20 Monte Carlo runs, the run plan next to Run. Needs
+# PDK_ROOT. Writes sim-sweeps.png.
+# Run: scripts/gen-doc-screenshots.sh docs/screenshots/sweeps.script
+window 1400 1750
+panel Library Manager
+wait 0.3
+open cells tb_inv testbench
+sim expect_target cells/tb_inv/testbench
+sim add_sweep vdd 1.08,1.2,1.32
+sim add_sweep cl 10f,20f,30f
+sim mc on
+sim set_mc runs 20
+sim set_mc seed 1
+sim expect_plan 180
+wait 0.5
+screenshot @SHOTS@/sim-sweeps.png
+quit

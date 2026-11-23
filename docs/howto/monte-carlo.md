@@ -21,6 +21,25 @@ override the setup's. Points are `mc_27_r000`, `mc_27_r001`, ... (`runs` x tempe
 sweeps). Each has a seed derived from the base seed and the run number, stored in
 `result.json`: the same seed repeats a run, another seed changes it.
 
+## From the form
+
+Tick **Monte Carlo** in the Simulation tab's setup form to add `[montecarlo]`; unticking it
+removes the table. The section has the runs and the seed, the draws (`process`, `mismatch`
+or `both`) and the corner set of each kind of draw, chosen from the model set's corners
+(empty: the defaults of the table below). The same text as `cdept sim run` appears under
+the section when the mode cannot run, for instance when the model set has no `tt_mm`
+corner set for `mismatch`. With Xyce the `mismatch` and `both` draws stay disabled until
+their corner set is named, and with VACASK the form says that Monte Carlo is refused. The
+line under the toolbar counts the points: temperatures x sweep points x runs.
+
+![Sweeps and Monte Carlo in the Simulation tab](../_static/screenshots/sim-sweeps.png)
+
+**Run N MC** runs the number in the box next to it with the form's seed, mode and corner
+sets (the file is not changed); **Grid** (shown when the run has Monte Carlo) runs the
+corner x temperature x sweep grid once instead. A template that declares `[montecarlo]`
+shows it as `from template <name>` with an **Override** button; your own `[montecarlo]`
+replaces the template's as a whole.
+
 ## What is drawn
 
 | mode | meaning | corner set used |

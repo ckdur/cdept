@@ -82,6 +82,7 @@ Milestone (SYMBI-72, 2026-11-23, [TESTS.md](TESTS.md) §6): corner sweep of an O
       3-bit flash ADC: DNL 0.082 / INL 0.049 LSB, as computed from the ladder).
 - [x] Templates declare `[[sweep]]` and `[montecarlo]` from their parameters (setup.toml's
       tables win); project template `examples/ihp-inv/templates/ac_load.toml`.
+- [x] Sweeps and Monte Carlo in the Simulation tab's form (SYMBI-77): own rows, inherited template ones read-only (Override copies), point count with a warning above 500, Monte Carlo corners from the model set with the CLI's error text, Xyce modes disabled until a corner is named, VACASK refused inline; Save merges into the file with toml_edit (`views/simulation/keep.rs`: comments and untouched keys stay). Code in `cdept-gui/src/views/simulation/sweeps.rs`, script `sweeps.script`, screenshot `sim-sweeps.png`.
 - [x] `startup_settle`: `settle_time` subtracted `t_step` twice (negative times); fixed.
 - [x] Tests: `libcdept/tests/real_ota.rs`, GUI `cdept-gui/scripts/ota.script`, screenshot
       `docs/_static/screenshots/ota-suite.png` (`docs/screenshots/ota-suite.script`).

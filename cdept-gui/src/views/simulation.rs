@@ -22,6 +22,10 @@ use libcdept::{Project, ViewKind};
 use super::{View, empty_state};
 use crate::state::{Action, AppCtx, Selection};
 
+mod keep;
+mod sweeps;
+use sweeps::SweepForm;
+
 /// The testbench a tab is about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Target {
@@ -107,8 +111,11 @@ pub(super) struct Form {
     analyses: Vec<AnalysisForm>,
     /// name, min, max
     specs: Vec<(String, String, String)>,
+    /// The setup's own `[[sweep]]` rows (the template's are in `inherited`).
     sweeps: Vec<SweepForm>,
-    /// `[montecarlo]` is present.
+    /// What the template brings: sweeps and Monte Carlo, shown read-only.
+    inherited: sweeps::Inherited,
+    /// The setup has its own `[montecarlo]` (else the template's, if any).
     mc: bool,
     mc_runs: String,
     mc_seed: String,
@@ -116,17 +123,6 @@ pub(super) struct Form {
     mc_corner: String,
     mc_mismatch_corner: String,
     mc_both_corner: String,
-}
-
-/// One `[[sweep]]`: a list of values, or start/stop/step.
-#[derive(Debug, Clone, Default, PartialEq)]
-struct SweepForm {
-    variable: String,
-    /// Separated by commas or spaces.
-    values: String,
-    start: String,
-    stop: String,
-    step: String,
 }
 
 fn lines(text: &str) -> Vec<String> {
@@ -171,6 +167,7 @@ impl Form {
                 .collect(),
             _ => Vec::new(),
         };
+        let inherited = sweeps::inherited(&setup.template, &setup.template_args);
         Ok(Form {
             base: setup.clone(),
             simulator: if setup.simulator.is_empty() { "ngspice".into() } else { setup.simulator.clone() },
@@ -195,21 +192,9 @@ impl Form {
                     )
                 })
                 .collect(),
-            sweeps: setup
-                .sweeps
-                .iter()
-                .map(|s| {
-                    let n = |v: Option<f64>| v.map(sim::setup::fmt_num).unwrap_or_default();
-                    SweepForm {
-                        variable: s.variable.clone(),
-                        values: s.values.join(", "),
-                        start: n(s.start),
-                        stop: n(s.stop),
-                        step: n(s.step),
-                    }
-                })
-                .collect(),
-            mc: setup.montecarlo.is_some(),
+            sweeps: sweeps::own_rows(&setup.sweeps, &inherited),
+            mc: setup.montecarlo.is_some() && setup.montecarlo != inherited.mc,
+            inherited,
             mc_runs: setup.montecarlo.as_ref().map_or("10".into(), |m| m.runs.to_string()),
             mc_seed: setup.montecarlo.as_ref().map_or("1".into(), |m| m.seed.to_string()),
             mc_mode: setup.montecarlo.as_ref().map_or(McMode::Process, |m| m.mode),
@@ -284,49 +269,14 @@ impl Form {
             specs.push(Value::Table(t));
         }
         set("spec", Value::Array(specs));
-        let mut sweeps = Vec::new();
-        for s in &self.sweeps {
-            let mut t = toml::Table::new();
-            t.insert("variable".into(), string(&s.variable));
-            let values: Vec<Value> =
-                s.values.split([',', ' ']).filter(|w| !w.is_empty()).map(|w| Value::String(w.into())).collect();
-            if !values.is_empty() {
-                t.insert("values".into(), Value::Array(values));
+        let own = sweeps::own_sweeps(&self.sweeps)?;
+        let all = sweeps::overlay(&self.inherited.sweeps, &own);
+        set("sweep", Value::Array(all.iter().map(sweeps::sweep_value).collect()));
+        match self.mc_table()? {
+            Some(t) => set("montecarlo", Value::Table(t)),
+            None => {
+                table.remove("montecarlo");
             }
-            for (key, value) in [("start", &s.start), ("stop", &s.stop), ("step", &s.step)] {
-                let value = value.trim();
-                if !value.is_empty() {
-                    let v: f64 = value
-                        .parse()
-                        .map_err(|_| format!("sweep '{}': {key} '{value}' is not a number", s.variable))?;
-                    t.insert(key.into(), Value::Float(v));
-                }
-            }
-            sweeps.push(Value::Table(t));
-        }
-        set("sweep", Value::Array(sweeps));
-        if self.mc {
-            let whole = |what: &str, v: &str| -> Result<Value, String> {
-                v.trim().parse::<i64>().map(Value::Integer).map_err(|_| format!("Monte Carlo {what} '{v}' is not a whole number"))
-            };
-            let mut t = toml::Table::new();
-            t.insert("runs".into(), whole("runs", &self.mc_runs)?);
-            t.insert("seed".into(), whole("seed", &self.mc_seed)?);
-            if self.mc_mode != McMode::Process {
-                t.insert("mode".into(), Value::String(self.mc_mode.name().into()));
-            }
-            for (key, value) in [
-                ("corner", &self.mc_corner),
-                ("mismatch_corner", &self.mc_mismatch_corner),
-                ("both_corner", &self.mc_both_corner),
-            ] {
-                if !value.trim().is_empty() {
-                    t.insert(key.into(), string(value));
-                }
-            }
-            set("montecarlo", Value::Table(t));
-        } else {
-            table.remove("montecarlo");
         }
         prune(&mut table);
         super::testlib::minimize_for(&mut table, &self.base.template, &self.base.template_args);
@@ -495,6 +445,11 @@ impl SimulationView {
         tracing::info!(target: "cdept::sim", "simulation: {}", target.text());
     }
 
+    /// The N of the "Run N MC" box, when it is a number above 0.
+    fn now_runs_value(&self) -> Result<usize, ()> {
+        self.now_runs.trim().parse::<usize>().ok().filter(|n| *n > 0).ok_or(())
+    }
+
     pub(crate) fn target(&self) -> Option<&Target> {
         self.target.as_ref()
     }
@@ -536,7 +491,12 @@ impl SimulationView {
         };
         let text = form.to_text().inspect_err(|e| self.problem = Some(e.clone()))?;
         let file = Self::path(project, &target).ok_or("the view is gone")?;
-        std::fs::write(&file, format!("{}{}", self.header, text)).map_err(|e| format!("{}: {e}", file.display()))?;
+        // The file as it is, with only the keys the form changed: comments stay.
+        let out = match std::fs::read_to_string(&file) {
+            Ok(old) => keep::merge(&old, &text),
+            Err(_) => format!("{}{}", self.header, text),
+        };
+        std::fs::write(&file, out).map_err(|e| format!("{}: {e}", file.display()))?;
         self.saved = text;
         self.problem = None;
         tracing::info!(target: "cdept::sim", "saved {}", file.display());
@@ -950,62 +910,11 @@ impl SimulationView {
         }
 
         ui.add_space(4.0);
-        ui.strong("Sweeps  ([[sweep]]: a design variable, crossed with the corners and temperatures)");
-        let mut remove = None;
-        Grid::new("sim-sweeps").num_columns(6).show(ui, |ui| {
-            for (i, s) in form.sweeps.iter_mut().enumerate() {
-                ui.add(TextEdit::singleline(&mut s.variable).desired_width(90.0).hint_text("variable"));
-                ui.add(TextEdit::singleline(&mut s.values).desired_width(170.0).hint_text("values: 1.0, 1.2, 1.4"));
-                ui.add(TextEdit::singleline(&mut s.start).desired_width(60.0).hint_text("start"));
-                ui.add(TextEdit::singleline(&mut s.stop).desired_width(60.0).hint_text("stop"));
-                ui.add(TextEdit::singleline(&mut s.step).desired_width(60.0).hint_text("step"));
-                if ui.small_button("✖").on_hover_text("Remove").clicked() {
-                    remove = Some(i);
-                }
-                ui.end_row();
-            }
-        });
-        if let Some(i) = remove {
-            form.sweeps.remove(i);
-        }
-        if ui.small_button("＋ Add sweep").clicked() {
-            form.sweeps.push(SweepForm::default());
-        }
-        let points = Setup::parse(&form.to_text().unwrap_or_default())
-            .map(|s| sim::deck::sweep_combinations(&s).len())
-            .unwrap_or(1);
-        if points > 1 {
-            ui.weak(format!("{points} sweep points per corner and temperature"));
-        }
+        sweeps::sweeps_ui(ui, form);
 
         ui.add_space(4.0);
-        ui.checkbox(&mut form.mc, "Monte Carlo  ([montecarlo]: seeded runs instead of the corner grid)");
-        if form.mc {
-            Grid::new("sim-mc").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-                ui.label("Runs / seed");
-                ui.horizontal(|ui| {
-                    ui.add(TextEdit::singleline(&mut form.mc_runs).desired_width(60.0));
-                    ui.add(TextEdit::singleline(&mut form.mc_seed).desired_width(90.0));
-                });
-                ui.end_row();
-                ui.label("Draws").on_hover_text(
-                    "process: global variation (the statistical corner), mismatch: per-device, both: together",
-                );
-                ComboBox::from_id_salt("sim-mc-mode").selected_text(form.mc_mode.name()).show_ui(ui, |ui| {
-                    for mode in [McMode::Process, McMode::Mismatch, McMode::Both] {
-                        ui.selectable_value(&mut form.mc_mode, mode, mode.name());
-                    }
-                });
-                ui.end_row();
-                ui.label("Corner").on_hover_text("process corner set; empty: mc");
-                ui.horizontal(|ui| {
-                    ui.add(TextEdit::singleline(&mut form.mc_corner).desired_width(80.0).hint_text("mc"));
-                    ui.add(TextEdit::singleline(&mut form.mc_mismatch_corner).desired_width(80.0).hint_text("mismatch: tt_mm"));
-                    ui.add(TextEdit::singleline(&mut form.mc_both_corner).desired_width(80.0).hint_text("both: mc_mm"));
-                });
-                ui.end_row();
-            });
-        }
+        let note = sweeps::mc_note(form, project);
+        sweeps::mc_ui(ui, form, &available, note.as_deref());
     }
 
     /// Statistics of the run: percentiles, a text histogram per measurement, the yield.
@@ -1241,7 +1150,7 @@ impl View for SimulationView {
             {
                 ask = Some("run_mc");
             }
-            if self.form.as_ref().is_some_and(|f| f.mc)
+            if self.form.as_ref().is_some_and(|f| f.has_mc())
                 && ui
                     .add_enabled(!running, egui::Button::new("▶ Grid"))
                     .on_hover_text("Run the corner/temperature/sweep grid this once, without Monte Carlo")
@@ -1256,6 +1165,7 @@ impl View for SimulationView {
                 ui.weak("cancelled");
             }
         });
+        sweeps::plan_ui(ui, self);
         match ask {
             Some("save") => {
                 if let Err(e) = self.save(&project) {
@@ -1328,6 +1238,9 @@ pub(crate) fn script(
     if super::testlib::is_command(arg(0)?) {
         return super::testlib::script(view, app, args);
     }
+    if let Some(result) = sweeps::script(view, &project, args) {
+        return result;
+    }
     let yes = |s: &str| matches!(s, "yes" | "on" | "true");
     fn form(view: &mut SimulationView) -> Result<&mut Form, String> {
         view.form.as_mut().ok_or_else(|| "no testbench is open".to_string())
@@ -1361,18 +1274,6 @@ pub(crate) fn script(
             view.start_with(&project, Vec::new(), Now { mc_runs: Some(n), no_mc: false })
         }
         "run_grid" => view.start_with(&project, Vec::new(), Now { mc_runs: None, no_mc: true }),
-        // add_sweep <variable> <value>…  (or start <a> stop <b> step <c> after the name)
-        "add_sweep" => {
-            let words = &args[2.min(args.len())..];
-            let mut s = SweepForm { variable: arg(1)?.into(), ..Default::default() };
-            if words.first().map(String::as_str) == Some("start") && words.len() == 6 {
-                (s.start, s.stop, s.step) = (words[1].clone(), words[3].clone(), words[5].clone());
-            } else {
-                s.values = words.join(", ");
-            }
-            form(view)?.sweeps.push(s);
-            Ok(())
-        }
         // mc <on|off|runs|seed|mode|corner|mismatch_corner|both_corner> [value]
         "mc" => {
             let f = form(view)?;
@@ -1588,12 +1489,12 @@ max = 3e-10
         let setup = Setup::parse(&text).unwrap();
         let mut form = Form::of(&setup).unwrap();
         assert_eq!(form.setup().unwrap(), setup);
-        assert_eq!((form.sweeps[0].values.as_str(), form.sweeps[1].step.as_str()), ("1.0, 1.2", "1"));
+        assert_eq!((form.sweeps[0].values.as_str(), form.sweeps[1].values.as_str()), ("1.0, 1.2", "1:3:1"));
         assert!(form.mc && form.mc_mode == McMode::Both && form.mc_runs == "7");
         form.mc_runs = "12".into();
         form.mc_mode = McMode::Mismatch;
         form.sweeps[0].values = "0.9 1.1 1.3".into();
-        form.sweeps[1].start = "x".into();
+        form.sweeps[1].values = "x:3:1".into();
         assert!(form.to_text().unwrap_err().contains("not a number"));
         form.sweeps.pop();
         let back = form.setup().unwrap();
