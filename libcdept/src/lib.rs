@@ -5,6 +5,7 @@
 //! headless CLI.
 
 pub mod batch;
+pub mod calc;
 pub mod category;
 pub mod cell;
 pub mod container;
@@ -21,6 +22,7 @@ pub mod link;
 pub mod magic;
 pub mod project;
 pub mod project_edit;
+pub mod raw;
 pub mod refactor;
 pub mod search;
 pub mod sim;

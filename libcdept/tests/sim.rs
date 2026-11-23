@@ -138,3 +138,34 @@ fn montecarlo_runs_are_independent_and_repeatable() {
     assert_eq!(grid.len(), 1);
     assert!(grid[0].record.is_none());
 }
+
+/// `[[output]]` expressions run on the raw file of every point: the calculator's delay
+/// equals the simulator's own `.meas`, a spec may name the output, and the record flags
+/// where it came from.
+#[test]
+fn calculator_outputs_match_the_meas() {
+    let Some((dir, project, simulator)) = open_example() else { return };
+    let file = dir.path().join("libs/cells/tb_inv/testbench/setup.toml");
+    let mut text = std::fs::read_to_string(&file).unwrap();
+    text.push_str(
+        "\n[[output]]\nname = \"tpd_calc\"\nexpr = \"delay(v(\\\"in\\\"), v(\\\"out\\\"), level=vdd/2, trig_edge=\\\"rise\\\", targ_edge=\\\"fall\\\")\"\n\
+         [[output]]\nname = \"swing\"\nexpr = \"pkpk(v(\\\"out\\\")) / vdd\"\nplot = \"tran\"\n\
+         [[output]]\nname = \"broken\"\nexpr = \"max(v(\\\"nothing\\\"))\"\n\
+         [[spec]]\nname = \"tpd_calc\"\nmax = 3e-10\n",
+    );
+    std::fs::write(&file, text).unwrap();
+    let tb = sim::open(&project, "cells", "tb_inv", "testbench").unwrap();
+    let results = sim::run_testbench(&project, &tb, &simulator, &["tt".to_string()]).unwrap();
+    let r = &results[0];
+    let out = r.outcome.as_ref().unwrap_or_else(|e| panic!("{e:#}"));
+    let (tpd, calc) = (out.measures["tpd"], out.measures["tpd_calc"]);
+    assert!((tpd - calc).abs() < tpd * 1e-3, "meas {tpd} vs calc {calc}");
+    assert!((out.measures["swing"] - 1.0).abs() < 0.15, "{:?}", out.measures);
+    assert!(!out.measures.contains_key("broken"));
+    assert_eq!(r.run.calc, ["tpd_calc", "swing"]);
+    assert!(r.run.calc_errors["broken"].contains("no vector"), "{:?}", r.run.calc_errors);
+    assert!(r.specs.iter().any(|s| s.name == "tpd_calc" && s.verdict == Verdict::Pass), "{:?}", r.specs);
+    let rec = RunRecord::read(r.record.as_ref().unwrap()).unwrap();
+    assert_eq!(rec.calc, r.run.calc);
+    assert!(results::format_table(&[rec]).contains("tpd_calc*"));
+}

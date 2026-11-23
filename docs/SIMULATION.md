@@ -194,3 +194,7 @@ Simulation** in the context menu of a view or of a cell opens it and runs at onc
   MISSING amber) and the other measures; **Open folder** and **Open log** hand the
   point's folder or `out.log` to the desktop (`xdg-open`).
 - Test: `cdept-gui/scripts/simulation.script` (docs/GUI-TESTING.md).
+
+## 8. Calculator outputs
+
+`[[output]] name = ".." expr = ".."` (optional `plot`) are expressions of the measurement calculator evaluated on each run's `out.raw`; their numbers are measures next to the `.meas` ones, specs may name them, `result.json` flags them (`calc`, `calc_errors`). Language and functions: [CALC.md](CALC.md).
