@@ -87,10 +87,9 @@ sim wait
 sim expect_points 9
 sim expect_rows 9 PASS
 
-# VACASK cannot do Monte Carlo (its models are not converted): said in the form.
+# VACASK draws Monte Carlo like ngspice (CDePT makes the draws): no problem in the form.
 sim set simulator vacask
-sim expect_problem VACASK
-sim expect_mc_note VACASK
+sim expect_no_problem
 sim set simulator ngspice
 sim expect_no_problem
 # Xyce: process only, unless a corner set with mismatch is named.

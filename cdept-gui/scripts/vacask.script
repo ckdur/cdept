@@ -79,7 +79,7 @@ sim expect_file mc_mm_27_r005 tran1.raw
 sim mc off
 sim set simulator ngspice
 sim save
-shell ! grep -q montecarlo libs/cells/tb_inv/testbench/setup.toml
+shell ! grep -q '^\[montecarlo' libs/cells/tb_inv/testbench/setup.toml
 shell ! grep -q 'simulator = "vacask"' libs/cells/tb_inv/testbench/setup.toml
 log vacask: ok
 quit
