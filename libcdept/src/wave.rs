@@ -1,6 +1,7 @@
 //! Waveforms: CDePT has no waveform viewer of its own. It starts UberWave
-//! (`UberWaveViewer`, a separate GPL-2.0 program in the `uberwave` repository) on the
-//! raw file of a run point, as a separate process (never linked: CDePT stays MIT).
+//! (`UberWaveViewer`, a separate program of Symbiotic EDA in the `uberwave` repository) on
+//! the raw file of a run point, as a separate process. UberWave has the same owner as
+//! CDePT, so its licence does not limit this; embedding it is possible later.
 //!
 //! The viewer takes one path and an optional `--analysis <name>` (`tran`, `ac`, `dc`,
 //! `noise`, `op` for a multi-plot ngspice raw file) and has no IPC yet, so what CDePT

@@ -257,7 +257,7 @@ Xyce Monte Carlo; the rest of the list below as written.
   VCD/FST/GHW viewing is Surfer or GTKWave, started the same way. What CDePT keeps is the
   raw reader (`libcdept/src/raw`, used by the calculator, `[[output]]` and the listing of a
   file's analyses) and the numbers: measures, the calculator and the spec table.
-- **UberWave** (a separate GPL-2.0 program, repository `uberwave`; the uberWAVE project from
+- **UberWave** (a separate program of Symbiotic EDA, repository `uberwave`; same owner as CDePT, so its licence does not limit the integration: starting it as a process is the first step and embedding it is possible if that proves too limited; the uberWAVE project from
   the proposal): C++20/ImGui/ImPlot analog and mixed-signal viewer built for multi-GB ngspice
   raw files (memory-mapped parser, decimation, `.uwraw` cache), plus Spectre PSF. Binary
   `UberWaveViewer`; CLI `UberWaveViewer <file.raw|psf-dir> [--analysis <name>]` (one path,

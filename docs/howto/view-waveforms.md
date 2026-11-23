@@ -1,9 +1,11 @@
 # View waveforms
 
 CDePT has no waveform viewer of its own. The viewer is **UberWave**, a separate program
-(GPL-2.0, C++ with Dear ImGui and ImPlot, built for very large ngspice raw files and Spectre
-PSF results). CDePT starts it on the raw file of a run point, as a separate process: it
-never links to it, so CDePT itself stays MIT.
+of Symbiotic EDA (C++ with Dear ImGui and ImPlot, built for very large ngspice raw files
+and Spectre PSF results). CDePT starts it on the raw file of a run point, as a separate
+process. UberWave belongs to the same owner as CDePT, so its licence does not limit how it
+is integrated; embedding it in the CDePT window is possible later if starting it as a
+program proves too limited (`docs/ROADMAP.md`, Phase 5).
 
 What stays in CDePT are the numbers: measurements, the [calculator](../CALC.md)
 (`cdept calc`, `[[output]]` in `setup.toml`) and the spec table of the Simulation tab. UberWave
