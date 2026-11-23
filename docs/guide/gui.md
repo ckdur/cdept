@@ -179,6 +179,18 @@ A layout that references other layout views shows them as cells filled from thei
 a missing one shows as a red X. Saving writes the layout and its `.gds.json` sidecar. See
 [KLAYOUT.md](../KLAYOUT.md) and [LINKING.md](../LINKING.md).
 
+A **LEF abstract** (an `abstract` view whose file is a `.lef`, e.g. a standard cell of a
+PDK) opens in the same tab, **read-only**: the picture is what KLayout's LEF reader makes
+of the file (pins, obstructions and the macro boundary each on layers of their own, named
+after the LEF's layer, with the PDK's colours where its layer properties have them), the
+macro of the view is shown and the other macros of the file are in the Cells panel.
+Zoom, the panels, rulers and the selection work; the drawing modes, Place Cell, Delete
+and Save are refused with the notice "LEF abstract: read-only". Nothing is converted or
+written next to the LEF. Double-click the view in the Library Manager to open it.
+
+![A LEF abstract in the embedded KLayout](../_static/screenshots/lef-abstract.png)
+*The abstract of `sg13g2_inv_1` from IHP's `sg13g2_stdcell.lef`: Metal1 pins in the PDK's colours, the cell boundary dashed.*
+
 ## Technology tab
 
 Project > Technology opens what CDePT read out of the PDK. A selector at the top chooses the

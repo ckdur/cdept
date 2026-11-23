@@ -44,6 +44,8 @@ class RefTable:
         self.pcells = table.get("pcells") or {}
         # How pins are drawn in this technology (pins.py); None: no rules.
         self.pin_rules = table.get("pin_rules")
+        # A LEF abstract (lef.py): {"tech_lef": path?}; None for layout files.
+        self.lef = table.get("lef")
 
     def entry(self, path):
         return self.files.get(os.path.normpath(path), {})

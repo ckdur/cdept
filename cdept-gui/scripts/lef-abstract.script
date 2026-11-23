@@ -1,0 +1,57 @@
+# A LEF abstract in the embedded KLayout, read-only (docs/KLAYOUT.md §9): the standard
+# cell sg13g2_inv_1 of IHP's LEF, one macro of a file that holds many. Needs the PDK and
+# KLayout:
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_EXAMPLE=ihp-inv cdept-gui/scripts/run.sh \
+#     cdept-gui/scripts/lef-abstract.script
+#
+# Nothing is written (the LEF belongs to a reference library). Exit status 0: every
+# check passed.
+
+expect_project ihp-inv
+
+# The Inspector draws the macro of the selected view.
+select sg13g2_stdcell sg13g2_inv_1 abstract
+expect_preview
+
+open sg13g2_stdcell sg13g2_inv_1 abstract
+wait_frame
+expect_documents 1
+expect_title sg13g2_inv_1 (abstract)
+# The notice says it, and the macro chosen is shown; the others are in the cells panel.
+expect_notice LEF abstract: read-only
+expect_shown sg13g2_inv_1
+expect_cell sg13g2_nand2_1 local
+expect_modified no
+# Pins, obstructions and the macro boundary are layers of their own, named after the
+# LEF's layer and what is on it.
+expect_layer Metal1
+expect_layer Metal1 pin
+expect_layer macro boundary
+screenshot /tmp/cdept-lef-1-inv.png
+
+# Looking works: zoom, a click selects.
+layout_zoom in
+layout_zoom fit
+mode ruler
+expect_mode ruler
+mode select
+expect_mode select
+
+# Changing does not: the drawing modes are refused, Save and Ctrl+S too.
+mode box
+expect_mode select
+key S ctrl
+key Delete
+sync
+expect_modified no
+expect_notice LEF abstract: read-only
+
+# Another macro of the same file is another tab.
+open sg13g2_stdcell sg13g2_nand2_1 abstract
+wait_frame
+expect_documents 2
+expect_shown sg13g2_nand2_1
+expect_modified no
+screenshot /tmp/cdept-lef-2-nand2.png
+quit

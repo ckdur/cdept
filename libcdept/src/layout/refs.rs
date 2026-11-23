@@ -25,6 +25,10 @@ pub struct RefTable {
     /// docs/LINKING.md §9); `None`: no rules, pins are CDePT's only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pin_rules: Option<crate::link::PinRules>,
+    /// Set when the root is a LEF abstract (docs/KLAYOUT.md §9): the helper reads it
+    /// with KLayout's LEF reader, read-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lef: Option<crate::klayout::lef::LefInfo>,
 }
 
 /// The pin rules of the project's device maps, for [`RefTable::pin_rules`].
@@ -325,11 +329,26 @@ fn file_label(project: &Project, file: &Path, meta: Option<&Meta>) -> String {
 /// followed; compressed files are leaves, and so are unreadable files (with a warning
 /// in the log).
 pub fn resolve(project: &Project, file: &Path) -> RefTable {
+    // A LEF abstract places nothing: no references, no PCells, no pins.
+    if crate::klayout::lef::is_lef(file) {
+        let entry = FileRefs {
+            label: file_label(project, file, None),
+            read_only: true,
+            ..Default::default()
+        };
+        return RefTable {
+            root: file.to_path_buf(),
+            files: [(file.to_path_buf(), entry)].into(),
+            lef: Some(crate::klayout::lef::info(project, file)),
+            ..Default::default()
+        };
+    }
     let mut table = RefTable {
         root: file.to_path_buf(),
         files: BTreeMap::new(),
         pcells: pcell_views(project),
         pin_rules: pin_rules(project),
+        lef: None,
     };
     let mut todo = vec![file.to_path_buf()];
     while let Some(current) = todo.pop() {
@@ -686,6 +705,25 @@ mod tests {
     fn gds(tmp: &tempfile::TempDir, lib: &str, cell: &str) -> PathBuf {
         tmp.path()
             .join(format!("libs/{lib}/{cell}/layout/{cell}.gds"))
+    }
+
+    #[test]
+    fn a_lef_resolves_to_itself_with_its_tech_lef_and_no_references() {
+        let (tmp, project) = setup();
+        let lef = tmp.path().join("lef/cells.lef");
+        let tech = tmp.path().join("lef/cells_tech.lef");
+        fs::create_dir_all(lef.parent().unwrap()).unwrap();
+        fs::write(&lef, "VERSION 5.8 ;\nMACRO a\nEND a\n").unwrap();
+        fs::write(&tech, "VERSION 5.8 ;\n").unwrap();
+        let table = resolve(&project, &lef);
+        assert_eq!(table.root, lef);
+        assert_eq!(table.files.len(), 1);
+        assert!(table.files[&lef].read_only);
+        assert!(table.files[&lef].refs.is_empty());
+        assert!(table.pcells.is_empty());
+        assert_eq!(table.lef.unwrap().tech_lef, Some(tech));
+        // A layout file carries no LEF part.
+        assert!(resolve(&project, &gds(&tmp, "a", "inv")).lef.is_none());
     }
 
     #[test]

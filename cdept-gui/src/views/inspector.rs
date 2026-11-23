@@ -168,6 +168,8 @@ impl View for InspectorView {
                 let tool = match format.tool() {
                     // KLayout runs in a helper of its own and is shown in a tab.
                     Some(_) if layout => "KLayout, in a tab".into(),
+                    // A LEF abstract is drawn by KLayout's LEF reader, read-only.
+                    None if format == Format::Lef => "KLayout, in a tab (read-only)".into(),
                     // xschem is built in: it needs its engine, not the program.
                     Some(_) if embedded => match ctx.tools.helper() {
                         Some(helper) if helper.path.is_none() => {
@@ -229,7 +231,10 @@ impl View for InspectorView {
         }
 
         // A picture of what xschem can draw.
-        let layout = matches!(entry.format, Some(Format::Gds | Format::Oasis));
+        let layout = matches!(
+            entry.format,
+            Some(Format::Gds | Format::Oasis | Format::Lef)
+        );
         let drawable = matches!(
             entry.format,
             Some(Format::XschemSchematic | Format::XschemSymbol)

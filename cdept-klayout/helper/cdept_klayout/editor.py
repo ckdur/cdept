@@ -8,8 +8,9 @@ import tempfile
 
 import pya
 
+from . import lef
 from . import pcells
-from .document import MARKER_LAYER, Document
+from .document import MARKER_LAYER
 
 # KLayout's ButtonState bits.
 LEFT, MIDDLE, RIGHT = 8, 16, 32
@@ -130,6 +131,8 @@ class Editor:
     # -- opening ---------------------------------------------------------------
 
     def open(self, table, editable=True, technology=None, layer_properties=None):
+        # A LEF abstract is never editable (lef.py).
+        editable = editable and table.lef is None
         self.editable = editable
         self.manager = pya.Manager()
         view = pya.LayoutView(editable, self.manager)
@@ -144,13 +147,16 @@ class Editor:
         if technology:
             cv.technology = technology
         pcells.sync(table.pcells)
-        doc = Document(cv.layout(), table).load()
+        doc = lef.open_document(cv.layout(), table, technology, layer_properties).load()
         top = doc.top_cell()
         if top is not None:
             cv.cell = top
-        if layer_properties:
-            view.load_layer_props(layer_properties, True)
-        view.add_missing_layers()
+        if getattr(doc, "abstract", False):
+            lef.style(view, doc.layout, doc.mapping, doc.layer_properties)
+        else:
+            if layer_properties:
+                view.load_layer_props(layer_properties, True)
+            view.add_missing_layers()
         self._style_marker(view)
         from . import pins
         pins.style_view(view, self.pin_style)
