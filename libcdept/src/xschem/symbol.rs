@@ -762,6 +762,7 @@ mod tests {
 
     #[test]
     fn new_symbols_point_at_the_schematic_view_and_follow_the_cell() {
+        let _env = crate::testutil::hermetic_env();
         let dir = tempfile::tempdir().unwrap();
         let mut project = project(dir.path());
         let libs = dir.path().join("libs");
@@ -812,6 +813,7 @@ mod tests {
 
     #[test]
     fn values_set_by_hand_are_kept_and_a_literal_cell_name_is_renamed() {
+        let _env = crate::testutil::hermetic_env();
         let dir = tempfile::tempdir().unwrap();
         let mut project = project(dir.path());
         let libs = dir.path().join("libs");
@@ -854,6 +856,7 @@ mod tests {
 
     #[test]
     fn check_finds_and_repairs_broken_links() {
+        let _env = crate::testutil::hermetic_env();
         let dir = tempfile::tempdir().unwrap();
         let mut project = project(dir.path());
         let libs = dir.path().join("libs");

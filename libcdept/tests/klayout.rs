@@ -166,6 +166,7 @@ fn copy_tree(from: &Path, to: &Path) {
 /// add a box; the save writes inv.gds too, and buf.gds still only references inv.
 #[test]
 fn edit_inv_in_place_from_buf() {
+    let _env = libcdept::testutil::hermetic_env();
     if !available() {
         return;
     }
@@ -230,6 +231,7 @@ fn edit_inv_in_place_from_buf() {
 /// change to the PCell file rebuilds them; the export has plain geometry only.
 #[test]
 fn project_pcells_are_live() {
+    let _env = libcdept::testutil::hermetic_env();
     if !available() {
         return;
     }

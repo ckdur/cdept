@@ -30,6 +30,8 @@ pub mod sim;
 pub mod tech;
 pub mod technology;
 pub mod template;
+#[cfg(any(test, feature = "testutil"))]
+pub mod testutil;
 pub mod tools;
 pub mod trash;
 pub mod vcs;

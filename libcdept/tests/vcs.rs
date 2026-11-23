@@ -60,6 +60,7 @@ fn project(root: &Path) -> Option<Project> {
 
 #[test]
 fn a_clean_project_is_clean() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let Some(project) = project(&tmp.path().join("p")) else {
         return;
@@ -86,6 +87,7 @@ fn a_clean_project_is_clean() {
 
 #[test]
 fn changes_show_per_view_cell_and_library() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let Some(mut project) = project(&tmp.path().join("p")) else {
         return;
@@ -146,6 +148,7 @@ fn changes_show_per_view_cell_and_library() {
 
 #[test]
 fn a_library_can_be_a_repository_of_its_own() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let Some(mut project) = project(&tmp.path().join("p")) else {
         return;
@@ -194,6 +197,7 @@ fn a_library_can_be_a_repository_of_its_own() {
 
 #[test]
 fn outside_a_repository_there_is_no_status() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("p");
     write(&root.join("libs/a/inv/schematic/inv.sch"), "v {}\n");

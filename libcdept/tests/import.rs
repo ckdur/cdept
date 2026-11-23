@@ -3,7 +3,7 @@
 //! when those are absent.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use libcdept::category::{self, Store};
 use libcdept::import::{self, Options, Origin};
@@ -88,6 +88,7 @@ fn project(dir: &Path) -> Project {
 
 #[test]
 fn categories_are_kept_in_the_library_or_in_the_project() {
+    let _env = libcdept::testutil::hermetic_env();
     let dir = tempfile::tempdir().unwrap();
     let project = project(dir.path());
     let analog = project.library("analog").unwrap();
@@ -174,6 +175,7 @@ fn categories_are_kept_in_the_library_or_in_the_project() {
 
 #[test]
 fn categories_are_suggested_and_libman_groups_are_read() {
+    let _env = libcdept::testutil::hermetic_env();
     let dir = tempfile::tempdir().unwrap();
     let project = project(dir.path());
     let prims = project.library("prims").unwrap();
@@ -207,6 +209,7 @@ fn categories_are_suggested_and_libman_groups_are_read() {
 
 #[test]
 fn search_finds_cells_views_and_content() {
+    let _env = libcdept::testutil::hermetic_env();
     let dir = tempfile::tempdir().unwrap();
     let project = project(dir.path());
     category::assign(&project, "analog", "analog/amplifiers", &["ota5t"]).unwrap();
@@ -294,6 +297,7 @@ fn design_folder(dir: &Path) {
 
 #[test]
 fn a_design_folder_becomes_a_project() {
+    let _env = libcdept::testutil::hermetic_env();
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("chip");
     design_folder(&root);
@@ -511,76 +515,68 @@ fn a_libman_project_file_gives_libraries_and_categories() {
     assert!(back.libraries[0].paths[0].ends_with("/mylib/*"));
 }
 
-fn pdk_root(pdk: &str) -> Option<PathBuf> {
-    let roots = [
-        std::env::var_os("PDK_ROOT").map(PathBuf::from),
-        Some(PathBuf::from("/opt/ext/OpenPDKs")),
-    ];
-    let found = roots
-        .into_iter()
-        .flatten()
-        .find(|root| root.join(pdk).join("libs.tech/xschem").is_dir());
-    if found.is_none() {
-        eprintln!("skipped: the {pdk} PDK was not found");
-    }
-    found
-}
+/// Tests that need an installed PDK.
+mod real_pdk {
+    use super::*;
 
-#[test]
-fn the_xschem_folder_of_a_pdk_gives_its_libraries_read_only() {
-    for pdk in ["sky130A", "ihp-sg13g2"] {
-        let Some(pdk_root) = pdk_root(pdk) else {
-            continue;
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let source = pdk_root.join(pdk).join("libs.tech/xschem");
-        let plan = import::scan(
-            &source,
-            &Options {
-                into: Some(dir.path().join("p")),
-                name: Some("p".into()),
-                ..options()
-            },
-        )
-        .unwrap();
-        assert_eq!(plan.technology.as_deref(), Some(pdk), "{}", plan.describe());
-        assert_eq!(plan.pdk_root.as_deref(), Some(pdk_root.as_path()));
-        assert!(plan.write_pdk_root);
-        assert!(!plan.libraries.is_empty());
-        assert!(
-            plan.libraries.iter().all(|l| l.read_only),
-            "{}",
-            plan.describe()
-        );
-        let primitives = if pdk == "sky130A" {
-            "sky130_fd_pr"
-        } else {
-            "sg13g2_pr"
-        };
-        let lib = plan
-            .libraries
-            .iter()
-            .find(|l| l.name == primitives)
+    #[test]
+    fn the_xschem_folder_of_a_pdk_gives_its_libraries_read_only() {
+        for pdk in ["sky130A", "ihp-sg13g2"] {
+            let Some(real) = libcdept::testutil::real_pdk(pdk) else {
+                continue;
+            };
+            let pdk_root = real.root.clone();
+            let dir = tempfile::tempdir().unwrap();
+            let source = pdk_root.join(pdk).join("libs.tech/xschem");
+            let plan = import::scan(
+                &source,
+                &Options {
+                    into: Some(dir.path().join("p")),
+                    name: Some("p".into()),
+                    ..options()
+                },
+            )
             .unwrap();
-        assert!(lib.enabled && lib.cells > 20, "{}", plan.describe());
-        assert_eq!(
-            plan.path_text(&lib.folder),
-            format!("$PDK_ROOT/{pdk}/libs.tech/xschem/{primitives}")
-        );
-        assert!(
-            plan.libraries.iter().any(|l| !l.enabled),
-            "{}",
-            plan.describe()
-        );
-        let project = plan.write().unwrap();
-        let lib = project.library(primitives).unwrap();
-        assert!(lib.read_only && lib.error.is_none() && lib.cells.len() > 20);
-        assert_eq!(project.technology.as_deref(), Some(pdk));
+            assert_eq!(plan.technology.as_deref(), Some(pdk), "{}", plan.describe());
+            assert_eq!(plan.pdk_root.as_deref(), Some(pdk_root.as_path()));
+            assert!(plan.write_pdk_root);
+            assert!(!plan.libraries.is_empty());
+            assert!(
+                plan.libraries.iter().all(|l| l.read_only),
+                "{}",
+                plan.describe()
+            );
+            let primitives = if pdk == "sky130A" {
+                "sky130_fd_pr"
+            } else {
+                "sg13g2_pr"
+            };
+            let lib = plan
+                .libraries
+                .iter()
+                .find(|l| l.name == primitives)
+                .unwrap();
+            assert!(lib.enabled && lib.cells > 20, "{}", plan.describe());
+            assert_eq!(
+                plan.path_text(&lib.folder),
+                format!("$PDK_ROOT/{pdk}/libs.tech/xschem/{primitives}")
+            );
+            assert!(
+                plan.libraries.iter().any(|l| !l.enabled),
+                "{}",
+                plan.describe()
+            );
+            let project = plan.write().unwrap();
+            let lib = project.library(primitives).unwrap();
+            assert!(lib.read_only && lib.error.is_none() && lib.cells.len() > 20);
+            assert_eq!(project.technology.as_deref(), Some(pdk));
+        }
     }
 }
 
 #[test]
 fn an_xschemrc_is_run_by_xschem_when_the_helper_is_built() {
+    let _env = libcdept::testutil::hermetic_env();
     if libcdept::xschem::Engine::find_helper().is_none() {
         // The test runs from target/<profile>/deps; the helper is built next to it.
         let built = std::env::current_exe()

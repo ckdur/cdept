@@ -391,13 +391,15 @@ mod tests {
 
     // -- against a real Magic and PDK, when they are installed ------------------------
 
-    /// A Magic and a PDK of this machine, else `None` (the test is skipped).
-    fn real(pdk: &str) -> Option<Magic> {
+    /// A Magic and a PDK of this machine (the environment is the PDK's while the second lives),
+    /// else `None` (the test is skipped).
+    fn real(pdk: &str) -> Option<(Magic, crate::testutil::RealPdk)> {
         let program = Magic::find().or_else(|| {
             let p = PathBuf::from("/opt/ext/OpenLane/bin/magic");
             p.is_file().then_some(p)
         })?;
-        let root = PathBuf::from("/opt/ext/OpenPDKs");
+        let installed = crate::testutil::real_pdk(pdk)?;
+        let root = installed.root.clone();
         let rc = root.join(pdk).join(format!("libs.tech/magic/{pdk}.magicrc"));
         if !rc.is_file() {
             return None;
@@ -409,20 +411,22 @@ mod tests {
             ("PDK".into(), pdk.into()),
             ("PDKPATH".into(), root.join(pdk).into()),
         ];
-        Some(m)
+        Some((m, installed))
     }
 
-    fn inverter() -> Option<PathBuf> {
-        let p = PathBuf::from(
-            "/opt/ext/OpenPDKs/sky130A/libs.ref/sky130_fd_sc_hd/mag/sky130_fd_sc_hd__inv_1.mag",
-        );
+    fn inverter(root: &Path) -> Option<PathBuf> {
+        let p = root.join("sky130A/libs.ref/sky130_fd_sc_hd/mag/sky130_fd_sc_hd__inv_1.mag");
         p.is_file().then_some(p)
     }
 
     #[test]
     fn real_extract_drc_lef() {
-        let (Some(magic), Some(file)) = (real("sky130A"), inverter()) else {
+        let Some((magic, pdk)) = real("sky130A") else {
             eprintln!("skipped: no magic or sky130A");
+            return;
+        };
+        let Some(file) = inverter(&pdk.root) else {
+            eprintln!("skipped: no inverter in sky130A");
             return;
         };
         let tmp = tempfile::tempdir().unwrap();
@@ -447,13 +451,15 @@ mod tests {
 
     #[test]
     fn real_ihp_extract_from_gds() {
-        let gds = PathBuf::from(
-            "/opt/ext/OpenPDKs/ihp-sg13g2/libs.ref/sg13g2_stdcell/gds/sg13g2_stdcell.gds",
-        );
-        let (Some(magic), true) = (real("ihp-sg13g2"), gds.is_file()) else {
+        let Some((magic, pdk)) = real("ihp-sg13g2") else {
             eprintln!("skipped: no magic or ihp-sg13g2");
             return;
         };
+        let gds = pdk.dir.join("libs.ref/sg13g2_stdcell/gds/sg13g2_stdcell.gds");
+        if !gds.is_file() {
+            eprintln!("skipped: no standard cell GDS in ihp-sg13g2");
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let src = Source::Gds {
             file: gds,
@@ -469,7 +475,7 @@ mod tests {
 
     #[test]
     fn real_drc_finds_violations() {
-        let Some(magic) = real("sky130A") else {
+        let Some((magic, _pdk)) = real("sky130A") else {
             eprintln!("skipped: no magic or sky130A");
             return;
         };
@@ -490,8 +496,12 @@ mod tests {
 
     #[test]
     fn real_gds_import_and_errors() {
-        let (Some(magic), Some(file)) = (real("sky130A"), inverter()) else {
+        let Some((magic, pdk)) = real("sky130A") else {
             eprintln!("skipped: no magic or sky130A");
+            return;
+        };
+        let Some(file) = inverter(&pdk.root) else {
+            eprintln!("skipped: no inverter in sky130A");
             return;
         };
         let tmp = tempfile::tempdir().unwrap();

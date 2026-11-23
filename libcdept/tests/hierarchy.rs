@@ -78,6 +78,7 @@ fn assert_sound(project: &Project) {
 
 #[test]
 fn the_index_knows_who_uses_what() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, project) = buffer();
     let index = Index::build(&project);
     assert!(index.warnings.is_empty(), "{:?}", index.warnings);
@@ -146,6 +147,7 @@ fn the_index_knows_who_uses_what() {
 
 #[test]
 fn renaming_a_cell_takes_its_users_along() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, mut project) = buffer();
     let root = project.root.clone();
     let operation = Operation::RenameCell {
@@ -217,6 +219,7 @@ fn renaming_a_cell_takes_its_users_along() {
 
 #[test]
 fn a_pcell_view_keeps_its_users_when_renamed_or_moved() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, mut project) = buffer();
     let root = project.root.clone();
     run(
@@ -257,6 +260,7 @@ fn a_pcell_view_keeps_its_users_when_renamed_or_moved() {
 
 #[test]
 fn moving_a_cell_to_another_library() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, mut project) = buffer();
     let root = project.root.clone();
     run(
@@ -295,6 +299,7 @@ fn moving_a_cell_to_another_library() {
 
 #[test]
 fn a_copy_points_at_itself_and_leaves_the_original_alone() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, mut project) = buffer();
     let root = project.root.clone();
     let original = read(root.join("libs/logic/buf/schematic/buf.sch"));
@@ -374,6 +379,7 @@ fn a_copy_points_at_itself_and_leaves_the_original_alone() {
 
 #[test]
 fn views_can_be_renamed_and_copied() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, mut project) = buffer();
     let root = project.root.clone();
     run(
@@ -448,6 +454,7 @@ fn views_can_be_renamed_and_copied() {
 
 #[test]
 fn renaming_a_library_with_and_without_its_folder() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, mut project) = buffer();
     let root = project.root.clone();
     // The name only: xschem keeps naming the folder; layouts name the library.
@@ -504,6 +511,7 @@ fn renaming_a_library_with_and_without_its_folder() {
 
 #[test]
 fn a_failed_step_puts_everything_back() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, project) = buffer();
     let root = project.root.clone();
     let operation = Operation::RenameCell {
@@ -545,6 +553,7 @@ fn a_failed_step_puts_everything_back() {
 
 #[test]
 fn unsaved_files_block_and_read_only_users_are_reported() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, mut project) = buffer();
     let root = project.root.clone();
     let operation = Operation::RenameCell {
@@ -644,6 +653,7 @@ const SCHEMATIC: &str =
 
 #[test]
 fn flat_and_cells_libraries_keep_their_schematic_links() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, mut project) = two_layouts();
     let root = project.root.clone();
     // A flat cell: the schematic is next to the symbol, no attribute. A user of it.
@@ -716,6 +726,7 @@ fn flat_and_cells_libraries_keep_their_schematic_links() {
 
 #[test]
 fn subcircuit_and_module_names_follow_a_rename() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, mut project) = two_layouts();
     let root = project.root.clone();
     let write = |path: &str, text: &str| {
@@ -786,6 +797,7 @@ fn subcircuit_and_module_names_follow_a_rename() {
 
 #[test]
 fn libraries_whose_folders_share_a_name_are_reported() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, mut project) = two_layouts();
     let options = AddLibrary {
         create: true,
@@ -802,6 +814,7 @@ fn libraries_whose_folders_share_a_name_are_reported() {
 
 #[test]
 fn deleting_says_who_is_left_without_it() {
+    let _env = libcdept::testutil::hermetic_env();
     let (_dir, mut project) = buffer();
     let root = project.root.clone();
     let operation = Operation::DeleteCell {

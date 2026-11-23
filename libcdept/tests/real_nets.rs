@@ -1,8 +1,10 @@
-//! Nets of a layout against its schematic (docs/LINKING.md §8), with the real KLayout,
-//! xschem and the IHP SG13G2 PDK (its LVS deck extracts the layout). Skipped when one
-//! of them is not found.
+//! Real-PDK tests: nets of a layout against its schematic (docs/LINKING.md §8), with the
+//! real KLayout, xschem and the IHP SG13G2 PDK (its LVS deck extracts the layout). Skipped
+//! when one of them is not found.
 
 use std::path::{Path, PathBuf};
+
+use libcdept::testutil::{RealPdk, real_pdk};
 
 use libcdept::Project;
 use libcdept::klayout::{Engine, setup, verify};
@@ -10,7 +12,8 @@ use libcdept::link::{self, nets::NetStatus};
 
 const PDK: &str = "ihp-sg13g2";
 
-fn pdk_root() -> Option<PathBuf> {
+/// `PDK_ROOT` of the installed PDK and the guard that keeps the environment for it.
+fn pdk_root() -> Option<(PathBuf, RealPdk)> {
     if setup::find_klayout().is_none() || setup::find_helper_dir().is_none() {
         eprintln!("skipped: KLayout or the cdept-klayout helper was not found");
         return None;
@@ -31,18 +34,8 @@ fn pdk_root() -> Option<PathBuf> {
             }
         }
     }
-    let roots = [
-        std::env::var_os("PDK_ROOT").map(PathBuf::from),
-        Some(PathBuf::from("/opt/ext/OpenPDKs")),
-    ];
-    let found = roots
-        .into_iter()
-        .flatten()
-        .find(|r| r.join(PDK).join("libs.tech/klayout").is_dir());
-    if found.is_none() {
-        eprintln!("skipped: the {PDK} PDK was not found");
-    }
-    found
+    let real = real_pdk(PDK)?;
+    Some((real.root.clone(), real))
 }
 
 fn copy_tree(from: &Path, to: &Path) {
@@ -90,7 +83,7 @@ fn check(project: &Project, cell: &str, work: &Path) -> link::nets::NetRun {
 /// open with flylines; with a wire from A to Y, a short.
 #[test]
 fn the_inverter_has_opens_and_then_a_short() {
-    let Some(root) = pdk_root() else {
+    let Some((root, _env)) = pdk_root() else {
         return;
     };
     let (dir, project) = example(&root);
@@ -147,7 +140,7 @@ fn the_inverter_has_opens_and_then_a_short() {
 /// between the two cells, with a flyline from one to the other.
 #[test]
 fn the_buffer_is_open_between_its_cells() {
-    let Some(root) = pdk_root() else {
+    let Some((root, _env)) = pdk_root() else {
         return;
     };
     let (_dir, project) = example(&root);
@@ -180,7 +173,7 @@ fn the_buffer_is_open_between_its_cells() {
 /// parallel group from xschem's own connectivity, and recorded in the sidecar.
 #[test]
 fn parallel_devices_are_found_in_the_schematic() {
-    let Some(root) = pdk_root() else {
+    let Some((root, _env)) = pdk_root() else {
         return;
     };
     let (dir, project) = example(&root);
@@ -215,7 +208,7 @@ fn parallel_devices_are_found_in_the_schematic() {
 /// pin moved onto the VSS wire is found there; IHP's LVS sees the pins' labels.
 #[test]
 fn pins_are_in_the_sidecar_the_stream_and_the_checks() {
-    let Some(root) = pdk_root() else {
+    let Some((root, _env)) = pdk_root() else {
         return;
     };
     let (dir, project) = example(&root);

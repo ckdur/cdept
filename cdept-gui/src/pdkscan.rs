@@ -450,22 +450,26 @@ mod tests {
         assert_eq!(seen.last(), Some(&("devices", true)), "devices come last");
     }
 
-    #[test]
-    fn the_real_scan_is_the_same_too() {
-        let root = std::path::Path::new("/opt/ext/OpenPDKs");
-        if !root.join("ihp-sg13g2/libs.tech").is_dir() {
-            eprintln!("skipped: no ihp-sg13g2 in {}", root.display());
-            return;
+    /// Tests that need an installed PDK (skipped without it).
+    mod real_pdk {
+        use super::*;
+
+        #[test]
+        fn the_real_scan_is_the_same_too() {
+            let Some(real) = libcdept::testutil::real_pdk("ihp-sg13g2") else {
+                return;
+            };
+            let ctx = ScanContext::new(PdkDir::new(&real.root, &real.name)).files_only();
+            let (tech, catalog) = scan_with_progress(&ctx, &|_, _| {});
+            let (plain_tech, plain_catalog) = tech::scan(&ctx);
+            assert_eq!(tech, plain_tech);
+            assert_eq!(catalog, plain_catalog);
         }
-        let ctx = ScanContext::new(PdkDir::new(root, "ihp-sg13g2")).files_only();
-        let (tech, catalog) = scan_with_progress(&ctx, &|_, _| {});
-        let (plain_tech, plain_catalog) = tech::scan(&ctx);
-        assert_eq!(tech, plain_tech);
-        assert_eq!(catalog, plain_catalog);
     }
 
     #[test]
     fn changing_the_pdk_in_the_settings_scans_it() {
+        let _env = libcdept::testutil::hermetic_env();
         let dir = tempfile::tempdir().unwrap();
         let pdk = fake_pdk(&dir.path().join("pdks"));
         let root = dir.path().join("project");
@@ -517,6 +521,7 @@ mod tests {
 
     #[test]
     fn a_project_without_a_pdk_cannot_be_rescanned() {
+        let _env = libcdept::testutil::hermetic_env();
         let dir = tempfile::tempdir().unwrap();
         libcdept::Project::create(dir.path(), Some("demo")).unwrap();
         let mut app = AppCtx::new(
@@ -524,10 +529,7 @@ mod tests {
             crate::log::LogBuffer::new(),
         );
         app.load_project(dir.path());
-        if app.pdk().is_some() {
-            eprintln!("skipped: the environment names a PDK");
-            return;
-        }
+        assert!(app.pdk().is_none(), "the hermetic environment names no PDK");
         let error = start_rescan(&mut app, &egui::Context::default(), false).unwrap_err();
         assert!(error.contains("no PDK"), "{error}");
         assert!(app.tech.rescan.is_none());

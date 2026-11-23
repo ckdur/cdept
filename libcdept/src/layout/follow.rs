@@ -347,6 +347,7 @@ mod tests {
 
     #[test]
     fn rename_rewrites_every_view_that_places_the_cell() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, project) = setup();
         let root = tmp.path();
         let lib = project.library("a").unwrap();
@@ -404,6 +405,7 @@ mod tests {
 
     #[test]
     fn a_used_name_keeps_the_structure_name() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, project) = setup();
         let buf = tmp.path().join("libs/a/buf/layout/buf.gds");
         // buf already has a structure named inv2.
@@ -422,6 +424,7 @@ mod tests {
 
     #[test]
     fn library_rename_rewrites_sidecars_only() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, project) = setup();
         let done = library_renamed(&project, "a", "logic");
         assert_eq!(done.iter().filter(|f| !f.is_problem()).count(), 3);
@@ -438,6 +441,7 @@ mod tests {
 
     #[test]
     fn deleting_reports_the_views_left_without_their_cell() {
+        let _env = crate::testutil::hermetic_env();
         let (_tmp, project) = setup();
         let mut labels: Vec<String> = placed_by(&project, "a", "inv", None)
             .iter()
@@ -459,6 +463,7 @@ mod tests {
 
     #[test]
     fn fix_repairs_a_library_renamed_behind_cdepts_back() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, project) = setup();
         let buf = tmp.path().join("libs/a/buf/layout/buf.gds");
         let mut meta = Meta::read_for(&buf).unwrap().unwrap();

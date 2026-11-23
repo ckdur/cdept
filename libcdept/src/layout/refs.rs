@@ -709,6 +709,7 @@ mod tests {
 
     #[test]
     fn a_lef_resolves_to_itself_with_its_tech_lef_and_no_references() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, project) = setup();
         let lef = tmp.path().join("lef/cells.lef");
         let tech = tmp.path().join("lef/cells_tech.lef");
@@ -728,6 +729,7 @@ mod tests {
 
     #[test]
     fn resolves_by_search_without_sidecar_and_follows_closure() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, project) = setup();
         let table = resolve(&project, &gds(&tmp, "b", "inv2"));
         assert_eq!(table.files.len(), 3);
@@ -746,6 +748,7 @@ mod tests {
 
     #[test]
     fn sidecar_entry_wins_and_unresolvable_entry_is_missing() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, project) = setup();
         let buf = gds(&tmp, "a", "buf");
         let mut meta = Meta::new("a", "buf", "layout", "buf");
@@ -773,6 +776,7 @@ mod tests {
 
     #[test]
     fn cycles_end() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, project) = setup();
         // inv places buf, which places inv.
         fs::write(gds(&tmp, "a", "inv"), build(&[("inv", &["buf"])])).unwrap();
@@ -782,6 +786,7 @@ mod tests {
 
     #[test]
     fn oasis_is_followed_and_unreadable_files_are_leaves() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, mut project) = setup();
         let dir = tmp.path().join("libs/a/pad/layout");
         fs::create_dir_all(&dir).unwrap();
@@ -815,6 +820,7 @@ mod tests {
 
     #[test]
     fn search_prefers_gds_and_the_layout_view() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, mut project) = setup();
         let dir = tmp.path().join("libs/b/inv/layout_oas");
         fs::create_dir_all(&dir).unwrap();
@@ -830,6 +836,7 @@ mod tests {
 
     #[test]
     fn update_after_save_writes_and_prunes() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, project) = setup();
         let buf = gds(&tmp, "a", "buf");
         let mut report = SaveReport {
@@ -886,6 +893,7 @@ mod tests {
 
     #[test]
     fn a_save_that_wrote_an_external_cell_too_updates_both_sidecars() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, project) = setup();
         let buf = gds(&tmp, "a", "buf");
         let inv = gds(&tmp, "a", "inv");
@@ -920,6 +928,7 @@ mod tests {
 
     #[test]
     fn update_after_save_ignores_unknown_files() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, project) = setup();
         let outside = tmp.path().join("loose.gds");
         fs::write(&outside, build(&[("x", &[])])).unwrap();
@@ -933,6 +942,7 @@ mod tests {
 
     #[test]
     fn check_and_fix() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, project) = setup();
         let buf = gds(&tmp, "a", "buf");
         let findings = check(&project, "a", "buf").unwrap();
@@ -993,6 +1003,7 @@ mod tests {
 
     #[test]
     fn rename_and_copy_keep_references_working() {
+        let _env = crate::testutil::hermetic_env();
         let (tmp, mut project) = setup();
         fix(&project, "a", "buf").unwrap();
         let lib = project.library("a").unwrap().clone();
@@ -1020,6 +1031,7 @@ mod tests {
 
     #[test]
     fn check_errors() {
+        let _env = crate::testutil::hermetic_env();
         let (_tmp, project) = setup();
         assert!(check(&project, "zzz", "buf").is_err());
         assert!(check(&project, "a", "zzz").is_err());

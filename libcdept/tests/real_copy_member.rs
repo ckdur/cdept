@@ -1,30 +1,20 @@
 //! Copying a cell that is one cell of a multi-cell file (a standard cell of the PDK's
-//! reference library) into a library of the project. Skipped when the PDK is absent.
+//! reference library) into a library of the project. A real-PDK test: skipped when the PDK
+//! is absent.
 
-use std::path::PathBuf;
-
+use libcdept::testutil::real_pdk;
 use libcdept::layout::gds;
 use libcdept::refactor::{self, Operation, Options};
 use libcdept::Project;
 
 const PDK: &str = "ihp-sg13g2";
 
-fn pdk_root() -> Option<PathBuf> {
-    let roots = std::env::var_os("PDK_ROOT")
-        .map(PathBuf::from)
-        .into_iter()
-        .chain(["/foss/pdks", "/opt/ext/OpenPDKs"].map(PathBuf::from));
-    roots
-        .into_iter()
-        .find(|r| r.join(PDK).join("libs.ref/sg13g2_stdcell/gds").is_dir())
-}
-
 #[test]
 fn a_standard_cell_is_copied_as_files_of_its_own() {
-    let Some(root) = pdk_root() else {
-        eprintln!("skipped: the {PDK} PDK was not found");
+    let Some(pdk) = real_pdk(PDK) else {
         return;
     };
+    let root = &pdk.root;
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(tmp.path().join("libs/cells")).unwrap();
     std::fs::write(

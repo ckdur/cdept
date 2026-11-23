@@ -687,6 +687,7 @@ mod tests {
 
     #[test]
     fn broken_links_are_found_when_the_project_loads_and_fixed_on_request() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = broken_project(tmp.path());
         assert_eq!(app.links.len(), 1);
@@ -715,6 +716,7 @@ mod tests {
 
     #[test]
     fn a_read_only_library_is_not_fixed() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = broken_project(tmp.path());
         fs::write(

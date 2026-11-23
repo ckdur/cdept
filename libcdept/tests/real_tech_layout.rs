@@ -1,30 +1,19 @@
 //! The KLayout, Magic and netgen sections of the technology snapshot on real PDKs.
 //!
-//! Every test skips when its PDK is not on this machine: `$CDEPT_TEST_PDK_ROOT`, else
-//! `$PDK_ROOT`, else `/opt/ext/OpenPDKs`. The tests that ask KLayout skip when it is
-//! not built (`cdept-klayout/.bin`) or found.
+//! Real-PDK tests: each skips when its PDK is not installed (`$CDEPT_TEST_PDK_ROOT`, else
+//! `/opt/ext/OpenPDKs`; see `libcdept::testutil`) and runs with `PDK` and `PDK_ROOT` set
+//! to it. The tests that ask KLayout skip when it is not built (`cdept-klayout/.bin`) or
+//! found.
 
-use std::path::PathBuf;
-
+use libcdept::testutil::{RealPdk, real_pdk};
 use libcdept::klayout::setup;
 use libcdept::tech::klayout::{self, KlayoutCatalog};
 use libcdept::tech::{PdkDir, ScanContext, magic, netgen};
 
-fn pdk(name: &str) -> Option<PdkDir> {
-    let roots = [
-        std::env::var_os("CDEPT_TEST_PDK_ROOT").map(PathBuf::from),
-        std::env::var_os("PDK_ROOT").map(PathBuf::from),
-        Some(PathBuf::from("/opt/ext/OpenPDKs")),
-    ];
-    let found = roots
-        .into_iter()
-        .flatten()
-        .map(|root| PdkDir::new(root, name))
-        .find(|pdk| pdk.dir().join("libs.tech").is_dir());
-    if found.is_none() {
-        eprintln!("skipped: the PDK {name} is not on this machine");
-    }
-    found
+/// The installed PDK, and the guard that keeps the environment for it.
+fn pdk(name: &str) -> Option<(PdkDir, RealPdk)> {
+    let real = real_pdk(name)?;
+    Some((PdkDir::new(real.root.clone(), name), real))
 }
 
 fn has_klayout() -> bool {
@@ -46,7 +35,7 @@ fn layer<'a>(catalog: &'a KlayoutCatalog, name: &str) -> &'a klayout::Layer {
 
 #[test]
 fn ihp_klayout_from_files() {
-    let Some(pdk) = pdk("ihp-sg13g2") else {
+    let Some((pdk, _env)) = pdk("ihp-sg13g2") else {
         return;
     };
     let scanned = klayout::scan(&ScanContext::new(pdk).files_only());
@@ -140,7 +129,7 @@ fn ihp_klayout_from_files() {
 
 #[test]
 fn ihp_pcells_through_klayout() {
-    let Some(pdk) = pdk("ihp-sg13g2") else {
+    let Some((pdk, _env)) = pdk("ihp-sg13g2") else {
         return;
     };
     if !has_klayout() {
@@ -185,7 +174,7 @@ fn ihp_pcells_through_klayout() {
 
 #[test]
 fn sky130_klayout() {
-    let Some(pdk) = pdk("sky130A") else {
+    let Some((pdk, _env)) = pdk("sky130A") else {
         return;
     };
     let scanned = klayout::scan(&ScanContext::new(pdk).files_only());
@@ -239,7 +228,7 @@ fn sky130_klayout() {
 
 #[test]
 fn ihp_magic_and_netgen() {
-    let Some(pdk) = pdk("ihp-sg13g2") else {
+    let Some((pdk, _env)) = pdk("ihp-sg13g2") else {
         return;
     };
     let ctx = ScanContext::new(pdk);
@@ -325,7 +314,7 @@ fn ihp_magic_and_netgen() {
 
 #[test]
 fn sky130_magic_and_netgen() {
-    let Some(pdk) = pdk("sky130A") else {
+    let Some((pdk, _env)) = pdk("sky130A") else {
         return;
     };
     let ctx = ScanContext::new(pdk);

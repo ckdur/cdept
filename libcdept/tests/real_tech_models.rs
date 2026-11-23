@@ -1,25 +1,19 @@
-//! The xschem, models and devices sections of the technology snapshot on the PDKs of
-//! this machine (skipped when they are absent): IHP SG13G2 and sky130A.
+//! Real-PDK tests: the xschem, models and devices sections of the technology snapshot on
+//! the PDKs of this machine (skipped when they are absent, see `libcdept::testutil`): IHP
+//! SG13G2 and sky130A.
 //!
-//! `cargo test -p libcdept --test tech_models -- --nocapture` prints sizes and times.
+//! `cargo test -p libcdept --test real_tech_models -- --nocapture` prints sizes and times.
 
-use std::path::PathBuf;
 use std::time::Instant;
 
 use libcdept::link::devices::DeviceMap;
+use libcdept::testutil::{RealPdk, real_pdk};
 use libcdept::tech::{self, Catalog, PdkDir, ScanContext, Tech, devices, models, xschem};
 
-fn pdk(name: &str) -> Option<PdkDir> {
-    let root = std::env::var_os("CDEPT_TEST_PDK_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/opt/ext/OpenPDKs"));
-    let pdk = PdkDir::new(root, name);
-    if pdk.dir().join("libs.tech").is_dir() {
-        Some(pdk)
-    } else {
-        eprintln!("skipped: no {name} under {}", pdk.root.display());
-        None
-    }
+/// The installed PDK, and the guard that keeps the environment for it.
+fn pdk(name: &str) -> Option<(PdkDir, RealPdk)> {
+    let real = real_pdk(name)?;
+    Some((PdkDir::new(real.root.clone(), name), real))
 }
 
 /// Make the xschem helper findable from a test (it is built next to `deps/`).
@@ -127,7 +121,7 @@ fn check_corners(pdk: &PdkDir, tech: &Tech) {
 
 #[test]
 fn ihp_sg13g2() {
-    let Some(pdk) = pdk("ihp-sg13g2") else { return };
+    let Some((pdk, _env)) = pdk("ihp-sg13g2") else { return };
     let (tech, catalog) = scan(&pdk, helper());
 
     // xschem
@@ -293,7 +287,7 @@ fn ihp_sg13g2() {
 
 #[test]
 fn sky130a() {
-    let Some(pdk) = pdk("sky130A") else { return };
+    let Some((pdk, _env)) = pdk("sky130A") else { return };
     let (tech, catalog) = scan(&pdk, helper());
 
     let x = &tech.xschem;
@@ -402,7 +396,7 @@ fn sky130a() {
 /// The whole scan, every section, round-trips through the two files.
 #[test]
 fn whole_scan_round_trips() {
-    let Some(pdk) = pdk("ihp-sg13g2") else { return };
+    let Some((pdk, _env)) = pdk("ihp-sg13g2") else { return };
     // Files only: the helpers are exercised above and by the other sections' tests.
     let (tech, catalog) = tech::scan(&ScanContext::new(pdk).files_only());
     let text = toml::to_string_pretty(&tech).unwrap();

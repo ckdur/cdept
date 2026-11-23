@@ -1634,6 +1634,7 @@ mod tests {
 
     #[test]
     fn the_schematic_of_a_cell_is_found() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         project(tmp.path());
         let dir = tmp.path().join("libs/analog/ota/schematic_old");

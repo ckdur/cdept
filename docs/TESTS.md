@@ -211,7 +211,7 @@ format_report}`, `SuiteReport::summary`.
 Tests: unit tests in `template.rs` (substitution, derived values, `when`, override and
 merge, every error message, bad templates, netlist requirements, shadowing, every
 built-in loading with its defaults), `starter.rs`, `suite.rs`, `calc/measure.rs`
-(`coherent`) and `testlib.rs` (minimal overlay); `libcdept/tests/templates.rs` runs the
+(`coherent`) and `testlib.rs` (minimal overlay); `libcdept/tests/real_templates.rs` runs the
 four examples and the suite for real (delay equal to the hand-written `.meas`, trip point,
 power consistency, AC figures, suite counts and stored report, a failing spec and a
 missing net failing the suite; skipped without ngspice, the helper or the PDK); GUI:
@@ -231,3 +231,41 @@ out, 1.09 uV/sqrt(Hz) in at 1 kHz), `thd_fft` (a `sim new --dut` testbench), `st
 - Templates for Xyce-only analyses; one template, one analysis set: a family that needs
   two stimuli (PSRR and CMRR) is two testbenches in a suite.
 - The suite panel has no per-test run, and no waveform viewer (Phase 5).
+
+## 8. Tests and the environment (Rust tests)
+
+CDePT reads `PDK`, `PDK_ROOT`, `PDKPATH`, `HOME`, `XDG_*` and the `CDEPT_*` variables, so
+a test that loads a project can be changed by the shell it runs from (with `PDK=ihp-sg13g2`
+exported, a project that names another PDK warns about the variable). The Rust tests are
+therefore of two kinds, both using `libcdept::testutil` (a `pub` module behind the
+`testutil` feature, which `libcdept` and `cdept-gui` switch on for their own tests):
+
+- **Hermetic** tests build a synthetic project or PDK in a scratch folder and start with
+  `let _env = libcdept::testutil::hermetic_env();` (`crate::testutil` inside `libcdept`).
+  While the guard lives `PDK`, `PDK_ROOT`, `PDKPATH`, `CDEPT_PDK_PATH`, `CDEPT_PDK_DATA`,
+  `CDEPT_INDEX_CACHE`, `KLAYOUT_*` and `XDG_RUNTIME_DIR` are unset and `HOME` and the
+  `XDG_*_HOME` folders are scratch folders (`env.scratch()`); everything is put back on
+  drop. The tool variables (`CDEPT_XSCHEM`, `CDEPT_NGSPICE`, `CDEPT_KLAYOUT`, ...) are
+  left as they are, tests that need a tool skip when it is missing;
+  `hermetic_env_without_tools()` unsets them too and `hermetic_env_with(&[(name, value)])`
+  sets more variables. Every test that calls `Project::load` / `create*`, opens an
+  `AppCtx` project or uses the user's trash and caches takes the guard.
+- **Real-PDK** tests need an installed PDK (ihp-sg13g2, sky130A). They live in
+  `libcdept/tests/real_*.rs`, in a `mod real_pdk` of their file, or are named `real_*`
+  when they also need a real Magic, and start with
+  `let Some(pdk) = libcdept::testutil::real_pdk("ihp-sg13g2") else { return };`. Without
+  the PDK that prints `skipped: ihp-sg13g2 not installed` and the test passes; with it the
+  guard sets `PDK`, `PDK_ROOT` and `PDKPATH` to it (`pdk.root`, `pdk.dir`), whatever the
+  shell has. The PDKs are looked for in `$CDEPT_TEST_PDK_ROOT`, else `/opt/ext/OpenPDKs`
+  (never in `$PDK_ROOT`).
+
+Guards of the same kind run in parallel; one that asks for another environment waits for
+them, and a test must not hold two guards.
+
+How to run them: `cargo test --workspace` (the default) runs both kinds, and the real-PDK
+tests skip themselves where the PDK or a tool is absent. Only the real-PDK files:
+`cargo test -p libcdept --test 'real_*'` (plus `real_pdk` to select the `mod real_pdk`
+tests of `link`, `import`, `importer` and `vacask`, and of `cdept-gui`'s `pdkscan`). Another
+PDK folder: `CDEPT_TEST_PDK_ROOT=/path/to/pdks cargo test --workspace`. The results do not
+depend on the shell: the workspace passes with `PDK` unset, with `PDK=ihp-sg13g2` exported
+and with `PDK=sky130A PDK_ROOT=/nonexistent`.

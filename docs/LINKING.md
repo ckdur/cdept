@@ -309,7 +309,7 @@ Markers are not part of the layout and never saved.
 Metal1 wire between the drains, the labels A and Y on them), not at VDD and VSS: two
 nets ok, two open (each MOS's source against its bulk), VDD and VSS labels on no
 wire. buf places it twice: the net between the two inverters is open from one cell to
-the other. Tests: `libcdept/tests/nets.rs` (also a deliberate short, A to Y),
+the other. Tests: `libcdept/tests/real_nets.rs` (also a deliberate short, A to Y),
 `cdept-klayout/tests/test_nets.py` (a deck of its own on generic layers, no PDK),
 `cdept-gui/scripts/layout-nets.script`.
 

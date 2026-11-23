@@ -830,6 +830,7 @@ mod tests {
 
     #[test]
     fn properties_change_a_definition_where_it_is_defined() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path());
 
@@ -885,6 +886,7 @@ mod tests {
 
     #[test]
     fn problems_are_listed() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let app = app(tmp.path());
         let problems = problems_of(app.project.as_ref().unwrap());
@@ -937,6 +939,7 @@ mod tests {
 
     #[test]
     fn the_dialogs_draw() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path());
         let ctx = Context::default();

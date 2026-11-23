@@ -68,6 +68,7 @@ fn expect_quiet(watcher: &Watcher) {
 
 #[test]
 fn the_plan_covers_the_project() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let project = project(tmp.path());
     let plan = Plan::of(&project, &options());
@@ -91,6 +92,7 @@ fn the_plan_covers_the_project() {
 
 #[test]
 fn changes_in_the_libraries_are_reported() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let project = project(tmp.path());
     let root = project.root.clone();
@@ -144,6 +146,7 @@ fn changes_in_the_libraries_are_reported() {
 
 #[test]
 fn many_writes_give_one_change() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let project = project(tmp.path());
     let watcher = Watcher::for_project(&project, options(), || {}).unwrap();
@@ -157,6 +160,7 @@ fn many_writes_give_one_change() {
 
 #[test]
 fn the_project_files_are_watched() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let project = project(tmp.path());
     let root = project.root.clone();
@@ -195,6 +199,7 @@ fn the_project_files_are_watched() {
 
 #[test]
 fn a_new_plan_watches_new_libraries() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let mut project = project(tmp.path());
     let root = project.root.clone();
@@ -223,6 +228,7 @@ fn a_new_plan_watches_new_libraries() {
 
 #[test]
 fn a_git_repository_reports_its_index() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let project = project(tmp.path());
     let root = project.root.clone();
@@ -254,6 +260,7 @@ fn a_git_repository_reports_its_index() {
 
 #[test]
 fn one_library_is_scanned_again() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let mut project = project(tmp.path());
     fs::write(project.root.join("libs/flat/c.sym"), "v {}\n").unwrap();
