@@ -44,6 +44,31 @@ pub fn run(
     dir: &Path,
     env: &[(std::ffi::OsString, std::ffi::OsString)],
 ) -> Result<Outcome> {
+    run_with(simulator, deck, dir, env, |cmd| {
+        let output = cmd.output().wrap_err_with(|| format!("cannot start {}", simulator.program.display()))?;
+        Ok((output.status, String::from_utf8_lossy(&output.stderr).into_owned()))
+    })
+}
+
+/// [`run`] as part of a job: the simulator's stdout/stderr go to the job log and
+/// cancelling the job kills it.
+pub fn run_in_job(
+    simulator: &Simulator,
+    deck: &str,
+    dir: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+    ctx: &crate::jobs::JobCtx,
+) -> Result<Outcome> {
+    run_with(simulator, deck, dir, env, |cmd| Ok((ctx.run_command(cmd)?, String::new())))
+}
+
+fn run_with(
+    simulator: &Simulator,
+    deck: &str,
+    dir: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+    exec: impl FnOnce(&mut Command) -> Result<(std::process::ExitStatus, String)>,
+) -> Result<Outcome> {
     std::fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     let deck_file = dir.join("deck.sp");
     let raw = dir.join("out.raw");
@@ -53,22 +78,19 @@ pub fn run(
     for old in [&raw, &log] {
         let _ = std::fs::remove_file(old);
     }
-    let output = Command::new(&simulator.program)
-        .current_dir(dir)
-        .envs(env.iter().map(|(k, v)| (k, v)))
-        .args(["-b", "-o", "out.log", "deck.sp"])
-        .output()
-        .wrap_err_with(|| format!("cannot start {}", simulator.program.display()))?;
+    let mut cmd = Command::new(&simulator.program);
+    cmd.current_dir(dir).envs(env.iter().map(|(k, v)| (k, v))).args(["-b", "-o", "out.log", "deck.sp"]);
+    let (status, stderr) = exec(&mut cmd)?;
     let text = std::fs::read_to_string(&log).unwrap_or_default();
-    if !output.status.success() || !raw.is_file() {
+    if !status.success() || !raw.is_file() {
         let tail: Vec<&str> = text.lines().rev().take(12).collect();
         let tail: Vec<&str> = tail.into_iter().rev().collect();
         bail!(
             "the simulator failed ({}){}\n{}\n{}",
-            output.status,
+            status,
             if raw.is_file() { "" } else { ", no raw file" },
             tail.join("\n"),
-            String::from_utf8_lossy(&output.stderr).trim_end()
+            stderr.trim_end()
         );
     }
     Ok(Outcome { deck: deck_file, raw, log, measures: parse_measures(&text) })
@@ -108,6 +130,27 @@ mod tests {
         assert_eq!(m["delay"], 1.25e-10);
         assert_eq!(m["vmax"], -1.5);
         assert_eq!(m.len(), 2, "{m:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runs_points_in_parallel_through_the_queue() {
+        use crate::jobs::{JobSpec, JobState, Queue};
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("fake-spice");
+        std::fs::write(&fake, "#!/bin/sh\nsleep 0.3\necho 'gain = 2.5' > out.log\necho raw > out.raw\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let sim = Simulator { program: fake };
+        let q = Queue::new(4);
+        let t = std::time::Instant::now();
+        for i in 0..4 {
+            let (sim, run_dir) = (sim.clone(), dir.path().join(format!("p{i}")));
+            q.submit(JobSpec::func(format!("p{i}"), move |ctx| run_in_job(&sim, ".end\n", &run_dir, &[], ctx).map(|_| ())));
+        }
+        q.wait_all();
+        assert!(q.snapshot().iter().all(|j| j.state == JobState::Done), "{:?}", q.snapshot());
+        assert!(t.elapsed() < std::time::Duration::from_millis(1100), "4 x 0.3 s ran serially: {:?}", t.elapsed());
     }
 
     #[cfg(unix)]

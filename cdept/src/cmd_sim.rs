@@ -1,6 +1,9 @@
 //! `cdept sim …`: testbench views, decks and ngspice runs (docs/SIMULATION.md).
 
+use std::sync::Arc;
+
 use clap::Subcommand;
+use libcdept::jobs::{JobState, Listener};
 use eyre::{Result, bail, eyre};
 use libcdept::Project;
 use libcdept::sim::{self, spec::Verdict};
@@ -20,6 +23,9 @@ pub enum SimCommand {
         /// Run only these corners (repeat), instead of the setup's.
         #[arg(long = "corner")]
         corners: Vec<String>,
+        /// Simulators running at once. Default: the smaller of the points and the cores.
+        #[arg(long, short = 'j')]
+        jobs: Option<usize>,
     },
     /// Print the deck of the first run without starting the simulator.
     Deck {
@@ -72,13 +78,25 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             print!("{}", sim::build_deck(&tb.setup, &point, &format!("{library}/{cell}/{view}"), &lines, &netlist));
             Ok(())
         }
-        SimCommand::Run { library, cell, view, corners } => {
+        SimCommand::Run { library, cell, view, corners, jobs } => {
             let view = view_of(project, &library, &cell, view)?;
             let tb = sim::open(project, &library, &cell, &view)?;
             let simulator = sim::Simulator::find().ok_or_else(|| {
                 eyre!("ngspice not found: put it on PATH or set {}", sim::run::NGSPICE_ENV)
             })?;
-            let results = sim::run_testbench(project, &tb, &simulator, &corners)?;
+            // One line per point as it starts and ends (the events come from worker threads).
+            let on_event: Listener = Arc::new(|e| {
+                let i = &e.info;
+                match i.state {
+                    JobState::Queued => {}
+                    JobState::Running => eprintln!("{:<10} running", i.name),
+                    JobState::Done => eprintln!("{:<10} done     {:.1}s", i.name, i.elapsed.as_secs_f32()),
+                    JobState::Failed => eprintln!("{:<10} failed   {:.1}s", i.name, i.elapsed.as_secs_f32()),
+                    JobState::Cancelled => eprintln!("{:<10} cancelled", i.name),
+                }
+            });
+            let options = sim::RunOptions { jobs: jobs.unwrap_or(0), on_event: Some(on_event) };
+            let results = sim::run_testbench_with(project, &tb, &simulator, &corners, &options)?;
             let mut bad = 0;
             for r in &results {
                 match &r.outcome {

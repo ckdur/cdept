@@ -15,7 +15,7 @@ pub mod setup;
 pub mod spec;
 
 pub use deck::{RunPoint, build as build_deck};
-pub use run::{Outcome, Simulator, run};
+pub use run::{Outcome, Simulator, run, run_in_job};
 pub use setup::{Analysis, Setup, Spec};
 
 use std::path::{Path, PathBuf};
@@ -68,14 +68,39 @@ pub struct PointResult {
     pub specs: Vec<spec::Row>,
 }
 
+/// How [`run_testbench_with`] runs the points.
+#[derive(Clone, Default)]
+pub struct RunOptions {
+    /// Simulators running at once; 0 means the smaller of the number of points and the cores.
+    pub jobs: usize,
+    /// Called on every job event (a point starts, finishes, fails), from worker threads.
+    pub on_event: Option<crate::jobs::Listener>,
+}
+
 /// Netlist the testbench's schematic (once) and run every point (or only `only`,
-/// corner names) in order. Files go to [`runs_dir`]/`<point>/`.
+/// corner names), in parallel as far as there are cores ([`RunOptions::jobs`]); the
+/// results are in point order. Files go to [`runs_dir`]/`<point>/` (`job.log` is the
+/// job's own log).
 pub fn run_testbench(
     project: &Project,
     tb: &Testbench,
     simulator: &Simulator,
     only: &[String],
 ) -> Result<Vec<PointResult>> {
+    run_testbench_with(project, tb, simulator, only, &RunOptions::default())
+}
+
+/// [`run_testbench`] with options.
+pub fn run_testbench_with(
+    project: &Project,
+    tb: &Testbench,
+    simulator: &Simulator,
+    only: &[String],
+    options: &RunOptions,
+) -> Result<Vec<PointResult>> {
+    use crate::jobs::{JobSpec, Queue};
+    use std::sync::{Arc, Mutex};
+
     let tech = project
         .tech
         .as_ref()
@@ -105,20 +130,48 @@ pub fn run_testbench(
     let init = deck::spiceinit(model_set, |n| project.var(n)).map_err(|e| eyre!(e))?;
     let title = format!("{}/{}/{}", tb.library, tb.cell, tb.view);
     let env = project.tool_env();
-    let mut results = Vec::new();
-    for point in points {
+    let workers = if options.jobs > 0 { options.jobs } else { Queue::default_workers().min(points.len()) };
+    let queue = Queue::new(workers);
+    if let Some(f) = &options.on_event {
+        let f = f.clone();
+        queue.on_event(move |e| f(e));
+    }
+    type Slot = Arc<Mutex<Option<Result<Outcome>>>>;
+    let mut slots: Vec<Slot> = vec![];
+    for point in &points {
         let lines = models.lines(&set, &point.corner, |n| project.var(n)).map_err(|e| eyre!(e))?;
-        let text = deck::build(&tb.setup, &point, &title, &lines, &netlist);
+        let text = deck::build(&tb.setup, point, &title, &lines, &netlist);
         let dir = base.join(point.name());
         std::fs::create_dir_all(&dir)?;
         std::fs::write(dir.join(".spiceinit"), &init)?;
-        let outcome = run::run(simulator, &text, &dir, &env);
-        let specs = match &outcome {
-            Ok(o) => spec::check(&tb.setup.specs, &o.measures),
-            Err(_) => vec![],
-        };
-        results.push(PointResult { point, outcome, specs });
+        let slot: Slot = Arc::default();
+        slots.push(slot.clone());
+        let (simulator, env, log) = (simulator.clone(), env.clone(), dir.join("job.log"));
+        let spec = JobSpec::func(point.name(), move |ctx| {
+            let outcome = run::run_in_job(&simulator, &text, &dir, &env, ctx);
+            let verdict = match &outcome {
+                Ok(_) => Ok(()),
+                Err(e) => Err(eyre!("{e:#}")),
+            };
+            *slot.lock().unwrap() = Some(outcome);
+            verdict
+        })
+        .log(log);
+        queue.submit(spec);
     }
+    queue.wait_all();
+    let results = points
+        .into_iter()
+        .zip(slots)
+        .map(|(point, slot)| {
+            let outcome = slot.lock().unwrap().take().unwrap_or_else(|| Err(eyre!("cancelled")));
+            let specs = match &outcome {
+                Ok(o) => spec::check(&tb.setup.specs, &o.measures),
+                Err(_) => vec![],
+            };
+            PointResult { point, outcome, specs }
+        })
+        .collect();
     Ok(results)
 }
 

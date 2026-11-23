@@ -58,6 +58,7 @@ Technology snapshot (`tech.toml` + `tech.catalog.json`, design in [TECH.md](TECH
 `cdept sim run|deck`, `setup.toml` testbench view, deck builder, ngspice batch, specs. Open: see
 SIMULATION.md §4 (GUI, job queue, sweeps, results DB). `libcdept/tests/sim.rs` needs
 `CDEPT_XSCHEM` and `CDEPT_NGSPICE` set to run (else it skips).
+Job queue / process supervisor: `libcdept::jobs` ([JOBS.md](JOBS.md)); `sim::run_testbench` runs points in parallel, `cdept sim run --jobs N`. Open: SLURM/ssh, results DB, process-group kill.
 
 ### Embedded xschem ([XSCHEM.md](XSCHEM.md))
 - [x] Decisions: helper process (GPL helper, MIT rest), pinned to the asic-all commit,
