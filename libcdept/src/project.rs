@@ -2118,6 +2118,7 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
 
     #[test]
     fn the_files_of_the_snapshot_pick_the_main_file_and_follow_hand_edits() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let (pdk, mut tech) = ref_snapshot(&tmp.path().join("pdks"), &["cells_ss.lib"]);
         let root = tmp.path().join("p");
@@ -2162,6 +2163,7 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
 
     #[test]
     fn a_changed_pdk_configuration_is_a_warning() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let (pdk, mut tech) = ref_snapshot(&tmp.path().join("pdks"), &["cells_tt.lib"]);
         let config = pdk.tech("librelane").join("config.tcl");
