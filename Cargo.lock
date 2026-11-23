@@ -1481,6 +1481,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "eyre",
+ "libloading",
  "memchr",
  "memmap2",
  "miniz_oxide",

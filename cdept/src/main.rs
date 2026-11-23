@@ -5,6 +5,7 @@ mod cmd_find;
 mod cmd_import;
 mod cmd_lib;
 mod cmd_ls;
+mod cmd_ngspice;
 mod cmd_pdk;
 mod cmd_sim;
 mod cmd_status;
@@ -121,6 +122,9 @@ enum Command {
     /// The PDKs installed on this machine and their versions (ciel).
     #[command(subcommand)]
     Pdk(cmd_pdk::PdkCommand),
+    /// ngspice in-process (libngspice, loaded at run time).
+    #[command(subcommand)]
+    Ngspice(cmd_ngspice::NgspiceCommand),
     /// Testbenches: decks and ngspice runs with corners and specs.
     #[command(subcommand)]
     Sim(cmd_sim::SimCommand),
@@ -1155,6 +1159,7 @@ fn main() -> Result<()> {
             };
             cmd_tech::run(command, project)
         }
+        Command::Ngspice(command) => cmd_ngspice::run(command),
         Command::Sim(command) => {
             init_tracing(cli.verbose, None);
             cmd_sim::run(command, &open_project(cli.project)?)
