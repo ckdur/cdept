@@ -66,7 +66,7 @@ Technology snapshot (`tech.toml` + `tech.catalog.json`, design in [TECH.md](TECH
 
 ### Phase 4 (first slice, 2026-11-23, [SIMULATION.md](SIMULATION.md))
 `cdept sim run|deck`, `setup.toml` testbench view, deck builder, ngspice batch, specs. Open: see
-SIMULATION.md §4 (GUI, job queue, sweeps, results DB). `libcdept/tests/sim.rs` needs
+SIMULATION.md §4 (GUI, job queue, sweeps, results DB). `libcdept/tests/real_sim.rs` needs
 `CDEPT_XSCHEM` and `CDEPT_NGSPICE` set to run (else it skips).
 Job queue / process supervisor: `libcdept::jobs` ([JOBS.md](JOBS.md)); `sim::run_testbench` runs points in parallel, `cdept sim run --jobs N`. Open: SLURM/ssh, results DB, process-group kill.
 
@@ -281,7 +281,7 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
       helper's `revision`), Nets panel, flylines, Probe Nets (N), cross-probing of
       nets with schematic tabs (`cdept::selection` reports `nets`, `hilight_netname`).
       Example inverter wired at A/Y (`examples/ihp-inv/scripts/wire-inv.py`). Tests:
-      `libcdept/tests/nets.rs`, helper `test_nets.py` (generic deck, no PDK),
+      `libcdept/tests/real_nets.rs`, helper `test_nets.py` (generic deck, no PDK),
       `layout-nets.script` (`CDEPT_EXAMPLE=ihp-inv`).
 - [x] Nets, round 2 (2026-11-20, LINKING.md §8.1–8.4):
       - live flylines: after an extraction the helper traces the wiring between its

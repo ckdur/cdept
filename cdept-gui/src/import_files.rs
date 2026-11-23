@@ -299,6 +299,7 @@ mod tests {
 
     #[test]
     fn the_dialog_plans_and_imports_files() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         fs::create_dir_all(root.join("libs/lib")).unwrap();

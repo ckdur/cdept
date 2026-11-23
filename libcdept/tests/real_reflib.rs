@@ -1,21 +1,17 @@
-//! Reference libraries on the PDKs of this machine (skipped when they are absent):
-//! what the container readers find, how long it takes, the `ref` library layout.
+//! Real-PDK tests: reference libraries on the PDKs of this machine (skipped when they are
+//! absent, see `libcdept::testutil`): what the container readers find, how long it takes,
+//! the `ref` library layout.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use libcdept::container::{self, Cache, Index};
+use libcdept::testutil::{RealPdk, real_pdk};
 
-fn pdk_root() -> Option<PathBuf> {
-    let root = std::env::var_os("CDEPT_TEST_PDK_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/opt/ext/OpenPDKs"));
-    root.is_dir().then_some(root)
-}
-
-fn pdk(name: &str) -> Option<PathBuf> {
-    let dir = pdk_root()?.join(name);
-    dir.join("libs.ref").is_dir().then_some(dir)
+/// The folder of the installed PDK, and the guard that keeps the environment for it.
+fn pdk(name: &str) -> Option<(PathBuf, RealPdk)> {
+    let real = real_pdk(name)?;
+    real.dir.join("libs.ref").is_dir().then(|| (real.dir.clone(), real))
 }
 
 fn files(dir: &Path) -> Vec<PathBuf> {
@@ -30,7 +26,7 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 
 #[test]
 fn readers_on_sky130_fd_sc_hd() {
-    let Some(pdk) = pdk("sky130A") else {
+    let Some((pdk, _env)) = pdk("sky130A") else {
         eprintln!("skipped: no sky130A");
         return;
     };
@@ -178,7 +174,7 @@ fn readers_on_sky130_fd_sc_hd() {
 
 #[test]
 fn readers_on_ihp_sg13g2() {
-    let Some(pdk) = pdk("ihp-sg13g2") else {
+    let Some((pdk, _env)) = pdk("ihp-sg13g2") else {
         eprintln!("skipped: no ihp-sg13g2");
         return;
     };
@@ -310,7 +306,7 @@ fn views(lib: &libcdept::Library, cell: &str) -> Vec<String> {
 
 #[test]
 fn ref_layout_on_sky130() {
-    let Some(pdk) = pdk("sky130A") else {
+    let Some((pdk, _env)) = pdk("sky130A") else {
         eprintln!("skipped: no sky130A");
         return;
     };
@@ -398,7 +394,7 @@ fn ref_layout_on_sky130() {
 
 #[test]
 fn ref_layout_on_ihp_sg13g2() {
-    let Some(pdk) = pdk("ihp-sg13g2") else {
+    let Some((pdk, _env)) = pdk("ihp-sg13g2") else {
         eprintln!("skipped: no ihp-sg13g2");
         return;
     };
@@ -506,7 +502,7 @@ fn refs_of(
 
 #[test]
 fn refs_section_on_sky130() {
-    let Some(pdk) = pdk("sky130A") else {
+    let Some((pdk, _env)) = pdk("sky130A") else {
         eprintln!("skipped: no sky130A");
         return;
     };
@@ -600,7 +596,7 @@ fn refs_section_on_sky130() {
 
 #[test]
 fn refs_section_on_ihp_sg13g2() {
-    let Some(pdk) = pdk("ihp-sg13g2") else {
+    let Some((pdk, _env)) = pdk("ihp-sg13g2") else {
         eprintln!("skipped: no ihp-sg13g2");
         return;
     };

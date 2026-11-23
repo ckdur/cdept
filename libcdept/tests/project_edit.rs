@@ -52,6 +52,7 @@ fn project(root: &Path) -> Project {
 
 #[test]
 fn new_projects_and_libraries_say_their_format_and_layout() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let project = project(&tmp.path().join("proj"));
     let text = fs::read_to_string(&project.file).unwrap();
@@ -81,6 +82,7 @@ fn new_projects_and_libraries_say_their_format_and_layout() {
 
 #[test]
 fn a_newer_format_loads_with_a_warning() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let mut project = project(&tmp.path().join("proj"));
     let text = fs::read_to_string(&project.file).unwrap();
@@ -108,6 +110,7 @@ fn a_newer_format_loads_with_a_warning() {
 
 #[test]
 fn a_definition_is_changed_in_the_project_file() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let mut project = project(&tmp.path().join("proj"));
     let definition = project.library_definition("analog").unwrap();
@@ -213,6 +216,7 @@ fn a_definition_is_changed_in_the_project_file() {
 
 #[test]
 fn a_library_of_an_included_file_is_changed_and_removed_there() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let mut project = project(&tmp.path().join("proj"));
     let shared = tmp
@@ -312,6 +316,7 @@ fn a_description_does_not_flip_a_detected_layout() {
 
 #[test]
 fn the_same_folder_or_folder_name_twice_is_noticed() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let project = project(&tmp.path().join("proj"));
     fs::create_dir_all(project.root.join("other/analog")).unwrap();
@@ -329,6 +334,7 @@ fn the_same_folder_or_folder_name_twice_is_noticed() {
 
 #[test]
 fn own_suffixes_change_what_the_libraries_show() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let mut project = project(&tmp.path().join("proj"));
     let cell = project.root.join("libs/analog/ota");
@@ -414,6 +420,7 @@ fn own_suffixes_change_what_the_libraries_show() {
 
 #[test]
 fn names_that_will_cause_trouble_are_warned_about() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let mut project = project(&tmp.path().join("proj"));
     let lib = project.root.join("libs/analog");
@@ -467,6 +474,7 @@ fn names_that_will_cause_trouble_are_warned_about() {
 #[cfg(unix)]
 #[test]
 fn saving_keeps_a_link_and_the_permissions() {
+    let _env = libcdept::testutil::hermetic_env();
     use std::os::unix::fs::PermissionsExt;
     let tmp = tempfile::tempdir().unwrap();
     let real = tmp.path().join("real.toml");
@@ -571,6 +579,7 @@ fn a_folder_reached_through_a_link_is_written_relative() {
 
 #[test]
 fn a_cell_copy_leaves_results_out() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let mut project = project(&tmp.path().join("proj"));
     let lib = project.root.join("libs/analog");

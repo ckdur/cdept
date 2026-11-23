@@ -1581,6 +1581,7 @@ mod tests {
 
     #[test]
     fn create_add_remove_keeps_hand_edits() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("adc");
         let mut project = Project::create(&root, None).unwrap();
@@ -1700,6 +1701,7 @@ layout = "flat"
 
     #[test]
     fn library_operations_through_a_project() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut project = Project::create(tmp.path(), Some("p")).unwrap();
         let options = AddLibrary {
@@ -1806,6 +1808,7 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
 
     #[test]
     fn settings_keep_comments_and_other_keys() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("p");
         let mut project = Project::create_with(&root, Some("p"), Some("ihp"), None).unwrap();
@@ -1870,6 +1873,7 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
 
     #[test]
     fn the_local_file_wins_and_brings_variables() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join("mine/ihp/libs")).unwrap();
@@ -1925,6 +1929,7 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
 
     #[test]
     fn the_local_file_is_ignored_by_git() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let repo = tmp.path().join("repo");
         fs::create_dir_all(repo.join(".git")).unwrap();
@@ -1998,6 +2003,7 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
 
     #[test]
     fn a_snapshot_fills_what_the_project_leaves_open() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let pdks = tmp.path().join("pdks");
         let (pdk, tech, catalog) = snapshot_fixture(&pdks);
@@ -2196,6 +2202,7 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
 
     #[test]
     fn a_snapshot_for_another_pdk_or_machine_is_reported() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let pdks = tmp.path().join("pdks");
         let (pdk, mut tech, catalog) = snapshot_fixture(&pdks);
@@ -2310,6 +2317,7 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
 
     #[test]
     fn klayout_settings_and_the_pdk_default() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let pdks = tmp.path().join("pdks");
         let tech = pdks.join("ihp/libs.tech/klayout");
@@ -2351,6 +2359,7 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
 
     #[test]
     fn flylines_of_the_project() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         fs::write(
             tmp.path().join(PROJECT_FILE),
@@ -2372,6 +2381,7 @@ rc = "$PDK_ROOT/$PDK/xschemrc"
 
     #[test]
     fn rejects_malformed_files() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join(PROJECT_FILE), "name = [1\n").unwrap();
         assert!(Project::load(tmp.path()).is_err());

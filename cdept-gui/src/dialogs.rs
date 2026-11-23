@@ -792,6 +792,7 @@ mod tests {
 
     #[test]
     fn fix_all_links_leaves_links_to_another_cell_unless_asked() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path());
         let root = tmp.path();
@@ -822,6 +823,7 @@ mod tests {
 
     #[test]
     fn project_settings_set_the_pdk() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path());
         let Dialog::ProjectSettings(mut settings) =
@@ -847,6 +849,7 @@ mod tests {
 
     #[test]
     fn dialogs_run_library_operations() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path());
         let root = app.project.as_ref().unwrap().root.clone();
@@ -946,6 +949,7 @@ mod tests {
     /// Draw every library-related view and dialog headlessly, for several selections.
     #[test]
     fn views_and_dialogs_draw() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path());
         // A symbol without its schematic link: the views draw the warning.

@@ -108,6 +108,7 @@ fn set(names: &[&str]) -> BTreeSet<String> {
 
 #[test]
 fn files_become_cells_with_several_views() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let project = project(&tmp.path().join("p"));
     let (gds_file, spice_file) = sources(tmp.path());
@@ -153,6 +154,7 @@ fn files_become_cells_with_several_views() {
 
 #[test]
 fn clashes_skip_rename_or_overwrite() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let project = project(&tmp.path().join("p"));
     let (gds_file, spice_file) = sources(tmp.path());
@@ -205,6 +207,7 @@ fn clashes_skip_rename_or_overwrite() {
 
 #[test]
 fn a_failure_puts_everything_back() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let project = project(&tmp.path().join("p"));
     let (gds_file, _) = sources(tmp.path());
@@ -274,6 +277,7 @@ fn single_files_unknown_files_and_compressed_files() {
 
 #[test]
 fn collections_split_or_stay_whole() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let project = project(&tmp.path().join("p"));
     let d = tmp.path().join("in");
@@ -331,6 +335,7 @@ fn project_in(dir: &Path) -> Project {
 
 #[test]
 fn refuses_what_cannot_take_files() {
+    let _env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
     let project = project(&tmp.path().join("p"));
     let (gds_file, _) = sources(tmp.path());
@@ -349,105 +354,101 @@ fn refuses_what_cannot_take_files() {
     assert!(matches!(plan.operation, Operation::Import { .. }));
 }
 
-// ---------------------------------------------------------------------------------
-// The IHP standard cells
-// ---------------------------------------------------------------------------------
+/// Tests that need an installed PDK.
+mod real_pdk {
+    use super::*;
 
-fn pdk_dir() -> Option<PathBuf> {
-    let roots = std::env::var_os("PDK_ROOT")
-        .map(PathBuf::from)
+    // ---------------------------------------------------------------------------------
+    // The IHP standard cells
+    // ---------------------------------------------------------------------------------
+
+    /// The first file of a folder with one of the suffixes.
+    fn first_in(dir: &Path, suffixes: &[&str]) -> Option<PathBuf> {
+        let mut found: Vec<PathBuf> = fs::read_dir(dir)
+            .ok()?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| suffixes.iter().any(|s| p.to_string_lossy().ends_with(s)))
+            .collect();
+        found.sort();
+        found.into_iter().next()
+    }
+
+    #[test]
+    fn the_ihp_standard_cells_come_in_with_three_views() {
+        let Some(pdk) = libcdept::testutil::real_pdk("ihp-sg13g2") else {
+            return;
+        };
+        let std = pdk.dir.join("libs.ref/sg13g2_stdcell");
+        if !std.join("gds").is_dir() {
+            eprintln!("skipped: ihp-sg13g2 has no standard cell library");
+            return;
+        }
+        let files: Vec<PathBuf> = [
+            first_in(&std.join("gds"), &[".gds"]),
+            first_in(&std.join("spice"), &[".spice", ".spi"]),
+            first_in(&std.join("cdl"), &[".cdl"]),
+        ]
         .into_iter()
-        .chain(["/foss/pdks", "/opt/ext/OpenPDKs"].map(PathBuf::from));
-    roots
-        .map(|r| r.join("ihp-sg13g2/libs.ref/sg13g2_stdcell"))
-        .find(|d| d.join("gds").is_dir())
-}
-
-/// The first file of a folder with one of the suffixes.
-fn first_in(dir: &Path, suffixes: &[&str]) -> Option<PathBuf> {
-    let mut found: Vec<PathBuf> = fs::read_dir(dir)
-        .ok()?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| suffixes.iter().any(|s| p.to_string_lossy().ends_with(s)))
+        .flatten()
         .collect();
-    found.sort();
-    found.into_iter().next()
-}
+        assert_eq!(files.len(), 3, "{files:?}");
+        let tmp = tempfile::tempdir().unwrap();
+        // A project of the PDK (for the DRC deck), with a library of its own.
+        let root = tmp.path().join("p");
+        fs::create_dir_all(root.join("libs/lib")).unwrap();
+        let pdk_root = &pdk.root;
+        fs::write(
+            root.join("cdept.toml"),
+            format!(
+                "name = \"t\"\ntechnology = \"ihp-sg13g2\"\npdk_root = \"{}\"\n[libraries]\nlib = \"libs/lib\"\n",
+                pdk_root.display()
+            ),
+        )
+        .unwrap();
+        let project = Project::load(&root).unwrap();
+        let planned =
+            importer::plan_import_report(&project, &ImportRequest::new("lib", files)).unwrap();
+        assert!(
+            planned.report.imported.len() > 200,
+            "{}",
+            planned.report.imported.len()
+        );
+        refactor::apply(&project, &planned.plan).unwrap();
+        assert_eq!(
+            views(&project, "sg13g2_inv_1"),
+            set(&["cdl", "layout", "netlist"])
+        );
+        let cell = tmp.path().join("p/libs/lib/sg13g2_inv_1");
+        let g = gds::read_structure(&cell.join("layout/sg13g2_inv_1.gds")).unwrap();
+        assert_eq!(g.top_cells(), ["sg13g2_inv_1"]);
+        let netlist = first_in(&cell.join("netlist"), &[".spice", ".spi"]).unwrap();
+        let n = fs::read_to_string(netlist).unwrap();
+        assert!(n.contains(".subckt sg13g2_inv_1"), "{n}");
 
-#[test]
-fn the_ihp_standard_cells_come_in_with_three_views() {
-    let Some(std) = pdk_dir() else {
-        eprintln!("skipped: the ihp-sg13g2 PDK was not found");
-        return;
-    };
-    let files: Vec<PathBuf> = [
-        first_in(&std.join("gds"), &[".gds"]),
-        first_in(&std.join("spice"), &[".spice", ".spi"]),
-        first_in(&std.join("cdl"), &[".cdl"]),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    assert_eq!(files.len(), 3, "{files:?}");
-    let tmp = tempfile::tempdir().unwrap();
-    // A project of the PDK (for the DRC deck), with a library of its own.
-    let root = tmp.path().join("p");
-    fs::create_dir_all(root.join("libs/lib")).unwrap();
-    let pdk_root = std
-        .ancestors()
-        .nth(3)
-        .expect("PDK_ROOT is above the PDK folder");
-    fs::write(
-        root.join("cdept.toml"),
-        format!(
-            "name = \"t\"\ntechnology = \"ihp-sg13g2\"\npdk_root = \"{}\"\n[libraries]\nlib = \"libs/lib\"\n",
-            pdk_root.display()
-        ),
-    )
-    .unwrap();
-    let project = Project::load(&root).unwrap();
-    let planned =
-        importer::plan_import_report(&project, &ImportRequest::new("lib", files)).unwrap();
-    assert!(
-        planned.report.imported.len() > 200,
-        "{}",
-        planned.report.imported.len()
-    );
-    refactor::apply(&project, &planned.plan).unwrap();
-    assert_eq!(
-        views(&project, "sg13g2_inv_1"),
-        set(&["cdl", "layout", "netlist"])
-    );
-    let cell = tmp.path().join("p/libs/lib/sg13g2_inv_1");
-    let g = gds::read_structure(&cell.join("layout/sg13g2_inv_1.gds")).unwrap();
-    assert_eq!(g.top_cells(), ["sg13g2_inv_1"]);
-    let netlist = first_in(&cell.join("netlist"), &[".spice", ".spi"]).unwrap();
-    let n = fs::read_to_string(netlist).unwrap();
-    assert!(n.contains(".subckt sg13g2_inv_1"), "{n}");
-
-    // The imported layout passes the PDK's DRC deck.
-    use libcdept::klayout::verify::{self, Check};
-    if libcdept::klayout::setup::find_klayout().is_none()
-        || libcdept::klayout::setup::find_helper_dir().is_none()
-    {
-        eprintln!("DRC skipped: KLayout or the cdept-klayout helper was not found");
-        return;
+        // The imported layout passes the PDK's DRC deck.
+        use libcdept::klayout::verify::{self, Check};
+        if libcdept::klayout::setup::find_klayout().is_none()
+            || libcdept::klayout::setup::find_helper_dir().is_none()
+        {
+            eprintln!("DRC skipped: KLayout or the cdept-klayout helper was not found");
+            return;
+        }
+        let mut project = Project::load(&root).unwrap();
+        for lib in &mut project.libraries {
+            lib.scan();
+        }
+        let Some(deck) = verify::find_deck(&project, Check::Drc) else {
+            eprintln!("DRC skipped: the PDK has no DRC deck");
+            return;
+        };
+        let dir = tmp.path().join("drc");
+        fs::create_dir_all(&dir).unwrap();
+        let layout =
+            libcdept::klayout::cell_layout(project.library("lib").unwrap(), "sg13g2_inv_1").unwrap();
+        let stream =
+            verify::export_stream(&project, &layout, "sg13g2_inv_1", &dir.join("inv.gds")).unwrap();
+        assert!(stream.missing.is_empty(), "{:?}", stream.missing);
+        let run = verify::run_drc(&project, &deck, &stream, &dir, &[]).unwrap();
+        assert!(run.rdb.counts().is_empty(), "{:?}", run.rdb.counts());
     }
-    let mut project = Project::load(&root).unwrap();
-    for lib in &mut project.libraries {
-        lib.scan();
-    }
-    let Some(deck) = verify::find_deck(&project, Check::Drc) else {
-        eprintln!("DRC skipped: the PDK has no DRC deck");
-        return;
-    };
-    let dir = tmp.path().join("drc");
-    fs::create_dir_all(&dir).unwrap();
-    let layout =
-        libcdept::klayout::cell_layout(project.library("lib").unwrap(), "sg13g2_inv_1").unwrap();
-    let stream =
-        verify::export_stream(&project, &layout, "sg13g2_inv_1", &dir.join("inv.gds")).unwrap();
-    assert!(stream.missing.is_empty(), "{:?}", stream.missing);
-    let run = verify::run_drc(&project, &deck, &stream, &dir, &[]).unwrap();
-    assert!(run.rdb.counts().is_empty(), "{:?}", run.rdb.counts());
 }

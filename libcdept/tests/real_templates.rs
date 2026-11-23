@@ -1,10 +1,11 @@
-//! Test templates and suites for real: the inverter's family of tests in
+//! Real-PDK tests: test templates and suites for real: the inverter's family of tests in
 //! examples/ihp-inv (tran_delay, dc_transfer, power, ac_response) through xschem and
 //! ngspice. Skipped (with a note) when ngspice, the xschem helper or the PDK is missing.
 
 use std::path::Path;
 
 use libcdept::Project;
+use libcdept::testutil::{RealPdk, real_pdk};
 use libcdept::sim::results::Overall;
 use libcdept::sim::suite::{self, SuiteOptions};
 use libcdept::sim::{self, Simulator};
@@ -22,7 +23,20 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
-fn open_example() -> Option<(tempfile::TempDir, Project, Simulator)> {
+/// The scratch folder of the project and the installed PDK, whose environment is kept while
+/// this lives.
+struct Scratch {
+    dir: tempfile::TempDir,
+    _pdk: RealPdk,
+}
+
+impl Scratch {
+    fn path(&self) -> &Path {
+        self.dir.path()
+    }
+}
+
+fn open_example() -> Option<(Scratch, Project, Simulator)> {
     let Some(simulator) = Simulator::find() else {
         eprintln!("skipped: ngspice not found");
         return None;
@@ -31,17 +45,14 @@ fn open_example() -> Option<(tempfile::TempDir, Project, Simulator)> {
         eprintln!("skipped: the xschem helper is not built");
         return None;
     }
-    let root = std::env::var("PDK_ROOT").unwrap_or_else(|_| "/opt/ext/OpenPDKs".into());
-    if !Path::new(&root).join("ihp-sg13g2/libs.tech/ngspice").is_dir() {
-        eprintln!("skipped: ihp-sg13g2 not found in {root}");
-        return None;
-    }
+    let pdk = real_pdk("ihp-sg13g2")?;
+    let root = pdk.root.display().to_string();
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/ihp-inv");
     let dir = tempfile::tempdir().unwrap();
     copy_dir(&example, dir.path());
     std::fs::write(dir.path().join("cdept.local.toml"), format!("pdk_root = \"{root}\"\n")).unwrap();
     let project = Project::load(dir.path()).unwrap();
-    Some((dir, project, simulator))
+    Some((Scratch { dir, _pdk: pdk }, project, simulator))
 }
 
 fn run_view(project: &Project, simulator: &Simulator, cell: &str, view: &str) -> Vec<sim::PointResult> {

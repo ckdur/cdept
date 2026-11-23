@@ -67,11 +67,11 @@ own analyses in code blocks is fine: leave `[[analysis]]` out.
 
 ## 3. Test
 
-`libcdept/tests/sim.rs` runs `tb_inv` for real (skipped without ngspice, the xschem
+`libcdept/tests/real_sim.rs` runs `tb_inv` for real (skipped without ngspice, the xschem
 helper or the PDK):
 
     CDEPT_XSCHEM=$PWD/target/debug/cdept-xschem CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice \
-      PDK_ROOT=/opt/ext/OpenPDKs cargo test -p libcdept --test sim
+      CDEPT_TEST_PDK_ROOT=/opt/ext/OpenPDKs cargo test -p libcdept --test real_sim
 
 Unit tests cover the schema, the deck order, the log parser and the verdicts; the runner
 is tested with stand-in scripts.
@@ -158,7 +158,7 @@ point and the record. They run in parallel through the job queue. Views of
   repeats). What works is a `.control` block that starts with `setseed N` and `reset`
   (re-reads the circuit and draws again), so the deck of a Monte Carlo point starts its
   control block that way. Verified for process, mismatch and both on IHP: the same seed
-  repeats a run, another seed changes it (real tests in `libcdept/tests/sim.rs`).
+  repeats a run, another seed changes it (real tests in `libcdept/tests/real_sim.rs`).
 - **Xyce 7.10.** `gauss()`/`agauss()` in a `.param` are *not* drawn in a plain run (the
   value is the nominal one, every time). They are drawn under `.SAMPLING
   useExpr=true` (the PDK's own `mc_*_cs_loop` test benches do this) with `.options

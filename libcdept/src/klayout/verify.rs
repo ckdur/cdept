@@ -1279,6 +1279,7 @@ mod tests {
 
     #[test]
     fn decks_of_a_pdk() {
+        let _env = crate::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let tech = tmp.path().join("pdks/ihp-sg13g2/libs.tech/klayout");
         let drc = tech.join("tech/drc");

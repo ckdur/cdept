@@ -101,6 +101,7 @@ mod tests {
 
     #[test]
     fn library_parents_go_on_the_search_path_once() {
+        let _env = crate::testutil::hermetic_env();
         let dir = tempfile::tempdir().unwrap();
         let mut project = Project::create(dir.path(), Some("demo")).unwrap();
         let options = || AddLibrary {
@@ -146,6 +147,7 @@ mod tests {
 
     #[test]
     fn unresolved_libraries_are_skipped() {
+        let _env = crate::testutil::hermetic_env();
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join(crate::PROJECT_FILE),
@@ -162,6 +164,7 @@ mod tests {
 
     #[test]
     fn pdk_start_up_files_are_read_before_the_libraries() {
+        let _env = crate::testutil::hermetic_env();
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("pdk.tcl"), "set pdk 1\n").unwrap();
         std::fs::create_dir_all(dir.path().join("libs/a")).unwrap();

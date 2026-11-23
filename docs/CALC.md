@@ -151,7 +151,7 @@ dB, all three windows), quantised sines of 6/8/10 bits (ENOB within 0.3), a nois
 (SNR), an irregular time grid, an RC step (10-90 % rise `tau ln 9`, settling, slew), a
 second-order step (overshoot 16.3 %), a two-pole amplifier (UGBW, phase margin,
 bandwidth), a synthetic ADC (DNL/INL by edges and histogram), ngspice-style binary and
-ascii raws with several plots, truncated files. Real: `libcdept/tests/sim.rs`
+ascii raws with several plots, truncated files. Real: `libcdept/tests/real_sim.rs`
 (`calculator_outputs_match_the_meas`): the calculator's `delay` on `tb_inv`'s `out.raw`
 equals the `.meas` `tpd`; and `raw::tests::real_xyce_raw_reads_like_ngspice` reads a
 Xyce raw (skipped without Xyce; `CDEPT_XYCE`).

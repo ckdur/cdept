@@ -8,6 +8,10 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+[features]
+# `libcdept::testutil`: the environment guards of the tests (see docs/TESTS.md).
+testutil = []
+
 [dependencies]
 eyre.workspace = true
 serde.workspace = true
@@ -26,6 +30,7 @@ rusqlite = { version = "0.43.0", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+libcdept = { path = ".", features = ["testutil"] }
 
 [build-dependencies]
 vergen-gitcl = { version = "1.0.0", features = ["build"] }

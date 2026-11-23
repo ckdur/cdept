@@ -1,8 +1,10 @@
-//! DRC and LVS for real: KLayout runs the IHP SG13G2 decks on the PDK's own inverter.
-//! Skipped (with a note) when KLayout, the helper or the PDK is not found, as in CI.
-//! The PDK is looked for in `$PDK_ROOT`, `/foss/pdks` and `/opt/ext/OpenPDKs`.
+//! Real-PDK tests: DRC and LVS for real, KLayout runs the IHP SG13G2 decks on the PDK's own
+//! inverter. Skipped (with a note) when KLayout, the helper or the PDK is not found, as in
+//! CI. The PDK is looked for in `$CDEPT_TEST_PDK_ROOT`, else `/opt/ext/OpenPDKs`.
 
 use std::path::{Path, PathBuf};
+
+use libcdept::testutil::{RealPdk, real_pdk};
 
 use libcdept::Project;
 use libcdept::klayout::verify::{self, Check};
@@ -11,26 +13,22 @@ use libcdept::klayout::{Engine, EngineOptions, setup};
 const PDK: &str = "ihp-sg13g2";
 const CELL: &str = "sg13g2_inv_1";
 
-/// `$PDK_ROOT` and the inverter's test case folder (layout/, netlist/).
-fn pdk() -> Option<(PathBuf, PathBuf)> {
+/// The PDK folder, the inverter's test case folder (layout/, netlist/) and the guard that
+/// keeps the environment for the PDK.
+fn pdk() -> Option<(PathBuf, PathBuf, RealPdk)> {
     if setup::find_klayout().is_none() || setup::find_helper_dir().is_none() {
         eprintln!("skipped: KLayout or the cdept-klayout helper was not found");
         return None;
     }
-    let roots = std::env::var_os("PDK_ROOT")
-        .map(PathBuf::from)
-        .into_iter()
-        .chain(["/foss/pdks", "/opt/ext/OpenPDKs"].map(PathBuf::from));
-    for root in roots {
-        let case = root.join(PDK).join(format!(
-            "libs.tech/klayout/tech/lvs/testing/testcases/sg13g2_cells/{CELL}"
-        ));
-        if case.join("layout").is_dir() {
-            return Some((root, case));
-        }
+    let real = real_pdk(PDK)?;
+    let case = real.dir.join(format!(
+        "libs.tech/klayout/tech/lvs/testing/testcases/sg13g2_cells/{CELL}"
+    ));
+    if !case.join("layout").is_dir() {
+        eprintln!("skipped: the {PDK} PDK has no KLayout LVS test cases");
+        return None;
     }
-    eprintln!("skipped: the {PDK} PDK (with its KLayout LVS test cases) was not found");
-    None
+    Some((real.root.clone(), case, real))
 }
 
 /// A project using the PDK, with library `std` holding the inverter's layout.
@@ -59,7 +57,7 @@ fn layout_file(project: &Project) -> PathBuf {
 
 #[test]
 fn drc_of_the_pdk_inverter_and_of_a_narrow_wire() {
-    let Some((root, case)) = pdk() else { return };
+    let Some((root, case, _env)) = pdk() else { return };
     let tmp = tempfile::tempdir().unwrap();
     let project = project(tmp.path(), &root, &case);
     let deck = verify::find_deck(&project, Check::Drc).expect("the PDK has a DRC deck");
@@ -116,7 +114,7 @@ fn drc_of_the_pdk_inverter_and_of_a_narrow_wire() {
 
 #[test]
 fn lvs_of_the_pdk_inverter() {
-    let Some((root, case)) = pdk() else { return };
+    let Some((root, case, _env)) = pdk() else { return };
     let tmp = tempfile::tempdir().unwrap();
     let project = project(tmp.path(), &root, &case);
     let deck = verify::find_deck(&project, Check::Lvs).expect("the PDK has an LVS deck");

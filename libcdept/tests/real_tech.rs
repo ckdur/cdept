@@ -1,28 +1,18 @@
-//! The technology snapshot end to end, on the PDKs of this machine: scan, write, load
-//! the project with it. Each test skips when its PDK is not installed.
-//!
-//! PDKs are looked for in `$PDK_ROOT` and `/opt/ext/OpenPDKs`.
+//! Real-PDK tests: the technology snapshot end to end, on the PDKs of this machine: scan,
+//! write, load the project with it. Each test skips when its PDK is not installed
+//! (`$CDEPT_TEST_PDK_ROOT`, else `/opt/ext/OpenPDKs`; see `libcdept::testutil`).
 
 use std::fs;
-use std::path::PathBuf;
+
+use libcdept::testutil::{RealPdk, real_pdk};
 
 use libcdept::tech::{self, PdkDir, ScanContext, file, report};
 use libcdept::{PROJECT_FILE, Project};
 
-fn pdk(name: &str) -> Option<PdkDir> {
-    let roots = [
-        std::env::var_os("PDK_ROOT").map(PathBuf::from),
-        Some(PathBuf::from("/opt/ext/OpenPDKs")),
-    ];
-    let found = roots
-        .into_iter()
-        .flatten()
-        .find(|root| root.join(name).join("libs.tech").is_dir())
-        .map(|root| PdkDir::new(root, name));
-    if found.is_none() {
-        eprintln!("skipped: PDK {name} is not on this machine");
-    }
-    found
+/// The installed PDK, and the guard that keeps the environment for it.
+fn pdk(name: &str) -> Option<(PdkDir, RealPdk)> {
+    let real = real_pdk(name)?;
+    Some((PdkDir::new(real.root.clone(), name), real))
 }
 
 /// Files only: the helper programs are tested by the sections that use them.
@@ -67,7 +57,7 @@ fn check_paths(pdk: &PdkDir, tech: &tech::Tech) {
 }
 
 fn snapshot_round_trip(name: &str) {
-    let Some(pdk) = pdk(name) else {
+    let Some((pdk, _env)) = pdk(name) else {
         return;
     };
     let (tech, catalog) = scan(&pdk);
@@ -173,7 +163,7 @@ fn sky130a_snapshot() {
 
 #[test]
 fn the_snapshot_follows_the_pdk_folder_of_the_machine() {
-    let Some(pdk) = pdk("ihp-sg13g2") else {
+    let Some((pdk, _env)) = pdk("ihp-sg13g2") else {
         return;
     };
     let (tech, catalog) = scan(&pdk);
@@ -210,7 +200,7 @@ fn the_snapshot_follows_the_pdk_folder_of_the_machine() {
 /// The files of the standard-cell library come from the digital flow's configuration
 /// and are on disk.
 fn config_files(name: &str, stdcell: &str) {
-    let Some(pdk) = pdk(name) else {
+    let Some((pdk, _env)) = pdk(name) else {
         return;
     };
     let (tech, _) = scan(&pdk);

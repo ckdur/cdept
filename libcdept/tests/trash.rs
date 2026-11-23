@@ -1,5 +1,5 @@
-//! Deleting cells and views to the trash. One test only: it points the user's trash
-//! at a temporary folder through the environment.
+//! Deleting cells and views to the trash. One test only: the hermetic environment points the
+//! user's trash (`XDG_DATA_HOME`) at a scratch folder.
 
 use std::fs;
 use std::path::Path;
@@ -14,10 +14,9 @@ fn write(path: &Path, text: &str) {
 
 #[test]
 fn cells_and_views_go_to_the_trash() {
+    let env = libcdept::testutil::hermetic_env();
     let tmp = tempfile::tempdir().unwrap();
-    let data = tmp.path().join("data");
-    // Safety: the only test of this program, so no other thread reads the environment.
-    unsafe { std::env::set_var("XDG_DATA_HOME", &data) };
+    let data = env.scratch().join("xdg/data");
 
     let root = tmp.path().join("p");
     write(&root.join("libs/a/inv/schematic/inv.sch"), "v {}\n");

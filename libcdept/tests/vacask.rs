@@ -2,7 +2,7 @@
 //! and the simulator, and examples/ihp-inv/tb_inv (IHP SG13G2, PSP103 through OSDI
 //! compiled by OpenVAF) against ngspice. Each test is skipped, with a note, when a
 //! tool is missing: VACASK (`$CDEPT_VACASK` or PATH), OpenVAF (`$CDEPT_OPENVAF`),
-//! python3, ngspice (`$CDEPT_NGSPICE`), the xschem helper, the PDK (`$PDK_ROOT` or
+//! python3, ngspice (`$CDEPT_NGSPICE`), the xschem helper, the PDK (`$CDEPT_TEST_PDK_ROOT` or
 //! /opt/ext/OpenPDKs).
 
 use std::path::Path;
@@ -107,101 +107,122 @@ fn level_1_inverter_and_a_diode_agree_with_ngspice() {
     assert!(rel < 0.05, "vacask {tpd} ngspice {} ({:.1} %)", n.measures["tpd"], rel * 100.0);
 }
 
-fn tools_for_pdk() -> bool {
-    if vacask().is_none() {
-        return false;
-    }
-    if libcdept::batch::openvaf::ADAPTER.locate().is_none() {
-        eprintln!("skipped: OpenVAF not found");
-        return false;
-    }
-    if libcdept::tools::find_in_path("python3").is_none() {
-        eprintln!("skipped: python3 not found");
-        return false;
-    }
-    true
-}
+/// Tests that need an installed PDK (the IHP SG13G2 Verilog-A models), OpenVAF and VACASK.
+mod real_pdk {
+    use super::*;
 
-fn copy_dir(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).unwrap();
-    for e in std::fs::read_dir(from).unwrap() {
-        let e = e.unwrap();
-        let target = to.join(e.file_name());
-        if e.file_type().unwrap().is_dir() {
-            copy_dir(&e.path(), &target);
-        } else {
-            std::fs::copy(e.path(), target).unwrap();
+    use libcdept::testutil::{RealPdk, real_pdk};
+
+    fn tools_for_pdk() -> bool {
+        if vacask().is_none() {
+            return false;
+        }
+        if libcdept::batch::openvaf::ADAPTER.locate().is_none() {
+            eprintln!("skipped: OpenVAF not found");
+            return false;
+        }
+        if libcdept::tools::find_in_path("python3").is_none() {
+            eprintln!("skipped: python3 not found");
+            return false;
+        }
+        true
+    }
+
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for e in std::fs::read_dir(from).unwrap() {
+            let e = e.unwrap();
+            let target = to.join(e.file_name());
+            if e.file_type().unwrap().is_dir() {
+                copy_dir(&e.path(), &target);
+            } else {
+                std::fs::copy(e.path(), target).unwrap();
+            }
         }
     }
-}
 
-fn open_example() -> Option<(tempfile::TempDir, Project)> {
-    if !tools_for_pdk() || libcdept::xschem::Engine::find_helper().is_none() {
-        eprintln!("skipped: xschem helper not built");
-        return None;
+    /// The scratch folder of the project and the installed PDK, whose environment is kept while
+    /// this lives.
+    struct Scratch {
+        dir: tempfile::TempDir,
+        _pdk: RealPdk,
     }
-    let root = std::env::var("PDK_ROOT").unwrap_or_else(|_| "/opt/ext/OpenPDKs".into());
-    if !Path::new(&root).join("ihp-sg13g2/libs.tech/verilog-a").is_dir() {
-        eprintln!("skipped: ihp-sg13g2 not found in {root}");
-        return None;
+
+    impl Scratch {
+        fn path(&self) -> &Path {
+            self.dir.path()
+        }
     }
-    let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/ihp-inv");
-    let dir = tempfile::tempdir().unwrap();
-    copy_dir(&example, dir.path());
-    std::fs::write(dir.path().join("cdept.local.toml"), format!("pdk_root = \"{root}\"\n")).unwrap();
-    let project = Project::load(dir.path()).unwrap();
-    Some((dir, project))
-}
 
-#[test]
-fn ihp_inverter_with_psp103_agrees_with_ngspice() {
-    let Some((dir, project)) = open_example() else { return };
-    let sim = vacask().unwrap();
-    let tb = sim::open(&project, "cells", "tb_inv", "vacask").unwrap();
-    let results = sim::run_testbench(&project, &tb, &sim, &[]).unwrap();
-    let vc: Vec<f64> = results
-        .iter()
-        .map(|r| r.outcome.as_ref().unwrap_or_else(|e| panic!("{}: {e:#}", r.point.name())).measures["tpd"])
-        .collect();
-    assert!(vc[1] < vc[0] && vc[0] < vc[2], "ff < tt < ss: {vc:?}");
-    // The models were generated, recorded in tech.toml and cached in the project.
-    let tech = libcdept::tech::file::load_tech(dir.path()).unwrap().unwrap();
-    let set = &tech.models.sets["vacask"];
-    assert!(set.generated.is_some() && !set.osdi.is_empty() && set.corners.contains_key("tt"));
-    assert!(!set.corners.contains_key("mc"), "statistical corners are not generated");
-    assert!(tech.notes.iter().any(|n| n.starts_with("vacask:")));
-    assert!(dir.path().join(".cdept/osdi").is_dir());
-
-    // ngspice on the same testbench.
-    let Some(ng) = Simulator::find() else { return };
-    let ngtb = sim::open(&project, "cells", "tb_inv", "testbench").unwrap();
-    let ngres = sim::run_testbench(&project, &ngtb, &ng, &[]).unwrap();
-    for (v, n) in vc.iter().zip(&ngres) {
-        let n = n.outcome.as_ref().unwrap().measures["tpd"];
-        assert!(((v - n) / n).abs() < 0.02, "vacask {v} ngspice {n}");
+    fn open_example() -> Option<(Scratch, Project)> {
+        if !tools_for_pdk() || libcdept::xschem::Engine::find_helper().is_none() {
+            eprintln!("skipped: xschem helper not built");
+            return None;
+        }
+        let pdk = real_pdk("ihp-sg13g2")?;
+        if !pdk.dir.join("libs.tech/verilog-a").is_dir() {
+            eprintln!("skipped: ihp-sg13g2 has no libs.tech/verilog-a");
+            return None;
+        }
+        let root = pdk.root.display().to_string();
+        let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/ihp-inv");
+        let dir = tempfile::tempdir().unwrap();
+        copy_dir(&example, dir.path());
+        std::fs::write(dir.path().join("cdept.local.toml"), format!("pdk_root = \"{root}\"\n")).unwrap();
+        let project = Project::load(dir.path()).unwrap();
+        Some((Scratch { dir, _pdk: pdk }, project))
     }
-    eprintln!("tpd vacask {vc:?}");
 
-    // A second run reads the cache and the recorded set: no conversion, no compile.
-    let before = std::fs::read_to_string(dir.path().join("tech.toml")).unwrap();
-    let again = sim::run_testbench(&project, &tb, &sim, &["tt".into()]).unwrap();
-    assert!(again[0].outcome.is_ok());
-    assert_eq!(before, std::fs::read_to_string(dir.path().join("tech.toml")).unwrap());
-}
+    #[test]
+    fn ihp_inverter_with_psp103_agrees_with_ngspice() {
+        let Some((dir, project)) = open_example() else { return };
+        let sim = vacask().unwrap();
+        let tb = sim::open(&project, "cells", "tb_inv", "vacask").unwrap();
+        let results = sim::run_testbench(&project, &tb, &sim, &[]).unwrap();
+        let vc: Vec<f64> = results
+            .iter()
+            .map(|r| r.outcome.as_ref().unwrap_or_else(|e| panic!("{}: {e:#}", r.point.name())).measures["tpd"])
+            .collect();
+        assert!(vc[1] < vc[0] && vc[0] < vc[2], "ff < tt < ss: {vc:?}");
+        // The models were generated, recorded in tech.toml and cached in the project.
+        let tech = libcdept::tech::file::load_tech(dir.path()).unwrap().unwrap();
+        let set = &tech.models.sets["vacask"];
+        assert!(set.generated.is_some() && !set.osdi.is_empty() && set.corners.contains_key("tt"));
+        assert!(!set.corners.contains_key("mc"), "statistical corners are not generated");
+        assert!(tech.notes.iter().any(|n| n.starts_with("vacask:")));
+        assert!(dir.path().join(".cdept/osdi").is_dir());
 
-#[test]
-fn a_device_the_converted_models_lack_is_an_error_that_names_it() {
-    let Some((dir, project)) = open_example() else { return };
-    let sim = vacask().unwrap();
-    // A resistor of the PDK in the testbench netlist: its subcircuit is not defined by
-    // the converted files, so the run is refused instead of starting VACASK.
-    let tb = sim::open(&project, "cells", "tb_inv", "vacask").unwrap();
-    let ready = vacask::models::ready(&project).unwrap();
-    let setup = tb.setup.clone();
-    let point = RunPoint { corner: "tt".into(), ..Default::default() };
-    let net = "t\nx1 a b sg13_hv_nonexistent w=1u l=1u\n.end\n";
-    let e = vacask::build_point(&project, &ready, &setup, "vacask", &point, "t", net).unwrap_err();
-    let text = format!("{e:#}");
-    assert!(text.contains("ihp-sg13g2") && text.contains("sg13_hv_nonexistent") && text.contains("x1"), "{text}");
-    let _ = (dir, sim);
+        // ngspice on the same testbench.
+        let Some(ng) = Simulator::find() else { return };
+        let ngtb = sim::open(&project, "cells", "tb_inv", "testbench").unwrap();
+        let ngres = sim::run_testbench(&project, &ngtb, &ng, &[]).unwrap();
+        for (v, n) in vc.iter().zip(&ngres) {
+            let n = n.outcome.as_ref().unwrap().measures["tpd"];
+            assert!(((v - n) / n).abs() < 0.02, "vacask {v} ngspice {n}");
+        }
+        eprintln!("tpd vacask {vc:?}");
+
+        // A second run reads the cache and the recorded set: no conversion, no compile.
+        let before = std::fs::read_to_string(dir.path().join("tech.toml")).unwrap();
+        let again = sim::run_testbench(&project, &tb, &sim, &["tt".into()]).unwrap();
+        assert!(again[0].outcome.is_ok());
+        assert_eq!(before, std::fs::read_to_string(dir.path().join("tech.toml")).unwrap());
+    }
+
+    #[test]
+    fn a_device_the_converted_models_lack_is_an_error_that_names_it() {
+        let Some((dir, project)) = open_example() else { return };
+        let sim = vacask().unwrap();
+        // A resistor of the PDK in the testbench netlist: its subcircuit is not defined by
+        // the converted files, so the run is refused instead of starting VACASK.
+        let tb = sim::open(&project, "cells", "tb_inv", "vacask").unwrap();
+        let ready = vacask::models::ready(&project).unwrap();
+        let setup = tb.setup.clone();
+        let point = RunPoint { corner: "tt".into(), ..Default::default() };
+        let net = "t\nx1 a b sg13_hv_nonexistent w=1u l=1u\n.end\n";
+        let e = vacask::build_point(&project, &ready, &setup, "vacask", &point, "t", net).unwrap_err();
+        let text = format!("{e:#}");
+        assert!(text.contains("ihp-sg13g2") && text.contains("sg13_hv_nonexistent") && text.contains("x1"), "{text}");
+        let _ = (dir, sim);
+    }
 }

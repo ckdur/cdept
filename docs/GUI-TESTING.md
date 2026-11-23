@@ -5,6 +5,10 @@ the commands of the file in order. It is how the embedded tools are tested end t
 open a view, move the mouse, press keys, look at xschem's or KLayout's answers, take
 screenshots.
 
+These scripts run the real program with the environment you give them (the ones that need a PDK
+name it: `PDK_ROOT=/opt/ext/OpenPDKs ...`). The Rust tests (`cargo test`) pin their environment
+instead, see TESTS.md section 8.
+
 ```sh
 XDG_DATA_HOME=$(mktemp -d) target/debug/cdept -p examples/buffer gui --script my.script
 ```

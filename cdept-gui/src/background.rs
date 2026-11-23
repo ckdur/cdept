@@ -702,6 +702,7 @@ mod tests {
 
     #[test]
     fn a_scan_is_taken_when_the_library_did_not_move_on() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path());
         let root = app.project.as_ref().unwrap().root.clone();
@@ -753,6 +754,7 @@ mod tests {
 
     #[test]
     fn a_selected_cell_that_is_gone_is_deselected() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path());
         let root = app.project.as_ref().unwrap().root.clone();
@@ -769,6 +771,7 @@ mod tests {
 
     #[test]
     fn a_reload_is_taken_only_for_the_project_it_started_from() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path());
         let root = app.project.as_ref().unwrap().root.clone();
@@ -818,6 +821,7 @@ mod tests {
 
     #[test]
     fn a_dialog_scans_the_library_it_touched() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path());
         let root = app.project.as_ref().unwrap().root.clone();
@@ -838,6 +842,7 @@ mod tests {
 
     #[test]
     fn deleting_is_for_good_unless_the_dialog_asked_for_the_trash() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = app(tmp.path());
         let root = app.project.as_ref().unwrap().root.clone();
@@ -852,6 +857,7 @@ mod tests {
 
     #[test]
     fn a_recent_project_that_is_gone_is_forgotten() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let mut app = AppCtx::new(Settings::default(), LogBuffer::new());
         let gone = tmp.path().join("gone");
@@ -865,6 +871,7 @@ mod tests {
 
     #[test]
     fn a_first_load_arrives_and_asks_for_the_documents() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let root = {
             let app = app(tmp.path());

@@ -1,11 +1,12 @@
-//! A testbench run for real: examples/ihp-inv/tb_inv through xschem and ngspice at
-//! three corners, a supply sweep and Monte Carlo, with the results stored. Skipped
-//! (with a note) when ngspice, the xschem helper or the PDK is not found. ngspice:
-//! `$CDEPT_NGSPICE` or PATH; the PDK: `$PDK_ROOT` or /opt/ext/OpenPDKs.
+//! Real-PDK tests: a testbench run for real: examples/ihp-inv/tb_inv through xschem and
+//! ngspice at three corners, a supply sweep and Monte Carlo, with the results stored.
+//! Skipped (with a note) when ngspice, the xschem helper or the PDK is not found. ngspice:
+//! `$CDEPT_NGSPICE` or PATH; the PDK: `$CDEPT_TEST_PDK_ROOT` or /opt/ext/OpenPDKs.
 
 use std::path::Path;
 
 use libcdept::Project;
+use libcdept::testutil::{RealPdk, real_pdk};
 use libcdept::sim::results::{self, RunRecord, Store};
 use libcdept::sim::{self, RunOptions, Simulator, spec::Verdict};
 
@@ -22,8 +23,21 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+/// The scratch folder of the project and the installed PDK, whose environment is kept while
+/// this lives.
+struct Scratch {
+    dir: tempfile::TempDir,
+    _pdk: RealPdk,
+}
+
+impl Scratch {
+    fn path(&self) -> &Path {
+        self.dir.path()
+    }
+}
+
 /// A scratch copy of the example project, or None (with a note) when the tools are missing.
-fn open_example() -> Option<(tempfile::TempDir, Project, Simulator)> {
+fn open_example() -> Option<(Scratch, Project, Simulator)> {
     let Some(simulator) = Simulator::find() else {
         eprintln!("skipped: ngspice not found");
         return None;
@@ -32,17 +46,14 @@ fn open_example() -> Option<(tempfile::TempDir, Project, Simulator)> {
         eprintln!("skipped: the xschem helper is not built");
         return None;
     }
-    let root = std::env::var("PDK_ROOT").unwrap_or_else(|_| "/opt/ext/OpenPDKs".into());
-    if !Path::new(&root).join("ihp-sg13g2/libs.tech/ngspice").is_dir() {
-        eprintln!("skipped: ihp-sg13g2 not found in {root}");
-        return None;
-    }
+    let pdk = real_pdk("ihp-sg13g2")?;
+    let root = pdk.root.display().to_string();
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/ihp-inv");
     let dir = tempfile::tempdir().unwrap();
     copy_dir(&example, dir.path());
     std::fs::write(dir.path().join("cdept.local.toml"), format!("pdk_root = \"{root}\"\n")).unwrap();
     let project = Project::load(dir.path()).unwrap();
-    Some((dir, project, simulator))
+    Some((Scratch { dir, _pdk: pdk }, project, simulator))
 }
 
 #[test]

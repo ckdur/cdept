@@ -972,6 +972,7 @@ mod tests {
 
     #[test]
     fn the_rename_dialog_takes_the_users_along() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let mut app = app(&root);
@@ -1001,6 +1002,7 @@ mod tests {
 
     #[test]
     fn unsaved_documents_block_and_moved_ones_are_reopened() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let mut app = app(&root);
@@ -1047,6 +1049,7 @@ mod tests {
 
     #[test]
     fn the_dialogs_and_the_hierarchy_panel_draw() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let mut app = app(&root);
@@ -1156,6 +1159,7 @@ mod tests {
 
     #[test]
     fn a_library_is_renamed_with_its_folder() {
+        let _env = libcdept::testutil::hermetic_env();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         let mut app = app(&root);
