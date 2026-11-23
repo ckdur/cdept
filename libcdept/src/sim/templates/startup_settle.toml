@@ -78,7 +78,7 @@ expr = 'value_at(v("${out}"), xmax(v("${out}")))'
 
 [[setup.output]]
 name = "settle_time"
-expr = 'settling_time(v("${out}"), tol=${tol}, from=${t_step}) - ${t_step}'
+expr = 'settling_time(v("${out}"), tol=${tol}, from=${t_step})'
 
 [[setup.output]]
 name = "overshoot_pct"

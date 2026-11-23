@@ -15,6 +15,12 @@
 //! [[derived]]                              # computed from the parameters
 //! name = "fin"
 //! expr = "coherent(tone, fs, n)"
+//! [[sweep]]                                # sweeps and Monte Carlo from the parameters
+//! variable = "cl"
+//! values = "${loads}"                      # "50f, 100f" becomes ["50f", "100f"]
+//! [montecarlo]
+//! when = "mc_runs"
+//! runs = "${mc_runs}"                      # becomes an integer
 //! [setup]                                  # the setup.toml fragment, `${param}` inside strings
 //! [[setup.analysis]]
 //! kind = "ac"
@@ -23,7 +29,8 @@
 //! [`resolve`] turns a `setup.toml` that names a template into the plain text
 //! [`super::Setup`] reads: the template's fragment with the parameters filled in, then
 //! the explicit fields of the setup laid over it (arrays of `analysis` by kind, `output`
-//! and `spec` by name, `variables`/`options` key by key, everything else replaced).
+//! and `spec` by name, `sweep` by variable, `variables`/`options` key by key, everything
+//! else, `montecarlo` too, replaced).
 //!
 //! Built-in templates live in `templates/*.toml` of this crate (embedded); a project
 //! adds `<project>/templates/*.toml` and a PDK `pdk/<tech>/templates/*.toml`; a later
@@ -134,6 +141,13 @@ pub struct TemplateFile {
     #[serde(rename = "param")]
     pub params: Vec<Param>,
     pub derived: Vec<Derived>,
+    /// Design-variable sweeps (`[[sweep]]`, the schema of `setup.toml`'s), with `${param}`:
+    /// `start`/`stop`/`step` that are exactly `${param}` become numbers, `values` that is
+    /// exactly `${param}` is split into a list. Added after the fragment's own sweeps.
+    pub sweep: Vec<toml::Table>,
+    /// Monte Carlo (`[montecarlo]`, the schema of `setup.toml`'s); `runs` and `seed` that
+    /// are exactly `${param}` become integers. Replaces the fragment's own.
+    pub montecarlo: Option<toml::Table>,
     /// The `setup.toml` fragment.
     pub setup: toml::Table,
 }
@@ -319,9 +333,34 @@ impl Template {
         let name = &self.file.name;
         let mut table = toml::Table::new();
         for (k, v) in &self.file.setup {
-            if let Some(v) = fill(v, &bound, name, k)? {
+            let filled = match k.as_str() {
+                "sweep" => Some(toml::Value::Array(fill_sweeps(v.as_array().map_or(&[][..], |a| a), &bound, name)?)),
+                "montecarlo" => match v {
+                    toml::Value::Table(t) => fill_montecarlo(t, &bound, name)?.map(toml::Value::Table),
+                    other => Some(other.clone()),
+                },
+                _ => fill(v, &bound, name, k)?,
+            };
+            if let Some(v) = filled {
                 table.insert(k.clone(), v);
             }
+        }
+        // The template's own `[[sweep]]` and `[montecarlo]` (setup.toml's win, in `overlay`).
+        if !self.file.sweep.is_empty() {
+            let items: Vec<toml::Value> = self.file.sweep.iter().cloned().map(toml::Value::Table).collect();
+            let mut sweeps = fill_sweeps(&items, &bound, name)?;
+            if let Some(toml::Value::Array(own)) = table.remove("sweep") {
+                sweeps.splice(0..0, own);
+            }
+            table.insert("sweep".into(), toml::Value::Array(sweeps));
+        }
+        if let Some(mc) = &self.file.montecarlo
+            && let Some(mc) = fill_montecarlo(mc, &bound, name)?
+        {
+            table.insert("montecarlo".into(), toml::Value::Table(mc));
+        }
+        if matches!(table.get("sweep"), Some(toml::Value::Array(a)) if a.is_empty()) {
+            table.remove("sweep");
         }
         // A spec whose bounds were all left unset is dropped.
         if let Some(toml::Value::Array(specs)) = table.get_mut("spec") {
@@ -477,6 +516,102 @@ fn fill(v: &toml::Value, bound: &Bound, template: &str, key: &str) -> Result<Opt
         }
         other => other.clone(),
     }))
+}
+
+/// The value of a string that is exactly one `${param}`: `Some(None)` when it is unset.
+fn exact_value<'a>(v: &toml::Value, bound: &'a Bound) -> Option<Option<&'a String>> {
+    let name = exact_ref(v.as_str()?)?;
+    bound.get(name).map(|v| v.as_ref())
+}
+
+/// Take `when` off an entry of a template table; false when its condition does not hold.
+fn keep_entry(t: &mut toml::Table, bound: &Bound, template: &str) -> Result<bool> {
+    match t.remove("when") {
+        None => Ok(true),
+        Some(cond) => {
+            let cond = cond.as_str().ok_or_else(|| eyre!("template '{template}': `when` must be a string"))?;
+            condition(cond, bound, template)
+        }
+    }
+}
+
+/// A number key of a sweep or Monte Carlo table: a string (after `${param}`) is read as
+/// a number with SPICE suffixes, `whole` ones become integers.
+fn number_value(v: toml::Value, what: &str, whole: bool, template: &str) -> Result<toml::Value> {
+    let toml::Value::String(x) = &v else { return Ok(v) };
+    let n = calc::parse_spice_number(x.trim())
+        .ok_or_else(|| eyre!("template '{template}': {what} '{x}' is not a number"))?;
+    if !whole {
+        return Ok(toml::Value::Float(n));
+    }
+    if n.fract() != 0.0 || !(0.0..9.0e15).contains(&n) {
+        bail!("template '{template}': {what} '{x}' is not a whole number");
+    }
+    Ok(toml::Value::Integer(n as i64))
+}
+
+/// Fill `[[sweep]]` entries: `start`/`stop`/`step` given as strings (`"${vlo}"`, `"1p"`)
+/// become numbers, `values` (`list`) that is exactly `${param}` becomes the list of its
+/// comma or space separated words. An entry that loses its values to an unset optional
+/// parameter is dropped, so an optional parameter can switch a sweep off.
+fn fill_sweeps(items: &[toml::Value], bound: &Bound, template: &str) -> Result<Vec<toml::Value>> {
+    let mut out = vec![];
+    for item in items {
+        let toml::Value::Table(t) = item else {
+            bail!("template '{template}': a [[sweep]] entry must be a table");
+        };
+        let mut t = t.clone();
+        if !keep_entry(&mut t, bound, template)? {
+            continue;
+        }
+        let mut filled = toml::Table::new();
+        let mut dropped = false;
+        for (k, v) in &t {
+            let value = match (k.as_str(), exact_value(v, bound)) {
+                ("values" | "list", Some(Some(x))) => Some(toml::Value::Array(
+                    x.split(|c: char| c == ',' || c.is_whitespace())
+                        .filter(|w| !w.is_empty())
+                        .map(|w| toml::Value::String(w.to_string()))
+                        .collect(),
+                )),
+                _ => fill(v, bound, template, k)?,
+            };
+            let Some(value) = value else {
+                dropped = true;
+                continue;
+            };
+            let value = match k.as_str() {
+                "start" | "stop" | "step" => number_value(value, &format!("sweep {k}"), false, template)?,
+                _ => value,
+            };
+            filled.insert(k.clone(), value);
+        }
+        let has_values = ["values", "list"].iter().any(|k| filled.get(*k).and_then(|v| v.as_array()).is_some_and(|a| !a.is_empty()));
+        if dropped && !has_values && !filled.contains_key("start") {
+            continue;
+        }
+        out.push(toml::Value::Table(filled));
+    }
+    Ok(out)
+}
+
+/// Fill `[montecarlo]`: `runs` and `seed` given as strings (`"${runs}"`) become integers;
+/// unset, the key is left out so the default applies. `when` drops the whole table.
+fn fill_montecarlo(t: &toml::Table, bound: &Bound, template: &str) -> Result<Option<toml::Table>> {
+    let mut t = t.clone();
+    if !keep_entry(&mut t, bound, template)? {
+        return Ok(None);
+    }
+    let mut out = toml::Table::new();
+    for (k, v) in &t {
+        let Some(value) = fill(v, bound, template, k)? else { continue };
+        let value = match k.as_str() {
+            "runs" | "seed" => number_value(value, &format!("montecarlo {k}"), true, template)?,
+            _ => value,
+        };
+        out.insert(k.clone(), value);
+    }
+    Ok(Some(out))
 }
 
 /// `when` of a fragment entry: `name` (set and not false), `!name`, `name=value`,
@@ -880,6 +1015,16 @@ pub fn format_show(t: &Template) -> Result<String> {
             out.push_str(&format!("  {m}\n"));
         }
     }
+    for s in &setup.sweeps {
+        let values = s.expand().map(|v| v.join(", ")).unwrap_or_else(|e| format!("{e:#}"));
+        out.push_str(&format!("\nsweep {}: {values}", s.variable));
+    }
+    if !setup.sweeps.is_empty() {
+        out.push('\n');
+    }
+    if let Some(mc) = &setup.montecarlo {
+        out.push_str(&format!("\nmonte carlo: {} runs, seed {}, {}\n", mc.runs, mc.seed, mc.mode.name()));
+    }
     out.push_str("\ndefault specs\n");
     if setup.specs.is_empty() {
         out.push_str("  none (set the *_min / *_max parameters, or add [[spec]] to setup.toml)\n");
@@ -1087,6 +1232,122 @@ kind = "op"
         assert!((m - m.round()).abs() < 1e-9 && (m.round() as u64) % 2 == 1, "{m}");
         assert!((v - 10e6).abs() <= 100e6 / 1024.0);
         assert!(calc::evaluate("coherent(60meg, 100meg, 1024)", &env).is_err());
+    }
+
+    const SWEEPY: &str = r#"
+name = "sweepy"
+description = "sweeps and Monte Carlo from parameters"
+[[param]]
+name = "cl_values"
+default = "10f, 100f"
+[[param]]
+name = "vlo"
+type = "number"
+default = "1.0"
+[[param]]
+name = "vhi"
+type = "number"
+default = "1.4"
+[[param]]
+name = "extra"
+optional = true
+[[param]]
+name = "mc"
+type = "bool"
+default = "false"
+[[param]]
+name = "runs"
+type = "int"
+optional = true
+[[sweep]]
+variable = "cl"
+values = "${cl_values}"
+[[sweep]]
+variable = "vdd"
+start = "${vlo}"
+stop = "${vhi}"
+step = "0.2"
+[[sweep]]
+variable = "x"
+values = "${extra}"
+[[sweep]]
+when = "mc"
+variable = "y"
+values = ["a", "b"]
+[montecarlo]
+when = "mc"
+runs = "${runs}"
+seed = 7
+mode = "mismatch"
+[setup]
+temperatures = [27]
+"#;
+
+    #[test]
+    fn sweeps_and_monte_carlo_from_parameters() {
+        let s = set(&[SWEEPY]);
+        let p = |t: &str| super::super::Setup::parse_with(t, &s);
+        let setup = p("template = \"sweepy\"").unwrap();
+        let sweeps: Vec<(&str, Vec<String>)> =
+            setup.sweeps.iter().map(|w| (w.variable.as_str(), w.expand().unwrap())).collect();
+        // `x` is switched off by its unset parameter, `y` and Monte Carlo by `when`
+        assert_eq!(sweeps, [("cl", vec!["10f".to_string(), "100f".into()]), ("vdd", vec!["1".into(), "1.2".into(), "1.4".into()])]);
+        assert_eq!(setup.montecarlo, None);
+
+        let setup = p("template = \"sweepy\"\n[template_args]\nmc = true\nruns = 25\nextra = \"3 4\"\nvhi = \"1.2\"").unwrap();
+        let names: Vec<&str> = setup.sweeps.iter().map(|w| w.variable.as_str()).collect();
+        assert_eq!(names, ["cl", "vdd", "x", "y"]);
+        assert_eq!(setup.sweeps[1].stop, Some(1.2));
+        assert_eq!(setup.sweeps[2].values, ["3", "4"]);
+        let mc = setup.montecarlo.clone().unwrap();
+        assert_eq!((mc.runs, mc.seed, mc.mode), (25, 7, crate::sim::setup::McMode::Mismatch));
+        // `runs` unset: the default number of runs
+        let setup = p("template = \"sweepy\"\n[template_args]\nmc = true").unwrap();
+        assert_eq!(setup.montecarlo.unwrap().runs, crate::sim::setup::MonteCarlo::default().runs);
+
+        // setup.toml's own tables win: a sweep of the same variable replaces the
+        // template's, `[montecarlo]` replaces it as a whole
+        let text = "template = \"sweepy\"\n[template_args]\nmc = true\nruns = 25\n\
+                    [[sweep]]\nvariable = \"cl\"\nvalues = [\"1f\"]\n[[sweep]]\nvariable = \"z\"\nvalues = [1]\n\
+                    [montecarlo]\nruns = 3\n";
+        let setup = p(text).unwrap();
+        let cl = setup.sweeps.iter().find(|w| w.variable == "cl").unwrap();
+        assert_eq!(cl.values, ["1f"]);
+        assert!(setup.sweeps.iter().any(|w| w.variable == "z"));
+        let mc = setup.montecarlo.unwrap();
+        assert_eq!((mc.runs, mc.seed, mc.mode), (3, 1, crate::sim::setup::McMode::Process));
+
+        // the expansion shows them
+        let shown = format_show(s.get("sweepy").unwrap()).unwrap();
+        assert!(shown.contains("sweep cl: 10f, 100f") && shown.contains("sweep vdd: 1, 1.2, 1.4"), "{shown}");
+    }
+
+    #[test]
+    fn sweep_and_monte_carlo_errors() {
+        let s = set(&[SWEEPY]);
+        let e = |t: &str| format!("{:#}", super::super::Setup::parse_with(t, &s).unwrap_err());
+        let m = e("template = \"sweepy\"\n[template_args]\nmc = true\nruns = \"2.5\"");
+        assert!(m.contains("not an integer"), "{m}");
+        let m = e("template = \"sweepy\"\n[template_args]\nvlo = \"low\"");
+        assert!(m.contains("not a number"), "{m}");
+        // a template whose sweep names an unknown parameter does not load
+        let t = |src: &str| format!("{:#}", Template::parse(src, Origin::Builtin).unwrap_err());
+        assert!(t("name=\"a\"\n[[sweep]]\nvariable=\"v\"\nvalues=\"${nope}\"").contains("not a parameter"));
+        // nor one whose expansion is not a setup (a sweep without values)
+        assert!(t("name=\"a\"\n[[sweep]]\nvariable=\"v\"").contains("not valid"));
+        assert!(t("name=\"a\"\n[montecarlo]\nruns=1\nbogus=2").contains("not valid"));
+        // runs from a parameter that is not a whole number
+        assert!(t("name=\"r\"\n[[param]]\nname=\"n\"\ndefault=\"2.5\"\n[montecarlo]\nruns=\"${n}\"").contains("not a whole number"));
+    }
+
+    #[test]
+    fn sweeps_inside_the_setup_fragment_are_typed_too() {
+        let s = set(&["name=\"f\"\n[[param]]\nname=\"a\"\ntype=\"number\"\ndefault=\"1p\"\n[[param]]\nname=\"n\"\ntype=\"int\"\ndefault=\"4\"\n\
+                       [setup]\n[[setup.sweep]]\nvariable=\"c\"\nstart=\"${a}\"\nstop=\"3p\"\nstep=\"${a}\"\n[setup.montecarlo]\nruns=\"${n}\""]);
+        let setup = super::super::Setup::parse_with("template=\"f\"", &s).unwrap();
+        assert_eq!(setup.sweeps[0].start, Some(1e-12));
+        assert_eq!(setup.sweeps[0].expand().unwrap().len(), 3);
+        assert_eq!(setup.montecarlo.unwrap().runs, 4);
     }
 
     #[test]

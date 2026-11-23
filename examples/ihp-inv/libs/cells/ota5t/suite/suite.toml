@@ -1,0 +1,22 @@
+# The OTA's family of tests over five process corners and three temperatures (15 points
+# per test, 90 runs): open-loop gain, unity-gain frequency and phase margin, unity-gain
+# step settling, operating point with every transistor saturated, power, PSRR and CMRR.
+# Run it with
+#   cdept sim suite cells ota5t
+# or open the view in the Simulation tab (Run suite).
+description = "IHP SG13G2 5-transistor OTA: AC, step, operating point, power, PSRR, CMRR"
+corners = ["tt", "ff", "ss", "fs", "sf"]
+temperatures = [-40, 27, 125]
+
+[[test]]
+view = "ac_open"
+[[test]]
+view = "tran_step"
+[[test]]
+view = "dc_op"
+[[test]]
+view = "power"
+[[test]]
+view = "psrr"
+[[test]]
+view = "cmrr"

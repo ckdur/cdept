@@ -1,0 +1,21 @@
+# Linearity of the behavioural 3-bit flash ADC: its input swept 0 to 1.2 V in 1 mV steps
+# (DC analysis of Vin), the code read from the node `code`, the transitions found where
+# it crosses k - 0.5, INL and DNL in LSB against the end-point line. R5 of the ladder is
+# 10 % high, so the code that it sets is wider and the codes above shift. From the test
+# template inl_dnl (docs/TESTS.md). Run it with
+#   cdept sim run cells flash3 --view inl_dnl
+template = "inl_dnl"
+schematic = "cells/tb_flash3"
+
+[template_args]
+code = 'v("code")'
+method = "edge"
+src = "vin"
+start = "0"
+stop = "1.2"
+step = "1m"
+inl_max = 0.25
+dnl_max = 0.25
+
+[variables]
+vref = "1.2"

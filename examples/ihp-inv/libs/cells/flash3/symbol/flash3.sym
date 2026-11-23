@@ -1,0 +1,29 @@
+v {xschem version=3.4.5 file_version=1.2
+}
+G {}
+K {type=subcircuit
+format="@name @pinlist @symname"
+template="name=x1"
+schematic=cells/@symname/schematic/@symname.sch
+}
+V {}
+S {}
+E {}
+L 4 -40 -40 40 -40 {}
+L 4 40 -40 40 40 {}
+L 4 40 40 -40 40 {}
+L 4 -40 40 -40 -40 {}
+L 4 -60 -20 -40 -20 {}
+L 4 -60 20 -40 20 {}
+L 4 40 0 60 0 {}
+L 4 0 40 0 60 {}
+B 5 -62.5 -22.5 -57.5 -17.5 {name=vin dir=in}
+B 5 -62.5 17.5 -57.5 22.5 {name=vref dir=in}
+B 5 57.5 -2.5 62.5 2.5 {name=code dir=out}
+B 5 -2.5 57.5 2.5 62.5 {name=vss dir=inout}
+T {@name} -35 -55 0 0 0.2 0.2 {}
+T {@symname} -30 -5 0 0 0.2 0.2 {}
+T {vin} -36 -26 0 0 0.12 0.12 {}
+T {vref} -36 14 0 0 0.12 0.12 {}
+T {code} 12 -6 0 0 0.12 0.12 {}
+T {vss} 4 28 0 0 0.12 0.12 {}

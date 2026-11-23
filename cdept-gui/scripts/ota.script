@@ -1,0 +1,32 @@
+# The Phase 4 milestone in the Simulation tab on examples/ihp-inv: the OTA's suite
+# (cells/ota5t/suite: open-loop AC, unity-gain step, operating point, power, PSRR, CMRR)
+# over five corners and three temperatures, run from the GUI into one table whose rows
+# all pass (gain, phase margin and UGBW among the columns). Writes into the project: use
+# a copy (run.sh does).
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice \
+#   CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=ihp-inv \
+#     cdept-gui/scripts/run.sh cdept-gui/scripts/ota.script
+
+panel Library Manager
+wait 0.3
+
+# One of its testbenches opens with its template and the corner grid.
+open cells ota5t ac_open
+sim expect_target cells/ota5t/ac_open
+sim template_expect ac_response
+sim template_expect_output pm
+sim template_expect_spec ugbw
+sim expect_corners tt ff ss fs sf
+sim expect_no_problem
+
+# The suite: 6 tests x 5 corners x 3 temperatures = 90 runs, all PASS.
+open cells ota5t suite
+sim expect_target cells/ota5t/suite
+sim suite_run
+sim suite_wait
+sim suite_expect pass
+sim suite_expect_rows 90
+shell test -f simulations/cells/ota5t/suite/suite.json
+log ota: ok
+quit

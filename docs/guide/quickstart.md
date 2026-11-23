@@ -216,6 +216,9 @@ In the GUI the same run looks like this:
 ![Results of a testbench run in the GUI](../_static/screenshots/sim-results.png)
 *The Simulation tab after running tb_inv: three corners, all PASS.*
 
+A larger example: `examples/ihp-inv` has a 5-transistor OTA whose suite (`cdept sim suite cells
+ota5t`) checks gain, UGBW and phase margin over 15 corner points ([suites](../howto/suites.md)).
+
 ## 7. Open the project in the GUI
 
 ```sh

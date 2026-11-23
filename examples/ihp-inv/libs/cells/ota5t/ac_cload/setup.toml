@@ -1,0 +1,25 @@
+# The OTA's open-loop response against its load, 50 fF to 1 pF, from the project
+# template examples/ihp-inv/templates/ac_load.toml, whose [[sweep]] of the design
+# variable cl comes from the parameter `loads`. Typical corner, 27 C: 5 runs. The phase
+# margin rises and the unity-gain frequency falls as the load grows. Set
+# `mc_runs = 10` in [template_args] for ten Monte Carlo runs at every load (the
+# template's [montecarlo]). Run it with
+#   cdept sim run cells ota5t --view ac_cload
+template = "ac_load"
+schematic = "cells/tb_ota5t"
+corners = ["tt"]
+temperatures = [27]
+
+[template_args]
+loads = "50f 100f 200f 500f 1p"
+pm_min = 45
+ugbw_min = "10meg"
+
+[variables]
+vdd = "1.2"
+vcm = "0.42"
+ibias = "20u"
+cl = "100f"
+ac_dm = "1"
+ac_cm = "0"
+ac_vdd = "0"

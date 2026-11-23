@@ -54,11 +54,6 @@ Where the results go
 : Runs write to `<project>/simulations/<lib>/<cell>/<view>/<point>/`. Older notes
   (`ROADMAP.md`) say `results/<run-id>/` inside the view; that is no longer so.
 
-Monte Carlo and sweeps from a template
-: A template cannot declare them, but a `setup.toml` that uses a template can add
-  `[montecarlo]` and `[[sweep]]` itself, and they are merged in. `TESTS.md` says they
-  cannot.
-
 Xyce, Monte Carlo and mismatch
 : Xyce does process variation only (the PDK's Xyce models have no mismatch sections),
   and a Xyce run cannot be cancelled once started. Its random draws are not the same

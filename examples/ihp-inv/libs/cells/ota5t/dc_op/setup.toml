@@ -1,0 +1,50 @@
+# Operating point of the OTA in the open-loop testbench (the DC loop is closed by Lfb,
+# so out sits at the common-mode input): output, supply current, power, the tail node
+# and the smallest saturation margin vds - vdsat (PSP's vdss) of the six transistors.
+# From the test template dc_op (docs/TESTS.md). Run it with
+#   cdept sim run cells ota5t --view dc_op
+template = "dc_op"
+schematic = "cells/tb_ota5t"
+corners = ["tt", "ff", "ss", "fs", "sf"]
+temperatures = [-40, 27, 125]
+# the op values of the transistors are not saved unless asked for
+save = [
+  "all",
+  "@n.xdut.xm1.nsg13_lv_pmos[vds]",
+  "@n.xdut.xm1.nsg13_lv_pmos[vdss]",
+  "@n.xdut.xm2.nsg13_lv_pmos[vds]",
+  "@n.xdut.xm2.nsg13_lv_pmos[vdss]",
+  "@n.xdut.xm3.nsg13_lv_nmos[vds]",
+  "@n.xdut.xm3.nsg13_lv_nmos[vdss]",
+  "@n.xdut.xm4.nsg13_lv_nmos[vds]",
+  "@n.xdut.xm4.nsg13_lv_nmos[vdss]",
+  "@n.xdut.xm5.nsg13_lv_pmos[vds]",
+  "@n.xdut.xm5.nsg13_lv_pmos[vdss]",
+  "@n.xdut.xm6.nsg13_lv_pmos[vds]",
+  "@n.xdut.xm6.nsg13_lv_pmos[vdss]",
+]
+
+[template_args]
+out = "out"
+node2 = "xdut.tail"
+vout_min = 0.40
+vout_max = 0.50
+isupply_max = "60u"
+
+[variables]
+vcm = "0.42"
+ibias = "20u"
+cl = "100f"
+ac_dm = "0"
+ac_cm = "0"
+ac_vdd = "0"
+
+# all six in saturation: the smallest vds - vdsat
+[[output]]
+name = "sat_margin"
+expr = 'min(min(min(min(min(max(v("@n.xdut.xm1.nsg13_lv_pmos[vds]")) - max(v("@n.xdut.xm1.nsg13_lv_pmos[vdss]")), max(v("@n.xdut.xm2.nsg13_lv_pmos[vds]")) - max(v("@n.xdut.xm2.nsg13_lv_pmos[vdss]"))), max(v("@n.xdut.xm3.nsg13_lv_nmos[vds]")) - max(v("@n.xdut.xm3.nsg13_lv_nmos[vdss]"))), max(v("@n.xdut.xm4.nsg13_lv_nmos[vds]")) - max(v("@n.xdut.xm4.nsg13_lv_nmos[vdss]"))), max(v("@n.xdut.xm5.nsg13_lv_pmos[vds]")) - max(v("@n.xdut.xm5.nsg13_lv_pmos[vdss]"))), max(v("@n.xdut.xm6.nsg13_lv_pmos[vds]")) - max(v("@n.xdut.xm6.nsg13_lv_pmos[vdss]")))'
+plot = "op"
+
+[[spec]]
+name = "sat_margin"
+min = 0.03

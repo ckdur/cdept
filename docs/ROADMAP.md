@@ -216,6 +216,14 @@ corners × temperatures × variable sweeps, Monte Carlo, measures and specs, job
 ([JOBS.md](JOBS.md)), results store (`result.json` + `results.db`), Simulation tab in the GUI.
 VACASK as a testbench simulator and OpenVAF on-demand compile (cached per technology) are
 done ([VACASK.md](VACASK.md): ihp-sg13g2 works, sky130 does not convert yet).
+Milestone reached 2026-11-23 ([TESTS.md](TESTS.md) §6): the 5-transistor OTA of
+`examples/ihp-inv` (`cells/ota5t`, IHP SG13G2, 1.2 V, 20 uA bias, 100 fF) runs as a suite
+from the Simulation tab over five corners (tt/ff/ss/fs/sf) and three temperatures
+(-40/27/125 C): 6 tests, 90 runs, a spec table of gain, UGBW, phase margin, settling,
+overshoot, saturation margin, current, power, PSRR and CMRR, all PASS. At tt, 27 C: open-loop
+gain 35.8 dB, UGBW 145 MHz, phase margin 59 deg, 1 % settling 9.2 ns; over the corners gain
+32.1 to 36.6 dB, UGBW 111 to 176 MHz, phase margin 57.9 to 62.4 deg (screenshot in the
+[suites how-to](howto/suites.md)). Templates may now declare sweeps and Monte Carlo.
 Still to do: CACE import/export, SLURM/ssh, sweep/MC in the GUI form,
 Xyce Monte Carlo; the rest of the list below as written.
 - Testbench view: DUT cell, analyses (op/dc/ac/tran/noise/pss if available), design

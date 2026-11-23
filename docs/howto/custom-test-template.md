@@ -104,6 +104,47 @@ netlisting any net or element the template requires that the schematic lacks.
 With `sim new --dut library/cell` a starter schematic with the DUT, a supply, an input
 source (the template's `stimulus`) and a load is written as well.
 
+## 4. Sweeps and Monte Carlo in the template
+
+A template can also say what to sweep and how many Monte Carlo runs to make, from its
+parameters. `examples/ihp-inv/templates/ac_load.toml` sweeps the load of an amplifier:
+
+```toml
+[[param]]
+name = "loads"
+default = "50f, 100f, 200f, 500f"
+doc = "The load capacitances, separated by commas or spaces."
+
+[[param]]
+name = "mc_runs"
+type = "int"
+optional = true
+doc = "Monte Carlo runs at every load; unset: the corner grid."
+
+[[sweep]]
+variable = "cl"                 # the testbench's load is value={cl}
+values = "${loads}"             # exactly one ${param}: its words become the list
+
+[montecarlo]
+when = "mc_runs"                # only when the parameter is set
+runs = "${mc_runs}"             # becomes a number
+```
+
+The view `cells/ota5t/ac_cload` uses it with `loads = "50f 100f 200f 500f 1p"`:
+
+```text
+point         result      gain_db*           pm*         ugbw*
+tt_27_cl50f   PASS        3.5759e1      5.6378e1      2.3395e8
+tt_27_cl100f  PASS        3.5759e1      5.9378e1      1.4513e8
+...
+tt_27_cl1p    PASS        3.5759e1      7.7759e1      2.6424e7
+```
+
+and with `mc_runs = 3` added it makes three seeded runs at every load (`mc_27_cl100f_r000`,
+...). A `[[sweep]]` of the same variable in the view's `setup.toml` replaces the template's,
+and a `[montecarlo]` there replaces the template's as a whole. `cdept sim templates show`
+lists the sweeps and the Monte Carlo settings of the expansion.
+
 ## See also
 
 - [Test template](../reference/files/test-template.md), [setup.toml](../reference/files/setup-toml.md)

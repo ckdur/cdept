@@ -30,6 +30,8 @@ const SETTLE_FRAMES: u32 = 3;
 const PATIENCE: Duration = Duration::from_secs(8);
 /// `sim wait`: a simulation netlists with xschem and runs every corner.
 const SIM_PATIENCE: Duration = Duration::from_secs(120);
+/// `sim suite_wait`: a suite runs many testbenches (the OTA's: 90 runs).
+const SUITE_PATIENCE: Duration = Duration::from_secs(600);
 /// Steps of a drag between its two ends.
 const DRAG_STEPS: u32 = 8;
 /// While waiting for an answer of xschem, how often to send it another request. A
@@ -283,6 +285,7 @@ impl Command {
     fn patience(&self) -> Duration {
         match self {
             Command::Sim(args) if args.first().map(String::as_str) == Some("wait") => SIM_PATIENCE,
+            Command::Sim(args) if args.first().map(String::as_str) == Some("suite_wait") => SUITE_PATIENCE,
             _ => PATIENCE,
         }
     }

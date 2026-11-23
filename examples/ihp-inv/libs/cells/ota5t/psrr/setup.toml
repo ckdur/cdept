@@ -1,0 +1,27 @@
+# Supply rejection of the OTA: the open-loop testbench with the AC stimulus on the supply
+# (ac_vdd = 1, the differential AC off). xfer_db is out/vdd at 1 kHz, psrr_db its
+# negative, and rejection_db = adm_db - xfer_db with adm_db the typical open-loop gain
+# from ac_open (36 dB at tt, 27 C). From the test template psrr_cmrr (docs/TESTS.md).
+# Run it with
+#   cdept sim run cells ota5t --view psrr
+template = "psrr_cmrr"
+schematic = "cells/tb_ota5t"
+corners = ["tt", "ff", "ss", "fs", "sf"]
+temperatures = [-40, 27, 125]
+
+[template_args]
+mode = "psrr"
+stim = "vdd"
+out = "out"
+f = "1k"
+adm_db = 36
+rejection_min = 50
+
+[variables]
+vdd = "1.2"
+vcm = "0.42"
+ibias = "20u"
+cl = "100f"
+ac_dm = "0"
+ac_cm = "0"
+ac_vdd = "1"

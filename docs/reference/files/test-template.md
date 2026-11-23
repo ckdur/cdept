@@ -27,6 +27,8 @@ Later sources shadow earlier ones of the same name; `cdept sim templates` notes 
 | `starter_variables` | table | Design variables that `stimulus` uses, written to the starter's `[variables]`. |
 | `param` | array of tables | The parameters. |
 | `derived` | array of tables | Values computed from the parameters. |
+| `sweep` | array of tables | Design-variable sweeps, with `${param}`: see below. |
+| `montecarlo` | table | Monte Carlo runs, with `${param}`: see below. |
 | `setup` | table | The `setup.toml` fragment. |
 
 ## `[[param]]`
@@ -103,13 +105,58 @@ name = "gain_db"
 min = "${gain_db_min}"
 ```
 
+## `[[sweep]]` and `[montecarlo]`
+
+The tables of [setup.toml](setup-toml.md#sweep) with the same keys, filled in from the
+parameters, so a template can say what to sweep and how many Monte Carlo runs to make.
+They may also be written inside `[setup]` (`[[setup.sweep]]`, `[setup.montecarlo]`), with
+the same rules.
+
+- `${param}` is replaced in every string, as in `[setup]`.
+- In a sweep, `start`, `stop` and `step` given as strings become numbers (SPICE suffixes
+  allowed: `"1p"`, `"${vlo}"`).
+- `values` (or `list`) that is exactly `"${param}"` becomes the list of the parameter's
+  words, separated by commas or spaces: with `loads = "50f, 100f 200f"` it is
+  `["50f", "100f", "200f"]`. A list written as an array is filled entry by entry.
+- A sweep whose values come from an optional parameter that is not set is dropped, so a
+  parameter can switch it off. `when` works on a sweep entry and on `[montecarlo]` as a
+  whole.
+- In `[montecarlo]`, `runs` and `seed` given as strings become whole numbers; an unset
+  optional parameter leaves the key out (the default applies).
+- The template's top-level sweeps come after those of its `[setup]`; its top-level
+  `[montecarlo]` replaces the one of `[setup]`.
+
+```toml
+[[param]]
+name = "loads"
+default = "50f, 100f, 200f"
+[[param]]
+name = "mc_runs"
+type = "int"
+optional = true
+
+[[sweep]]
+variable = "cl"
+values = "${loads}"
+
+[montecarlo]
+when = "mc_runs"
+runs = "${mc_runs}"
+seed = 1
+```
+
+`examples/ihp-inv/templates/ac_load.toml` is a complete one (a project template), used by
+the view `cells/ota5t/ac_cload`.
+
 ## How a template and a setup merge
 
 The template fragment is filled in, then the fields written in `setup.toml` go on top:
 `analysis` merges by `kind`, `output` and `spec` by `name`, `sweep` by `variable` (an entry
 with the same key replaces the template's, others are added), `variables` and `options` key
-by key; everything else (`corners`, `temperatures`, `measures`, `save`, ...) is replaced as
-a whole. Output expressions see earlier outputs and `[variables]` by name.
+by key; everything else (`corners`, `temperatures`, `measures`, `save`, `montecarlo`, ...)
+is replaced as a whole. So a setup's own `[[sweep]]` of a variable the template sweeps
+replaces that sweep, and its own `[montecarlo]` replaces the template's. Output expressions
+see earlier outputs and `[variables]` by name.
 
 ## Built-in templates
 

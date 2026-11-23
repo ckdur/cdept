@@ -1,0 +1,29 @@
+# Open-loop AC response of the OTA: the testbench closes the loop at DC through Lfb
+# (1 TH) and drives inn through Cin (1 F), so out/in is minus the open-loop gain, which
+# is also the loop gain of the unity-gain follower (beta = 1): DC gain, -3 dB bandwidth,
+# unity-gain frequency and phase margin, into 100 fF. From the test template ac_response
+# (docs/TESTS.md). Run it with
+#   cdept sim run cells ota5t --view ac_open
+template = "ac_response"
+schematic = "cells/tb_ota5t"
+corners = ["tt", "ff", "ss", "fs", "sf"]
+temperatures = [-40, 27, 125]
+
+[template_args]
+in = "in"
+out = "out"
+inverting = "yes"
+fstart = "1"
+fstop = "10G"
+gain_db_min = 30
+ugbw_min = "80meg"
+pm_min = 50
+
+[variables]
+vdd = "1.2"
+vcm = "0.42"
+ibias = "20u"
+cl = "100f"
+ac_dm = "1"
+ac_cm = "0"
+ac_vdd = "0"

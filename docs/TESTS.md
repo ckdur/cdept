@@ -48,6 +48,11 @@ the same key replaces the template's, others are added), `variables` and `option
 key, everything else (`corners`, `temperatures`, `measures`, `save`, ...) replaced as a
 whole.
 
+A template can bring design-variable sweeps and Monte Carlo of its own (`[[sweep]]` and
+`[montecarlo]` at the top of the template file, or inside `[setup]`), with `${param}` in
+their values; the setup's own `[[sweep]]` (by `variable`) and `[montecarlo]` (as a whole)
+win, as above. See section 2.
+
 ### Errors
 
 All say what is wrong and what is possible: an unknown template or parameter (with a
@@ -88,6 +93,21 @@ name = "sign"
 from = "inverting"                         # or: look a parameter up
 map = { no = "1", yes = "-1" }
 
+[[sweep]]           # design-variable sweeps from the parameters (optional)
+variable = "${load}"
+values = "${loads}"                        # exactly ${param}: its comma/space separated words
+[[sweep]]
+when = "supply_sweep"
+variable = "vdd"
+start = "${vlo}"                           # start/stop/step: strings become numbers
+stop = "${vhi}"
+step = "0.1"
+[montecarlo]        # Monte Carlo from the parameters (optional)
+when = "mc_runs"                           # off unless the parameter is set
+runs = "${mc_runs}"                        # runs/seed: strings become integers
+seed = "${mc_seed}"
+mode = "process"
+
 [setup]             # the setup.toml fragment: any field of docs/SIMULATION.md §1
 [[setup.analysis]]
 kind = "ac"
@@ -112,6 +132,15 @@ min = "${gain_db_min}"                     # unset optional parameter: the bound
 - An optional parameter left empty is *unset*; using it inside a longer string is an error,
   alone as a value it removes the key.
 - Output expressions see the earlier outputs and the setup's `[variables]` by name.
+- `[[sweep]]` and `[montecarlo]` have the schema of `setup.toml`'s. In a sweep, `start`,
+  `stop` and `step` written as strings (`"${vlo}"`, `"1p"`) become numbers, and `values`
+  that is exactly `"${param}"` becomes the list of that parameter's comma or space
+  separated words (`loads = "50f, 100f"` gives `["50f", "100f"]`); a sweep whose values
+  come from an optional parameter left unset is dropped. In `[montecarlo]`, `runs` and
+  `seed` become integers (unset: the default). Both take `when`. The template's sweeps
+  come after the ones of its `[setup]`; its `[montecarlo]` replaces the one of its
+  `[setup]`. Example: `examples/ihp-inv/templates/ac_load.toml` (a sweep of the load
+  capacitance, Monte Carlo with `mc_runs`), used by `cells/ota5t/ac_cload`.
 
 **Where templates come from**, later ones shadow earlier ones of the same name (a note
 says so in `cdept sim templates`):
@@ -207,6 +236,30 @@ format_report}`, `SuiteReport::summary`.
 | `cells/tb_inv/power` | `power` | 15.5 uA average, 321 uA peak, 18.6 fJ per cycle (10 fF) |
 | `cells/tb_inv_ac/ac_response` | `ac_response` | the inverter biased near its trip point as an amplifier: 22 dB, 306 MHz, UGBW 3.9 GHz, phase margin 87 deg (made with `sim new --dut`) |
 | `cells/tb_inv/suite` | suite | the four together over tt/ff/ss: `cdept sim suite cells tb_inv` |
+| `cells/ota5t/ac_open` | `ac_response` | the 5-transistor OTA open loop into 100 fF: 35.8 dB, -3 dB at 3.7 MHz, UGBW 145 MHz, phase margin 59 deg |
+| `cells/ota5t/tran_step` | `startup_settle` | unity-gain 200 mV step: settles to 1 % in 9.2 ns, 8.2 % overshoot, final error 0.4 mV |
+| `cells/ota5t/dc_op` | `dc_op` | out 0.422 V (common mode 0.42 V), 39 uA, smallest vds - vdsat of the six transistors 108 mV |
+| `cells/ota5t/power` | `power` | 39 uA, 47 uW average over a 1 us step period |
+| `cells/ota5t/psrr` | `psrr_cmrr` | out/vdd -27.6 dB at 1 kHz, PSRR 63.6 dB against the 36 dB open-loop gain |
+| `cells/ota5t/cmrr` | `psrr_cmrr` | out/cm -14.4 dB at 1 kHz, CMRR 50.4 dB |
+| `cells/ota5t/ac_cload` | project template `ac_load` | the load swept 50 fF to 1 pF by the template's `[[sweep]]`: UGBW 234 to 26 MHz, phase margin 56 to 78 deg |
+| `cells/ota5t/suite` | suite | the six above (not `ac_cload`) over tt/ff/ss/fs/sf and -40/27/125 C: 90 runs, all pass (`cdept sim suite cells ota5t`) |
+| `cells/flash3/inl_dnl` | `inl_dnl` | a behavioural 3-bit flash ADC (resistor ladder, R5 10 % high; B-source comparators): DNL 0.082 LSB, INL 0.049 LSB, as the ladder gives by hand |
+
+The OTA (`cells/ota5t`, testbench schematics `cells/tb_ota5t` and `cells/tb_ota5t_step`):
+PMOS input pair M1/M2 30/0.5 um with their bodies on the tail, NMOS mirror load M3/M4
+2/4 um, PMOS tail M5 32/1 um mirrored 1:1 from M6, 20 uA into `ibias`, 1.2 V. The
+open-loop testbench closes the DC loop with a 1 TH inductor from out to inn and drives
+inn through a 1 F capacitor, so out/in is minus the open-loop gain, which is the loop
+gain of the unity-gain follower; the AC sources on the supply and the common mode are
+design variables (`ac_dm`, `ac_vdd`, `ac_cm`), so PSRR and CMRR use the same schematic.
+Over the 15 corner points: gain 32.1 to 36.6 dB (lowest at 125 C), UGBW 111 to 176 MHz,
+phase margin 57.9 to 62.4 deg, settling 7.8 to 11.6 ns, saturation margin at least 33 mV.
+The specs (gain >= 30 dB, UGBW >= 80 MHz, PM >= 50 deg, settling <= 20 ns, overshoot
+<= 15 %, final error <= 25 mV, margin >= 30 mV, 0.40 V <= out <= 0.50 V, supply
+<= 60 uA, average <= 50 uA / 60 uW, PSRR >= 50 dB, CMRR >= 40 dB) leave room. NMOS input
+pairs were tried first and dropped: the lv NMOS has a low Early voltage (2 to 6 V at
+L = 2 to 8 um), so the gain stayed below 30 dB.
 
 Tests: unit tests in `template.rs` (substitution, derived values, `when`, override and
 merge, every error message, bad templates, netlist requirements, shadowing, every
@@ -214,20 +267,23 @@ built-in loading with its defaults), `starter.rs`, `suite.rs`, `calc/measure.rs`
 (`coherent`) and `testlib.rs` (minimal overlay); `libcdept/tests/real_templates.rs` runs the
 four examples and the suite for real (delay equal to the hand-written `.meas`, trip point,
 power consistency, AC figures, suite counts and stored report, a failing spec and a
-missing net failing the suite; skipped without ngspice, the helper or the PDK); GUI:
-`cdept-gui/scripts/tests.script`.
+missing net failing the suite; skipped without ngspice, the helper or the PDK);
+`libcdept/tests/real_ota.rs` loads the OTA's views, suite and the `ac_load` template
+without a PDK (`mod hermetic`) and runs the OTA suite at tt, 27 C (all specs pass, gain,
+UGBW and phase margin in windows), the load sweep and the flash ADC for real
+(`mod real_pdk`); GUI: `cdept-gui/scripts/tests.script` and `cdept-gui/scripts/ota.script`
+(the OTA suite from the Simulation tab, 90 PASS rows).
 
 Checked by hand on the inverter, not in the tests: `dc_op`, `noise` (spot 14 uV/sqrt(Hz)
 out, 1.09 uV/sqrt(Hz) in at 1 kHz), `thd_fft` (a `sim new --dut` testbench), `startup_settle`,
-`psrr_cmrr` parses and runs (the AC value on the supply is the user's to add).
+`psrr_cmrr` has real examples on the OTA (`cells/ota5t/psrr`, `cmrr`), `inl_dnl` on the
+flash ADC (`cells/flash3/inl_dnl`).
 
 ## 7. Open
 
-- `inl_dnl` and `psrr_cmrr` have no real example (they need a converter or an amplifier
-  with a differential pair); they parse and run on synthetic data / the inverter.
 - Settling inside `tran_delay` (use `startup_settle`); jitter and PSD are not in the calculator.
-- A template cannot add `[[sweep]]` or Monte Carlo from parameters (set them in
-  `setup.toml`; they merge).
+- `psrr_cmrr` takes the differential gain as a number (`adm_db`), not from the
+  `ac_response` test of the same suite.
 - Templates for Xyce-only analyses; one template, one analysis set: a family that needs
   two stimuli (PSRR and CMRR) is two testbenches in a suite.
 - The suite panel has no per-test run, and no waveform viewer (Phase 5).
