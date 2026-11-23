@@ -135,6 +135,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                 mc_seed: seed,
                 no_mc,
                 no_store,
+                ..Default::default()
             };
             let results = sim::run_testbench_with(project, &tb, &simulator, &corners, &options)?;
             let records: Vec<RunRecord> = results.iter().map(|r| r.run.clone()).collect();

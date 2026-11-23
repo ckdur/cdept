@@ -15,6 +15,7 @@ mod library;
 mod placeholder;
 mod schematic;
 pub(crate) mod search;
+pub(crate) mod simulation;
 mod start;
 pub(crate) mod technology;
 mod tools;
@@ -85,6 +86,7 @@ pub struct Views {
     inspector: inspector::InspectorView,
     tools: tools::ToolsView,
     technology: technology::TechnologyView,
+    simulation: simulation::SimulationView,
     console: console::ConsoleView,
     jobs: placeholder::Placeholder,
     problems: placeholder::Placeholder,
@@ -109,6 +111,7 @@ impl Default for Views {
             inspector: Default::default(),
             tools: Default::default(),
             technology: Default::default(),
+            simulation: Default::default(),
             console: Default::default(),
             jobs: Placeholder::new("Jobs", "No simulation or verification jobs.", "Phase 4"),
             problems: Placeholder::new("Problems", "No DRC/LVS results.", "Phase 7"),
@@ -130,6 +133,7 @@ impl Views {
             Tab::Inspector => &mut self.inspector,
             Tab::Tools => &mut self.tools,
             Tab::Technology => &mut self.technology,
+            Tab::Simulation => &mut self.simulation,
             Tab::Console => &mut self.console,
             Tab::Jobs => &mut self.jobs,
             Tab::Problems => &mut self.problems,
@@ -139,6 +143,11 @@ impl Views {
                 None => &mut self.missing,
             },
         }
+    }
+
+    /// The Simulation tab.
+    pub(crate) fn simulation_mut(&mut self) -> &mut simulation::SimulationView {
+        &mut self.simulation
     }
 
     /// The Search panel.

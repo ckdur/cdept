@@ -198,6 +198,12 @@ fn cell_items(ui: &mut Ui, project: &Project, lib: &Library, cell: &Cell, cmds: 
         cmds.push(Cmd::Dialog(copy_cell_dialog(project, lib, cell)));
     }
     super::categories::cell_menu(ui, lib, cell);
+    if let Some(tb) = cell.entries.iter().find(|e| super::simulation::is_testbench(e)) {
+        let selection = Selection::view(&lib.name, &cell.name, &tb.name);
+        if ui.button("Run Simulation").on_hover_text("Run the testbench view of this cell").clicked() {
+            cmds.push(Cmd::Action(Action::OpenSimulation { selection, run: true }));
+        }
+    }
     let netlist = ui.add_enabled_ui(rw && crate::app::schematic_file(cell).is_some(), |ui| {
         ui.menu_button("Netlist to View", |ui| {
             for (label, format) in super::NETLIST_FORMATS {
@@ -260,6 +266,15 @@ fn view_items(
             &cell.name,
             &entry.name,
         )));
+    }
+    if super::simulation::is_testbench(entry) {
+        let selection = Selection::view(&lib.name, &cell.name, &entry.name);
+        if ui.button("Simulation").on_hover_text("Edit the setup and see the results").clicked() {
+            cmds.push(Cmd::Action(Action::OpenSimulation { selection: selection.clone(), run: false }));
+        }
+        if ui.button("Run Simulation").on_hover_text("Open the Simulation tab and run the testbench").clicked() {
+            cmds.push(Cmd::Action(Action::OpenSimulation { selection, run: true }));
+        }
     }
     if let Some(u) = link
         && ui
