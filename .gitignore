@@ -1,3 +1,4 @@
 /target
 .claude/worktrees/
 docs/_build/
+imgui.ini
