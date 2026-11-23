@@ -6,6 +6,7 @@ mod cmd_import;
 mod cmd_lib;
 mod cmd_ls;
 mod cmd_ngspice;
+mod cmd_magic;
 mod cmd_pdk;
 mod cmd_sim;
 mod cmd_status;
@@ -125,6 +126,9 @@ enum Command {
     /// ngspice in-process (libngspice, loaded at run time).
     #[command(subcommand)]
     Ngspice(cmd_ngspice::NgspiceCommand),
+    /// Magic in batch mode: extraction, DRC, LEF export.
+    #[command(subcommand)]
+    Magic(cmd_magic::MagicCommand),
     /// Testbenches: decks and ngspice runs with corners and specs.
     #[command(subcommand)]
     Sim(cmd_sim::SimCommand),
@@ -1160,6 +1164,10 @@ fn main() -> Result<()> {
             cmd_tech::run(command, project)
         }
         Command::Ngspice(command) => cmd_ngspice::run(command),
+        Command::Magic(command) => {
+            init_tracing(cli.verbose, None);
+            cmd_magic::run(command, &open_project(cli.project)?)
+        }
         Command::Sim(command) => {
             init_tracing(cli.verbose, None);
             cmd_sim::run(command, &open_project(cli.project)?)

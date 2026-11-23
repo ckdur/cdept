@@ -17,6 +17,7 @@ pub mod layout;
 pub mod library;
 pub mod ngspice;
 pub mod link;
+pub mod magic;
 pub mod project;
 pub mod project_edit;
 pub mod refactor;
