@@ -155,7 +155,9 @@ CDePT library of the `ref` layout, so what the snapshot lists is what the projec
 `tech.toml` gets, per library: purpose, formats, cell count, technology LEFs and Liberty
 corners (process, voltage, temperature); the catalog gets the cells with their views and
 facts (LEF class and size, Liberty area), every Liberty file, LEF layers and sites, and
-every digital-flow setting.
+every digital-flow setting. Which file is a library's GDS, SPICE, CDL, LEF, Verilog and
+Liberty file comes from the flow's configuration (`tech::librelane`, a tolerant reader of
+the Tcl, never run), else from the folders: `[refs.library.files]`.
 
 ## 4. `tech.toml`
 

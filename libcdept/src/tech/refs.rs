@@ -70,6 +70,76 @@ pub struct RefLibrary {
     /// corner, and every file, are in the catalog ([`RefLibraryCatalog::corners`]).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub liberty: BTreeMap<String, TechPath>,
+    /// The files of the library by format: from the LibreLane/OpenLane configuration
+    /// when it names them, else from the folders.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<LibraryFiles>,
+}
+
+/// `[refs.library.files]`: which file is the library's GDS, SPICE netlist, CDL, LEF,
+/// Verilog model and Liberty file. A folder of many files (one per cell) is written
+/// as its pattern (`$PDK_ROOT/…/lef/*.lef`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LibraryFiles {
+    /// `librelane config` (the PDK's `config.tcl` names the files) or `folder scan`
+    /// (guessed from the folders; also for a format the configuration does not name,
+    /// when the other formats come from it).
+    pub source: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gds: Vec<TechPath>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub spice: Vec<TechPath>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub cdl: Vec<TechPath>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub lef: Vec<TechPath>,
+    /// The technology LEF (layers, vias, sites).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tech_lef: Vec<TechPath>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub verilog: Vec<TechPath>,
+    /// Liberty files by corner: the pattern of corners the configuration gives
+    /// (`*_typ_1p20V_25C`), else the corner as the file name says it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub liberty: Vec<LibertyRef>,
+    /// The power pins of the cells (`VDD`, `VPWR VPB`), when the configuration says.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub power_pins: Vec<String>,
+    /// The ground pins.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ground_pins: Vec<String>,
+}
+
+/// A Liberty file and the corner it is for.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LibertyRef {
+    pub corner: String,
+    pub file: TechPath,
+}
+
+impl LibraryFiles {
+    /// The files of every format, as `(format, lines)`; a Liberty line is
+    /// `corner = file`.
+    pub fn formats(&self) -> Vec<(&'static str, Vec<String>)> {
+        let names = |list: &[TechPath]| list.iter().map(|p| p.0.clone()).collect::<Vec<_>>();
+        vec![
+            ("gds", names(&self.gds)),
+            ("spice", names(&self.spice)),
+            ("cdl", names(&self.cdl)),
+            ("lef", names(&self.lef)),
+            ("tech_lef", names(&self.tech_lef)),
+            ("verilog", names(&self.verilog)),
+            (
+                "liberty",
+                self.liberty
+                    .iter()
+                    .map(|l| format!("{} = {}", l.corner, l.file))
+                    .collect(),
+            ),
+        ]
+    }
 }
 
 /// One corner of a library's Liberty files (in the catalog).
@@ -278,12 +348,20 @@ pub fn scan_with(ctx: &ScanContext, cache: &Cache) -> Scanned<RefsTech, RefsCata
             })
             .collect();
         folders.sort();
+        // What the digital flow's configuration says about the libraries' files.
+        let config = super::librelane::read(pdk);
+        out.notes.extend(config.notes.iter().cloned());
         // The libraries side by side: each reads files of its own.
         let scanned: Vec<(RefLibrary, RefLibraryCatalog, Vec<String>)> =
             std::thread::scope(|scope| {
+                let config = &config;
                 let handles: Vec<_> = folders
                     .iter()
-                    .map(|folder| scope.spawn(move || library(pdk, folder, cache)))
+                    .map(|folder| {
+                        scope.spawn(move || {
+                            library(pdk, folder, cache, config.libraries.get(&name_of(folder)))
+                        })
+                    })
                     .collect();
                 handles
                     .into_iter()
@@ -517,6 +595,7 @@ fn library(
     pdk: &PdkDir,
     folder: &Path,
     cache: &Cache,
+    config: Option<&super::librelane::ConfigFiles>,
 ) -> (RefLibrary, RefLibraryCatalog, Vec<String>) {
     let name = name_of(folder);
     let mut notes = Vec::new();
@@ -716,6 +795,13 @@ fn library(
         })
         .collect();
 
+    let files = library_files(
+        pdk,
+        &lib,
+        config,
+        techlef.iter().map(|t| t.file.clone()).collect(),
+        &liberty_paths,
+    );
     let role = role(&name, &classes);
     let has_layout = lib
         .cells
@@ -739,6 +825,7 @@ fn library(
         techlef: techlef.iter().map(|t| t.file.clone()).collect(),
         default_corner,
         liberty: liberty_paths,
+        files,
     };
     let catalog = RefLibraryCatalog {
         name,
@@ -749,6 +836,129 @@ fn library(
         techlef,
     };
     (section, catalog, notes)
+}
+
+/// Most files listed one by one; more are written as the pattern they share.
+const LISTED: usize = 8;
+
+/// Files of one format as the snapshot lists them.
+fn listed(pdk: &PdkDir, files: &BTreeSet<PathBuf>) -> Vec<TechPath> {
+    if files.len() > LISTED {
+        let files: Vec<PathBuf> = files.iter().cloned().collect();
+        let first = &files[0];
+        let ext = first
+            .extension()
+            .map(|e| format!(".{}", e.to_string_lossy()))
+            .unwrap_or_default();
+        let folder = first.parent().unwrap_or(Path::new(""));
+        return vec![pdk.portable(&folder.join(format!("*{ext}")))];
+    }
+    files.iter().map(|f| pdk.portable(f)).collect()
+}
+
+/// The files of a library by format: what the configuration names, and for a format
+/// it does not name what the folders have.
+fn library_files(
+    pdk: &PdkDir,
+    lib: &Library,
+    config: Option<&super::librelane::ConfigFiles>,
+    techlef: Vec<TechPath>,
+    liberty: &BTreeMap<String, TechPath>,
+) -> Option<LibraryFiles> {
+    use std::ffi::OsStr;
+    // The folder's files by format, from the views of the cells.
+    let mut guessed: BTreeMap<&str, BTreeSet<PathBuf>> = BTreeMap::new();
+    for entry in lib.cells.iter().flat_map(|cell| &cell.entries) {
+        for file in &entry.files {
+            let name = file
+                .file_name()
+                .map(|n| n.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            let name = name.strip_suffix(".gz").unwrap_or(&name);
+            let ext = Path::new(name).extension().and_then(OsStr::to_str);
+            let format = match (entry.kind, ext) {
+                (ViewKind::Layout, Some("gds")) => "gds",
+                (ViewKind::Abstract, Some("lef")) => "lef",
+                (ViewKind::Netlist, Some("cdl")) => "cdl",
+                (ViewKind::Netlist, Some("spice" | "sp" | "spi" | "cir")) => "spice",
+                (ViewKind::Hdl, Some("v" | "sv")) => "verilog",
+                _ => continue,
+            };
+            guessed.entry(format).or_default().insert(file.clone());
+        }
+    }
+    // A technology LEF is not a cell view of the library.
+    let tech: BTreeSet<PathBuf> = techlef
+        .iter()
+        .filter_map(|t| t.resolve_in(pdk).ok())
+        .collect();
+    if let Some(lef) = guessed.get_mut("lef") {
+        lef.retain(|file| !tech.contains(file));
+    }
+    let set = |files: &[PathBuf]| files.iter().cloned().collect::<BTreeSet<_>>();
+    let config = config.filter(|c| !c.is_empty());
+    let mut from_config = false;
+    let mut pick = |named: Option<BTreeSet<PathBuf>>, format: &str| -> Vec<TechPath> {
+        match named.filter(|files| !files.is_empty()) {
+            Some(files) => {
+                from_config = true;
+                listed(pdk, &files)
+            }
+            None => guessed
+                .get(format)
+                .map(|files| listed(pdk, files))
+                .unwrap_or_default(),
+        }
+    };
+    let mut files = LibraryFiles {
+        gds: pick(config.map(|c| set(&c.gds)), "gds"),
+        spice: pick(config.map(|c| set(&c.spice)), "spice"),
+        cdl: pick(config.map(|c| set(&c.cdl)), "cdl"),
+        lef: pick(config.map(|c| set(&c.lef)), "lef"),
+        verilog: pick(config.map(|c| set(&c.verilog)), "verilog"),
+        ..LibraryFiles::default()
+    };
+    match config.map(|c| set(&c.tech_lef)).filter(|f| !f.is_empty()) {
+        Some(named) => {
+            from_config = true;
+            files.tech_lef = listed(pdk, &named);
+        }
+        None => files.tech_lef = techlef,
+    }
+    match config.filter(|c| !c.liberty.is_empty()) {
+        Some(config) => {
+            from_config = true;
+            files.liberty = config
+                .liberty
+                .iter()
+                .map(|(corner, file)| LibertyRef {
+                    corner: corner.clone(),
+                    file: pdk.portable(file),
+                })
+                .collect();
+        }
+        None => {
+            files.liberty = liberty
+                .iter()
+                .map(|(corner, file)| LibertyRef {
+                    corner: corner.clone(),
+                    file: file.clone(),
+                })
+                .collect()
+        }
+    }
+    if let Some(config) = config {
+        files.power_pins = config.power.clone();
+        files.ground_pins = config.ground.clone();
+    }
+    files.source = if from_config {
+        "librelane config"
+    } else {
+        "folder scan"
+    }
+    .into();
+    let nothing = files.formats().iter().all(|(_, list)| list.is_empty());
+    (!nothing).then_some(files)
 }
 
 /// Every `set ::env(NAME) value` of a LibreLane/OpenLane `config.tcl` (the first of

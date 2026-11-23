@@ -134,6 +134,13 @@ libraries, read-only. Test benches and examples of the PDK are found but not ena
 list one, set `enabled = true` in `tech.toml`, or define the library in `cdept.toml`. A
 library the project defines with the same name wins over the PDK's.
 
+Which file of a reference library is its GDS, SPICE netlist, CDL, LEF, Verilog model or
+Liberty file for a corner is taken from the PDK's LibreLane or OpenLane configuration
+(`libs.tech/librelane/config.tcl` and the `config.tcl` of each library), which CDePT reads
+without running Tcl. A library the configuration does not mention, and a PDK without
+one, are read from the library's folders. `cdept tech show refs` lists the files per
+format, and `cdept tech notes` what could not be read.
+
 When a PDK has two libraries of one name that are not nested (IHP's `sg13g2_pr` holds
 xschem symbols under `libs.tech` and fixed layouts under `libs.ref`), the project lists the
 xschem one and the scan records a note. A CDePT library is one folder.

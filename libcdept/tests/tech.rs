@@ -206,3 +206,59 @@ fn the_snapshot_follows_the_pdk_folder_of_the_machine() {
     }
     assert_eq!(moved.snapshot_stale(), None);
 }
+
+/// The files of the standard-cell library come from the digital flow's configuration
+/// and are on disk.
+fn config_files(name: &str, stdcell: &str) {
+    let Some(pdk) = pdk(name) else {
+        return;
+    };
+    let (tech, _) = scan(&pdk);
+    let library = tech
+        .refs
+        .library(stdcell)
+        .unwrap_or_else(|| panic!("no library {stdcell}"));
+    let files = library.files.as_ref().expect("files of the library");
+    assert_eq!(files.source, "librelane config", "{files:?}");
+    for (format, list) in [
+        ("gds", &files.gds),
+        ("cdl", &files.cdl),
+        ("lef", &files.lef),
+        ("tech_lef", &files.tech_lef),
+    ] {
+        assert!(!list.is_empty(), "{stdcell}: no {format} file");
+        for file in list {
+            assert!(
+                file.resolve_in(&pdk).unwrap().is_file(),
+                "{stdcell}: {format} {file}"
+            );
+        }
+    }
+    // SPICE: named by the IHP configuration, found in the folder for sky130.
+    assert!(!files.spice.is_empty());
+    if name == "ihp-sg13g2" {
+        for file in &files.spice {
+            assert!(file.resolve_in(&pdk).unwrap().is_file(), "{file}");
+        }
+    }
+    assert!(!files.liberty.is_empty());
+    for item in &files.liberty {
+        assert!(item.file.resolve_in(&pdk).unwrap().is_file(), "{}", item.file);
+    }
+    assert!(!files.power_pins.is_empty() && !files.ground_pins.is_empty());
+    // The snapshot with the new table still reads back.
+    let text = file::tech_text(&tech).unwrap();
+    let mut warnings = Vec::new();
+    let back = file::parse_tech(&text, &mut warnings).unwrap();
+    assert_eq!(back.refs, tech.refs);
+}
+
+#[test]
+fn ihp_sg13g2_library_files_come_from_the_config() {
+    config_files("ihp-sg13g2", "sg13g2_stdcell");
+}
+
+#[test]
+fn sky130a_library_files_come_from_the_config() {
+    config_files("sky130A", "sky130_fd_sc_hd");
+}

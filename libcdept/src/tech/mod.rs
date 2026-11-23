@@ -21,6 +21,7 @@ pub mod devices;
 pub mod discover;
 pub mod file;
 pub mod klayout;
+pub mod librelane;
 pub mod magic;
 pub mod models;
 pub mod netgen;

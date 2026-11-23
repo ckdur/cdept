@@ -296,6 +296,32 @@ A `[[refs.library]]` table has the library keys `name`, `path`, `layout`, `role`
 | `default_corner` | string | | The Liberty corner to start with (the typical one). |
 | `sites` | table | `{}` | Placement sites: name to `[width, height]` in micron (`unithd = [0.46, 2.72]`). |
 | `liberty` | table of path | `{}` | Liberty files per corner: the corner as the file names say it (`tt_025C_1v80`) to the file. A library with a file per cell gives the pattern of the names. Process, voltage and temperature of each corner are in the catalog. |
+| `[refs.library.files]` | table | | Which file is the library's file of each format (below). |
+
+`[refs.library.files]` says which file is the library's GDS, SPICE netlist, CDL, LEF and
+Verilog model. The PDK's LibreLane or OpenLane configuration names them (`CELL_GDS`,
+`CELL_LEFS`, `TECH_LEFS`, `CELL_LIBS`, `PAD_GDS`, ...); for a format it does not name, or a
+PDK without such a configuration, the files are those the library's folders hold. A
+format with more than eight files (one per cell) is written as the pattern they share
+(`$PDK_ROOT/.../lef/*.lef`). A file the configuration names that is not on disk is left
+out, with a note.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `source` | string | | `"librelane config"` when the configuration names files of the library, else `"folder scan"`. |
+| `gds` | list of path | `[]` | Layout of the cells. |
+| `spice` | list of path | `[]` | SPICE netlist. |
+| `cdl` | list of path | `[]` | CDL netlist. |
+| `lef` | list of path | `[]` | Cell abstracts. |
+| `tech_lef` | list of path | `[]` | Technology LEF. |
+| `verilog` | list of path | `[]` | Verilog models. |
+| `liberty` | list of tables | `[]` | `{ corner, file }`: the Liberty file of a corner, the corner being the pattern the configuration gives (`*_typ_1p20V_25C`) or what the file name says (`tt_025C_1v80`). |
+| `power_pins` | list of strings | `[]` | Power pins of the cells, when the configuration says (`SCL_POWER_PINS`, `STD_CELL_POWER_PINS`, `VDD_PIN`). |
+| `ground_pins` | list of strings | `[]` | Ground pins. |
+
+When a reference library is read, the files the configuration names are the main files of
+the cells' views (the GDS, LEF, Liberty file that a tool opens), before a guess from the
+file names.
 
 `[refs.digital]` says what LibreLane or OpenLane is told about the PDK:
 

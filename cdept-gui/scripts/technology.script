@@ -59,6 +59,10 @@ tech expect pdk.name ihp-sg13g2
 tech expect klayout.dbu 0.001
 tech expect catalog.pdk ihp-sg13g2
 tech expect catalog.klayout.layers.0.name Substrate.drawing
+# The files of the libraries come from the digital flow's configuration.
+tech expect refs.library.3.name sg13g2_stdcell
+tech expect refs.library.3.files.source librelane config
+tech expect refs.library.3.files.gds.0 $PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/gds/sg13g2_stdcell.gds
 # Every page draws (a frame or two each).
 tech page Layers
 wait 0.2

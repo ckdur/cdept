@@ -650,7 +650,7 @@ fn scan_flat(library: &Path, cache: &Cache) -> Result<Vec<Cell>> {
             path,
         });
     }
-    Ok(assemble(found, cache, true))
+    Ok(assemble(found, cache, true, &Default::default()))
 }
 
 /// The view name and kind of a file in the format folder `folder` of a reference
@@ -689,6 +689,9 @@ fn ref_view(folder: &str, tool: Option<&str>, format: Format) -> (String, ViewKi
 }
 
 fn scan_ref(library: &Path, cache: &Cache) -> Result<Vec<Cell>> {
+    // The files the PDK's LibreLane/OpenLane configuration names for this library
+    // decide which file is a view's main file, before guessing from the names.
+    let preferred = crate::tech::librelane::library_files(library);
     let mut found = Vec::new();
     let mut add = |folder: &str, tool: Option<&str>, name: String, path: PathBuf| {
         let Some((stem, _)) = Format::split_name(&name) else {
@@ -735,7 +738,7 @@ fn scan_ref(library: &Path, cache: &Cache) -> Result<Vec<Cell>> {
             }
         }
     }
-    Ok(assemble(found, cache, false))
+    Ok(assemble(found, cache, false, &preferred))
 }
 
 /// A cell a file gives: its name and, when the file is a collection, the same name
@@ -784,7 +787,11 @@ fn file_cells(
 /// How good a file is as the main file of a view of several: the cell's own file
 /// before a collection, the typical corner before the others, the full Verilog model
 /// before black boxes. Smaller is better.
-fn main_file_rank(path: &Path, member: bool) -> (bool, u8) {
+fn main_file_rank(
+    path: &Path,
+    member: bool,
+    preferred: &std::collections::BTreeSet<PathBuf>,
+) -> (bool, bool, u8) {
     let name = file_name(path).to_ascii_lowercase();
     let stem = name.split('.').next().unwrap_or_default();
     let has = |word: &str| stem.split('_').any(|part| part == word);
@@ -801,11 +808,16 @@ fn main_file_rank(path: &Path, member: bool) -> (bool, u8) {
     if has("pp") {
         penalty += 1;
     }
-    (member, penalty)
+    (!preferred.contains(path), member, penalty)
 }
 
 /// The cells of a flat or reference library from its design files.
-fn assemble(found: Vec<Found>, cache: &Cache, flat: bool) -> Vec<Cell> {
+fn assemble(
+    found: Vec<Found>,
+    cache: &Cache,
+    flat: bool,
+    preferred: &std::collections::BTreeSet<PathBuf>,
+) -> Vec<Cell> {
     // What is inside the files that may hold several cells, read side by side.
     let jobs: Vec<(&Path, Reader)> = found
         .iter()
@@ -892,7 +904,7 @@ fn assemble(found: Vec<Found>, cache: &Cache, flat: bool) -> Vec<Cell> {
                     let (main, member) = view
                         .files
                         .iter()
-                        .min_by_key(|(f, member)| main_file_rank(&f.path, member.is_some()))
+                        .min_by_key(|(f, member)| main_file_rank(&f.path, member.is_some(), preferred))
                         .expect("a view has a file");
                     Entry {
                         name: view.name,
@@ -1573,6 +1585,38 @@ mod tests {
                 ("ram8", "netlist_cdl", None),
             ])
         );
+    }
+
+    #[test]
+    fn the_flow_configuration_names_the_main_file_of_a_view() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("demo/libs.ref/std");
+        let write = |name: &str, text: &str| {
+            let file = tmp.path().join("demo").join(name);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, text).unwrap();
+        };
+        write("libs.ref/std/lib/std_tt_1p8V_25C.lib", &liberty(&["inv"]));
+        write("libs.ref/std/lib/std_ff_1p8V_25C.lib", &liberty(&["inv"]));
+        let main = |lib: &Library| {
+            lib.cell("inv")
+                .and_then(|c| c.entries.first())
+                .and_then(|e| e.main_file.clone())
+                .and_then(|f| f.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_default()
+        };
+        // No configuration: the typical corner by its name.
+        let mut lib = library(&root, LibraryLayout::Ref);
+        lib.scan_with(&Cache::off());
+        assert_eq!(main(&lib), "std_tt_1p8V_25C.lib");
+        // The configuration says another one.
+        write(
+            "libs.tech/librelane/config.tcl",
+            "set ::env(CELL_LIBS) [dict create]\n\
+             dict set ::env(CELL_LIBS) \"*_ff\" \"$::env(PDK_ROOT)/$::env(PDK)/libs.ref/std/lib/std_ff_1p8V_25C.lib\"\n",
+        );
+        lib.scan_with(&Cache::off());
+        assert_eq!(main(&lib), "std_ff_1p8V_25C.lib");
     }
 
     #[test]
