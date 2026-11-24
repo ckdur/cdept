@@ -50,6 +50,12 @@ pub enum SimCommand {
         /// Run with this simulator instead of the setup's (`simulator` of setup.toml).
         #[arg(long, value_parser = ["ngspice", "xyce", "vacask"])]
         simulator: Option<String>,
+        /// Time limit of each run point, like `10m`, `90s`, `1h30m` or a number of
+        /// seconds; `0` is none. A point that runs longer is killed and ends as an
+        /// error. Default: the setup's `timeout`, else `[sim] timeout` of cdept.toml,
+        /// else 30m.
+        #[arg(long, value_parser = parse_limit)]
+        timeout: Option<std::time::Duration>,
     },
     /// Show the stored results of a testbench: the latest run of every point and, over
     /// them, pass/fail counts and min/max/mean/std of every measurement.
@@ -123,6 +129,9 @@ pub enum SimCommand {
         /// `simulator`).
         #[arg(long, value_parser = ["ngspice", "xyce", "vacask"])]
         simulator: Option<String>,
+        /// Time limit of each run point (see `sim run --timeout`).
+        #[arg(long, value_parser = parse_limit)]
+        timeout: Option<std::time::Duration>,
     },
     /// Print the deck of the first run without starting the simulator.
     Deck {
@@ -133,7 +142,16 @@ pub enum SimCommand {
         /// The deck for this simulator instead of the setup's.
         #[arg(long, value_parser = ["ngspice", "xyce", "vacask"])]
         simulator: Option<String>,
+        /// Accepted for symmetry with `sim run`: a deck is not simulated, so there is
+        /// no time to limit.
+        #[arg(long, value_parser = parse_limit, hide = true)]
+        timeout: Option<std::time::Duration>,
     },
+}
+
+/// `--timeout`: a duration (`10m`, `90s`, a number of seconds; `0` is none).
+fn parse_limit(text: &str) -> std::result::Result<std::time::Duration, String> {
+    libcdept::jobs::parse_duration(text).map_err(|e| e.to_string())
 }
 
 #[derive(Subcommand)]
@@ -253,6 +271,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             no_store,
             json,
             simulator,
+            timeout,
         } => {
             let view = suite_view_of(project, &library, &cell, view)?;
             let on_event: Listener = Arc::new(|e| {
@@ -272,6 +291,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                 on_event: Some(on_event),
                 no_store,
                 simulator,
+                timeout,
                 ..Default::default()
             };
             let report = sim::suite::run(project, &library, &cell, &view, &options)?;
@@ -298,11 +318,15 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             cell,
             view,
             simulator,
+            timeout: _,
         } => {
             let view = view_of(project, &library, &cell, view)?;
             let mut tb = sim::open(project, &library, &cell, &view)?;
             if let Some(name) = &simulator {
                 tb.setup.set_simulator(name)?;
+            }
+            if tb.setup.simulator == "vacask" {
+                libcdept::vacask::availability(project).check()?;
             }
             let tech = project
                 .tech
@@ -355,11 +379,16 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             no_store,
             backend,
             simulator,
+            timeout,
         } => {
             let view = view_of(project, &library, &cell, view)?;
             let mut tb = sim::open(project, &library, &cell, &view)?;
             if let Some(name) = &simulator {
                 tb.setup.set_simulator(name)?;
+            }
+            // VACASK that cannot run this technology: say why before anything starts.
+            if tb.setup.simulator == "vacask" {
+                libcdept::vacask::availability(project).check()?;
             }
             let backend = backend.as_deref().and_then(sim::run::Backend::of);
             if backend == Some(sim::run::Backend::Inproc) {
@@ -402,6 +431,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                 no_mc,
                 no_store,
                 backend,
+                timeout,
                 ..Default::default()
             };
             let results = sim::run_testbench_with(project, &tb, &simulator, &corners, &options)?;

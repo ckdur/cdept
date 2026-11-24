@@ -1661,6 +1661,13 @@ fn main() -> Result<()> {
                     t.spec.name, t.spec.role
                 );
             }
+            // Inside a project, whether VACASK can run its technology (docs/VACASK.md).
+            if let Some(root) = project_root(cli.project)
+                && let Ok(project) = Project::load(&root)
+            {
+                println!();
+                println!("{}", libcdept::vacask::availability(&project).line());
+            }
             Ok(())
         }
         Command::Version => {

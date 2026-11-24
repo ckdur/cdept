@@ -164,15 +164,18 @@ impl Job {
             || String::from_utf8_lossy(&std::fs::read(&log).unwrap_or_default()).into_owned();
         let status = match watch.wait(&mut child)? {
             Waited::Exited(status) => status,
-            Waited::Cancelled => return Err(eyre::eyre!("{} cancelled", self.name)),
+            Waited::Cancelled => {
+                return Err(eyre::Report::new(Cancelled {
+                    name: self.name.clone(),
+                }));
+            }
             Waited::TimedOut(limit) => {
-                return Err(eyre::eyre!(
-                    "{} timed out after {} and was stopped\nlog: {}\n{}",
-                    self.name,
-                    crate::jobs::format_duration(limit),
-                    log.display(),
-                    tail(&read_log(), 12)
-                ));
+                return Err(eyre::Report::new(TimedOut {
+                    name: self.name.clone(),
+                    limit,
+                    log: log.clone(),
+                    tail: tail(&read_log(), 12),
+                }));
             }
         };
         Ok(Output {
@@ -183,6 +186,46 @@ impl Job {
         })
     }
 }
+
+/// [`Job::run_watched`] stopped the program because the cancel flag was set. Callers
+/// that must tell it from a failure look for it with `Report::downcast_ref`.
+#[derive(Debug, Clone)]
+pub struct Cancelled {
+    pub name: String,
+}
+
+impl std::fmt::Display for Cancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} cancelled", self.name)
+    }
+}
+
+impl std::error::Error for Cancelled {}
+
+/// [`Job::run_watched`] killed the program because it ran past `limit`.
+#[derive(Debug, Clone)]
+pub struct TimedOut {
+    pub name: String,
+    pub limit: Duration,
+    pub log: PathBuf,
+    /// The last lines of the log.
+    pub tail: String,
+}
+
+impl std::fmt::Display for TimedOut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} timed out after {} and was stopped\nlog: {}\n{}",
+            self.name,
+            crate::jobs::format_duration(self.limit),
+            self.log.display(),
+            self.tail
+        )
+    }
+}
+
+impl std::error::Error for TimedOut {}
 
 /// What stops a running program early ([`Job::run_watched`]): a cancel flag, polled,
 /// and a time limit. The default stops nothing.

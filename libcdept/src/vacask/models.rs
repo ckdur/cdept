@@ -61,25 +61,33 @@ pub struct Generated {
     /// What the converted files draw from the Monte Carlo vectors ([`super::stat`]).
     #[serde(default)]
     pub stat: super::stat::MmInfo,
+    /// The compiled libraries that could not be made, each as `<stem>: <why>`. A run
+    /// that needs the models is refused ([`check_libraries`]).
+    #[serde(default)]
+    pub missing: Vec<String>,
+    /// OpenVAF was needed and not found (nothing was cached: installing it and asking
+    /// again compiles).
+    #[serde(skip)]
+    pub openvaf_missing: bool,
 }
 
 /// A library file to convert.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Source {
+pub(super) struct Source {
     /// Name inside the set's folder (the converted file keeps it).
-    name: String,
-    path: PathBuf,
+    pub name: String,
+    pub path: PathBuf,
     /// The file has `.lib <section>` blocks (corner file).
-    corner: bool,
+    pub corner: bool,
 }
 
 /// What generation reads.
 #[derive(Debug, Clone)]
 pub struct Plan {
     pub pdk: String,
-    sources: Vec<Source>,
+    pub(super) sources: Vec<Source>,
     /// The `.osdi` stems of the ngspice set and the Verilog-A file behind each.
-    osdi: Vec<(String, Option<PathBuf>)>,
+    pub(super) osdi: Vec<(String, Option<PathBuf>)>,
     pub hash: String,
     ngspice: ModelSet,
     notes: Vec<String>,
@@ -438,11 +446,46 @@ fn defined_names(text: &str, into: &mut BTreeSet<String>) {
 
 /// Make (or find in the cache) the VACASK models of the technology.
 pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated> {
+    generate_watched(project, tech, plan, None)
+}
+
+/// The watch of an OpenVAF compilation: the job's cancel flag and the project's
+/// `[sim] openvaf_timeout` (default [`openvaf::DEFAULT_TIMEOUT`], zero: none).
+fn openvaf_watch(
+    project: &Project,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> crate::batch::Watch {
+    let limit = project
+        .sim
+        .openvaf_timeout
+        .unwrap_or(openvaf::DEFAULT_TIMEOUT);
+    crate::batch::Watch {
+        cancel,
+        timeout: (!limit.is_zero()).then_some(limit),
+    }
+}
+
+/// The error that ends a generation: the cancel flag was set, or OpenVAF ran out of
+/// time. Anything else is a note in the result.
+fn is_stop(e: &eyre::Report) -> bool {
+    e.downcast_ref::<crate::batch::Cancelled>().is_some()
+        || e.downcast_ref::<crate::batch::TimedOut>().is_some()
+}
+
+/// [`generate`], stopped when `cancel` is set (a job's cancel flag) and bound by the
+/// project's `[sim] openvaf_timeout` for each compilation.
+pub fn generate_watched(
+    project: &Project,
+    tech: &Tech,
+    plan: &Plan,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<Generated> {
     let dir = plan.dir(project);
     let report = dir.join(REPORT);
     if let Ok(text) = std::fs::read_to_string(&report)
         && let Ok(g) = serde_json::from_str::<Generated>(&text)
         && g.hash == plan.hash
+        && g.compiled.iter().all(|c| dir.join(c).is_file())
     {
         return Ok(g);
     }
@@ -474,7 +517,10 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
         .args(["-I", "convert.py", "convert-spec.json"])
         .env(&env);
     job.env_defaults = vec![("PYTHONDONTWRITEBYTECODE".into(), "1".into())];
-    let out = job.run_unchecked()?;
+    let out = job.run_watched(&crate::batch::Watch {
+        cancel: cancel.clone(),
+        timeout: None,
+    })?;
     out.check()
         .wrap_err("VACASK's model converter did not run")?;
     let result: serde_json::Value = serde_json::from_str(
@@ -541,10 +587,14 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
 
     // 2. compile the Verilog-A models.
     let mut compiled = vec![];
+    let mut missing: Vec<String> = vec![];
+    let mut openvaf_missing = false;
     let mut osdi_paths: Vec<TechPath> = vec![];
     match openvaf::ADAPTER.require() {
         Err(e) => {
             if !plan.osdi.is_empty() {
+                openvaf_missing = true;
+                missing.extend(plan.osdi.iter().map(|o| format!("{}: {e}", o.0)));
                 notes.push(format!(
                     "vacask: the Verilog-A models ({}) were not compiled: {e}",
                     plan.osdi
@@ -561,21 +611,28 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
             for (stem, va) in &plan.osdi {
                 let Some(va) = va else {
                     notes.push(format!("vacask: no Verilog-A source for '{stem}' under the technology's verilog-a folder"));
+                    missing.push(format!(
+                        "{stem}: no Verilog-A source under the technology's verilog-a folder"
+                    ));
                     continue;
                 };
                 let c = openvaf::Compile {
                     source: va.clone(),
                     ..Default::default()
                 };
-                match openvaf::compile_cached(&program, &c, &dir, &env2) {
+                let watch = openvaf_watch(project, cancel.clone());
+                match openvaf::compile_cached_watched(&program, &c, &dir, &env2, &watch) {
                     Ok(r) => {
                         compiled.push(format!("{stem}.osdi"));
                         osdi_paths.push(project_path(project, &r.osdi));
                     }
-                    Err(e) => notes.push(format!(
-                        "vacask: {stem}.va did not compile: {}",
-                        format!("{e:#}").lines().next().unwrap_or("")
-                    )),
+                    // Cancelled, or out of time: the generation ends, nothing is saved.
+                    Err(e) if is_stop(&e) => return Err(e),
+                    Err(e) => {
+                        let first = format!("{e:#}").lines().next().unwrap_or("").to_string();
+                        notes.push(format!("vacask: {stem}.va did not compile: {first}"));
+                        missing.push(format!("{stem}: did not compile ({first})"));
+                    }
                 }
             }
         }
@@ -655,9 +712,46 @@ pub fn generate(project: &Project, tech: &Tech, plan: &Plan) -> Result<Generated
         converted,
         compiled,
         stat,
+        missing,
+        openvaf_missing,
     };
-    std::fs::write(&report, serde_json::to_vec_pretty(&g)?)?;
+    // Without OpenVAF nothing is final: once it is installed the same plan compiles.
+    if !g.openvaf_missing {
+        std::fs::write(&report, serde_json::to_vec_pretty(&g)?)?;
+    }
     Ok(g)
+}
+
+/// The message for a technology whose models need OpenVAF (`stems` are the Verilog-A
+/// models to compile) and there is none.
+pub fn openvaf_missing_message(stems: &[&str]) -> String {
+    format!(
+        "OpenVAF not found: put openvaf-r on PATH or set {}; needed to compile {}",
+        openvaf::OPENVAF_ENV,
+        stems.join(", ")
+    )
+}
+
+/// An error unless every compiled library the models need is there: VACASK would
+/// start and say only `Device 'psp103va' not found.` for every point.
+pub fn check_libraries(g: &Generated) -> Result<()> {
+    if g.missing.is_empty() {
+        return Ok(());
+    }
+    let stems: Vec<&str> = g
+        .missing
+        .iter()
+        .map(|m| m.split(':').next().unwrap_or(m))
+        .collect();
+    if g.openvaf_missing {
+        bail!("{}", openvaf_missing_message(&stems));
+    }
+    bail!(
+        "the compiled model libraries of the technology '{}' are missing: {} \
+         (`cdept vacask models` shows the details)",
+        g.pdk,
+        g.missing.join("; ")
+    );
 }
 
 /// Put a generated set in the snapshot file (`tech.toml` of the project), replacing an
@@ -691,6 +785,15 @@ pub struct Ready {
 }
 
 pub fn ready(project: &Project) -> Result<Ready> {
+    ready_watched(project, None)
+}
+
+/// [`ready`], stopped when `cancel` is set (a job's cancel flag): the compilations of
+/// the Verilog-A models are killed.
+pub fn ready_watched(
+    project: &Project,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<Ready> {
     // The tests of a suite ask at once: one makes the models, the others wait for them.
     static GENERATING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _one_at_a_time = GENERATING.lock().unwrap_or_else(|e| e.into_inner());
@@ -708,7 +811,8 @@ pub fn ready(project: &Project) -> Result<Ready> {
         });
     }
     let plan = Plan::new(project, tech)?;
-    let g = generate(project, tech, &plan)?;
+    let g = generate_watched(project, tech, &plan, cancel)?;
+    check_libraries(&g)?;
     if g.set.corners.is_empty() {
         let why: Vec<&str> = g.notes.iter().take(6).map(String::as_str).collect();
         return Err(eyre!(

@@ -44,7 +44,13 @@ cdept sim run cells tb_inv --view vacask
 - Works on ihp-sg13g2: the inverter's tests, the OTA suite and the test templates agree
   with ngspice (most measurements within 0.1 %, transient edges within a few percent; the
   table is in [VACASK.md](../VACASK.md#6-parity-with-ngspice)). Not on sky130A/B: VACASK's
-  converter does not read its MOS models, and the run says "has no usable VACASK models".
+  converter does not read their binned BSIM4 models, so VACASK is *not available* there:
+  the Simulation tab shows it disabled (the reason is the hover text), a testbench that
+  names it gets a problem line, and `cdept sim run|suite` stop at once with the reason
+  ([availability rules](../VACASK.md#4b-availability-per-technology); `cdept tools`
+  prints the line for the project's technology).
+- Without OpenVAF the run stops before VACASK starts: `OpenVAF not found: put openvaf-r
+  on PATH or set CDEPT_OPENVAF; needed to compile psp103, ...`.
 - Any testbench runs with it without editing the file: `cdept sim run cells tb_inv
   --simulator vacask` (also `sim deck` and `sim suite`, and `simulator = "vacask"` in a
   `suite.toml`).
@@ -57,7 +63,11 @@ cdept sim run cells tb_inv --view vacask
   the raw file (`trig`/`targ`, `max`, `min`, `pp`, `avg`, `rms`, `integ`, `find ... at=`,
   `find ... when`); calculator `[[output]]` expressions work on its raw files, noise and
   AC (complex) included.
-- A cancelled run point kills VACASK.
+- A cancelled run point kills VACASK, and so does the time limit: every simulator's run
+  point has one, `timeout = "10m"` in the testbench's `setup.toml`, `[sim] timeout` in
+  `cdept.toml` (default 30 minutes), `cdept sim run --timeout 10m` (`0` is none). The point
+  then ends as an error `run point exceeded its time limit of 10m` with the last lines of
+  the log. OpenVAF compiles have `[sim] openvaf_timeout` (default 20 minutes).
 
 ## Qucs-S schematics
 

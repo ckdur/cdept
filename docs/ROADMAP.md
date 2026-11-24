@@ -231,7 +231,10 @@ gain 35.8 dB, UGBW 145 MHz, phase margin 59 deg, 1 % settling 9.2 ns; over the c
 32.1 to 36.6 dB, UGBW 111 to 176 MHz, phase margin 57.9 to 62.4 deg (screenshot in the
 [suites how-to](howto/suites.md)). Templates may now declare sweeps and Monte Carlo.
 CACE datasheet import/export is done ([reference/files/cace.md](reference/files/cace.md), CACE 2.x `cace_format` 5.2).
-Sweeps and Monte Carlo are editable in the GUI form (SYMBI-77).
+Sweeps and Monte Carlo are editable in the GUI form (SYMBI-77). SYMBI-80 (2026-11-24): a time
+limit per run point for every simulator (`timeout`, `[sim] timeout`, `--timeout`), cancellable
+and time-bound OpenVAF compiles, a clear error when OpenVAF is missing, and VACASK availability
+per technology (`vacask::availability`; sky130A/B unavailable, the form disables it).
 Still to do: SLURM/ssh; the rest of the list below as written.
 - Testbench view: DUT cell, analyses (op/dc/ac/tran/noise/pss if available), design
   variables, model corners (from tech.toml), temperature, saves/probes.

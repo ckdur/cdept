@@ -121,6 +121,14 @@ name = ""
 # (default 15m; "0" is no limit):
 #   [magic]
 #   timeout = "10m"
+
+# Simulator runs: a run point that takes longer is stopped and ends as an error (default
+# 30m; "0" is no limit; a testbench's setup.toml `timeout` and `cdept sim run --timeout`
+# come first). `openvaf_timeout` bounds one OpenVAF compilation of the VACASK models
+# (default 20m):
+#   [sim]
+#   timeout = "30m"
+#   openvaf_timeout = "20m"
 "#;
 
 /// Options for [`Project::add_library`].
@@ -160,6 +168,8 @@ pub struct Project {
     pub klayout: KlayoutSettings,
     /// `[magic]`: the batch runs of Magic.
     pub magic: MagicSettings,
+    /// `[sim]`: time limits of the simulator runs.
+    pub sim: SimSettings,
     /// The technology snapshot (`tech.toml` next to the project file), when the
     /// project has one. See [`crate::tech`].
     pub tech: Option<Tech>,
@@ -208,6 +218,17 @@ pub struct MagicSettings {
     /// `timeout = "10m"`: a batch run that takes longer is stopped. `None`: not set
     /// (the default of [`crate::magic::DEFAULT_TIMEOUT`]); zero: no limit.
     pub timeout: Option<std::time::Duration>,
+}
+
+/// `[sim]` in the project file (docs/reference/files/cdept-toml.md).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SimSettings {
+    /// `timeout = "30m"`: a run point that takes longer is stopped (`None`: not set, the
+    /// default of [`crate::sim::run::DEFAULT_TIMEOUT`]; zero: no limit).
+    pub timeout: Option<std::time::Duration>,
+    /// `openvaf_timeout = "20m"`: the limit of one OpenVAF compilation of the VACASK
+    /// models (`None`: [`crate::batch::openvaf::DEFAULT_TIMEOUT`]; zero: no limit).
+    pub openvaf_timeout: Option<std::time::Duration>,
 }
 
 /// The environment lookup of a project (not part of what makes two projects equal).
@@ -398,6 +419,7 @@ impl Project {
             xschem_rc: Vec::new(),
             klayout: KlayoutSettings::default(),
             magic: MagicSettings::default(),
+            sim: SimSettings::default(),
             tech,
             tech_in_use: false,
             root,
@@ -410,6 +432,7 @@ impl Project {
         project.load_xschem_rc(&doc);
         project.load_klayout(&doc);
         project.load_magic(&doc);
+        project.load_sim(&doc);
         project.apply_snapshot();
         let mut seen = HashSet::from([file.clone()]);
         project.load_definitions(&file, &doc, &mut seen)?;
@@ -698,9 +721,30 @@ impl Project {
     /// `[magic]`: `timeout`, a duration (`"10m"`, `"90s"`, a number of seconds). A value
     /// that cannot be read is left out, with a warning.
     fn load_magic(&mut self, doc: &DocumentMut) {
-        let Some(item) = doc.get("magic").and_then(|t| t.get("timeout")) else {
-            return;
-        };
+        if let Some(d) = self.duration_setting(doc, "magic", "timeout") {
+            self.magic.timeout = Some(d);
+        }
+    }
+
+    /// `[sim]`: `timeout` and `openvaf_timeout`, durations like `[magic] timeout`.
+    fn load_sim(&mut self, doc: &DocumentMut) {
+        if let Some(d) = self.duration_setting(doc, "sim", "timeout") {
+            self.sim.timeout = Some(d);
+        }
+        if let Some(d) = self.duration_setting(doc, "sim", "openvaf_timeout") {
+            self.sim.openvaf_timeout = Some(d);
+        }
+    }
+
+    /// A duration setting (`"10m"`, `"90s"`, a number of seconds) of `[table]`. One that
+    /// cannot be read is left out, with a warning.
+    fn duration_setting(
+        &mut self,
+        doc: &DocumentMut,
+        table: &str,
+        key: &str,
+    ) -> Option<std::time::Duration> {
+        let item = doc.get(table).and_then(|t| t.get(key))?;
         let parsed = match (item.as_str(), item.as_integer(), item.as_float()) {
             (Some(text), _, _) => crate::jobs::parse_duration(text).map_err(|e| format!("{e}")),
             (_, Some(n), _) if n >= 0 => Ok(std::time::Duration::from_secs(n as u64)),
@@ -710,8 +754,11 @@ impl Project {
             _ => Err("it must be a duration such as \"10m\"".to_string()),
         };
         match parsed {
-            Ok(d) => self.magic.timeout = Some(d),
-            Err(e) => self.warnings.push(format!("[magic] timeout: {e}")),
+            Ok(d) => Some(d),
+            Err(e) => {
+                self.warnings.push(format!("[{table}] {key}: {e}"));
+                None
+            }
         }
     }
 
