@@ -1,6 +1,6 @@
 //! `cdept wave`: open a raw file, or the raw of a run point, in UberWave (docs/howto/view-waveforms.md).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::Args;
 use eyre::{Result, eyre};
@@ -55,6 +55,16 @@ pub struct WaveArgs {
     /// envelope of half of them, named `... (decimated)`).
     #[arg(long)]
     no_decimate: bool,
+    /// Which UberWave: `embedded` (built into this cdept: its window opens in this process
+    /// and `cdept wave` waits until it is closed) or `process` (the separate
+    /// `UberWaveViewer`, started and left running). Default: `embedded` when built in, else
+    /// `process`; also `$CDEPT_UBERWAVE_BACKEND` and `[wave] backend` of cdept.toml.
+    #[arg(long, value_parser = ["embedded", "process"])]
+    backend: Option<String>,
+    /// Save the viewer window as a PNG once everything is loaded and exit (embedded UberWave
+    /// only; the window stays hidden and is 1280x720): for documentation and tests.
+    #[arg(long, value_name = "PNG")]
+    screenshot: Option<PathBuf>,
     /// Do not start the viewer: for a file, print its analyses and signal counts (CDePT's
     /// own reader); for a cell, the raw files of all its run points.
     #[arg(long)]
@@ -89,6 +99,22 @@ fn show_request(
 }
 
 pub fn run(args: WaveArgs, project: Option<&Project>) -> Result<()> {
+    if let Some(b) = args
+        .backend
+        .as_deref()
+        .and_then(wave::backend::Backend::parse)
+    {
+        wave::backend::set_override(Some(b));
+    }
+    if args.screenshot.is_some() {
+        wave::embedded::configure(wave::embedded::Options {
+            title: Some("UberWave (cdept)".into()),
+            width: 1280,
+            height: 720,
+            headless: true,
+            ..Default::default()
+        });
+    }
     match &args.cell {
         None if args.family
             || !args.points.is_empty()
@@ -119,6 +145,32 @@ fn file(args: &WaveArgs, raw: &Path, project: Option<&Project>) -> Result<()> {
     }
     let launched = wave::open_raw(project, raw, args.analysis.as_deref())?;
     println!("{}", launched.text());
+    finish(args, launched.embedded)
+}
+
+/// With the embedded UberWave the window belongs to this process: save the screenshot
+/// that was asked for and leave, or stay until the window is closed.
+fn finish(args: &WaveArgs, embedded: bool) -> Result<()> {
+    if !embedded {
+        if args.screenshot.is_some() {
+            return Err(eyre!(
+                "--screenshot needs the embedded UberWave (this cdept uses the UberWaveViewer process: see --backend)"
+            ));
+        }
+        return Ok(());
+    }
+    if let Some(png) = &args.screenshot {
+        let png = std::path::absolute(png)?;
+        let viewer =
+            wave::embedded::running().ok_or_else(|| eyre!("the viewer window is not open"))?;
+        let saved = viewer.screenshot(&png);
+        wave::embedded::close();
+        saved?;
+        println!("screenshot {}", png.display());
+        return Ok(());
+    }
+    eprintln!("UberWave is open in this process: close its window to end cdept wave");
+    wave::embedded::wait_closed();
     Ok(())
 }
 
@@ -182,7 +234,7 @@ fn point(args: &WaveArgs, cell: &str, project: Option<&Project>) -> Result<()> {
     if let Some(note) = opened.old_viewer_note() {
         eprintln!("note: {note}");
     }
-    Ok(())
+    finish(args, opened.embedded)
 }
 
 fn calc(
@@ -232,5 +284,5 @@ fn calc(
     if !failed.is_empty() {
         return Err(eyre!("{}", failed.join("\n")));
     }
-    Ok(())
+    finish(args, sent.embedded)
 }

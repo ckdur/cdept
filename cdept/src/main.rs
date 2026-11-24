@@ -1659,6 +1659,7 @@ fn main() -> Result<()> {
             init_tracing(cli.verbose, None);
             for t in libcdept::tools::detect_all() {
                 let status = match (&t.path, &t.version) {
+                    _ if t.spec.name == "UberWave" => libcdept::wave::tool_line(None),
                     (Some(p), Some(v)) => format!("{v}  ({})", p.display()),
                     (Some(p), None) => p.display().to_string(),
                     (None, _) => "not found".into(),

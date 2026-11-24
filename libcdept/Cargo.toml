@@ -13,6 +13,7 @@ repository.workspace = true
 testutil = []
 
 [dependencies]
+cdept-uberwave.workspace = true
 eyre.workspace = true
 serde.workspace = true
 memmap2.workspace = true
@@ -32,6 +33,7 @@ serde_yaml_ng = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true
+image.workspace = true
 libcdept = { path = ".", features = ["testutil"] }
 
 [build-dependencies]

@@ -19,6 +19,9 @@
 # The fake is what is started, not a real viewer.
 shell test -x "$CDEPT_UBERWAVE"
 shell case "$CDEPT_UBERWAVE" in *fake-uberwave*) true;; *) false;; esac
+# This tests the PROCESS backend (the fallback when UberWave is not built in), also in a
+# cdept that has it built in: the embedded one is uberwave-embedded.script.
+wave backend process
 
 panel Library Manager
 wait 0.3

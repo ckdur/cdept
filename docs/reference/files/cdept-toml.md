@@ -283,11 +283,14 @@ applies. See [JOBS.md](../../JOBS.md) and [VACASK.md](../../VACASK.md).
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `max_points` | integer | `200000` | A calculator trace (`cdept wave --calc`, the Send button) with more points than this goes to UberWave as a min/max envelope of at most half as many points, named `<name> (decimated)`. `0` never decimates. `--no-decimate` of `cdept wave` does the same for one call. |
+| `max_points` | integer | `200000` | A calculator trace (`cdept wave --calc`, the Send button) with more points than this goes to a process UberWave as a min/max envelope of at most half as many points, named `<name> (decimated)`. `0` never decimates. `--no-decimate` of `cdept wave` does the same for one call. |
+
+| `backend` | string | the built-in UberWave, else the process | `"embedded"` (UberWave built into cdept) or `"process"` (the separate `UberWaveViewer`). `CDEPT_UBERWAVE_BACKEND` and `cdept wave --backend` are stronger. `"embedded"` in a cdept without it is an error that says how to build it in. |
 
 ```toml
 [wave]
-max_points = 500000
+max_points = 500000     # only the process backend decimates
+backend = "process"
 ```
 
 The first and last point are kept and the extrema of every bucket survive, so the plot

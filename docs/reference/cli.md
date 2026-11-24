@@ -1429,6 +1429,8 @@ Options:
       --show <SHOW>          Signals to plot (comma separated, `v(out)` or just `out`; the tag of each file is added). Default: the nodes the testbench `save`s, else the ones its measures use, else the first four voltages that are not ground or a supply
       --no-show              Plot nothing: the viewer opens as it is (File traces are added in the viewer)
       --no-decimate          Send calculator traces whole, however many points they have (by default a trace with more than `[wave] max_points` of cdept.toml, 200000, goes as a min/max envelope of half of them, named `... (decimated)`)
+      --backend <BACKEND>    Which UberWave: `embedded` (built into this cdept: its window opens in this process and `cdept wave` waits until it is closed) or `process` (the separate `UberWaveViewer`, started and left running). Default: `embedded` when built in, else `process`; also `$CDEPT_UBERWAVE_BACKEND` and `[wave] backend` of cdept.toml [possible values: embedded, process]
+      --screenshot <PNG>     Save the viewer window as a PNG once everything is loaded and exit (embedded UberWave only; the window stays hidden and is 1280x720): for documentation and tests
       --list                 Do not start the viewer: for a file, print its analyses and signal counts (CDePT's own reader); for a cell, the raw files of all its run points
 ```
 

@@ -146,6 +146,10 @@ name = ""
 # viewer as a min/max envelope of half of them (default 200000; 0 never decimates):
 #   [wave]
 #   max_points = 200000
+#
+# Which UberWave: "embedded" (built into this executable) or "process" (the separate
+# UberWaveViewer); default: the built-in one when there is one:
+#   backend = "process"
 "#;
 
 /// Options for [`Project::add_library`].
@@ -258,12 +262,16 @@ pub struct WaveSettings {
     /// `max_points = 200000`: a calculator trace with more points is sent to the viewer
     /// as a min/max envelope of half of them (zero: never).
     pub max_points: usize,
+    /// `backend = "embedded" | "process"`: which UberWave to use (`None`: the one built in,
+    /// else the process).
+    pub backend: Option<crate::wave::backend::Backend>,
 }
 
 impl Default for WaveSettings {
     fn default() -> Self {
         WaveSettings {
             max_points: crate::wave::decimate::DEFAULT_MAX_POINTS,
+            backend: None,
         }
     }
 }
@@ -795,9 +803,18 @@ impl Project {
                             .into(),
                     ),
                 },
-                other => self
-                    .warnings
-                    .push(format!("[wave] unknown key `{other}` (known: max_points)")),
+                "backend" => match item
+                    .as_str()
+                    .and_then(crate::wave::backend::Backend::parse)
+                {
+                    Some(b) => self.wave.backend = Some(b),
+                    None => self
+                        .warnings
+                        .push("[wave] backend: it must be \"embedded\" or \"process\"".into()),
+                },
+                other => self.warnings.push(format!(
+                    "[wave] unknown key `{other}` (known: max_points, backend)"
+                )),
             }
         }
     }

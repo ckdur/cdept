@@ -337,7 +337,9 @@ fn wait_for<T>(
 pub(crate) fn script(project: Option<&Project>, args: &[String]) -> Result<(), String> {
     const USAGE: &str = "usage: wave open <lib> <cell> <view> <point> | wave family <lib> <cell> <view> [point] | \
          wave calc <lib> <cell> <view> <point|all> <expr> | wave expect_start <text> | \
-         wave expect_request <cmd> [text] | wave expect_trace <name> <n|>n> | wave quit_viewer <lib> <cell> <view>";
+         wave expect_request <cmd> [text] | wave expect_trace <name> <n|>n> | wave quit_viewer <lib> <cell> <view> | \
+         wave backend <embedded|process> | wave embedded_files <tag>... | wave embedded_signal <file> <name> | \
+         wave embedded_screenshot <png> | wave embedded_close";
     let project_or = || project.ok_or("no project is open");
     match args {
         [open, lib, cell, view, point] if open == "open" => {
@@ -415,6 +417,70 @@ pub(crate) fn script(project: Option<&Project>, args: &[String]) -> Result<(), S
                 wave::ipc::Client::connect_once(&socket).map_err(|e| format!("{e:#}"))?;
             client.quit().map_err(|e| format!("{e:#}"))
         }
+        [backend, name] if backend == "backend" => {
+            let b = wave::backend::Backend::parse(name)
+                .ok_or_else(|| format!("'{name}' is not a backend (embedded, process)"))?;
+            wave::backend::set_override(Some(b));
+            Ok(())
+        }
+        [files, tags @ ..] if files == "embedded_files" && !tags.is_empty() => {
+            let viewer = embedded_viewer()?;
+            let json = viewer.list_files_json().map_err(|e| format!("{e:#}"))?;
+            for t in tags {
+                if !json.contains(&format!("\"tag\":\"{t}\"")) {
+                    return Err(format!("the embedded viewer has no file '{t}': {json}"));
+                }
+            }
+            Ok(())
+        }
+        [signal, file, name @ ..] if signal == "embedded_signal" && !name.is_empty() => {
+            let viewer = embedded_viewer()?;
+            let name = name.join(" ");
+            let json = viewer
+                .list_signals_json(Some(file))
+                .map_err(|e| format!("{e:#}"))?;
+            if json.contains(&format!("\"name\":{}", serde_json::json!(name))) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "the embedded viewer has no signal '{name}' in '{file}': {json}"
+                ))
+            }
+        }
+        [shot, png] if shot == "embedded_screenshot" => {
+            let viewer = embedded_viewer()?;
+            let path = std::path::absolute(png).map_err(|e| e.to_string())?;
+            viewer.screenshot(&path).map_err(|e| format!("{e:#}"))?;
+            check_png(&path)
+        }
+        [close] if close == "embedded_close" => {
+            wave::embedded::close();
+            Ok(())
+        }
         _ => Err(USAGE.into()),
     }
+}
+
+fn embedded_viewer() -> Result<wave::embedded::Shared, String> {
+    wave::embedded::running().ok_or_else(|| "no embedded UberWave window is open".to_string())
+}
+
+/// The screenshot is a PNG with something drawn in it: not (nearly) all dark.
+fn check_png(path: &Path) -> Result<(), String> {
+    let img = image::open(path)
+        .map_err(|e| format!("{} is not a PNG: {e}", path.display()))?
+        .to_rgb8();
+    let bright = img
+        .pixels()
+        .filter(|p| p.0.iter().any(|c| *c > 150))
+        .count();
+    if bright < 200 {
+        return Err(format!(
+            "{} looks empty: {bright} bright pixels of {}",
+            path.display(),
+            img.width() * img.height()
+        ));
+    }
+    tracing::info!(target: "cdept::script", "wave: screenshot {} ({}x{}, {bright} bright pixels)", path.display(), img.width(), img.height());
+    Ok(())
 }

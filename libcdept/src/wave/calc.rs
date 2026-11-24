@@ -9,6 +9,7 @@ use std::path::Path;
 
 use eyre::{Result, eyre};
 
+use super::backend::ViewerOps;
 use super::decimate;
 use super::ipc::Trace;
 use super::session::{Mode, ViewFile, open_files, run_key};
@@ -233,6 +234,8 @@ pub struct Sent {
     pub viewer: Option<String>,
     /// Why the traces could not be sent (no viewer, an old one, a refusal), if so.
     pub problem: Option<String>,
+    /// The viewer is part of this executable (the process stays to keep its window).
+    pub embedded: bool,
     /// Things worth a line: a trace that was decimated, a signal that was not shown.
     pub notes: Vec<String>,
 }
@@ -271,6 +274,7 @@ pub fn send(
         pushed: vec![],
         viewer: None,
         problem: None,
+        embedded: false,
         notes: vec![],
     };
     let traces: Vec<&Trace> = sent
@@ -307,6 +311,7 @@ pub fn send(
         }
     };
     sent.viewer = Some(opened.text());
+    sent.embedded = opened.embedded;
     sent.notes.extend(opened.notes.iter().cloned());
     let Some(mut client) = opened.client else {
         sent.problem = opened.old_viewer_note();
@@ -315,7 +320,12 @@ pub fn send(
     let limit = req.max_points.unwrap_or(project.wave.max_points);
     let mut pushed = Vec::new();
     for t in traces {
-        let t = decimated(t, limit, &mut sent.notes);
+        // Only a socket needs thinned traces: the embedded viewer takes the raw slices.
+        let t = if client.wants_decimation() {
+            decimated(t, limit, &mut sent.notes)
+        } else {
+            t.clone()
+        };
         // A trace of that name from an earlier send is replaced.
         let _ = client.remove_trace(&t.name);
         match client.add_trace(&t) {

@@ -86,6 +86,8 @@ pub fn run(options: GuiOptions, log: LogBuffer) -> eyre::Result<()> {
         Box::new(move |cc| Ok(Box::new(app::CdeptApp::new(cc, options, log, script)))),
     )
     .map_err(|e| eyre::eyre!("failed to run the GUI: {e}"))?;
+    // The built-in UberWave window (a thread of this process) goes with the GUI.
+    libcdept::wave::embedded::close();
     if failed.load(Ordering::SeqCst) {
         eyre::bail!("the script failed; see the messages above");
     }

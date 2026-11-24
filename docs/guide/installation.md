@@ -51,6 +51,25 @@ sudo apt install libjpeg-dev
 Without the helper, everything that does not touch a schematic still works; commands
 that need it say so. See [XSCHEM.md](../XSCHEM.md) for what the helper is.
 
+### UberWave, the waveform viewer (optional, built in)
+
+`cdept wave` and **Open in UberWave** use UberWave, Symbiotic EDA's waveform viewer. It can be
+built **into the cdept executable**: point `UBERWAVE_SRC` at the `uberwave` repository before
+`cargo build` (the crate `cdept-uberwave` runs CMake on it; it needs `cmake`, a C++20 compiler
+and the OpenGL and GTK 3 development files, and the network once to fetch GLFW, Dear ImGui and
+ImPlot).
+
+```sh
+sudo apt install build-essential cmake libgl1-mesa-dev libgtk-3-dev
+UBERWAVE_SRC=~/uberwave cargo build --release
+cdept tools | grep UberWave        # built in (embedded)
+```
+
+Without `UBERWAVE_SRC` (or when that build fails: the build prints a warning and goes on) the
+executable has a stub instead and `cdept wave` starts the separate `UberWaveViewer` program, if
+there is one. [View waveforms](../howto/view-waveforms.md) has the details, the offline variables
+and the fallback.
+
 ### The KLayout helper
 
 Layouts open through KLayout itself, which runs a Python helper that ships with CDePT

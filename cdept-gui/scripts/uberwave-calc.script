@@ -20,6 +20,9 @@
 
 shell test -x "$CDEPT_UBERWAVE"
 shell case "$CDEPT_UBERWAVE" in *fake-uberwave-ipc*) true;; *) false;; esac
+# This tests the PROCESS backend (the fallback when UberWave is not built in), also in a
+# cdept that has it built in: the embedded one is uberwave-embedded.script.
+wave backend process
 shell test -n "$FAKE_UBERWAVE_LOG"
 shell rm -f "$FAKE_UBERWAVE_LOG"
 

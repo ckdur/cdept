@@ -370,6 +370,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cdept-uberwave"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "cdept-xschem"
 version = "0.1.0"
 dependencies = [
@@ -1502,8 +1509,10 @@ checksum = "b5b646652bf6661599e1da8901b3b9522896f01e736bad5f723fe7a3a27f899d"
 name = "libcdept"
 version = "0.1.0"
 dependencies = [
+ "cdept-uberwave",
  "chrono",
  "eyre",
+ "image",
  "libcdept",
  "libloading",
  "memchr",

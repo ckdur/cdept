@@ -30,7 +30,7 @@ they are run locally before a push (`docs/TESTS.md`).
   and suites, a results store with statistics; CACE datasheet import and export.
 - **Import:** bring GDS, SPICE, CDL, LEF, Liberty, Verilog and other files into a library as
   cells and views.
-- **Waveforms:** open results in UberWave, including whole families and calculator results.
+- **Waveforms:** the built-in UberWave viewer (in the cdept executable, built with `UBERWAVE_SRC`; the separate `UberWaveViewer` process is the fallback) shows results, including whole families and calculator results.
 
 What is not there yet is listed in [docs/ROADMAP.md](docs/ROADMAP.md) and the open points
 of [docs/NOTES.md](docs/NOTES.md).
@@ -83,4 +83,4 @@ the manual.
 CDePT is released under the [MIT licence](LICENSE). xschem, KLayout, Magic, ngspice and the
 other tools are separate programs with their own licences; the GPL ones are only ever
 started as processes of their own and never linked into CDePT. UberWave is Symbiotic EDA's
-own software and is integrated by the owner's choice.
+own software and is built into the executable by the owner's choice (`UBERWAVE_SRC`; without it a stub is built and the separate program is used).

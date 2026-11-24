@@ -124,6 +124,12 @@ fn acquire(key: &str, shared: bool, vars: Vars) -> EnvGuard {
     for (name, value) in pdk_vars
         .into_iter()
         .chain(scratch_vars(&scratch))
+        // The tests of the fake viewers are about the process backend; the embedded
+        // one (when built in) is tested apart, with this variable set to `embedded`.
+        .chain([(
+            "CDEPT_UBERWAVE_BACKEND".to_string(),
+            Some(OsString::from("process")),
+        )])
         .chain(vars)
     {
         if !saved.iter().any(|(n, _)| *n == name) {

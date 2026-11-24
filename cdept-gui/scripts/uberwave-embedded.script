@@ -1,0 +1,60 @@
+# The EMBEDDED UberWave: its window runs on a thread of the cdept process, next to the main
+# window (winit/egui) of the GUI. Needs UberWave built in (UBERWAVE_SRC at build time, see
+# docs/howto/view-waveforms.md) and a display: without the built-in viewer `wave backend
+# embedded` fails, which is the answer (run it only with a build that has UberWave).
+# On examples/ihp-inv: run tb_inv (tt/ff/ss), open the family (the viewer window opens on
+# the screen), open it again (the same window is reused), push calculator traces, check
+# what the viewer holds through its list calls, and save a screenshot (a PNG that is not
+# empty) to /tmp/cdept-uberwave-embedded.png.
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice \
+#   CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=ihp-inv \
+#     cdept-gui/scripts/run.sh cdept-gui/scripts/uberwave-embedded.script
+#
+# `wave` commands (uberwave.rs; docs/GUI-TESTING.md):
+#   wave backend <embedded|process>     choose the backend for the rest of the script
+#   wave family <lib> <cell> <view>     what "Open family in UberWave" does
+#   wave calc <lib> <cell> <view> <point|all> <expr>   what the expression line's Send does
+#   wave embedded_files <tag>...        the embedded viewer holds files with these tags
+#   wave embedded_signal <file> <name>  ... a signal (`(external)`: a pushed trace)
+#   wave embedded_screenshot <png>      save the window, check it is a PNG with content
+#   wave embedded_close                 close the window
+
+wave backend embedded
+panel Library Manager
+wait 0.3
+open cells tb_inv testbench
+sim expect_target cells/tb_inv/testbench
+sim run
+sim wait
+sim expect_state finished
+sim expect_points 3
+
+# The family: one window, three files tagged by point name.
+wave family cells tb_inv testbench
+wave embedded_files ff_27 ss_27 tt_27
+
+# Again: the window is reused (it is the same viewer; the files are replaced and shown again).
+wave family cells tb_inv testbench
+wave embedded_files ff_27 ss_27 tt_27
+
+# Calculator traces: raw data, no decimation, one per point.
+wave calc cells tb_inv testbench all db20(v("out"))
+wave embedded_signal (external) db20(v("out")) @ ff_27
+wave embedded_signal (external) db20(v("out")) @ tt_27
+wave calc cells tb_inv testbench tt_27 v("out")
+wave embedded_signal (external) v("out") @ tt_27
+
+# The main window keeps working while the viewer is open: a panel switch and a frame.
+panel Libraries
+wait 0.3
+wave embedded_screenshot /tmp/cdept-uberwave-embedded.png
+wave embedded_close
+
+# After the window was closed the next open starts a new one (the host keeps running).
+wave family cells tb_inv testbench
+wave embedded_files ff_27 ss_27 tt_27
+wave embedded_screenshot /tmp/cdept-uberwave-embedded.png
+wave embedded_close
+log uberwave-embedded: ok
+quit

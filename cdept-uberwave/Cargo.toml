@@ -1,0 +1,17 @@
+[package]
+name = "cdept-uberwave"
+description = "UberWave, the waveform viewer, built into the cdept executable (thin shim over its C API); a stub when it is not built in"
+version.workspace = true
+license.workspace = true
+categories.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[lib]
+name = "cdept_uberwave"
+path = "src/lib.rs"
+
+[dev-dependencies]
+tempfile.workspace = true

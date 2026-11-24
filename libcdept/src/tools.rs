@@ -431,7 +431,7 @@ pub const KNOWN_TOOLS: &[ToolSpec] = &[
         locate: Locate::Bin(&["UberWaveViewer", "uberwave"]),
         version_args: &[],
         note: Some(
-            "the waveform viewer (separate GPL program): `cdept wave`; `$CDEPT_UBERWAVE`; docs/howto/view-waveforms.md",
+            "the waveform viewer, built into cdept (UBERWAVE_SRC) or a separate program (`$CDEPT_UBERWAVE`): `cdept wave`; docs/howto/view-waveforms.md",
         ),
     },
     ToolSpec {
@@ -525,6 +525,14 @@ pub fn detect(spec: &ToolSpec) -> ToolInfo {
     // UberWave: `$CDEPT_UBERWAVE`, PATH, a sibling build; `--version` when the viewer
     // has one (probed without a display, killed after 2 s), else the file's date.
     if spec.name == "UberWave" {
+        if cdept_uberwave::available() {
+            // Built into this executable: nothing to find.
+            return ToolInfo {
+                spec: *spec,
+                path: Some(PathBuf::from("built in (embedded)")),
+                version: cdept_uberwave::version(),
+            };
+        }
         let path = crate::wave::locate(None);
         let version = path.as_deref().and_then(crate::wave::describe);
         return ToolInfo {

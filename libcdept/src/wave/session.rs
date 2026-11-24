@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 
 use eyre::{Result, WrapErr, bail};
 
+use super::backend::{self, Backend, Connection, ViewerOps};
+use super::embedded;
 use super::ipc::{self, Client};
 use super::show::{self, Applied, ShowRequest};
 use super::{PointRaw, analyses, analysis_arg, command_line, require, spawn_detached};
@@ -133,14 +135,16 @@ pub struct Opened {
     pub command: Vec<OsString>,
     /// The viewer ran already and was told to open the files over its socket.
     pub reused: bool,
-    /// The viewer speaks IPC.
+    /// The viewer speaks IPC (the embedded one does everything IPC does).
     pub ipc: bool,
+    /// The viewer is part of this executable ([`Backend::Embedded`]).
+    pub embedded: bool,
     /// The socket, with IPC.
     pub socket: Option<PathBuf>,
     /// With an old viewer: files that could not be opened (only the first is).
     pub not_opened: Vec<ViewFile>,
     /// The connection (only when asked for).
-    pub client: Option<Client>,
+    pub client: Option<Connection>,
     /// `tag:name` of the signals sent to the viewer with `show`.
     pub shown: Vec<String>,
     /// What went wrong without stopping the open (a signal a file lacks, a refused `show`).
@@ -150,6 +154,13 @@ pub struct Opened {
 impl Opened {
     /// One line for the user.
     pub fn text(&self) -> String {
+        if self.embedded {
+            return if self.reused {
+                "reused the running UberWave (built in)".into()
+            } else {
+                "UberWave (built in) is open".into()
+            };
+        }
         if self.reused {
             return format!(
                 "reused the running UberWave ({})",
@@ -217,7 +228,6 @@ pub fn open_files(
             bail!("{} does not exist", f.raw.display());
         }
     }
-    let program = require(project)?;
     let per_file: Vec<Option<String>> = files
         .iter()
         .map(|f| {
@@ -229,6 +239,10 @@ pub fn open_files(
             analysis_arg(&found, analysis)
         })
         .collect::<Result<_>>()?;
+    if backend::choose(project)? == Backend::Embedded {
+        return open_embedded(files, &per_file, mode, show);
+    }
+    let program = require(project)?;
     let dir = std::path::absolute(&first.raw)
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf));
@@ -241,6 +255,7 @@ pub fn open_files(
             command: line,
             reused: false,
             ipc: false,
+            embedded: false,
             socket: None,
             not_opened: files[1..].to_vec(),
             client: None,
@@ -271,9 +286,10 @@ pub fn open_files(
             command: vec![],
             reused: true,
             ipc: true,
+            embedded: false,
             socket: Some(socket),
             not_opened: vec![],
-            client: (mode == Mode::Connect).then_some(client),
+            client: (mode == Mode::Connect).then_some(Connection::Ipc(client)),
             shown: applied.shown,
             notes: applied.notes,
         });
@@ -306,7 +322,7 @@ pub fn open_files(
         match started {
             Ok(mut c) => {
                 applied = show::apply(&mut c, files, show, show::LOAD_TIMEOUT);
-                client = Some(c);
+                client = Some(Connection::Ipc(c));
             }
             // The viewer runs, only `show` could not be sent: not an error to open.
             Err(e) if mode == Mode::Open => applied.notes.push(format!("{e:#}")),
@@ -318,9 +334,45 @@ pub fn open_files(
         command: line,
         reused: false,
         ipc: true,
+        embedded: false,
         socket: Some(socket),
         not_opened: vec![],
         client,
+        shown: applied.shown,
+        notes: applied.notes,
+    })
+}
+
+/// [`open_files`] with the viewer of this process: the window is reused while it is open
+/// and started again after it was closed.
+fn open_embedded(
+    files: &[ViewFile],
+    per_file: &[Option<String>],
+    mode: Mode,
+    show: &ShowRequest,
+) -> Result<Opened> {
+    let (viewer, reused) = embedded::acquire()?;
+    let mut conn = Connection::Embedded(viewer);
+    let mut applied = Applied::default();
+    if !reused || mode == Mode::Open {
+        for (i, (f, a)) in files.iter().zip(per_file).enumerate() {
+            let (path, tag) = (absolute(&f.raw), Some(f.tag.as_str()));
+            if i == 0 {
+                ViewerOps::open(&mut conn, &path, a.as_deref(), tag)?;
+            } else {
+                ViewerOps::import(&mut conn, &path, a.as_deref(), tag)?;
+            }
+        }
+        applied = show::apply(&mut conn, files, show, show::LOAD_TIMEOUT);
+    }
+    Ok(Opened {
+        command: vec![],
+        reused,
+        ipc: true,
+        embedded: true,
+        socket: None,
+        not_opened: vec![],
+        client: (mode == Mode::Connect).then_some(conn),
         shown: applied.shown,
         notes: applied.notes,
     })

@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use super::ipc::{Client, Signal};
+use super::backend::ViewerOps;
+use super::ipc::Signal;
 use super::session::ViewFile;
 use crate::Project;
 
@@ -259,7 +260,7 @@ pub struct Applied {
 
 /// The signals of one file, waiting for the viewer to have loaded it (an empty list
 /// until then). `None` when `deadline` came first.
-fn wait_signals(client: &mut Client, tag: &str, deadline: Instant) -> Option<Vec<Signal>> {
+fn wait_signals(client: &mut dyn ViewerOps, tag: &str, deadline: Instant) -> Option<Vec<Signal>> {
     loop {
         if let Ok((s, _)) = client.list_signals(Some(tag), None)
             && !s.is_empty()
@@ -277,7 +278,7 @@ fn wait_signals(client: &mut Client, tag: &str, deadline: Instant) -> Option<Vec
 /// viewer answered with. A viewer that has not loaded a file within `wait` is left alone
 /// for it. Failures are notes, never errors: the files are open anyway.
 pub fn apply(
-    client: &mut Client,
+    client: &mut dyn ViewerOps,
     files: &[ViewFile],
     req: &ShowRequest,
     wait: Duration,

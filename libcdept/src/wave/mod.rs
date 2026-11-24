@@ -1,17 +1,23 @@
-//! Waveforms: CDePT has no waveform viewer of its own. It starts UberWave
-//! (`UberWaveViewer`, a separate program of Symbiotic EDA in the `uberwave` repository) on
-//! the raw file of a run point, as a separate process. UberWave has the same owner as
-//! CDePT, so its licence does not limit this; embedding it is possible later.
+//! Waveforms: CDePT has no waveform viewer of its own. It uses UberWave, Symbiotic EDA's
+//! viewer (the `uberwave` repository), in one of two ways ([`backend`]):
 //!
-//! An older viewer takes one path and an optional `--analysis <name>` (`tran`, `ac`, `dc`,
+//! * built into the cdept executable ([`embedded`], crate `cdept-uberwave`): the window
+//!   runs on a thread of this process, commands and data are plain calls;
+//! * as a separate process (`UberWaveViewer`), the fallback when it is not built in.
+//!
+//! The rest of this text is about the process: an older viewer takes one path and an optional `--analysis <name>` (`tran`, `ac`, `dc`,
 //! `noise`, `op` for a multi-plot ngspice raw file): one raw file at a time. A viewer
 //! with IPC protocol 1 (`--version` says `ipc 1`) takes several files and a socket
 //! ([`ipc`], [`session`]): families of run points open in one window and the calculator
 //! pushes traces into it ([`calc`]). Design: docs/howto/view-waveforms.md.
 
 #[cfg(unix)]
+pub mod backend;
+#[cfg(unix)]
 pub mod calc;
 pub mod decimate;
+#[cfg(unix)]
+pub mod embedded;
 #[cfg(unix)]
 pub mod ipc;
 #[cfg(unix)]
@@ -93,6 +99,23 @@ pub fn require(project: Option<&Project>) -> Result<PathBuf> {
              {UBERWAVE_ENV}; see {DOCS}"
         )
     })
+}
+
+/// The `cdept tools` line of UberWave: `built in (embedded)`, `process: <path>`, or
+/// `not available`.
+pub fn tool_line(project: Option<&Project>) -> String {
+    #[cfg(unix)]
+    if backend::embedded_available() {
+        let version = cdept_uberwave::version().unwrap_or_default();
+        return format!("built in (embedded)  {version}");
+    }
+    match locate(project) {
+        Some(p) => {
+            let version = describe(&p).map(|v| format!("{v}  ")).unwrap_or_default();
+            format!("process: {version}({})", p.display())
+        }
+        None => "not available".into(),
+    }
 }
 
 /// What the "version" column of `cdept tools` shows: the viewer's own `--version` line
@@ -190,10 +213,15 @@ fn absolute(p: &Path) -> PathBuf {
 #[derive(Debug, Clone)]
 pub struct LaunchInfo {
     pub command: Vec<OsString>,
+    /// Opened in the viewer built into this process (no command line).
+    pub embedded: bool,
 }
 
 impl LaunchInfo {
     pub fn text(&self) -> String {
+        if self.embedded {
+            return "opened in the built-in UberWave".into();
+        }
         self.command
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
@@ -212,6 +240,28 @@ pub fn open_raw(
     if !raw.exists() {
         bail!("{} does not exist", raw.display());
     }
+    #[cfg(unix)]
+    if backend::choose(project)? == backend::Backend::Embedded {
+        let tag = raw
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "file".into());
+        session::open_files(
+            project,
+            "files",
+            &[session::ViewFile {
+                tag,
+                raw: raw.to_path_buf(),
+            }],
+            analysis,
+            session::Mode::Open,
+            &show::ShowRequest::default(),
+        )?;
+        return Ok(LaunchInfo {
+            command: vec![],
+            embedded: true,
+        });
+    }
     let program = require(project)?;
     let found = if raw.is_file() {
         analyses(raw).unwrap_or_default()
@@ -225,7 +275,10 @@ pub fn open_raw(
         absolute(raw).parent().filter(|d| d.is_dir()),
         project,
     )?;
-    Ok(LaunchInfo { command: line })
+    Ok(LaunchInfo {
+        command: line,
+        embedded: false,
+    })
 }
 
 pub(crate) fn spawn_detached(
