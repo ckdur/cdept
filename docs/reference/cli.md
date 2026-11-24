@@ -980,6 +980,8 @@ Options:
 
       --remote <REMOTE>
           Send the points to this remote ([jobs.remote.NAME] of cdept.toml: ssh or SLURM) instead of running them here. Default: the setup's `remote`, else [jobs] default
+      --timeout <TIMEOUT>
+          Time limit of each run point, like `10m`, `90s`, `1h30m` or a number of seconds; `0` is none. A point that runs longer is killed and ends as an error. Default: the setup's `timeout`, else `[sim] timeout` of cdept.toml, else 30m
 ```
 
 #### cdept sim results
@@ -1093,6 +1095,8 @@ Options:
 
       --remote <REMOTE>
           Send every test's points to this remote ([jobs.remote.NAME] of cdept.toml)
+      --timeout <TIMEOUT>
+          Time limit of each run point (see `sim run --timeout`)
 ```
 
 #### cdept sim deck

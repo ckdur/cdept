@@ -215,6 +215,20 @@ impl JobCtx {
     /// Run `cmd` with stdout and stderr appended to the job log, and wait for it. If the
     /// job is cancelled meanwhile, the child is killed and this returns an error.
     pub fn run_command(&self, cmd: &mut Command) -> Result<ExitStatus> {
+        Ok(self
+            .run_command_limited(cmd, None)?
+            .expect("no limit, no time-out"))
+    }
+
+    /// [`JobCtx::run_command`] with a time limit: the child is killed when it runs
+    /// longer than `limit` and the result is `Ok(None)` (`None` or zero: no limit).
+    pub fn run_command_limited(
+        &self,
+        cmd: &mut Command,
+        limit: Option<Duration>,
+    ) -> Result<Option<ExitStatus>> {
+        let limit = limit.filter(|l| !l.is_zero());
+        let start = std::time::Instant::now();
         let (out, err) = match self
             .log
             .lock()
@@ -238,7 +252,12 @@ impl JobCtx {
                 return Err(eyre!("cancelled"));
             }
             if let Some(status) = child.try_wait()? {
-                return Ok(status);
+                return Ok(Some(status));
+            }
+            if limit.is_some_and(|l| start.elapsed() >= l) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(None);
             }
             std::thread::sleep(Duration::from_millis(5));
         }

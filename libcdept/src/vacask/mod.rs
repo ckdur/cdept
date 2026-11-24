@@ -15,6 +15,7 @@
 //! file per analysis, read by [`raw`]; `.meas`-style measurements of the setup are
 //! evaluated by [`meas`].
 
+pub mod avail;
 pub mod deck;
 pub mod meas;
 pub mod models;
@@ -28,6 +29,8 @@ use std::path::Path;
 use eyre::{Result, WrapErr, bail};
 
 use crate::sim::run::Outcome;
+
+pub use avail::{Availability, availability};
 
 /// Environment for a program of the VACASK install (`vacask`, `openvaf-r`): its
 /// shared libraries are in `<prefix>/lib`, which the loader does not know, so that
@@ -123,12 +126,28 @@ pub fn run_vacask_watched(
     env: &[(OsString, OsString)],
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<Outcome> {
-    run_vacask_launch(program, deck, dir, env, &|job| {
-        job.run_watched(&crate::batch::Watch {
-            cancel: cancel.clone(),
+    run_vacask_limited(
+        program,
+        deck,
+        dir,
+        env,
+        crate::batch::Watch {
+            cancel,
             timeout: None,
-        })
-    })
+        },
+    )
+}
+
+/// [`run_vacask`], killed when `watch` says so: its cancel flag is set or it runs past
+/// the time limit (then the error is a [`crate::batch::TimedOut`]).
+pub fn run_vacask_limited(
+    program: &Path,
+    deck: &str,
+    dir: &Path,
+    env: &[(OsString, OsString)],
+    watch: crate::batch::Watch,
+) -> Result<Outcome> {
+    run_vacask_launch(program, deck, dir, env, &|job| job.run_watched(&watch))
 }
 
 /// [`run_vacask_watched`] with the way the program is started chosen by the caller

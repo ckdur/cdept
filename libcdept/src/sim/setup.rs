@@ -36,6 +36,14 @@ pub struct Setup {
     /// default. `cdept sim run --remote` overrides it.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub remote: String,
+    /// The time limit of one run point: `"10m"`, `"90s"`, `"1h30m"` or a number of
+    /// seconds; `"0"` is no limit. Empty: the project's `[sim] timeout` (default 30
+    /// minutes). `cdept sim run --timeout` comes first.
+    #[serde(
+        skip_serializing_if = "String::is_empty",
+        deserialize_with = "text_value"
+    )]
+    pub timeout: String,
     /// The model set of `[models]` in tech.toml. Empty: the technology's default.
     pub models: String,
     /// The corner sets to run. Empty: the technology's default corner.
@@ -87,6 +95,22 @@ pub struct Setup {
     /// What the template suggests to plot (not a file field).
     #[serde(skip)]
     pub plot_hints: Vec<String>,
+}
+
+/// A string, or a number written without quotes (read as its text).
+fn text_value<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum V {
+        S(String),
+        I(i64),
+        F(f64),
+    }
+    Ok(match V::deserialize(d)? {
+        V::S(s) => s,
+        V::I(i) => i.to_string(),
+        V::F(f) => fmt_num(f),
+    })
 }
 
 fn text_map<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BTreeMap<String, String>, D::Error> {
@@ -371,6 +395,17 @@ impl Setup {
         super::caps::check(self)
     }
 
+    /// The `timeout` of the testbench: `None` when it has none (the project's applies),
+    /// zero for "0" (no limit).
+    pub fn time_limit(&self) -> Result<Option<std::time::Duration>> {
+        if self.timeout.trim().is_empty() {
+            return Ok(None);
+        }
+        crate::jobs::parse_duration(&self.timeout)
+            .map(Some)
+            .map_err(|e| eyre::eyre!("timeout: {e}"))
+    }
+
     pub fn load(file: &Path) -> Result<Setup> {
         Self::load_with(file, super::template::TemplateSet::builtin())
     }
@@ -388,6 +423,7 @@ impl Setup {
                 self.simulator
             );
         }
+        self.time_limit()?;
         if super::run::Backend::of(&self.simulator_backend).is_none() {
             bail!(
                 "simulator_backend '{}' is not process or inproc",

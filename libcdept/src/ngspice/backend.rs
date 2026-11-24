@@ -57,6 +57,10 @@ struct Request {
     dir: PathBuf,
     env: Vec<(OsString, OsString)>,
     cancel: Arc<AtomicBool>,
+    /// The time limit of the point, counted from when the worker starts it.
+    limit: Option<Duration>,
+    /// Set by the watchdog of the worker when the point ran past `limit`.
+    timed_out: Arc<AtomicBool>,
     reply: Sender<Msg>,
 }
 
@@ -77,8 +81,27 @@ fn serve(requests: Receiver<Request>) {
         let outcome = if req.cancel.load(Ordering::SeqCst) {
             Err(eyre!("cancelled"))
         } else {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_point(&req)))
-                .unwrap_or_else(|_| Err(eyre!("the in-process ngspice run panicked")))
+            // The time limit: a watchdog sets `timed_out`, which the point reads like
+            // the cancel flag (and halts the simulation the same way).
+            let (done, finished) = channel::<()>();
+            let flag = req.timed_out.clone();
+            let watchdog = req.limit.filter(|l| !l.is_zero()).map(|limit| {
+                std::thread::spawn(move || {
+                    if finished.recv_timeout(limit)
+                        == Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                    {
+                        flag.store(true, Ordering::SeqCst);
+                    }
+                })
+            });
+            let outcome =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_point(&req)))
+                    .unwrap_or_else(|_| Err(eyre!("the in-process ngspice run panicked")));
+            drop(done);
+            if let Some(w) = watchdog {
+                let _ = w.join();
+            }
+            outcome
         };
         let _ = req.reply.send(Msg::Done(outcome));
     }
@@ -93,6 +116,23 @@ pub fn run(
     dir: &Path,
     env: &[(OsString, OsString)],
     cancel: Option<Arc<AtomicBool>>,
+    progress: impl FnMut(f32),
+    line: impl FnMut(&str),
+) -> Result<Outcome> {
+    run_limited(deck, dir, env, cancel, None, progress, line)
+}
+
+/// [`run`] with a time limit, counted from when the point starts (not while it waits
+/// for the points before it): the simulation is halted (`bg_halt`) when it runs longer
+/// and the error is [`crate::sim::run::time_limit_error`]. A deck whose control block
+/// has control flow runs whole and cannot be halted; for it the limit only applies
+/// between its parts.
+pub fn run_limited(
+    deck: &str,
+    dir: &Path,
+    env: &[(OsString, OsString)],
+    cancel: Option<Arc<AtomicBool>>,
+    limit: Option<Duration>,
     mut progress: impl FnMut(f32),
     mut line: impl FnMut(&str),
 ) -> Result<Outcome> {
@@ -103,6 +143,8 @@ pub fn run(
         dir: dir.to_path_buf(),
         env: env.to_vec(),
         cancel: cancel.unwrap_or_default(),
+        limit,
+        timed_out: Arc::default(),
         reply,
     };
     worker()
@@ -126,12 +168,24 @@ pub fn run_in_job(
     env: &[(OsString, OsString)],
     ctx: &crate::jobs::JobCtx,
 ) -> Result<Outcome> {
+    run_in_job_limited(deck, dir, env, ctx, None)
+}
+
+/// [`run_in_job`] with a time limit ([`run_limited`]).
+pub fn run_in_job_limited(
+    deck: &str,
+    dir: &Path,
+    env: &[(OsString, OsString)],
+    ctx: &crate::jobs::JobCtx,
+    limit: Option<Duration>,
+) -> Result<Outcome> {
     ctx.log("in-process ngspice (libngspice)");
-    run(
+    run_limited(
         deck,
         dir,
         env,
         Some(ctx.cancel_flag()),
+        limit,
         |p| ctx.progress(p),
         |l| ctx.log(l),
     )
@@ -252,6 +306,13 @@ fn run_point(req: &Request) -> Result<Outcome> {
     let (text, exit, halted) = (std::mem::take(&mut point.text), point.exit, point.halted);
     drop(session);
     std::fs::write(&log, &text).wrap_err_with(|| format!("cannot write {}", log.display()))?;
+    if req.timed_out.load(Ordering::SeqCst)
+        && halted
+        && !req.cancel.load(Ordering::SeqCst)
+        && let Some(limit) = req.limit
+    {
+        return Err(crate::sim::run::time_limit_error(limit, &tail(&text)));
+    }
     if halted || req.cancel.load(Ordering::SeqCst) {
         bail!("cancelled");
     }
@@ -285,7 +346,7 @@ struct Point<'a> {
 
 impl Point<'_> {
     fn cancelled(&self) -> bool {
-        self.req.cancel.load(Ordering::SeqCst)
+        self.req.cancel.load(Ordering::SeqCst) || self.req.timed_out.load(Ordering::SeqCst)
     }
 
     fn handle(&mut self, ev: Event, analysis: Option<(usize, usize)>) {
@@ -339,6 +400,7 @@ impl Point<'_> {
         let mut done = 0;
         for line in &lines {
             if self.cancelled() || self.exit.is_some() {
+                self.halted = self.halted || self.cancelled();
                 break;
             }
             if !ANALYSES.contains(&first_word(line).as_str()) {
@@ -463,6 +525,24 @@ mod tests {
         )
         .unwrap_err();
         assert!(format!("{err}").contains("cancelled"), "{err}");
+        assert!(t.elapsed() < Duration::from_secs(20), "{:?}", t.elapsed());
+        // A time limit halts it the same way, and says so.
+        let t = std::time::Instant::now();
+        let err = run_limited(
+            &long,
+            &dir.path().join("e"),
+            &[],
+            None,
+            Some(Duration::from_millis(300)),
+            |_| {},
+            |_| {},
+        )
+        .unwrap_err();
+        let text = format!("{err}");
+        assert!(
+            text.starts_with("run point exceeded its time limit of 300ms"),
+            "{text}"
+        );
         assert!(t.elapsed() < Duration::from_secs(20), "{:?}", t.elapsed());
         // And the instance still works afterwards.
         let after = run(deck, &dir.path().join("d"), &[], None, |_| {}, |_| {}).unwrap();

@@ -60,6 +60,7 @@ pub fn vacask(command: VacaskCommand, project: &Project) -> Result<()> {
     let g = models::generate(project, tech, &plan)?;
     models::record(project, &g)?;
     println!("technology: {}", g.pdk);
+    println!("{}", libcdept::vacask::availability(project).line());
     println!("cache:      {}", plan.dir(project).display());
     println!(
         "converted:  {} file(s): {}",

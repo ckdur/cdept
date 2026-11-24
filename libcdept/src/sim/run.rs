@@ -13,6 +13,35 @@ pub const NGSPICE_ENV: &str = "CDEPT_NGSPICE";
 /// [`super::deck::xyce_args`]): the model plugins and the Monte Carlo seed.
 pub const XYCE_ARGS_ENV: &str = "CDEPT_XYCE_ARGS";
 
+/// The time limit of a run point when neither `--timeout`, the testbench nor the
+/// project says otherwise.
+pub const DEFAULT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// The error of a run point that ran past its time limit: the same words for every
+/// simulator, with the last lines of its log.
+pub fn time_limit_error(limit: std::time::Duration, tail: &str) -> eyre::Report {
+    let tail = tail.trim_end();
+    eyre::eyre!(
+        "run point exceeded its time limit of {}{}{}",
+        crate::jobs::format_duration(limit),
+        if tail.is_empty() { "" } else { "\n" },
+        tail
+    )
+}
+
+/// Whether `err` is what [`time_limit_error`] makes.
+pub fn is_time_limit(err: &eyre::Report) -> bool {
+    format!("{err}").starts_with("run point exceeded its time limit")
+}
+
+/// A batch program's time-out ([`crate::batch::TimedOut`]) as [`time_limit_error`].
+fn limit_message(e: eyre::Report) -> eyre::Report {
+    match e.downcast_ref::<crate::batch::TimedOut>() {
+        Some(t) => time_limit_error(t.limit, &t.tail),
+        None => e,
+    }
+}
+
 /// Which simulator a program is. The deck and the command line differ.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SimKind {
@@ -144,12 +173,12 @@ pub fn run(
     dir: &Path,
     env: &[(std::ffi::OsString, std::ffi::OsString)],
 ) -> Result<Outcome> {
-    run_with(simulator, deck, dir, env, None, |cmd| {
+    run_with(simulator, deck, dir, env, None, None, |cmd| {
         let output = cmd
             .output()
             .wrap_err_with(|| format!("cannot start {}", simulator.program.display()))?;
         Ok((
-            output.status,
+            Some(output.status),
             String::from_utf8_lossy(&output.stderr).into_owned(),
         ))
     })
@@ -164,9 +193,29 @@ pub fn run_in_job(
     env: &[(std::ffi::OsString, std::ffi::OsString)],
     ctx: &crate::jobs::JobCtx,
 ) -> Result<Outcome> {
-    run_with(simulator, deck, dir, env, Some(ctx.cancel_flag()), |cmd| {
-        Ok((ctx.run_command(cmd)?, String::new()))
-    })
+    run_in_job_limited(simulator, deck, dir, env, ctx, None)
+}
+
+/// [`run_in_job`] with a time limit: the simulator is killed when it runs longer
+/// (`None` or zero: no limit) and the error is [`time_limit_error`].
+pub fn run_in_job_limited(
+    simulator: &Simulator,
+    deck: &str,
+    dir: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+    ctx: &crate::jobs::JobCtx,
+    timeout: Option<std::time::Duration>,
+) -> Result<Outcome> {
+    let timeout = timeout.filter(|t| !t.is_zero());
+    run_with(
+        simulator,
+        deck,
+        dir,
+        env,
+        Some(ctx.cancel_flag()),
+        timeout,
+        |cmd| Ok((ctx.run_command_limited(cmd, timeout)?, String::new())),
+    )
 }
 
 fn run_with(
@@ -175,14 +224,23 @@ fn run_with(
     dir: &Path,
     env: &[(std::ffi::OsString, std::ffi::OsString)],
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    exec: impl FnOnce(&mut Command) -> Result<(std::process::ExitStatus, String)>,
+    timeout: Option<std::time::Duration>,
+    exec: impl FnOnce(&mut Command) -> Result<(Option<std::process::ExitStatus>, String)>,
 ) -> Result<Outcome> {
-    // Xyce goes through the batch layer, killed like the others when the job is cancelled.
+    // Xyce goes through the batch layer, killed like the others when the job is cancelled
+    // or out of time.
     if simulator.kind == SimKind::Xyce {
-        return run_xyce(simulator, deck, dir, env, cancel);
+        return run_xyce(simulator, deck, dir, env, cancel, timeout);
     }
     if simulator.kind == SimKind::Vacask {
-        return crate::vacask::run_vacask_watched(&simulator.program, deck, dir, env, cancel);
+        return crate::vacask::run_vacask_limited(
+            &simulator.program,
+            deck,
+            dir,
+            env,
+            crate::batch::Watch { cancel, timeout },
+        )
+        .map_err(limit_message);
     }
     std::fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     let deck_file = dir.join("deck.sp");
@@ -200,6 +258,12 @@ fn run_with(
         .args(["-b", "-o", "out.log", "deck.sp"]);
     let (status, stderr) = exec(&mut cmd)?;
     let text = std::fs::read_to_string(&log).unwrap_or_default();
+    let Some(status) = status else {
+        return Err(time_limit_error(
+            timeout.unwrap_or_default(),
+            &crate::batch::tail(&text, 12),
+        ));
+    };
     if !status.success() || !raw.is_file() {
         let tail: Vec<&str> = text.lines().rev().take(12).collect();
         let tail: Vec<&str> = tail.into_iter().rev().collect();
@@ -227,6 +291,7 @@ fn run_xyce(
     dir: &Path,
     env: &[(std::ffi::OsString, std::ffi::OsString)],
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    timeout: Option<std::time::Duration>,
 ) -> Result<Outcome> {
     std::fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     let name = "deck.cir";
@@ -250,10 +315,9 @@ fn run_xyce(
         let at = job.args.len().saturating_sub(1);
         job.args.splice(at..at, extra);
     }
-    let out = job.run_watched(&crate::batch::Watch {
-        cancel,
-        timeout: None,
-    })?;
+    let out = job
+        .run_watched(&crate::batch::Watch { cancel, timeout })
+        .map_err(limit_message)?;
     let text = std::fs::read_to_string(&log).unwrap_or_default();
     if !out.status.success() || !raw.is_file() {
         bail!(

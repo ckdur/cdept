@@ -201,8 +201,49 @@ complex, binary, ASCII).
 
 **Cancel.** A cancelled run point kills the VACASK process (the job's cancel flag goes to
 `Job::run_watched`, as for Xyce); tested with a fake slow program
-(`a_cancelled_job_kills_vacask`). There is no time limit for any simulator. OpenVAF
-compiles are not cancellable.
+(`a_cancelled_job_kills_vacask`). **Time limit:** a run point has one like every
+simulator (`--timeout`, `timeout` in `setup.toml`, `[sim] timeout`, default 30 minutes;
+[JOBS.md](JOBS.md#time-limits)): VACASK is killed and the point ends as `run point
+exceeded its time limit of 10m` with the end of `vacask.stdout`. **OpenVAF** compiles of
+the model generation are cancelled with the run's cancel flag and bound by `[sim]
+openvaf_timeout` (default 20 minutes); tests with fake slow programs
+(`libcdept/tests/vacask_limits.rs`).
+
+## 4b. Availability per technology
+
+`libcdept::vacask::availability(project)` answers `Ready` or `Unavailable(reason)`
+**cheaply** (no conversion, no program started; the model files are read once per
+project and technology and kept in memory). The rule, in this order:
+
+1. **The technology must have VACASK models**: a hand-written `[models.vacask]`, or
+   `[models.ngspice]` models VACASK's converter can convert. They cannot be converted
+   when a model file holds **binned BSIM3/BSIM4 SPICE models** (a `.model` card with
+   `level` 8, 14, 49 or 54 and `lmin`/`wmin`, one bin of a family chosen by the
+   instance's size). That is how sky130A and sky130B write their transistors, and
+   `ng2vc` has no binning and no `M` cards (section 2, sky130). The rule is by what the
+   models *are*, not by the PDK's name, so a PDK that gets a converter later only needs
+   the converter. ihp-sg13g2 writes its transistors as PSP103 OSDI models: not affected.
+2. **The VACASK program exists** (`$CDEPT_VACASK` or `PATH`).
+3. **OpenVAF (and python3) exist when Verilog-A models have to be compiled** and the
+   compiled libraries are not in the project's cache (`.cdept/osdi/`) yet. The message is
+   `OpenVAF not found: put openvaf-r on PATH or set CDEPT_OPENVAF; needed to compile
+   psp103, ...`. With the libraries cached, OpenVAF is not needed any more; a cache that
+   records libraries that failed to compile is `Unavailable` with the reason.
+
+Where it is used: the Simulation tab shows the VACASK entry of the simulator combo
+**disabled, with the reason as hover text**; a testbench whose `setup.toml` already says
+`simulator = "vacask"` gets the problem line `VACASK is not available: ...` under the form
+and its Run buttons are disabled. `cdept sim run|suite|deck` (also with `--simulator
+vacask`; a suite whose tests are forced to VACASK) refuse before anything is netlisted or
+made, with the same words as one error; a test of a mixed suite that names VACASK is
+reported as not run with the reason. `cdept tools` (inside a project) and `cdept vacask
+models` print the line `VACASK: available for this technology` / `VACASK: not available:
+<reason>`. A run also fails *before starting VACASK* when a compiled library the models
+need is missing for another reason (a compile that failed, a model without a Verilog-A
+source, a cache folder that lost a file): `the compiled model libraries of the technology
+'x' are missing: psp103: did not compile (...)`, instead of VACASK's `Device 'psp103va'
+not found.` for every point. A missing OpenVAF is no longer cached as a finished
+generation: installing it and running again compiles.
 
 ## 5. Monte Carlo
 
@@ -285,9 +326,9 @@ against VACASK 0.3.2 with the PSP103 that OpenVAF compiled.
 | OTA suite (examples/ihp-inv/libs/cells/ota5t) | yes | all six tests, typical corner | see below |
 | job queue: parallel | yes | yes (one process per point) | same |
 | job queue: cancel | kills the process | kills the process | same |
-| job queue: time limit | none | none | same |
+| job queue: time limit | `timeout` / `[sim] timeout` (30m) | same | same |
 | in-process (libngspice) | `simulator_backend = "inproc"` | not applicable (process only; `caps.in_process` says so) | n/a |
-| PDKs | ihp-sg13g2, sky130A/B | ihp-sg13g2 only | sky130: section 2 |
+| PDKs | ihp-sg13g2, sky130A/B | ihp-sg13g2 only; sky130A/B are **not available** (the form disables VACASK, `sim run` refuses, section 4b) | sky130: section 2 |
 | devices | all | PSP103 MOS, `bondpad`, `sg13_hv_*`, VBIC `npn13G2*` and `_5t`, resistors, capacitors, diodes: yes; `sg13_hv_svaricap`: refused by name | section 2 |
 
 Differences of the tests, typical corner (VACASK against ngspice; the allowed tolerance of

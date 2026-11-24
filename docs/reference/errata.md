@@ -63,7 +63,12 @@ Xyce, Monte Carlo and mismatch
 VACASK
 : The PDK's models convert for IHP SG13G2 (Monte Carlo too: process, mismatch and both,
   with CDePT's own draws) but not for sky130A (VACASK's converter has no `M` cards, binned
-  models or BSIM4; [VACASK.md](../VACASK.md#2-models-the-pdks-have-no-vacask-ones)). The varicap `sg13_hv_svaricap` is
+  models or BSIM4; [VACASK.md](../VACASK.md#2-models-the-pdks-have-no-vacask-ones)): for
+  such a technology VACASK is *not available*, the Simulation tab disables it with the
+  reason, and `cdept sim run|suite` refuse before starting
+  ([availability](../VACASK.md#4b-availability-per-technology)). Without OpenVAF the run
+  stops with `OpenVAF not found: put openvaf-r on PATH or set CDEPT_OPENVAF; needed to
+  compile psp103, ...` instead of VACASK's `Device 'psp103va' not found.`. The varicap `sg13_hv_svaricap` is
   refused by name (its resistor reads a node voltage). `B`, `F`/`H` sources and `.ic` in the
   testbench netlist are refused, so a testbench that uses them (`flash3/inl_dnl`) runs
   with ngspice only. Transient edge measurements differ from ngspice's by a few percent at

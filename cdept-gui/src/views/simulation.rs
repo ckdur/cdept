@@ -22,6 +22,7 @@ use libcdept::{Project, ViewKind};
 use super::{View, empty_state};
 use crate::state::{Action, AppCtx, Selection};
 
+mod avail;
 mod keep;
 mod remote;
 mod sweeps;
@@ -487,6 +488,8 @@ pub struct SimulationView {
     pub(super) egui: Option<egui::Context>,
     /// Test templates and suites (testlib.rs).
     pub(super) tests: super::testlib::TestsUi,
+    /// Whether VACASK can run the project's technology (simulation/avail.rs).
+    avail: avail::Avail,
 }
 
 impl SimulationView {
@@ -533,6 +536,7 @@ impl SimulationView {
             Err(e) => self.problem = Some(e),
         }
         self.run_when_loaded = run;
+        self.avail.get(project, true);
         tracing::info!(target: "cdept::sim", "simulation: {}", target.text());
     }
 
@@ -575,6 +579,11 @@ impl SimulationView {
             && let Err(e) = form.to_text()
         {
             return Some(e);
+        }
+        if let Some(form) = &self.form
+            && let Some(p) = avail::problem(&form.simulator, &self.avail.last())
+        {
+            return Some(p);
         }
         self.run_error.clone()
     }
@@ -651,6 +660,10 @@ impl SimulationView {
             .as_ref()
             .ok_or("the setup is not valid")?
             .setup()?;
+        // VACASK where it cannot run: not started (the form says why).
+        if let Some(p) = avail::problem(&setup.simulator, &self.avail.get(project, true)) {
+            return Err(p);
+        }
         let queue = self.queue();
         self.results.clear();
         self.stats = None;
@@ -769,6 +782,11 @@ fn run_target(
         setup: setup.clone(),
         ..tb
     };
+    if tb.setup.simulator == "vacask" {
+        libcdept::vacask::availability(project)
+            .check()
+            .map_err(|e| format!("{e:#}"))?;
+    }
     let simulator = remote::simulator(project, &tb.setup).ok_or_else(|| {
         format!(
             "the simulator '{}' was not found: put it on PATH or set CDEPT_NGSPICE / CDEPT_XYCE",
@@ -902,6 +920,7 @@ fn list_editor(ui: &mut Ui, id: &str, rows: &mut Vec<(String, String)>, names: (
 
 impl SimulationView {
     fn editor(&mut self, ui: &mut Ui, project: &Project) {
+        let simulator_avail = self.avail.get(project, false);
         let Some(form) = &mut self.form else { return };
         let tech = project.tech.as_ref().map(|t| &t.models);
         let set_name = if form.models.is_empty() {
@@ -925,13 +944,7 @@ impl SimulationView {
             .spacing([8.0, 4.0])
             .show(ui, |ui| {
                 ui.label("Simulator");
-                ComboBox::from_id_salt("sim-simulator")
-                    .selected_text(&form.simulator)
-                    .show_ui(ui, |ui| {
-                        for name in ["ngspice", "xyce", "vacask"] {
-                            ui.selectable_value(&mut form.simulator, name.to_string(), name);
-                        }
-                    });
+                avail::simulator_combo(ui, &mut form.simulator, &simulator_avail);
                 ui.end_row();
                 ui.label("Model set");
                 ComboBox::from_id_salt("sim-models")
@@ -1417,6 +1430,11 @@ impl View for SimulationView {
             ui.ctx().request_repaint_after(Duration::from_millis(250));
         }
         let dirty = self.dirty();
+        // The form names VACASK where it cannot run: the run is not offered.
+        let vacask_blocked = self.form.as_ref().is_some_and(|f| {
+            avail::problem(&f.simulator, &self.avail.get(&project, false)).is_some()
+        });
+        let can_run = self.form.is_some() && !running && !vacask_blocked;
         let mut ask: Option<&str> = None;
         ui.horizontal(|ui| {
             ui.heading(target.text());
@@ -1442,7 +1460,7 @@ impl View for SimulationView {
             }
             ui.separator();
             if ui
-                .add_enabled(self.form.is_some() && !running, egui::Button::new("▶ Run"))
+                .add_enabled(can_run, egui::Button::new("▶ Run"))
                 .on_hover_text("Saves the setup, netlists the schematic and runs every corner and temperature")
                 .clicked()
             {
@@ -1455,7 +1473,7 @@ impl View for SimulationView {
             ui.add(TextEdit::singleline(&mut self.now_runs).desired_width(44.0).hint_text("N"))
                 .on_hover_text("Monte Carlo runs for this run only (the file is not changed)");
             if ui
-                .add_enabled(self.form.is_some() && !running, egui::Button::new("▶ Run N MC"))
+                .add_enabled(can_run, egui::Button::new("▶ Run N MC"))
                 .on_hover_text("Run this many seeded Monte Carlo runs now (the setup's mode, seed and corners)")
                 .clicked()
             {
@@ -1586,6 +1604,9 @@ pub(crate) fn script(
         return super::testlib::script(view, app, args);
     }
     if let Some(result) = sweeps::script(view, &project, args) {
+        return result;
+    }
+    if let Some(result) = avail::script(view, &project, args) {
         return result;
     }
     let yes = |s: &str| matches!(s, "yes" | "on" | "true");

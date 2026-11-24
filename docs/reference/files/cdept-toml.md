@@ -262,6 +262,23 @@ command_prefix = "source ~/.cdept-env"
 
 `cdept jobs remotes` lists them, `--check` asks each one (`ssh host true`, `sbatch --test-only`).
 
+## `[sim]`
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `timeout` | string or number | `"30m"` | The time limit of one simulator run point (ngspice, Xyce, VACASK). A duration such as `"90s"`, `"10m"`, `"1h30m"`, or a number of seconds; `0` is no limit. A testbench's own `timeout` in `setup.toml` and `--timeout` on `cdept sim run|suite` come first. |
+| `openvaf_timeout` | string or number | `"20m"` | The time limit of one OpenVAF compilation when the VACASK models of the technology are made (`cdept vacask models`, the first VACASK run). `0` is no limit. |
+
+```toml
+[sim]
+timeout = "1h"
+openvaf_timeout = "30m"
+```
+
+A point or a compilation that runs longer is killed; the error says so and carries the
+last lines of the log. A value that is not a duration is a warning, and the default
+applies. See [JOBS.md](../../JOBS.md) and [VACASK.md](../../VACASK.md).
+
 ## Where the PDK comes from
 
 `$PDK` and `$PDK_ROOT` in library paths and in the environment of every tool are worked

@@ -23,7 +23,7 @@ pub mod suite;
 pub mod template;
 
 pub use deck::{RunPoint, build as build_deck};
-pub use run::{Outcome, Simulator, run, run_in_job};
+pub use run::{Outcome, Simulator, run, run_in_job, run_in_job_limited};
 pub use setup::{Analysis, Setup, Spec};
 
 use std::path::{Path, PathBuf};
@@ -133,6 +133,28 @@ pub struct RunOptions {
     /// Send the points to this remote of `[jobs.remote.*]` (`--remote`); default: the
     /// setup's `remote`, else the project's `[jobs] default`, else run here.
     pub remote: Option<String>,
+    /// The time limit of each run point (`--timeout`); `Some(0)` is no limit. Default:
+    /// the setup's `timeout`, else the project's `[sim] timeout`, else 30 minutes.
+    pub timeout: Option<std::time::Duration>,
+}
+
+impl RunOptions {
+    /// The limit of a point: `timeout`, else the setup's, else the project's, else
+    /// [`run::DEFAULT_TIMEOUT`]; `None` for no limit.
+    pub fn time_limit(
+        &self,
+        project: &Project,
+        setup: &Setup,
+    ) -> Result<Option<std::time::Duration>> {
+        let limit = match self.timeout {
+            Some(t) => t,
+            None => match setup.time_limit()? {
+                Some(t) => t,
+                None => project.sim.timeout.unwrap_or(run::DEFAULT_TIMEOUT),
+            },
+        };
+        Ok((!limit.is_zero()).then_some(limit))
+    }
 }
 
 /// Netlist the testbench's schematic (once) and run every point (or only `only`,
@@ -198,7 +220,12 @@ pub fn run_testbench_with(
         .ok_or_else(|| eyre!("the project has no technology snapshot (cdept tech scan)"))?;
     // VACASK: the technology's ngspice models converted for it (made on first use).
     let vacask_ready = if tb.setup.simulator == "vacask" {
-        Some(crate::vacask::models::ready(project)?)
+        // Refused before anything is made when VACASK cannot run here (docs/VACASK.md).
+        crate::vacask::availability(project).check()?;
+        Some(crate::vacask::models::ready_watched(
+            project,
+            options.cancel.clone(),
+        )?)
     } else {
         None
     };
@@ -226,6 +253,7 @@ pub fn run_testbench_with(
         );
     }
     let backend = run::Backend::choose(options.backend, &tb.setup)?;
+    let time_limit = options.time_limit(project, &tb.setup)?;
     let default_corner = models
         .corner
         .clone()
@@ -364,7 +392,6 @@ pub fn run_testbench_with(
         }
         let (simulator, log) = (simulator.clone(), dir.join("job.log"));
         let remote = remote.clone();
-        let timeout: Option<std::time::Duration> = None; // TODO(merge): the run point's time limit
         let spec = JobSpec::func(point.name(), move |ctx| {
             let started = chrono::Local::now().to_rfc3339();
             let clock = std::time::Instant::now();
@@ -376,10 +403,14 @@ pub fn run_testbench_with(
                     &dir,
                     &env,
                     ctx,
-                    timeout,
+                    time_limit,
                 ),
-                run::Backend::Process => run::run_in_job(&simulator, &text, &dir, &env, ctx),
-                run::Backend::Inproc => crate::ngspice::backend::run_in_job(&text, &dir, &env, ctx),
+                run::Backend::Process => {
+                    run::run_in_job_limited(&simulator, &text, &dir, &env, ctx, time_limit)
+                }
+                run::Backend::Inproc => {
+                    crate::ngspice::backend::run_in_job_limited(&text, &dir, &env, ctx, time_limit)
+                }
             };
             let verdict = match &outcome {
                 Ok(_) => Ok(()),

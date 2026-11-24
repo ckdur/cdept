@@ -37,6 +37,21 @@ the in-process ngspice backend halts the simulation with `bg_halt`
 ([NGSPICE.md](NGSPICE.md#the-in-process-backend)). `jobs::parse_duration` reads the
 durations (`90s`, `10m`, `1h30m`).
 
+### Time limits
+
+Every simulator run point has a time limit (SYMBI-80), the same for ngspice (process and
+in-process), Xyce and VACASK: `--timeout` of `cdept sim run|suite`, else `timeout` in the
+testbench's `setup.toml`, else `[sim] timeout` of `cdept.toml`, else 30 minutes (`0` is no
+limit). The clock starts when the point starts (not while it waits in the queue). On
+expiry the program is killed (`JobCtx::run_command_limited` for ngspice, `Watch.timeout`
+of `Job::run_watched` for Xyce and VACASK, a watchdog and `bg_halt` in-process: one
+mechanism per kind of run, the same `Watch`/`JobCtx` path as cancel) and the point ends as
+a failed job with the message `run point exceeded its time limit of 10m` and the last
+lines of its log (`sim::run::is_time_limit` recognises it). The compilation of the
+VACASK models has its own limit, `[sim] openvaf_timeout` (default 20 minutes), and is
+cancelled with the run's cancel flag; a half-written library is removed, so a stopped
+compilation never counts as cached.
+
 ## Use by simulation
 
 `sim::run_testbench` makes one job per run point and runs them in parallel

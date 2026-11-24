@@ -235,6 +235,9 @@ pub struct SuiteOptions {
     pub simulator: Option<String>,
     /// Run every test's points on this remote (`--remote`, [`crate::jobs::remote`]).
     pub remote: Option<String>,
+    /// The time limit of each run point (`--timeout`; zero: none), as
+    /// [`super::RunOptions::timeout`].
+    pub timeout: Option<std::time::Duration>,
 }
 
 /// Where the report goes: `<project>/simulations/<lib>/<cell>/<suite view>/suite.json`.
@@ -251,6 +254,14 @@ pub fn run(
     options: &SuiteOptions,
 ) -> Result<SuiteReport> {
     let suite = open(project, library, cell, view)?;
+    // Every test is forced to VACASK: refuse at once when it cannot run here.
+    let forced = options
+        .simulator
+        .as_deref()
+        .or(Some(suite.simulator.as_str()).filter(|s| !s.is_empty()));
+    if forced == Some("vacask") {
+        crate::vacask::availability(project).check()?;
+    }
     let started = chrono::Local::now().to_rfc3339();
     let clock = std::time::Instant::now();
     let queue = match &options.queue {
@@ -274,6 +285,7 @@ pub fn run(
         queue: Some(queue),
         cancel: options.cancel.clone(),
         remote: options.remote.clone(),
+        timeout: options.timeout,
         ..Default::default()
     };
     // Tests are netlisted and queued from their own threads; the simulations of all of

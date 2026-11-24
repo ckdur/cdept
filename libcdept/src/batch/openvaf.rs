@@ -23,6 +23,9 @@ pub const ADAPTER: Adapter = Adapter {
     tool: "OpenVAF",
 };
 
+/// How long one compilation may take unless `[sim] openvaf_timeout` says otherwise.
+pub const DEFAULT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+
 /// Where compiled libraries are cached, relative to the project folder.
 pub const CACHE: &str = ".cdept/osdi";
 
@@ -71,12 +74,36 @@ pub fn job(program: &Path, c: &Compile, env: &[(OsString, OsString)]) -> Job {
 /// Compile. The output must exist afterwards; an error names the source and has the
 /// compiler's last lines.
 pub fn compile(program: &Path, c: &Compile, env: &[(OsString, OsString)]) -> Result<()> {
+    compile_watched(program, c, env, &super::Watch::default())
+}
+
+/// [`compile`], stopped when `watch` says so (a job's cancel flag, a time limit). The
+/// error of a stop is a [`super::Cancelled`] or a [`super::TimedOut`] (found with
+/// `Report::downcast_ref`, also under the message that names the source).
+pub fn compile_watched(
+    program: &Path,
+    c: &Compile,
+    env: &[(OsString, OsString)],
+    watch: &super::Watch,
+) -> Result<()> {
     if let Some(dir) = c.out.parent() {
         std::fs::create_dir_all(dir)
             .wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     }
     let _ = std::fs::remove_file(&c.out);
-    let out = job(program, c, env).run_unchecked()?;
+    let out = job(program, c, env).run_watched(watch).map_err(|e| {
+        // A killed compiler may leave half a library: it must not pass for a cached one.
+        let _ = std::fs::remove_file(&c.out);
+        match e.downcast_ref::<super::TimedOut>().map(|t| t.limit) {
+            Some(limit) => e.wrap_err(format!(
+                "OpenVAF ran past its time limit of {} compiling {} and was stopped \
+                 (raise [sim] openvaf_timeout in cdept.toml)",
+                crate::jobs::format_duration(limit),
+                c.source.display()
+            )),
+            None => e,
+        }
+    })?;
     if !out.status.success() || !c.out.is_file() {
         bail!(
             "OpenVAF could not compile {} ({})\nlog: {}\n{}",
@@ -169,6 +196,17 @@ pub fn compile_cached(
     cache: &Path,
     env: &[(OsString, OsString)],
 ) -> Result<Cached> {
+    compile_cached_watched(program, c, cache, env, &super::Watch::default())
+}
+
+/// [`compile_cached`], stopped when `watch` says so ([`compile_watched`]).
+pub fn compile_cached_watched(
+    program: &Path,
+    c: &Compile,
+    cache: &Path,
+    env: &[(OsString, OsString)],
+    watch: &super::Watch,
+) -> Result<Cached> {
     let stem = c
         .source
         .file_stem()
@@ -183,7 +221,7 @@ pub fn compile_cached(
     }
     let mut c = c.clone();
     c.out = osdi.clone();
-    compile(program, &c, env)?;
+    compile_watched(program, &c, env, watch)?;
     Ok(Cached {
         osdi,
         compiled: true,
