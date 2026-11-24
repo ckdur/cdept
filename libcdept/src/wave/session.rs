@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use eyre::{Result, WrapErr, bail};
 
 use super::ipc::{self, Client};
+use super::show::{self, Applied, ShowRequest};
 use super::{PointRaw, analyses, analysis_arg, command_line, require, spawn_detached};
 use crate::Project;
 
@@ -140,6 +141,10 @@ pub struct Opened {
     pub not_opened: Vec<ViewFile>,
     /// The connection (only when asked for).
     pub client: Option<Client>,
+    /// `tag:name` of the signals sent to the viewer with `show`.
+    pub shown: Vec<String>,
+    /// What went wrong without stopping the open (a signal a file lacks, a refused `show`).
+    pub notes: Vec<String>,
 }
 
 impl Opened {
@@ -192,13 +197,17 @@ pub enum Mode {
 }
 
 /// Show `files` (one tag each) in the viewer of `run` (`library/cell/view`; any text
-/// for files that belong to no run). `analysis` as for [`analysis_arg`], per file.
+/// for files that belong to no run). `analysis` as for [`analysis_arg`], per file. `show`
+/// says what the viewer plots (nothing is plotted until `show`); a viewer that is started
+/// and has to be sent `show` is connected to and waited for, which is not done for
+/// `Show::Off` in `Mode::Open`. In `Mode::Connect` a running viewer is left as it is.
 pub fn open_files(
     project: Option<&Project>,
     run: &str,
     files: &[ViewFile],
     analysis: Option<&str>,
     mode: Mode,
+    show: &ShowRequest,
 ) -> Result<Opened> {
     let Some(first) = files.first() else {
         bail!("no files to open");
@@ -235,6 +244,8 @@ pub fn open_files(
             socket: None,
             not_opened: files[1..].to_vec(),
             client: None,
+            shown: vec![],
+            notes: vec![],
         });
     }
     let root = project
@@ -243,6 +254,7 @@ pub fn open_files(
         .unwrap_or_else(|| PathBuf::from("."));
     let socket = ipc::socket_path(&root, run);
     // A viewer of this run that already runs.
+    let mut applied = Applied::default();
     if let Some(mut client) = existing(&socket)? {
         if mode == Mode::Open {
             for (i, (f, a)) in files.iter().zip(&per_file).enumerate() {
@@ -253,6 +265,7 @@ pub fn open_files(
                     client.import(&path, a.as_deref(), tag)?;
                 }
             }
+            applied = show::apply(&mut client, files, show, show::LOAD_TIMEOUT);
         }
         return Ok(Opened {
             command: vec![],
@@ -261,6 +274,8 @@ pub fn open_files(
             socket: Some(socket),
             not_opened: vec![],
             client: (mode == Mode::Connect).then_some(client),
+            shown: applied.shown,
+            notes: applied.notes,
         });
     }
     // Nobody listens: a socket file left by a viewer that died would stop the new one.
@@ -280,13 +295,25 @@ pub fn open_files(
     }
     line.extend(files.iter().map(|f| absolute(&f.raw).into_os_string()));
     spawn_detached(&line, dir.as_deref(), project)?;
-    let client = if mode == Mode::Connect {
-        let mut c = Client::connect(&socket, CONNECT_TIMEOUT)?;
-        c.hello().wrap_err("the new viewer does not answer hello")?;
-        Some(c)
-    } else {
-        None
-    };
+    let connect = mode == Mode::Connect || show.enabled();
+    let mut client = None;
+    if connect {
+        let started = Client::connect(&socket, CONNECT_TIMEOUT).and_then(|mut c| {
+            c.hello()
+                .wrap_err("the new viewer does not answer hello")
+                .map(|_| c)
+        });
+        match started {
+            Ok(mut c) => {
+                applied = show::apply(&mut c, files, show, show::LOAD_TIMEOUT);
+                client = Some(c);
+            }
+            // The viewer runs, only `show` could not be sent: not an error to open.
+            Err(e) if mode == Mode::Open => applied.notes.push(format!("{e:#}")),
+            Err(e) => return Err(e),
+        }
+    }
+    let client = if mode == Mode::Connect { client } else { None };
     Ok(Opened {
         command: line,
         reused: false,
@@ -294,6 +321,8 @@ pub fn open_files(
         socket: Some(socket),
         not_opened: vec![],
         client,
+        shown: applied.shown,
+        notes: applied.notes,
     })
 }
 

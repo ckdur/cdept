@@ -309,14 +309,16 @@ impl Client {
         ))
     }
 
-    /// Show signals (`name` or `tag:name`) in a pane (a number, or `"new"`).
-    pub fn show(&mut self, signals: &[String], pane: Option<Value>) -> Result<()> {
+    /// Show signals (`name` or `tag:name`) in a pane (a number, or `"new"`). Returns the
+    /// pane they went to, when the viewer says it.
+    pub fn show(&mut self, signals: &[String], pane: Option<Value>) -> Result<Option<u64>> {
         let mut args = Map::new();
         args.insert("signals".into(), json!(signals));
         if let Some(p) = pane {
             args.insert("pane".into(), p);
         }
-        self.request("show", Value::Object(args)).map(drop)
+        let v = self.request("show", Value::Object(args))?;
+        Ok(v.get("pane").and_then(Value::as_u64))
     }
 
     pub fn hide(&mut self, signals: &[String]) -> Result<()> {
@@ -757,6 +759,67 @@ mod tests {
         assert_eq!(seen[3]["pane"], "new");
         assert_eq!(seen[7]["fit"], true);
         assert_eq!(seen[8]["x1"], 1.0);
+    }
+
+    #[test]
+    fn show_is_sent_per_file_into_one_pane_and_waits_for_the_load() {
+        use crate::wave::session::ViewFile;
+        use crate::wave::show::{Show, ShowRequest, apply};
+        let tmp = tempfile::tempdir().unwrap();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let log = seen.clone();
+        let mut empty_answers = 1;
+        let (sock, h) = serve(tmp.path(), move |r| {
+            log.lock().unwrap().push(r.clone());
+            match r["cmd"].as_str().unwrap() {
+                // The first file is not loaded at the first ask.
+                "list_signals" if empty_answers > 0 => {
+                    empty_answers -= 1;
+                    vec![ok(&r, json!({"signals": []}))]
+                }
+                "list_signals" => vec![ok(
+                    &r,
+                    json!({"signals":[
+                        {"name":"time","file":r["file"],"unit":"s","complex":false},
+                        {"name":"v(vdd)","file":r["file"],"unit":"V","complex":false},
+                        {"name":"v(out)","file":r["file"],"unit":"V","complex":false}]}),
+                )],
+                "show" => vec![ok(&r, json!({"pane": 3}))],
+                _ => vec![ok(&r, json!({}))],
+            }
+        });
+        let mut c = Client::connect_once(&sock).unwrap();
+        let files: Vec<ViewFile> = ["a", "b"]
+            .iter()
+            .map(|t| ViewFile {
+                tag: t.to_string(),
+                raw: PathBuf::from(format!("/{t}.raw")),
+            })
+            .collect();
+        let done = apply(
+            &mut c,
+            &files,
+            &ShowRequest::default(),
+            Duration::from_secs(5),
+        );
+        assert_eq!(done.shown, ["a:v(out)", "b:v(out)"]);
+        assert!(done.notes.is_empty(), "{:?}", done.notes);
+        // Off sends nothing; a file never loaded is a note.
+        let off = apply(&mut c, &files, &ShowRequest::off(), Duration::from_secs(1));
+        assert_eq!(off, Default::default());
+        assert_eq!(ShowRequest::off().show, Show::Off);
+        drop(c);
+        h.join().unwrap();
+        let seen = seen.lock().unwrap();
+        let shows: Vec<&Value> = seen.iter().filter(|r| r["cmd"] == "show").collect();
+        assert_eq!(shows.len(), 2);
+        assert_eq!(shows[0]["pane"], "new");
+        assert_eq!(shows[0]["signals"], json!(["a:v(out)"]));
+        assert_eq!(shows[1]["pane"], 3);
+        // list_signals asks for one file by tag; the first answer was empty and asked again.
+        let asks = seen.iter().filter(|r| r["cmd"] == "list_signals").count();
+        assert_eq!(asks, 3);
+        assert_eq!(seen[0]["file"], "a");
     }
 
     #[test]

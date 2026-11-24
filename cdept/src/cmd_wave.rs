@@ -42,17 +42,63 @@ pub struct WaveArgs {
     /// points `<name> @ <point>`.
     #[arg(long)]
     name: Option<String>,
+    /// Signals to plot (comma separated, `v(out)` or just `out`; the tag of each file is
+    /// added). Default: the nodes the testbench `save`s, else the ones its measures use,
+    /// else the first four voltages that are not ground or a supply.
+    #[arg(long, value_delimiter = ',', conflicts_with = "no_show")]
+    show: Vec<String>,
+    /// Plot nothing: the viewer opens as it is (File traces are added in the viewer).
+    #[arg(long)]
+    no_show: bool,
+    /// Send calculator traces whole, however many points they have (by default a trace
+    /// with more than `[wave] max_points` of cdept.toml, 200000, goes as a min/max
+    /// envelope of half of them, named `... (decimated)`).
+    #[arg(long)]
+    no_decimate: bool,
     /// Do not start the viewer: for a file, print its analyses and signal counts (CDePT's
     /// own reader); for a cell, the raw files of all its run points.
     #[arg(long)]
     list: bool,
 }
 
+impl WaveArgs {
+    /// What was asked for with `--show` / `--no-show`; `None`: the default.
+    fn show_choice(&self) -> Option<wave::show::Show> {
+        if self.no_show {
+            Some(wave::show::Show::Off)
+        } else if !self.show.is_empty() {
+            Some(wave::show::Show::Names(self.show.clone()))
+        } else {
+            None
+        }
+    }
+}
+
+fn show_request(
+    args: &WaveArgs,
+    project: &Project,
+    (library, cell, view): (&str, &str, &str),
+) -> wave::show::ShowRequest {
+    wave::show::ShowRequest::for_testbench(
+        project,
+        library,
+        cell,
+        view,
+        args.show_choice().unwrap_or_default(),
+    )
+}
+
 pub fn run(args: WaveArgs, project: Option<&Project>) -> Result<()> {
     match &args.cell {
-        None if args.family || !args.points.is_empty() || args.calc.is_some() => Err(eyre!(
-            "--family, --points and --calc work on the run points of a testbench: cdept wave <library> <cell> --view V ..."
-        )),
+        None if args.family
+            || !args.points.is_empty()
+            || args.calc.is_some()
+            || !args.show.is_empty() =>
+        {
+            Err(eyre!(
+                "--family, --points, --calc and --show work on the run points of a testbench: cdept wave <library> <cell> --view V ..."
+            ))
+        }
         None => file(&args, Path::new(&args.first), project),
         Some(cell) => point(&args, cell, project),
     }
@@ -107,6 +153,7 @@ fn point(args: &WaveArgs, cell: &str, project: Option<&Project>) -> Result<()> {
     if let Some(expr) = &args.calc {
         return calc(args, project, (library, cell, &view), &chosen, expr);
     }
+    let show = show_request(args, project, (library, cell, &view));
     let opened = if several {
         wave::open_family(
             project,
@@ -115,6 +162,7 @@ fn point(args: &WaveArgs, cell: &str, project: Option<&Project>) -> Result<()> {
             &view,
             &chosen,
             args.analysis.as_deref(),
+            &show,
         )?
     } else {
         wave::open_point_raw(
@@ -124,9 +172,13 @@ fn point(args: &WaveArgs, cell: &str, project: Option<&Project>) -> Result<()> {
             &view,
             &chosen[0],
             args.analysis.as_deref(),
+            &show,
         )?
     };
     println!("{}", opened.text());
+    for note in &opened.notes {
+        eprintln!("note: {note}");
+    }
     if let Some(note) = opened.old_viewer_note() {
         eprintln!("note: {note}");
     }
@@ -144,6 +196,8 @@ fn calc(
         expr: expr.to_string(),
         name: args.name.clone(),
         plot: args.analysis.clone(),
+        show: args.show_choice(),
+        max_points: args.no_decimate.then_some(0),
     };
     let sent = wave::calc::send(project, library, cell, view, chosen, &req);
     let table = sent.table();
@@ -155,6 +209,9 @@ fn calc(
         );
     } else if !table.is_empty() {
         println!("{table}");
+    }
+    for note in &sent.notes {
+        eprintln!("note: {note}");
     }
     for (name, n) in &sent.pushed {
         println!("sent trace '{name}' ({n} points)");

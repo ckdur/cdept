@@ -29,7 +29,15 @@ pub(crate) fn open_dir(project: &Project, dir: &Path) -> Result<String, String> 
                 point: file_name(dir),
                 raw,
             };
-            wave::open_point_raw(project, &lib, &cell, &view, &point, None)
+            wave::open_point_raw(
+                project,
+                &lib,
+                &cell,
+                &view,
+                &point,
+                None,
+                &wave::default_show(project, &lib, &cell, &view),
+            )
         }
         None => wave::session::open_files(
             Some(project),
@@ -40,6 +48,7 @@ pub(crate) fn open_dir(project: &Project, dir: &Path) -> Result<String, String> 
             }],
             None,
             wave::session::Mode::Open,
+            &wave::show::ShowRequest::default(),
         ),
     }
     .map_err(|e| format!("{e:#}"))?;
@@ -72,12 +81,14 @@ fn run_of(project: &Project, dir: &Path) -> Option<(String, String, String, Stri
     }
 }
 
-/// The button: failures (no viewer, with how to get it; no raw file) go to the log.
+/// The button: failures (no viewer, with how to get it; no raw file) go to the log. In a
+/// thread: a viewer that is started is waited for to plot the default signals.
 pub(crate) fn open_run_dir(project: &Project, dir: &Path) {
-    match open_dir(project, dir) {
+    let (project, dir) = (project.clone(), dir.to_path_buf());
+    std::thread::spawn(move || match open_dir(&project, &dir) {
         Ok(line) => tracing::info!(target: "cdept::sim", "UberWave: {line}"),
         Err(e) => tracing::warn!(target: "cdept::sim", "Open in UberWave: {e}"),
-    }
+    });
 }
 
 fn points_of(
@@ -96,7 +107,8 @@ pub(crate) fn open_family(
     chosen: Option<&str>,
 ) -> Result<String, String> {
     let points = points_of(project, run, chosen)?;
-    let opened = wave::open_family(project, run.0, run.1, run.2, &points, None)
+    let show = wave::default_show(project, run.0, run.1, run.2);
+    let opened = wave::open_family(project, run.0, run.1, run.2, &points, None, &show)
         .map_err(|e| format!("{e:#}"))?;
     Ok(with_note(opened.text(), opened.old_viewer_note()))
 }
@@ -184,10 +196,16 @@ pub(crate) fn results_ui<'a>(
             .on_hover_text("All the points of this run in one UberWave window (needs a viewer with IPC; an older one opens the first)")
             .clicked()
         {
-            match open_family(project, run, None) {
-                Ok(line) => tracing::info!(target: "cdept::sim", "UberWave: {line}"),
-                Err(e) => tracing::warn!(target: "cdept::sim", "Open family in UberWave: {e}"),
-            }
+            let (project, run) = (
+                project.clone(),
+                (run.0.to_string(), run.1.to_string(), run.2.to_string()),
+            );
+            std::thread::spawn(
+                move || match open_family(&project, (&run.0, &run.1, &run.2), None) {
+                    Ok(line) => tracing::info!(target: "cdept::sim", "UberWave: {line}"),
+                    Err(e) => tracing::warn!(target: "cdept::sim", "Open family in UberWave: {e}"),
+                },
+            );
         }
         egui::ComboBox::from_id_salt("uw-calc-point")
             .selected_text(target.clone().unwrap_or_else(|| "all points".into()))
