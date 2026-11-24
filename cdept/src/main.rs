@@ -7,6 +7,7 @@ mod cmd_cell;
 mod cmd_find;
 mod cmd_import;
 mod cmd_importfile;
+mod cmd_jobs;
 mod cmd_lib;
 mod cmd_ls;
 mod cmd_magic;
@@ -139,6 +140,9 @@ enum Command {
     /// Testbenches: decks and ngspice runs with corners and specs.
     #[command(subcommand)]
     Sim(cmd_sim::SimCommand),
+    /// Remotes for run points: list them, check that they answer (ssh, SLURM).
+    #[command(subcommand)]
+    Jobs(cmd_jobs::JobsCommand),
     /// CACE datasheets: import into testbenches and a suite, export with the results.
     #[command(subcommand)]
     Cace(cmd_cace::CaceCommand),
@@ -1233,6 +1237,10 @@ fn main() -> Result<()> {
         Command::Sim(command) => {
             init_tracing(cli.verbose, None);
             cmd_sim::run(command, &open_project(cli.project)?)
+        }
+        Command::Jobs(command) => {
+            init_tracing(cli.verbose, None);
+            cmd_jobs::run(command, &open_project(cli.project)?)
         }
         Command::Cace(command) => {
             init_tracing(cli.verbose, None);

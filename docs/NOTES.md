@@ -68,7 +68,8 @@ Technology snapshot (`tech.toml` + `tech.catalog.json`, design in [TECH.md](TECH
 `cdept sim run|deck`, `setup.toml` testbench view, deck builder, ngspice batch, specs. Open: see
 SIMULATION.md §4 (GUI, job queue, sweeps, results DB). `libcdept/tests/real_sim.rs` needs
 `CDEPT_XSCHEM` and `CDEPT_NGSPICE` set to run (else it skips).
-Job queue / process supervisor: `libcdept::jobs` ([JOBS.md](JOBS.md)); `sim::run_testbench` runs points in parallel, `cdept sim run --jobs N`. Open: SLURM/ssh, results DB, process-group kill.
+Job queue / process supervisor: `libcdept::jobs` ([JOBS.md](JOBS.md)); `sim::run_testbench` runs points in parallel, `cdept sim run --jobs N`. Open: results DB, process-group kill.
+- [x] SLURM/ssh remote runs (SYMBI-82): `[jobs.remote.NAME]` in cdept.toml, `remote` in setup.toml, `cdept sim run|suite --remote`, `cdept jobs remotes [--check]`; `libcdept::jobs::remote`, `sim::remote`. SMOKE-TESTED ONLY against fake ssh/rsync/sbatch/squeue/sacct/scancel (and real ngspice behind them); never a cluster. Shared folder is the mode to trust; rsync mode only against a fake rsync. The run point's time limit is a `Watch.timeout` (in `sim::run_testbench_with` the `timeout` passed to `sim::remote::run_in_job` is a `None` placeholder to wire to the per-point timeout when that lands). See howto/remote-runs.md.
 - [x] In-process ngspice backend (SYMBI-71): `simulator_backend = "inproc"` / `cdept sim run --backend inproc`, one worker thread owns libngspice, points are queue jobs, progress from the status callback, cancel = `bg_halt`; same `tpd` as the process to 1e-12 (tt and Monte Carlo). See NGSPICE.md.
 - [x] Cancelling a Xyce point kills Xyce (`batch::Job::run_watched`); Magic batch runs have a time limit (`[magic] timeout`, `--timeout`, default 15m) and `Magic::in_job` for the queue (SYMBI-71).
 

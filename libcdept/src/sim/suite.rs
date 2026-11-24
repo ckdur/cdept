@@ -233,6 +233,8 @@ pub struct SuiteOptions {
     pub cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
     /// Run every test with this simulator (`--simulator`); wins over the suite's.
     pub simulator: Option<String>,
+    /// Run every test's points on this remote (`--remote`, [`crate::jobs::remote`]).
+    pub remote: Option<String>,
 }
 
 /// Where the report goes: `<project>/simulations/<lib>/<cell>/<suite view>/suite.json`.
@@ -271,6 +273,7 @@ pub fn run(
         no_store: options.no_store,
         queue: Some(queue),
         cancel: options.cancel.clone(),
+        remote: options.remote.clone(),
         ..Default::default()
     };
     // Tests are netlisted and queued from their own threads; the simulations of all of
@@ -343,8 +346,16 @@ fn run_test(
         if let Some(name) = chosen {
             tb.setup.set_simulator(&name)?;
         }
-        let simulator = super::Simulator::for_setup(&tb.setup)
-            .ok_or_else(|| eyre!("the simulator '{}' was not found", tb.setup.simulator))?;
+        let remote = project
+            .jobs
+            .pick(options.remote.as_deref(), &tb.setup.remote)?
+            .is_some();
+        let simulator = (if remote {
+            super::Simulator::for_remote(&tb.setup)
+        } else {
+            super::Simulator::for_setup(&tb.setup)
+        })
+        .ok_or_else(|| eyre!("the simulator '{}' was not found", tb.setup.simulator))?;
         let results = super::run_testbench_with(project, &tb, &simulator, &[], options)?;
         Ok(results.into_iter().map(|r| r.run).collect())
     })();

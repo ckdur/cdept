@@ -31,6 +31,11 @@ pub struct Setup {
     /// `cdept sim run --backend` overrides it.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub simulator_backend: String,
+    /// The remote (`[jobs.remote.NAME]` of cdept.toml) the run points go to, over ssh or as
+    /// SLURM jobs (docs/howto/remote-runs.md). Empty: this machine, unless the project names a
+    /// default. `cdept sim run --remote` overrides it.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub remote: String,
     /// The model set of `[models]` in tech.toml. Empty: the technology's default.
     pub models: String,
     /// The corner sets to run. Empty: the technology's default corner.

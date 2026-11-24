@@ -43,6 +43,7 @@ bench = "libs/bench"
 | `[libraries]` | table | empty | The library definitions. |
 | `[suffixes]` | table | empty | What a file suffix means in this project. |
 | `[xschem]` | table | none | Start-up file of the embedded xschem. |
+| `[jobs]` | table | none | Remotes (ssh, SLURM) that run points can be sent to; see [`[jobs]`](#jobs). |
 | `[klayout]` | table | none | Settings of the embedded KLayout. |
 | `[magic]` | table | none | Batch runs of Magic. |
 
@@ -208,6 +209,58 @@ timeout = "30m"
 A Magic that is stopped (out of time, or its job cancelled) is killed, and the error
 carries the last lines it printed. A value that is not a duration is a warning, and the
 default applies. See [MAGIC.md](../../MAGIC.md).
+
+## `[jobs]`
+
+Remotes for run points: over ssh, or as SLURM batch jobs. Smoke-tested only (against fake
+`ssh`/`sbatch`/`squeue`/`sacct`/`scancel`, never a cluster). A testbench names one with `remote`
+in its [setup.toml](setup-toml.md), or `cdept sim run --remote NAME` does. How-to:
+[Run on a cluster or over ssh](../../howto/remote-runs.md).
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `default` | string | none | The remote used by testbenches that name none. |
+| `[jobs.remote.NAME]` | table | none | One remote, with the keys below. A table that cannot be read (unknown key, no `host`) is left out with a warning. |
+
+| Key of a remote | Type | Default | Meaning |
+|---|---|---|---|
+| `kind` | `"ssh"` or `"slurm"` | required | `ssh`: run the simulator in an ssh session. `slurm`: submit a batch script and poll. |
+| `host` | string | none | The ssh host (`user@host` works). Required for `ssh`. For `slurm` the login node: `sbatch`, `squeue`, `sacct` and `scancel` are run through ssh there; empty: they are run here. |
+| `ssh_options` | array of strings | none | More arguments for every `ssh` (`["-p", "2222", "-i", "key"]`). `-o BatchMode=yes` is always passed: no password prompts. |
+| `command_prefix` | string or array | none | Shell lines run on the remote before the simulator (`source /etc/profile`). |
+| `modules` | array of strings | none | `module load` of each, after the prefix. |
+| `env` | table | none | Variables set for the simulator on the remote, on top of the project's tool environment (`PDK_ROOT`, ...). |
+| `partition`, `account`, `time`, `cpus`, `mem` | string / number | none | SLURM: `--partition`, `--account`, `--time` (as written, `"00:30:00"`), `--cpus-per-task`, `--mem`. |
+| `sbatch_options` | array of strings | none | More `#SBATCH` lines (`["--gres=gpu:1"]`). |
+| `workdir_mode` | `"shared"` or `"rsync"` | `shared` | `shared`: the project folder is visible at the same path on the remote. `rsync`: the point folder is copied to `remote_dir/<last four folder names>` before the run and back after it (needs `host`). |
+| `remote_dir` | string | none | rsync mode: where the point folders go on the remote. |
+| `max_jobs` | integer | `8` | Run points at once on this remote (instead of the local core count). |
+| `program`, `programs` | string, table | the bare name | The simulator on the remote: `ngspice`, `Xyce`, `vacask` by default; `program` for whichever the testbench uses, `programs = { xyce = "/opt/xyce/bin/Xyce" }` per simulator. Never the local path. |
+| `poll` | duration | `"5s"` | How often SLURM is asked for the state. |
+| `file_wait` | duration | `"10s"` | How long result files are waited for after the job ended (a lagging network filesystem). |
+| `ssh`, `rsync`, `sbatch`, `squeue`, `sacct`, `scancel` | string | the program's name | The program to run, for a wrapper or a stand-in. |
+
+```toml
+[jobs]
+default = "cluster"
+
+[jobs.remote.cluster]
+kind = "slurm"
+host = "login1"
+partition = "short"
+time = "00:30:00"
+cpus = 2
+mem = "4G"
+modules = ["ngspice/45"]
+max_jobs = 16
+
+[jobs.remote.workstation]
+kind = "ssh"
+host = "me@big-box"
+command_prefix = "source ~/.cdept-env"
+```
+
+`cdept jobs remotes` lists them, `--check` asks each one (`ssh host true`, `sbatch --test-only`).
 
 ## Where the PDK comes from
 

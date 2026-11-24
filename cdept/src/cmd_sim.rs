@@ -50,6 +50,10 @@ pub enum SimCommand {
         /// Run with this simulator instead of the setup's (`simulator` of setup.toml).
         #[arg(long, value_parser = ["ngspice", "xyce", "vacask"])]
         simulator: Option<String>,
+        /// Send the points to this remote ([jobs.remote.NAME] of cdept.toml: ssh or SLURM)
+        /// instead of running them here. Default: the setup's `remote`, else [jobs] default.
+        #[arg(long)]
+        remote: Option<String>,
     },
     /// Show the stored results of a testbench: the latest run of every point and, over
     /// them, pass/fail counts and min/max/mean/std of every measurement.
@@ -123,6 +127,9 @@ pub enum SimCommand {
         /// `simulator`).
         #[arg(long, value_parser = ["ngspice", "xyce", "vacask"])]
         simulator: Option<String>,
+        /// Send every test's points to this remote ([jobs.remote.NAME] of cdept.toml).
+        #[arg(long)]
+        remote: Option<String>,
     },
     /// Print the deck of the first run without starting the simulator.
     Deck {
@@ -253,6 +260,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             no_store,
             json,
             simulator,
+            remote,
         } => {
             let view = suite_view_of(project, &library, &cell, view)?;
             let on_event: Listener = Arc::new(|e| {
@@ -272,6 +280,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                 on_event: Some(on_event),
                 no_store,
                 simulator,
+                remote,
                 ..Default::default()
             };
             let report = sim::suite::run(project, &library, &cell, &view, &options)?;
@@ -355,6 +364,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
             no_store,
             backend,
             simulator,
+            remote,
         } => {
             let view = view_of(project, &library, &cell, view)?;
             let mut tb = sim::open(project, &library, &cell, &view)?;
@@ -366,7 +376,17 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                 // No ngspice program is needed then.
                 tb.setup.simulator_backend = "inproc".into();
             }
-            let simulator = sim::Simulator::for_setup(&tb.setup).ok_or_else(|| {
+            let remote_run = project
+                .jobs
+                .pick(remote.as_deref(), &tb.setup.remote)?
+                .is_some();
+            // A remote's program is the remote's own: it need not be found here.
+            let simulator = if remote_run {
+                sim::Simulator::for_remote(&tb.setup)
+            } else {
+                sim::Simulator::for_setup(&tb.setup)
+            };
+            let simulator = simulator.ok_or_else(|| {
                 eyre!(
                     "the simulator '{}' was not found: put it on PATH or set {} (ngspice), {} (Xyce) or {} (VACASK)",
                     tb.setup.simulator,
@@ -402,6 +422,7 @@ pub fn run(command: SimCommand, project: &Project) -> Result<()> {
                 no_mc,
                 no_store,
                 backend,
+                remote,
                 ..Default::default()
             };
             let results = sim::run_testbench_with(project, &tb, &simulator, &corners, &options)?;

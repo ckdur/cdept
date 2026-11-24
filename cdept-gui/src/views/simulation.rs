@@ -16,13 +16,14 @@ use egui::{Color32, ComboBox, Grid, RichText, ScrollArea, TextEdit, Ui};
 use libcdept::jobs::{JobInfo, JobState, Queue};
 use libcdept::sim::setup::McMode;
 use libcdept::sim::spec::{Row, Verdict};
-use libcdept::sim::{self, RunOptions, Setup, Simulator};
+use libcdept::sim::{self, RunOptions, Setup};
 use libcdept::{Project, ViewKind};
 
 use super::{View, empty_state};
 use crate::state::{Action, AppCtx, Selection};
 
 mod keep;
+mod remote;
 mod sweeps;
 use sweeps::SweepForm;
 
@@ -768,7 +769,7 @@ fn run_target(
         setup: setup.clone(),
         ..tb
     };
-    let simulator = Simulator::for_setup(&tb.setup).ok_or_else(|| {
+    let simulator = remote::simulator(project, &tb.setup).ok_or_else(|| {
         format!(
             "the simulator '{}' was not found: put it on PATH or set CDEPT_NGSPICE / CDEPT_XYCE",
             tb.setup.simulator
@@ -916,6 +917,9 @@ impl SimulationView {
             .map(|m| m.sets.keys().cloned().collect())
             .unwrap_or_default();
 
+        if let Some(text) = remote::line(project, &form.base) {
+            ui.label(text);
+        }
         Grid::new("sim-general")
             .num_columns(2)
             .spacing([8.0, 4.0])

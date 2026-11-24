@@ -47,7 +47,48 @@ an event listener). Results come back in point order. Each point directory gets 
 as it starts and ends. With the in-process backend the points share one libngspice and
 run one at a time; their progress is the simulator's own percentage.
 
+## Remote backend (SLURM and ssh; smoke-tested only)
+
+`libcdept::jobs::remote` (SYMBI-82) starts the simulator of a run point on another machine
+instead of as a local process. How to use it: [remote-runs how-to](howto/remote-runs.md).
+It was tested against fake `ssh`, `rsync`, `sbatch`, `squeue`, `sacct` and `scancel` programs
+(and the real ngspice behind them), never against a cluster or a second machine.
+
+A run point is prepared locally as always (`deck.sp`, `.spiceinit` in its folder). A `Remote`
+(`[jobs.remote.NAME]` of `cdept.toml`) then `launch`es the simulator's `batch::Job` and returns the
+same `batch::Output` a local run gives, so `sim::remote::run` reads `out.raw`, `out.log` and the
+measures from the point folder exactly as for a local run. The queue job of the point is an
+ordinary `JobSpec::func`: it is Running while the remote works, its cancel flag stops the remote
+run and the `job.log` of the point collects the progress lines (`slurm job 123: PENDING (Priority)`).
+A `Watch` timeout (the run point's time limit) is honoured the same way.
+
+| | `kind = "ssh"` | `kind = "slurm"` |
+|---|---|---|
+| start | `ssh -o BatchMode=yes host '<script>'`: environment, `cd`, `exec <simulator>` | `job.sbatch` written in the point folder, `sbatch --parsable job.sbatch` (through `ssh host` when `host` is set) |
+| watched | the local `ssh` process | `squeue -j ID -h -o %T\|%r`, then `sacct -j ID -n -P -o State,ExitCode`, then the `exit_status` file |
+| cancel / time limit | the local ssh is killed, then the remote process is killed by the pid it wrote (`.cdept-remote.pid`) over a second ssh (best effort, 10 s) | `scancel ID` |
+| result | the simulator's own exit status | the simulator's exit status from `exit_status` (the script ends 0 itself) |
+
+States of SLURM and what CDePT does with them: PENDING, CONFIGURING, RUNNING, COMPLETING are
+progress (logged when they change; the queue job stays Running). COMPLETED gives the simulator's
+exit status, so a failing simulator is the usual "the simulator failed" error with its log.
+FAILED, CANCELLED, TIMEOUT, NODE_FAIL, OUT_OF_MEMORY, BOOT_FAIL, DEADLINE, PREEMPTED, REVOKED
+fail the point with the state, the exit code, the last reason `squeue` gave (`TimeLimit`,
+`NodeFail`, ...) and the end of the job log. `squeue` failing, or not knowing the job, is not an
+error at once: `sacct` is asked, then the `exit_status` file (shared folder); six polls in a row that
+learn nothing end the wait. The poll interval is `poll` (default 5 s).
+
+Limits: `max_jobs` per remote (default 8) replaces the local core count as the number of points
+in flight (`--jobs` still wins). The simulator is the remote's own `program` (default the bare
+name `ngspice`, `Xyce`, `vacask`), never the local path. Only the process backends are
+remote-capable: `simulator_backend = "inproc"` with a remote is refused. VACASK model
+conversion, OpenVAF and xschem netlisting stay local (they happen before the points are
+prepared). After a run the files are waited for up to `file_wait` (default 10 s) for a lagging
+network filesystem.
+
 ## Not done yet
 
-SLURM/ssh back ends, a persistent results DB (Phase 4), restart policy and one-instance-per-tool
-reuse for the long-lived helpers (xschem, KLayout), process-group kill, CPU/memory limits.
+A cluster or second machine to test the remote backend on (it is smoke-tested only), job arrays
+and accounting for SLURM, a persistent results DB (Phase 4), restart policy and one-instance-per-tool
+reuse for the long-lived helpers (xschem, KLayout), process-group kill, CPU/memory limits (a SLURM
+remote has `cpus` and `mem`, local runs do not).

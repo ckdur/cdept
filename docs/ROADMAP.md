@@ -232,7 +232,9 @@ gain 35.8 dB, UGBW 145 MHz, phase margin 59 deg, 1 % settling 9.2 ns; over the c
 [suites how-to](howto/suites.md)). Templates may now declare sweeps and Monte Carlo.
 CACE datasheet import/export is done ([reference/files/cace.md](reference/files/cace.md), CACE 2.x `cace_format` 5.2).
 Sweeps and Monte Carlo are editable in the GUI form (SYMBI-77).
-Still to do: SLURM/ssh; the rest of the list below as written.
+SLURM and ssh remote runs (SYMBI-82, 2026-11-24) are there but smoke-tested only (fake `sbatch`/`squeue`/`ssh`,
+real ngspice behind them; [JOBS.md](JOBS.md#remote-backend-slurm-and-ssh-smoke-tested-only)).
+Still to do: the rest of the list below as written.
 - Testbench view: DUT cell, analyses (op/dc/ac/tran/noise/pss if available), design
   variables, model corners (from tech.toml), temperature, saves/probes.
 - Netlisting pipeline: xschem netlist → wrapper with includes, `.param` and `.control`.
@@ -246,8 +248,8 @@ Still to do: SLURM/ssh; the rest of the list below as written.
 - CACE (datasheet-driven characterisation) overlaps with the spec table: import and export
   CACE datasheets (done) rather than inventing a second spec format. pygmid can feed gm/Id sizing
   helpers later.
-- Job queue: parallel local runs (tokio + process pool), progress, cancel. Optional SLURM/ssh
-  later.
+- Job queue: parallel local runs (tokio + process pool), progress, cancel. SLURM/ssh remotes:
+  done 2026-11-24, smoke-tested only ([howto](howto/remote-runs.md)).
 - Results DB: per-run directory + SQLite index (`rusqlite`). Outputs/specs table with
   pass/fail (the ADE "Outputs" panel).
 - **Milestone:** corner sweep of an OTA from the GUI, with a spec table showing gain, PM

@@ -11,6 +11,8 @@
 //! println!("{:?}", queue.info(id).unwrap().state);
 //! ```
 
+pub mod remote;
+
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fs::File;

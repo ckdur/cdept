@@ -69,6 +69,15 @@ VACASK
   with ngspice only. Transient edge measurements differ from ngspice's by a few percent at
   default tolerances (different step control). Needs OpenVAF on first use.
 
+Remote runs (SLURM, ssh) are smoke-tested only
+: `[jobs.remote.*]` was tested against fake `ssh`, `rsync`, `sbatch`, `squeue`, `sacct` and
+  `scancel` programs and the real ngspice behind them, never against a cluster, a real
+  scheduler or a second machine. The only mode that is expected to work as it stands is a
+  folder shared at the same path. There are no job arrays and no accounting, `rsync` mode copies
+  one point folder at a time, `simulator_backend = "inproc"` is refused with a remote, and
+  VACASK model conversion and xschem netlisting stay on this machine. See
+  [Run on a cluster or over ssh](../howto/remote-runs.md).
+
 Fractional temperatures in folder names
 : `27.5` becomes the folder suffix `27p5`.
 

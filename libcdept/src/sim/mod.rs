@@ -12,6 +12,7 @@
 pub mod caps;
 pub mod deck;
 pub mod mc;
+pub mod remote;
 pub mod results;
 pub mod run;
 pub mod setup;
@@ -27,7 +28,7 @@ pub use setup::{Analysis, Setup, Spec};
 
 use std::path::{Path, PathBuf};
 
-use eyre::{Result, WrapErr, eyre};
+use eyre::{Result, WrapErr, bail, eyre};
 
 use crate::Project;
 
@@ -129,6 +130,9 @@ pub struct RunOptions {
     /// ngspice as a process or in-process (`--backend`); default: the setup's
     /// `simulator_backend`, else the process.
     pub backend: Option<run::Backend>,
+    /// Send the points to this remote of `[jobs.remote.*]` (`--remote`); default: the
+    /// setup's `remote`, else the project's `[jobs] default`, else run here.
+    pub remote: Option<String>,
 }
 
 /// Netlist the testbench's schematic (once) and run every point (or only `only`,
@@ -208,6 +212,19 @@ pub fn run_testbench_with(
             .clone()
             .ok_or_else(|| eyre!("the technology names no default model set"))?
     };
+    let remote = project
+        .jobs
+        .pick(options.remote.as_deref(), &tb.setup.remote)?
+        .cloned();
+    if let Some(r) = &remote
+        && (options.backend == Some(run::Backend::Inproc)
+            || (options.backend.is_none() && tb.setup.simulator_backend == "inproc"))
+    {
+        bail!(
+            "the in-process backend cannot run on the remote '{}': use simulator_backend = \"process\" (or --backend process)",
+            r.name
+        );
+    }
     let backend = run::Backend::choose(options.backend, &tb.setup)?;
     let default_corner = models
         .corner
@@ -266,6 +283,9 @@ pub fn run_testbench_with(
     let env = project.tool_env();
     let workers = if options.jobs > 0 {
         options.jobs
+    } else if let Some(r) = &remote {
+        // The remote's own limit, not this machine's cores.
+        r.max_jobs.min(points.len().max(1))
     } else {
         Queue::default_workers().min(points.len())
     };
@@ -343,10 +363,21 @@ pub fn run_testbench_with(
             env.push((run::XYCE_ARGS_ENV.into(), args.into()));
         }
         let (simulator, log) = (simulator.clone(), dir.join("job.log"));
+        let remote = remote.clone();
+        let timeout: Option<std::time::Duration> = None; // TODO(merge): the run point's time limit
         let spec = JobSpec::func(point.name(), move |ctx| {
             let started = chrono::Local::now().to_rfc3339();
             let clock = std::time::Instant::now();
             let outcome = match backend {
+                _ if remote.is_some() => remote::run_in_job(
+                    remote.as_ref().unwrap(),
+                    &simulator,
+                    &text,
+                    &dir,
+                    &env,
+                    ctx,
+                    timeout,
+                ),
                 run::Backend::Process => run::run_in_job(&simulator, &text, &dir, &env, ctx),
                 run::Backend::Inproc => crate::ngspice::backend::run_in_job(&text, &dir, &env, ctx),
             };

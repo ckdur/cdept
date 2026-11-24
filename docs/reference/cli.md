@@ -26,6 +26,7 @@ Commands:
   ngspice       ngspice in-process (libngspice, loaded at run time)
   magic         Magic in batch mode: extraction, DRC, LEF export
   sim           Testbenches: decks and ngspice runs with corners and specs
+  jobs          Remotes for run points: list them, check that they answer (ssh, SLURM)
   cace          CACE datasheets: import into testbenches and a suite, export with the results
   netgen        LVS with netgen (batch)
   yosys         Synthesis with Yosys (batch)
@@ -976,6 +977,9 @@ Options:
           Run with this simulator instead of the setup's (`simulator` of setup.toml)
           
           [possible values: ngspice, xyce, vacask]
+
+      --remote <REMOTE>
+          Send the points to this remote ([jobs.remote.NAME] of cdept.toml: ssh or SLURM) instead of running them here. Default: the setup's `remote`, else [jobs] default
 ```
 
 #### cdept sim results
@@ -1086,6 +1090,9 @@ Options:
           Run every test with this simulator instead of the tests' (and the suite's `simulator`)
           
           [possible values: ngspice, xyce, vacask]
+
+      --remote <REMOTE>
+          Send every test's points to this remote ([jobs.remote.NAME] of cdept.toml)
 ```
 
 #### cdept sim deck
@@ -1102,6 +1109,36 @@ Arguments:
 Options:
       --view <VIEW>            
       --simulator <SIMULATOR>  The deck for this simulator instead of the setup's [possible values: ngspice, xyce, vacask]
+```
+
+### cdept jobs
+
+```text
+Remotes for run points: list them, check that they answer (ssh, SLURM)
+
+Usage: cdept jobs [OPTIONS] <COMMAND>
+
+Commands:
+  remotes  List the remotes of [jobs.remote.*] in cdept.toml (ssh and SLURM)
+  help     Print this message or the help of the given subcommand(s)
+```
+
+#### cdept jobs remotes
+
+```text
+List the remotes of [jobs.remote.*] in cdept.toml (ssh and SLURM).
+
+With --check each one is asked for a sign of life: `ssh host true`, or `sbatch --test-only` for SLURM. Exits non-zero when one does not answer.
+
+Usage: cdept jobs remotes [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]
+          Only this remote
+
+Options:
+      --check
+          Run the trivial command on every remote (or only on NAME)
 ```
 
 ### cdept cace

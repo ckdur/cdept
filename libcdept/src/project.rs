@@ -121,6 +121,18 @@ name = ""
 # (default 15m; "0" is no limit):
 #   [magic]
 #   timeout = "10m"
+
+# Remotes the run points of a testbench can be sent to (docs/howto/remote-runs.md): over
+# ssh, or as SLURM batch jobs, on a folder the remote sees at the same path. A testbench
+# names one with `remote = "name"` in its setup.toml, or `cdept sim run --remote name`:
+#   [jobs]
+#   default = "cluster"        # optional: used when a testbench names none
+#   [jobs.remote.cluster]
+#   kind = "slurm"             # or "ssh"
+#   host = "login1"            # empty: sbatch is local
+#   partition = "short"
+#   time = "00:30:00"
+#   max_jobs = 16
 "#;
 
 /// Options for [`Project::add_library`].
@@ -160,6 +172,8 @@ pub struct Project {
     pub klayout: KlayoutSettings,
     /// `[magic]`: the batch runs of Magic.
     pub magic: MagicSettings,
+    /// `[jobs]`: the remotes (SLURM, ssh) run points can be sent to.
+    pub jobs: crate::jobs::remote::JobsSettings,
     /// The technology snapshot (`tech.toml` next to the project file), when the
     /// project has one. See [`crate::tech`].
     pub tech: Option<Tech>,
@@ -398,6 +412,7 @@ impl Project {
             xschem_rc: Vec::new(),
             klayout: KlayoutSettings::default(),
             magic: MagicSettings::default(),
+            jobs: Default::default(),
             tech,
             tech_in_use: false,
             root,
@@ -410,6 +425,7 @@ impl Project {
         project.load_xschem_rc(&doc);
         project.load_klayout(&doc);
         project.load_magic(&doc);
+        project.load_jobs(&doc);
         project.apply_snapshot();
         let mut seen = HashSet::from([file.clone()]);
         project.load_definitions(&file, &doc, &mut seen)?;
@@ -712,6 +728,19 @@ impl Project {
         match parsed {
             Ok(d) => self.magic.timeout = Some(d),
             Err(e) => self.warnings.push(format!("[magic] timeout: {e}")),
+        }
+    }
+
+    /// `[jobs]`: the remotes ([`crate::jobs::remote`]); what cannot be read gives a warning.
+    fn load_jobs(&mut self, doc: &DocumentMut) {
+        if doc.get("jobs").is_none() {
+            return;
+        }
+        match doc.to_string().parse::<toml::Table>() {
+            Ok(root) => {
+                self.jobs = crate::jobs::remote::JobsSettings::load(&root, &mut self.warnings)
+            }
+            Err(e) => self.warnings.push(format!("[jobs]: {e}")),
         }
     }
 

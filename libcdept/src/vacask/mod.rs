@@ -123,6 +123,24 @@ pub fn run_vacask_watched(
     env: &[(OsString, OsString)],
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<Outcome> {
+    run_vacask_launch(program, deck, dir, env, &|job| {
+        job.run_watched(&crate::batch::Watch {
+            cancel: cancel.clone(),
+            timeout: None,
+        })
+    })
+}
+
+/// [`run_vacask_watched`] with the way the program is started chosen by the caller
+/// (`launch` runs the job and returns its output): a remote run
+/// ([`crate::jobs::remote`]) starts it elsewhere and the files are read back the same.
+pub fn run_vacask_launch(
+    program: &Path,
+    deck: &str,
+    dir: &Path,
+    env: &[(OsString, OsString)],
+    launch: &dyn Fn(&crate::batch::Job) -> Result<crate::batch::Output>,
+) -> Result<Outcome> {
     std::fs::create_dir_all(dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
     if deck.starts_with("// CDePT: this testbench cannot be written for VACASK") {
         bail!(
@@ -154,10 +172,7 @@ pub fn run_vacask_watched(
         .map(|(n, k)| (n.to_string(), k.trim().to_string()))
         .collect();
     let job = crate::batch::vacask::job(program, "deck.sim", dir, env);
-    let out = job.run_watched(&crate::batch::Watch {
-        cancel,
-        timeout: None,
-    })?;
+    let out = launch(&job)?;
     let _ = std::fs::copy(&out.log, &log);
     let problems = crate::batch::vacask::problems(&out.text);
     let missing: Vec<&str> = analyses
