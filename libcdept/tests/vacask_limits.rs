@@ -55,6 +55,8 @@ fn run_limited(
 
 #[test]
 fn a_point_that_runs_too_long_is_killed_and_ends_as_an_error_for_every_simulator() {
+    // Spawns programs by name (`sleep`): wait while a test that changes PATH is running.
+    let _env = hermetic_env();
     let dir = tempfile::tempdir().unwrap();
     // Each program prints something, then sleeps for a long time. ngspice writes its
     // log itself (`-o out.log`); Xyce and VACASK print to the job's own file.
@@ -97,6 +99,8 @@ fn a_point_that_runs_too_long_is_killed_and_ends_as_an_error_for_every_simulator
 
 #[test]
 fn a_fast_point_and_a_zero_limit_are_not_stopped() {
+    // Spawns programs by name (`sleep`): wait while a test that changes PATH is running.
+    let _env = hermetic_env();
     let dir = tempfile::tempdir().unwrap();
     let quick = fake(
         dir.path(),
@@ -187,6 +191,8 @@ fn the_limit_comes_from_the_command_line_the_testbench_or_the_project() {
 
 #[test]
 fn openvaf_is_cancellable_and_bound_by_a_time_limit() {
+    // Spawns programs by name (`sleep`): wait while a test that changes PATH is running.
+    let _env = hermetic_env();
     let dir = tempfile::tempdir().unwrap();
     let slow = fake(
         dir.path(),
