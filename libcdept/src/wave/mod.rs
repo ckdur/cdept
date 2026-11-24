@@ -11,10 +11,13 @@
 
 #[cfg(unix)]
 pub mod calc;
+pub mod decimate;
 #[cfg(unix)]
 pub mod ipc;
 #[cfg(unix)]
 pub mod session;
+#[cfg(unix)]
+pub mod show;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -369,7 +372,8 @@ pub fn names(points: &[PointRaw]) -> String {
 }
 
 /// Open one run point (the GUI's button and script command): in the viewer of the run
-/// when one runs and has IPC, else in a new one.
+/// when one runs and has IPC, else in a new one. `show` as for [`session::open_files`]:
+/// [`default_show`] is what the buttons use.
 #[cfg(unix)]
 pub fn open_point(
     project: &Project,
@@ -377,6 +381,7 @@ pub fn open_point(
     cell: &str,
     view: &str,
     point: &str,
+    show: &show::ShowRequest,
 ) -> Result<session::Opened> {
     let p = pick_point(project, library, cell, view, Some(point))?;
     session::open_files(
@@ -385,7 +390,15 @@ pub fn open_point(
         &[(&p).into()],
         None,
         session::Mode::Open,
+        show,
     )
+}
+
+/// What the viewer plots by default for the testbench view `library/cell/view`: the
+/// signals its `save` names, else the ones its measures use, else the first voltages.
+#[cfg(unix)]
+pub fn default_show(project: &Project, library: &str, cell: &str, view: &str) -> show::ShowRequest {
+    show::ShowRequest::for_testbench(project, library, cell, view, show::Show::Default)
 }
 
 /// Open the raw file of a point already picked (the viewer of the run is reused).
@@ -397,6 +410,7 @@ pub fn open_point_raw(
     view: &str,
     point: &PointRaw,
     analysis: Option<&str>,
+    show: &show::ShowRequest,
 ) -> Result<session::Opened> {
     session::open_files(
         Some(project),
@@ -404,6 +418,7 @@ pub fn open_point_raw(
         &[point.into()],
         analysis,
         session::Mode::Open,
+        show,
     )
 }
 
@@ -448,6 +463,7 @@ pub fn open_family(
     view: &str,
     chosen: &[PointRaw],
     analysis: Option<&str>,
+    show: &show::ShowRequest,
 ) -> Result<session::Opened> {
     let files: Vec<session::ViewFile> = chosen.iter().map(Into::into).collect();
     session::open_files(
@@ -456,6 +472,7 @@ pub fn open_family(
         &files,
         analysis,
         session::Mode::Open,
+        show,
     )
 }
 

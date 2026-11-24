@@ -39,12 +39,13 @@ has the control channel described below. CDePT asks without a display and gives 
 seconds; an older viewer that does not know the flag does not answer in time, and the column
 says `found, file of <date>`.
 
-### A viewer with IPC
+### A viewer with IPC (what to build)
 
 Families, the reuse of a running viewer and the calculator traces need a viewer that prints
 `ipc 1` in `--version`. It comes from the branch `ipc-multifile` of the `uberwave` repository
 (build as above after `git checkout ipc-multifile`; once it is merged, any current build
-has it). With an older viewer CDePT keeps working as before: it opens the first file, says
+has it). To use a build that is not on `PATH` set `CDEPT_UBERWAVE` to it, for example
+`export CDEPT_UBERWAVE=~/uberwave/build/wp5-viewer/UberWaveViewer`. With an older viewer CDePT keeps working as before: it opens the first file, says
 so, and lists the other files (**File > Import** adds them); calculator traces cannot be sent
 to it, scalar results are still printed.
 
@@ -95,6 +96,28 @@ and `import` to it instead of starting another window; the session is replaced b
 asked for. Another run, or another project, gets its own viewer. A socket left by a viewer that
 died is replaced.
 
+### What is plotted when it opens
+
+A file that is opened over IPC plots nothing until it is told to, so after opening CDePT sends
+`show` for each file (tag = point name), all in one pane. By default the signals are:
+
+1. the nodes the testbench `save`s in its `setup.toml`, if the raw file has them;
+2. else the signals its `measures` and `[[output]]` expressions use;
+3. else the first four voltages that are not the time or frequency axis, ground (`0`, `gnd`)
+   or a supply (`vdd`, `vss`, ...).
+
+```bash
+cdept wave cells tb_inv --view testbench --family --show out,in   # these signals of every point
+cdept wave cells tb_inv --view testbench --family --no-show       # open, plot nothing
+```
+
+`--show` takes a comma separated list (`v(out)` or just `out`, `i(vdd)`; no `tag:`, CDePT adds
+the point name). A name a file does not have is a note. A freshly started viewer is waited for
+while it loads the files (up to a minute); **Open family in UberWave** and **Open in UberWave**
+in the GUI use the default and do not block the window.
+
+![A family of three corners in UberWave](../_static/screenshots/uberwave-family.png)
+
 ## Calculator traces
 
 The [calculator](../CALC.md) can feed the viewer: an expression is evaluated by CDePT on the raw
@@ -117,6 +140,18 @@ cdept wave cells tb_inv --view testbench --family --calc 'max(v("out"))'   # sca
 - The viewer is started on the chosen points when none of the run is open yet; a running one is
   left as it is.
 - `--analysis` limits the expression to one analysis of the raw file, as `cdept calc --plot`.
+- Names are written in quotes, `v("out")`. `v(out)` is accepted here too (tried when the
+  expression as written fails); when an expression still fails the error says
+  `hint: write node names in quotes: v("out")` (see [the calculator](../CALC.md)).
+- A viewer that is started for the push plots the default signals first (`--show`,
+  `--no-show` as above); a running one is left as it is.
+- A trace with more than 200000 points is sent as a min/max envelope of at most half of them
+  (first and last point and the extrema are kept), named `<name> (decimated)`, with a note.
+  `--no-decimate` sends it whole; `[wave] max_points` in `cdept.toml` changes the limit
+  (`0`: never). The viewer parses 10 million points in about ten seconds, with the window
+  stopped meanwhile.
+
+![The calculator trace vout pushed next to the three corners](../_static/screenshots/uberwave-calc.png)
 
 In the GUI, the Results area of the Simulation tab has an expression line with a choice of
 points (all, or one) and **Send**. Scalars and errors show under the line; typing the start of

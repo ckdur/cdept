@@ -9,8 +9,10 @@ use std::path::Path;
 
 use eyre::{Result, eyre};
 
+use super::decimate;
 use super::ipc::Trace;
 use super::session::{Mode, ViewFile, open_files, run_key};
+use super::show::{Show, ShowRequest};
 use super::{PointRaw, analyses};
 use crate::Project;
 use crate::calc::{self, Env, Value, Waveform};
@@ -61,7 +63,59 @@ pub fn evaluate_raw(raw_file: &Path, expr: &str, plot: Option<&str>) -> Result<V
             env.set("run", Value::Num(r as f64));
         }
     }
-    calc::evaluate(expr, &env).map_err(|e| eyre!("{}", e.render(expr)))
+    match calc::evaluate(expr, &env) {
+        Ok(v) => Ok(v),
+        Err(first) => {
+            // `v(out)` for `v("out")`: tried only when the expression as written failed,
+            // so what is valid keeps its meaning (a bare name there is a variable).
+            if let Some(quoted) = quote_bare_nodes(expr)
+                && let Ok(v) = calc::evaluate(&quoted, &env)
+            {
+                return Ok(v);
+            }
+            let mut text = first.render(expr);
+            if text.contains("unknown name") && expr.contains('(') {
+                text.push_str(&format!("\n  hint: {QUOTE_HINT}"));
+            }
+            Err(eyre!("{text}"))
+        }
+    }
+}
+
+/// What to tell when a signal is written without quotes.
+pub const QUOTE_HINT: &str = "write node names in quotes: v(\"out\"), i(\"vdd\")";
+
+/// `expr` with the bare names of `v( )` and `i( )` calls quoted (`v(out)` as `v("out")`,
+/// `i(x1.vdd)` as `i("x1.vdd")`), or `None` when there is none. Only a call with one
+/// plain name inside is touched.
+pub fn quote_bare_nodes(expr: &str) -> Option<String> {
+    let chars: Vec<char> = expr.chars().collect();
+    let mut out = String::new();
+    let mut changed = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let call = matches!(c, 'v' | 'V' | 'i' | 'I')
+            && (i == 0 || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '_'))
+            && chars.get(i + 1) == Some(&'(');
+        if call && let Some(close) = chars[i + 2..].iter().position(|c| *c == ')') {
+            let inner: String = chars[i + 2..i + 2 + close].iter().collect();
+            let name = inner.trim();
+            let plain = !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || "_.:#$[]/<>!".contains(c));
+            if plain {
+                out.push_str(&format!("{c}(\"{name}\")"));
+                changed = true;
+                i += 2 + close + 1;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    changed.then_some(out)
 }
 
 /// The trace name of a point: `name` as given when it is the only point, else
@@ -162,6 +216,11 @@ pub struct Request {
     pub expr: String,
     pub name: Option<String>,
     pub plot: Option<String>,
+    /// What a viewer started for the push plots (`None`: [`Show::Default`]).
+    pub show: Option<Show>,
+    /// Traces with more points are decimated: `None` the project's `[wave] max_points`
+    /// (default [`decimate::DEFAULT_MAX_POINTS`]), `Some(0)` never.
+    pub max_points: Option<usize>,
 }
 
 /// What [`send`] did.
@@ -174,6 +233,8 @@ pub struct Sent {
     pub viewer: Option<String>,
     /// Why the traces could not be sent (no viewer, an old one, a refusal), if so.
     pub problem: Option<String>,
+    /// Things worth a line: a trace that was decimated, a signal that was not shown.
+    pub notes: Vec<String>,
 }
 
 impl Sent {
@@ -210,6 +271,7 @@ pub fn send(
         pushed: vec![],
         viewer: None,
         problem: None,
+        notes: vec![],
     };
     let traces: Vec<&Trace> = sent
         .outcomes
@@ -230,6 +292,13 @@ pub fn send(
         &files,
         plot_analysis(points, plot),
         Mode::Connect,
+        &ShowRequest::for_testbench(
+            project,
+            library,
+            cell,
+            view,
+            req.show.clone().unwrap_or_default(),
+        ),
     ) {
         Ok(o) => o,
         Err(e) => {
@@ -238,15 +307,18 @@ pub fn send(
         }
     };
     sent.viewer = Some(opened.text());
+    sent.notes.extend(opened.notes.iter().cloned());
     let Some(mut client) = opened.client else {
         sent.problem = opened.old_viewer_note();
         return sent;
     };
+    let limit = req.max_points.unwrap_or(project.wave.max_points);
     let mut pushed = Vec::new();
     for t in traces {
+        let t = decimated(t, limit, &mut sent.notes);
         // A trace of that name from an earlier send is replaced.
         let _ = client.remove_trace(&t.name);
-        match client.add_trace(t) {
+        match client.add_trace(&t) {
             Ok(()) => pushed.push((t.name.clone(), t.x.len())),
             Err(e) => {
                 sent.problem = Some(format!("{e:#}"));
@@ -256,6 +328,27 @@ pub fn send(
     }
     sent.pushed = pushed;
     sent
+}
+
+/// The trace as it goes to the viewer: itself, or its min/max envelope (name with
+/// [`decimate::SUFFIX`]) when it has more than `limit` points; the note says so.
+fn decimated(t: &Trace, limit: usize, notes: &mut Vec<String>) -> Trace {
+    match decimate::min_max(&t.x, &t.y, limit) {
+        Some((x, y)) => {
+            let mut d = t.clone();
+            notes.push(format!(
+                "'{}' has {} points: sent as a min/max envelope of {} points (--no-decimate or [wave] max_points to change)",
+                t.name,
+                t.x.len(),
+                x.len()
+            ));
+            d.name = format!("{}{}", t.name, decimate::SUFFIX);
+            d.x = x;
+            d.y = y;
+            d
+        }
+        None => t.clone(),
+    }
 }
 
 /// The analysis to preselect when the viewer is started for a calculator push: only

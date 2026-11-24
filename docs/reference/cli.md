@@ -1426,6 +1426,9 @@ Options:
       --points <POINTS>      Open these run points (comma separated) in one viewer, as `--family` does for all
       --calc <CALC>          Evaluate a calculator expression on the point (or on every point with `--family` / `--points`) and send waveform results to the viewer as traces (started when it is not running; needs a viewer with IPC). Scalar results are printed, as a table for several points. A complex waveform is sent as `<name> (mag dB)` and `<name> (phase)`
       --name <NAME>          The name of the trace sent by `--calc` (default: the expression); with several points `<name> @ <point>`
+      --show <SHOW>          Signals to plot (comma separated, `v(out)` or just `out`; the tag of each file is added). Default: the nodes the testbench `save`s, else the ones its measures use, else the first four voltages that are not ground or a supply
+      --no-show              Plot nothing: the viewer opens as it is (File traces are added in the viewer)
+      --no-decimate          Send calculator traces whole, however many points they have (by default a trace with more than `[wave] max_points` of cdept.toml, 200000, goes as a min/max envelope of half of them, named `... (decimated)`)
       --list                 Do not start the viewer: for a file, print its analyses and signal counts (CDePT's own reader); for a cell, the raw files of all its run points
 ```
 

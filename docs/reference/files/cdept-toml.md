@@ -279,6 +279,21 @@ A point or a compilation that runs longer is killed; the error says so and carri
 last lines of the log. A value that is not a duration is a warning, and the default
 applies. See [JOBS.md](../../JOBS.md) and [VACASK.md](../../VACASK.md).
 
+## `[wave]`
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `max_points` | integer | `200000` | A calculator trace (`cdept wave --calc`, the Send button) with more points than this goes to UberWave as a min/max envelope of at most half as many points, named `<name> (decimated)`. `0` never decimates. `--no-decimate` of `cdept wave` does the same for one call. |
+
+```toml
+[wave]
+max_points = 500000
+```
+
+The first and last point are kept and the extrema of every bucket survive, so the plot
+looks the same; the viewer parses a request on its UI thread (about a second per million
+points). A value that is not a whole number, or an unknown key, is a warning.
+
 ## Where the PDK comes from
 
 `$PDK` and `$PDK_ROOT` in library paths and in the environment of every tool are worked

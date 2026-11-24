@@ -39,6 +39,9 @@ wave expect_start --tag
 wave expect_start ff_27
 wave expect_start ss_27
 wave expect_start tt_27/out.raw
+# the testbench saves v(in) and v(out): they are plotted, tag by tag
+wave expect_request show ff_27:v(out)
+wave expect_request show tt_27:v(in)
 
 # Again: the viewer of this run is reused (open, then import for the others).
 wave family cells tb_inv testbench

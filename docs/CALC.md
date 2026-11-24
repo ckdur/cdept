@@ -151,6 +151,13 @@ evaluates the expression on the raw file of each chosen point and pushes wavefor
 to [UberWave](howto/view-waveforms.md) as traces (a viewer with IPC is needed). The Simulation
 tab has the same in the Results area. Scalars are printed (a table per point for a family).
 
+Signals are written with quoted names, `v("out")`: a bare `out` is a variable name of the
+language. In `cdept wave --calc` only, an expression that fails as written is tried once more
+with the plain name inside `v( )` and `i( )` quoted, so `v(out)` and `i(vdd)` work there
+too; an expression that is valid as written is never changed (a variable named like the
+node keeps its meaning). When it still fails, the error ends with `hint: write node names
+in quotes: v("out")`. `cdept calc` and `[[output]]` stay strict.
+
 ## 6. Tests
 
 Unit tests use synthetic waveforms: sine with a 1 % third harmonic (THD -40 dB, SFDR 40

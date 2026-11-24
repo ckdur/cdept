@@ -118,7 +118,15 @@ fn a_single_analysis_gets_no_analysis_flag_and_a_point_is_found() {
         .to_string();
     assert!(e.contains("ss_27, tt_27"), "{e}");
 
-    let started = wave::open_point(&project, "cells", "tb", "testbench", "tt_27").unwrap();
+    let started = wave::open_point(
+        &project,
+        "cells",
+        "tb",
+        "testbench",
+        "tt_27",
+        &wave::show::ShowRequest::default(),
+    )
+    .unwrap();
     assert!(
         started.text().ends_with("tt_27/out.raw"),
         "{}",
@@ -288,7 +296,9 @@ fn a_family_opens_in_one_viewer_a_second_open_reuses_it_and_the_calculator_pushe
     // The family: one start with every point, tags = point names, the transient analysis.
     let all = wave::select_points(&b.project, "cells", "tb", "testbench", &[]).unwrap();
     assert_eq!(all.len(), 3);
-    let opened = wave::open_family(&b.project, "cells", "tb", "testbench", &all, None).unwrap();
+    let show = wave::default_show(&b.project, "cells", "tb", "testbench");
+    let opened =
+        wave::open_family(&b.project, "cells", "tb", "testbench", &all, None, &show).unwrap();
     assert!(
         opened.ipc
             && !opened.reused
@@ -316,19 +326,83 @@ fn a_family_opens_in_one_viewer_a_second_open_reuses_it_and_the_calculator_pushe
     assert_eq!(start["argv"][1], socket.to_str().unwrap());
 
     // A second open of the same run goes to the running viewer: open, then import.
-    let again = wave::open_family(&b.project, "cells", "tb", "testbench", &all[..2], None).unwrap();
+    let again = wave::open_family(
+        &b.project,
+        "cells",
+        "tb",
+        "testbench",
+        &all[..2],
+        None,
+        &show,
+    )
+    .unwrap();
     assert!(again.reused && again.command.is_empty(), "{}", again.text());
-    let lines = wait_log(&b.log, "open and import", |l| {
-        l.iter().filter(|r| r.get("request").is_some()).count() >= 3
+    let lines = wait_log(&b.log, "open, import and show", |l| {
+        l.iter().filter(|r| r.get("request").is_some()).count() >= 7 + 7
     });
     let cmds: Vec<&str> = lines
         .iter()
         .filter_map(|r| r["request"]["cmd"].as_str())
         .collect();
-    assert_eq!(cmds, ["hello", "open", "import"]);
+    // The start: hello, then per file its signals and a show. Then the second open.
+    assert_eq!(
+        cmds,
+        [
+            [
+                "hello",
+                "list_signals",
+                "show",
+                "list_signals",
+                "show",
+                "list_signals",
+                "show"
+            ],
+            [
+                "hello",
+                "open",
+                "import",
+                "list_signals",
+                "show",
+                "list_signals",
+                "show"
+            ],
+        ]
+        .concat()
+    );
     assert_eq!(lines.iter().filter(|r| r.get("start").is_some()).count(), 1);
-    let one = wave::open_point(&b.project, "cells", "tb", "testbench", "tt_27").unwrap();
-    assert!(one.reused);
+    let shows: Vec<&serde_json::Value> = lines
+        .iter()
+        .map(|r| &r["request"])
+        .filter(|r| r["cmd"] == "show")
+        .collect();
+    // Without hints: the voltages of the file, in one pane (new for the first, then its number).
+    assert_eq!(
+        shows[0]["signals"],
+        serde_json::json!(["ff_27:v(a)", "ff_27:v(b)"])
+    );
+    assert_eq!(shows[0]["pane"], "new");
+    assert_eq!(
+        shows[1]["signals"],
+        serde_json::json!(["ss_27:v(a)", "ss_27:v(b)"])
+    );
+    assert_eq!(shows[1]["pane"], 0);
+    assert_eq!(shows[2]["pane"], 0);
+    assert_eq!(shows[3]["pane"], "new");
+    assert_eq!(opened.shown.len(), 6, "{:?}", opened.shown);
+    assert_eq!(
+        again.shown,
+        ["ff_27:v(a)", "ff_27:v(b)", "ss_27:v(a)", "ss_27:v(b)"]
+    );
+    let one = wave::open_point(
+        &b.project,
+        "cells",
+        "tb",
+        "testbench",
+        "tt_27",
+        &wave::show::ShowRequest::off(),
+    )
+    .unwrap();
+    assert!(one.reused && one.shown.is_empty());
 
     // The calculator on one point: a trace named by the expression and the point.
     let tt = vec![all.iter().find(|p| p.point == "tt_27").unwrap().clone()];
@@ -343,6 +417,7 @@ fn a_family_opens_in_one_viewer_a_second_open_reuses_it_and_the_calculator_pushe
         expr: "v(\"a\")".into(),
         name: Some("va".into()),
         plot: None,
+        ..Default::default()
     };
     let sent = wave::calc::send(&b.project, "cells", "tb", "testbench", &all, &named);
     assert_eq!(sent.problem, None, "{sent:?}");
@@ -451,7 +526,16 @@ fn an_older_viewer_opens_the_first_file_and_the_rest_are_listed() {
     let _env = hermetic_env_with(&[("CDEPT_UBERWAVE", Some(program.as_os_str()))]);
     assert!(wave::session::version(&program).is_none());
     let all = wave::select_points(&b.project, "cells", "tb", "testbench", &[]).unwrap();
-    let opened = wave::open_family(&b.project, "cells", "tb", "testbench", &all, None).unwrap();
+    let opened = wave::open_family(
+        &b.project,
+        "cells",
+        "tb",
+        "testbench",
+        &all,
+        None,
+        &wave::show::ShowRequest::default(),
+    )
+    .unwrap();
     assert!(!opened.ipc && !opened.reused && opened.client.is_none());
     assert_eq!(
         opened
@@ -481,4 +565,240 @@ fn an_older_viewer_opens_the_first_file_and_the_rest_are_listed() {
     let sent = wave::calc::send(&b.project, "cells", "tb", "testbench", &all, &scalar);
     assert_eq!(sent.table().lines().count(), 3);
     assert!(sent.problem.is_none());
+}
+
+/// A bench whose testbench view has a setup.toml (`save`, measures) next to its runs.
+fn bench_with_setup(points: &[&str], setup: &str) -> Bench {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("proj");
+    std::fs::create_dir_all(root.join("libs/cells/tb/testbench")).unwrap();
+    std::fs::write(
+        root.join("cdept.toml"),
+        "name = \"w\"\n[libraries]\ncells = { path = \"libs/cells\", layout = \"cells\" }\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("libs/cells/tb/testbench/setup.toml"), setup).unwrap();
+    let project = libcdept::Project::load(&root).unwrap();
+    let base = root.join("simulations/cells/tb/testbench");
+    for point in points {
+        std::fs::create_dir_all(base.join(point)).unwrap();
+        std::fs::write(base.join(point).join("out.raw"), TRAN).unwrap();
+    }
+    let log = tmp.path().join("fake.log");
+    Bench { tmp, project, log }
+}
+
+fn shows(log: &Path) -> Vec<serde_json::Value> {
+    log_lines(log)
+        .iter()
+        .map(|r| r["request"].clone())
+        .filter(|r| r["cmd"] == "show")
+        .collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn the_default_signals_are_the_saved_ones_then_the_measured_ones_and_names_can_be_asked_for() {
+    if !python_ok() {
+        eprintln!("skipped: no python3");
+        return;
+    }
+    // `save` has a node the file lacks and one it has.
+    let b = bench_with_setup(
+        &["tt_27", "ss_27"],
+        "save = [\"v(nope)\", \"v(b)\"]\nmeasures = [\"tran d trig v(a) val=1 rise=1 targ v(b) val=1 rise=1\"]\n",
+    );
+    let run = b.tmp.path().join("run");
+    std::fs::create_dir_all(&run).unwrap();
+    let _env = hermetic_env_with(&[
+        ("CDEPT_UBERWAVE", Some(OsStr::new(FAKE_IPC))),
+        ("XDG_RUNTIME_DIR", Some(run.as_os_str())),
+        ("FAKE_UBERWAVE_LOG", Some(b.log.as_os_str())),
+        ("FAKE_UBERWAVE_IDLE", Some(OsStr::new("30"))),
+    ]);
+    let all = wave::select_points(&b.project, "cells", "tb", "testbench", &[]).unwrap();
+    let show = wave::default_show(&b.project, "cells", "tb", "testbench");
+    assert_eq!(show.save, ["v(nope)", "v(b)"]);
+    assert_eq!(show.measured, ["v(a)", "v(b)"]);
+    wave::open_family(&b.project, "cells", "tb", "testbench", &all, None, &show).unwrap();
+    let got = shows(&b.log);
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[0]["signals"], serde_json::json!(["ss_27:v(b)"]));
+    assert_eq!(got[1]["signals"], serde_json::json!(["tt_27:v(b)"]));
+
+    // `--show`: the names given, with the tags added; a name a file lacks is a note.
+    let ask = wave::show::ShowRequest {
+        show: wave::show::Show::Names(vec!["a".into(), "v(zz)".into()]),
+        ..Default::default()
+    };
+    let again =
+        wave::open_family(&b.project, "cells", "tb", "testbench", &all, None, &ask).unwrap();
+    assert_eq!(again.shown, ["ss_27:v(a)", "tt_27:v(a)"]);
+    assert_eq!(again.notes.len(), 2, "{:?}", again.notes);
+    assert!(again.notes[0].contains("'ss_27' has no signal v(zz)"));
+    let got = shows(&b.log);
+    assert_eq!(got.len(), 4);
+    assert_eq!(got[2]["signals"], serde_json::json!(["ss_27:v(a)"]));
+    assert!(got[3]["pane"].is_number(), "{:?}", got[3]);
+
+    // `--no-show`: no show request at all.
+    wave::open_family(
+        &b.project,
+        "cells",
+        "tb",
+        "testbench",
+        &all,
+        None,
+        &wave::show::ShowRequest::off(),
+    )
+    .unwrap();
+    assert_eq!(shows(&b.log).len(), 4);
+    quit_viewer(&b.project);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_started_viewer_shows_the_default_signals_before_the_calculator_pushes() {
+    if !python_ok() {
+        eprintln!("skipped: no python3");
+        return;
+    }
+    let b = bench_with_setup(&["tt_27"], "save = [\"v(a)\"]\n");
+    let run = b.tmp.path().join("run");
+    std::fs::create_dir_all(&run).unwrap();
+    let _env = hermetic_env_with(&[
+        ("CDEPT_UBERWAVE", Some(OsStr::new(FAKE_IPC))),
+        ("XDG_RUNTIME_DIR", Some(run.as_os_str())),
+        ("FAKE_UBERWAVE_LOG", Some(b.log.as_os_str())),
+        ("FAKE_UBERWAVE_IDLE", Some(OsStr::new("30"))),
+    ]);
+    let all = wave::select_points(&b.project, "cells", "tb", "testbench", &[]).unwrap();
+    let sent = wave::calc::send(&b.project, "cells", "tb", "testbench", &all, &v_a());
+    assert_eq!(sent.problem, None, "{sent:?}");
+    let lines = log_lines(&b.log);
+    let cmds: Vec<&str> = lines
+        .iter()
+        .filter_map(|r| r["request"]["cmd"].as_str())
+        .collect();
+    assert_eq!(
+        cmds,
+        ["hello", "list_signals", "show", "remove_trace", "add_trace"]
+    );
+    // `Show::Off` leaves the plot alone.
+    let none = wave::calc::Request {
+        show: Some(wave::show::Show::Off),
+        ..v_a()
+    };
+    quit_viewer(&b.project);
+    let sent = wave::calc::send(&b.project, "cells", "tb", "testbench", &all, &none);
+    assert_eq!(sent.problem, None, "{sent:?}");
+    assert_eq!(shows(&b.log).len(), 1);
+    quit_viewer(&b.project);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_big_trace_is_decimated_before_it_is_sent() {
+    if !python_ok() {
+        eprintln!("skipped: no python3");
+        return;
+    }
+    let b = bench(&["tt_27"]);
+    let run = b.tmp.path().join("run");
+    std::fs::create_dir_all(&run).unwrap();
+    // 3000 points of a ramp.
+    let mut text = String::from(
+        "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 3000\nVariables:\n\t0\ttime\ttime\n\t1\tv(a)\tvoltage\nValues:\n",
+    );
+    for i in 0..3000 {
+        text.push_str(&format!(
+            " {i}\t{}\n\t{}\n",
+            i as f64 * 1e-9,
+            (i % 100) as f64
+        ));
+    }
+    std::fs::write(
+        b.project
+            .root
+            .join("simulations/cells/tb/testbench/tt_27/out.raw"),
+        text,
+    )
+    .unwrap();
+    let _env = hermetic_env_with(&[
+        ("CDEPT_UBERWAVE", Some(OsStr::new(FAKE_IPC))),
+        ("XDG_RUNTIME_DIR", Some(run.as_os_str())),
+        ("FAKE_UBERWAVE_LOG", Some(b.log.as_os_str())),
+        ("FAKE_UBERWAVE_IDLE", Some(OsStr::new("30"))),
+    ]);
+    let all = wave::select_points(&b.project, "cells", "tb", "testbench", &[]).unwrap();
+    let req = wave::calc::Request {
+        expr: "v(\"a\")".into(),
+        name: Some("va".into()),
+        max_points: Some(1000),
+        show: Some(wave::show::Show::Off),
+        ..Default::default()
+    };
+    let sent = wave::calc::send(&b.project, "cells", "tb", "testbench", &all, &req);
+    assert_eq!(sent.problem, None, "{sent:?}");
+    assert_eq!(sent.pushed.len(), 1);
+    assert_eq!(sent.pushed[0].0, "va (decimated)");
+    assert!(sent.pushed[0].1 <= 500, "{:?}", sent.pushed);
+    assert!(
+        sent.notes.iter().any(|n| n.contains("3000 points")),
+        "{:?}",
+        sent.notes
+    );
+    // `max_points: Some(0)` sends it whole, under its own name.
+    let whole = wave::calc::Request {
+        max_points: Some(0),
+        ..req.clone()
+    };
+    let sent = wave::calc::send(&b.project, "cells", "tb", "testbench", &all, &whole);
+    assert_eq!(sent.pushed, [("va".to_string(), 3000)]);
+    assert!(sent.notes.is_empty());
+    let traces: Vec<serde_json::Value> = log_lines(&b.log)
+        .iter()
+        .map(|r| r["request"].clone())
+        .filter(|r| r["cmd"] == "add_trace")
+        .collect();
+    assert_eq!(traces[0]["name"], "va (decimated)");
+    assert_eq!(traces[0]["x_first"], 0.0);
+    assert_eq!(traces[1]["n"], 3000);
+    quit_viewer(&b.project);
+}
+
+#[cfg(unix)]
+#[test]
+fn bare_node_names_are_quoted_when_the_expression_fails_as_written() {
+    let b = bench(&["tt_27"]);
+    let raw = b
+        .project
+        .root
+        .join("simulations/cells/tb/testbench/tt_27/out.raw");
+    let quoted = wave::calc::evaluate_raw(&raw, "v(\"b\")", Some("tran")).unwrap();
+    for expr in ["v(b)", " V( b ) ", "max(v(b)) + 0"] {
+        let got = wave::calc::evaluate_raw(&raw, expr, Some("tran")).unwrap();
+        if expr.starts_with("max") {
+            assert!(matches!(got, libcdept::calc::Value::Num(_)), "{expr}");
+        } else {
+            assert_eq!(got.display(), quoted.display(), "{expr}");
+        }
+    }
+    // A signal that is not there: the error carries the hint.
+    let e = wave::calc::evaluate_raw(&raw, "v(zz)", Some("tran"))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("hint: write node names in quotes: v(\"out\")"),
+        "{e}"
+    );
+    // The quoting is a fallback: a variable named like the node keeps its meaning.
+    assert_eq!(
+        wave::calc::quote_bare_nodes("v(out) + i(x1.vdd) + dv(q)").unwrap(),
+        "v(\"out\") + i(\"x1.vdd\") + dv(q)"
+    );
+    assert_eq!(
+        wave::calc::quote_bare_nodes("v(\"out\", plot=\"tran\")"),
+        None
+    );
 }

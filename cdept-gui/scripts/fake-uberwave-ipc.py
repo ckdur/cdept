@@ -73,6 +73,7 @@ class State:
         self.cursors = {"a": None, "b": None}
         self.analysis = None
         self.shown = []
+        self.panes = 0
         self.events = []
 
     def add_file(self, path, tag=None, analysis=None):
@@ -134,7 +135,13 @@ def handle(st, req):
         return {"ok": True, "signals": out}
     if cmd == "show":
         st.shown += req.get("signals", [])
-        return {"ok": True}
+        pane = req.get("pane")
+        if pane == "new" or pane is None:
+            pane = st.panes
+            st.panes += 1
+        elif not isinstance(pane, int) or pane >= st.panes:
+            return {"ok": False, "error": "no pane %s" % pane}
+        return {"ok": True, "pane": pane, "shown": req.get("signals", [])}
     if cmd == "hide":
         st.shown = [s for s in st.shown if s not in req.get("signals", [])]
         return {"ok": True}

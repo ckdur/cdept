@@ -141,6 +141,11 @@ name = ""
 #   [sim]
 #   timeout = "30m"
 #   openvaf_timeout = "20m"
+
+# Waveforms (cdept wave --calc): a calculator trace with more points than this goes to the
+# viewer as a min/max envelope of half of them (default 200000; 0 never decimates):
+#   [wave]
+#   max_points = 200000
 "#;
 
 /// Options for [`Project::add_library`].
@@ -184,6 +189,8 @@ pub struct Project {
     pub jobs: crate::jobs::remote::JobsSettings,
     /// `[sim]`: time limits of the simulator runs.
     pub sim: SimSettings,
+    /// `[wave]`: what is sent to the waveform viewer.
+    pub wave: WaveSettings,
     /// The technology snapshot (`tech.toml` next to the project file), when the
     /// project has one. See [`crate::tech`].
     pub tech: Option<Tech>,
@@ -243,6 +250,22 @@ pub struct SimSettings {
     /// `openvaf_timeout = "20m"`: the limit of one OpenVAF compilation of the VACASK
     /// models (`None`: [`crate::batch::openvaf::DEFAULT_TIMEOUT`]; zero: no limit).
     pub openvaf_timeout: Option<std::time::Duration>,
+}
+
+/// `[wave]` in the project file (docs/reference/files/cdept-toml.md).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaveSettings {
+    /// `max_points = 200000`: a calculator trace with more points is sent to the viewer
+    /// as a min/max envelope of half of them (zero: never).
+    pub max_points: usize,
+}
+
+impl Default for WaveSettings {
+    fn default() -> Self {
+        WaveSettings {
+            max_points: crate::wave::decimate::DEFAULT_MAX_POINTS,
+        }
+    }
 }
 
 /// The environment lookup of a project (not part of what makes two projects equal).
@@ -435,6 +458,7 @@ impl Project {
             magic: MagicSettings::default(),
             jobs: Default::default(),
             sim: SimSettings::default(),
+            wave: WaveSettings::default(),
             tech,
             tech_in_use: false,
             root,
@@ -449,6 +473,7 @@ impl Project {
         project.load_magic(&doc);
         project.load_jobs(&doc);
         project.load_sim(&doc);
+        project.load_wave(&doc);
         project.apply_snapshot();
         let mut seen = HashSet::from([file.clone()]);
         project.load_definitions(&file, &doc, &mut seen)?;
@@ -749,6 +774,31 @@ impl Project {
         }
         if let Some(d) = self.duration_setting(doc, "sim", "openvaf_timeout") {
             self.sim.openvaf_timeout = Some(d);
+        }
+    }
+
+    /// `[wave]`: `max_points`, a whole number (zero: never decimate). A value that cannot
+    /// be read, or a key that is not known, gives a warning.
+    fn load_wave(&mut self, doc: &DocumentMut) {
+        let Some(table) = doc.get("wave").and_then(|t| t.as_table_like()) else {
+            if doc.get("wave").is_some() {
+                self.warnings.push("[wave] must be a table".into());
+            }
+            return;
+        };
+        for (key, item) in table.iter() {
+            match key {
+                "max_points" => match item.as_integer() {
+                    Some(n) if n >= 0 => self.wave.max_points = n as usize,
+                    _ => self.warnings.push(
+                        "[wave] max_points: it must be a whole number, 0 or more (0: never decimate)"
+                            .into(),
+                    ),
+                },
+                other => self
+                    .warnings
+                    .push(format!("[wave] unknown key `{other}` (known: max_points)")),
+            }
         }
     }
 
@@ -1774,6 +1824,33 @@ mod tests {
                 .any(|w| w.starts_with("[magic] timeout")),
             "{:?}",
             bad.warnings
+        );
+    }
+
+    #[test]
+    fn wave_max_points() {
+        let _env = crate::testutil::hermetic_env();
+        let tmp = tempfile::tempdir().unwrap();
+        let load = |text: &str| {
+            std::fs::write(tmp.path().join(PROJECT_FILE), text).unwrap();
+            Project::load(tmp.path()).unwrap()
+        };
+        assert_eq!(load("name = \"p\"\n").wave.max_points, 200_000);
+        assert_eq!(load("[wave]\nmax_points = 5000\n").wave.max_points, 5000);
+        let off = load("[wave]\nmax_points = 0\n");
+        assert_eq!(off.wave.max_points, 0);
+        assert!(off.warnings.is_empty(), "{:?}", off.warnings);
+        let bad = load("[wave]\nmax_points = \"lots\"\nmax_pts = 3\n");
+        assert_eq!(bad.wave.max_points, 200_000);
+        assert!(
+            bad.warnings
+                .iter()
+                .any(|w| w.starts_with("[wave] max_points"))
+        );
+        assert!(
+            bad.warnings
+                .iter()
+                .any(|w| w.contains("unknown key `max_pts`"))
         );
     }
 
