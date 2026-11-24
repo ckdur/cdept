@@ -295,27 +295,7 @@ pub(super) fn mc_note(form: &Form, project: &Project) -> Option<String> {
         .map(|e| format!("{e:#}"))
 }
 
-/// Why a mode cannot be picked with Xyce until its corner set is named.
-pub(super) fn xyce_mode_reason(mode: McMode) -> &'static str {
-    match mode {
-        McMode::Process => "",
-        McMode::Mismatch => {
-            "Xyce: the PDK's models have no transistor mismatch sections; name a corner set for mismatch first"
-        }
-        McMode::Both => "Xyce: process + mismatch needs a corner set that has both; name it first",
-    }
-}
-
 impl Form {
-    /// Is the corner set of this mode named (Xyce needs it for mismatch and both)?
-    fn mode_has_corner(&self, mode: McMode) -> bool {
-        match mode {
-            McMode::Process => true,
-            McMode::Mismatch => !self.mc_mismatch_corner.trim().is_empty(),
-            McMode::Both => !self.mc_both_corner.trim().is_empty(),
-        }
-    }
-
     /// Does the run have Monte Carlo (own or the template's)?
     pub(super) fn has_mc(&self) -> bool {
         self.mc || self.inherited.mc.is_some()
@@ -532,11 +512,7 @@ pub(super) fn mc_ui(ui: &mut Ui, form: &mut Form, corners: &[String], note: Opti
             );
             ComboBox::from_id_salt("sim-mc-mode").selected_text(form.mc_mode.name()).show_ui(ui, |ui| {
                 for mode in [McMode::Process, McMode::Mismatch, McMode::Both] {
-                    let allowed = !xyce || form.mode_has_corner(mode);
-                    let r = ui.add_enabled_ui(allowed, |ui| ui.selectable_value(&mut form.mc_mode, mode, mode.name())).inner;
-                    if !allowed {
-                        r.on_hover_text(xyce_mode_reason(mode));
-                    }
+                    ui.selectable_value(&mut form.mc_mode, mode, mode.name());
                 }
             });
             ui.end_row();
@@ -553,9 +529,9 @@ pub(super) fn mc_ui(ui: &mut Ui, form: &mut Form, corners: &[String], note: Opti
                 ui.end_row();
             }
         });
-        if xyce && form.mc_mode == McMode::Process {
+        if xyce && form.mc_mode != McMode::Process {
             ui.weak(
-                "Xyce: process variation only, unless a corner set with mismatch is named above",
+                "Xyce: the transistor mismatch is CDePT's (.cdept/xyce-mm); a corner set named above replaces it",
             );
         }
     }

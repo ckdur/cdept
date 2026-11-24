@@ -22,15 +22,47 @@ pub struct Plan {
     pub label: String,
     pub corners: Vec<String>,
     pub extra: Vec<String>,
+    /// Xyce: the PDK's Xyce models have no transistor mismatch, so the run reads them
+    /// from the overlay that has it ([`super::xyce_mm`]).
+    pub mismatch_models: bool,
 }
 
 /// The mismatch switch of sky130-style models.
 pub const MISMATCH_SWITCH: &str = "mc_mm_switch";
 
+/// The IHP Xyce statistical files (`mos_tt_stat`) define `sg13g2_*_vfbo` but the device
+/// files read `sg13g2_*_vfbo_mm`, which only the non-statistical corners define, and Xyce
+/// stops at "Parameter VFBO ... contains unrecognized symbols". A run that draws the
+/// process variation of the `mc` corner set ties them.
+const XYCE_VFBO_ALIASES: &[&str] = &[
+    ".param sg13g2_lv_nmos_vfbo_mm=sg13g2_lv_nmos_vfbo",
+    ".param sg13g2_lv_pmos_vfbo_mm=sg13g2_lv_pmos_vfbo",
+    ".param sg13g2_hv_nmos_vfbo_mm=sg13g2_hv_nmos_vfbo",
+    ".param sg13g2_hv_pmos_vfbo_mm=sg13g2_hv_pmos_vfbo",
+];
+
 /// Choose the corner sets for a mode. `has` tells whether the model set has a corner
 /// set, `mentions` whether the files of a corner set mention a word, `xyce` that the
 /// models are the Xyce ones.
 pub fn plan(
+    mc: &MonteCarlo,
+    set: &str,
+    xyce: bool,
+    has: impl Fn(&str) -> bool,
+    mentions: impl Fn(&str, &str) -> bool,
+) -> Result<Plan> {
+    let mut p = plan_corners(mc, set, xyce, has, mentions)?;
+    if xyce && p.corners.iter().any(|c| c == "mc") {
+        p.extra
+            .extend(XYCE_VFBO_ALIASES.iter().map(|l| l.to_string()));
+    }
+    Ok(p)
+}
+
+/// [`plan`] without the Xyce parameter fixes. `has` tells whether the model set has a corner
+/// set, `mentions` whether the files of a corner set mention a word, `xyce` that the
+/// models are the Xyce ones.
+fn plan_corners(
     mc: &MonteCarlo,
     set: &str,
     xyce: bool,
@@ -54,6 +86,7 @@ pub fn plan(
         label: corner.to_string(),
         corners: vec![corner.to_string()],
         extra: vec![],
+        mismatch_models: false,
     };
     match mc.mode {
         McMode::Process => {
@@ -61,19 +94,17 @@ pub fn plan(
             Ok(single(process))
         }
         McMode::Mismatch => {
-            if xyce && mc.mismatch_corner.is_empty() {
-                bail!(
-                    "mismatch Monte Carlo with Xyce needs `mismatch_corner` in [montecarlo]: the PDK's Xyce models \
-                     have no mismatch sections for the transistors (their `tt_mm` only covers the MOS capacitor)"
-                );
-            }
             let corner = if mc.mismatch_corner.is_empty() {
                 "tt_mm"
             } else {
                 mc.mismatch_corner.as_str()
             };
             need(corner, "mismatch")?;
-            Ok(single(corner))
+            // Xyce without a corner of its own: the transistor mismatch is CDePT's.
+            Ok(Plan {
+                mismatch_models: xyce && mc.mismatch_corner.is_empty(),
+                ..single(corner)
+            })
         }
         McMode::Both => {
             if !mc.both_corner.is_empty() {
@@ -81,9 +112,12 @@ pub fn plan(
                 return Ok(single(&mc.both_corner));
             }
             if xyce {
-                bail!(
-                    "process + mismatch Monte Carlo with Xyce needs `both_corner` in [montecarlo] (the PDK's Xyce models have no transistor mismatch)"
-                );
+                need(process, "process")?;
+                return Ok(Plan {
+                    label: "mc_mm".into(),
+                    mismatch_models: true,
+                    ..single(process)
+                });
             }
             if has("mc_mm") {
                 return Ok(single("mc_mm"));
@@ -93,6 +127,7 @@ pub fn plan(
                     label: "mc_mm".into(),
                     corners: vec![process.to_string()],
                     extra: vec![format!(".param {MISMATCH_SWITCH}=1")],
+                    mismatch_models: false,
                 });
             }
             Err(eyre::eyre!(
@@ -124,7 +159,8 @@ mod tests {
             Plan {
                 label: "mc".into(),
                 corners: vec!["mc".into()],
-                extra: vec![]
+                extra: vec![],
+                mismatch_models: false
             }
         );
         assert_eq!(
@@ -165,16 +201,47 @@ mod tests {
     }
 
     #[test]
-    fn xyce_mismatch_needs_an_explicit_corner() {
+    fn xyce_mismatch_uses_the_cdept_models_unless_a_corner_is_named() {
         let has = |c: &str| IHP.contains(&c);
         let no = |_: &str, _: &str| false;
-        assert!(plan(&mc(McMode::Mismatch), "xyce", true, has, no).is_err());
+        let p = plan(&mc(McMode::Mismatch), "xyce", true, has, no).unwrap();
+        assert_eq!(
+            (p.corners, p.mismatch_models),
+            (vec!["tt_mm".to_string()], true)
+        );
+        let p = plan(&mc(McMode::Both), "xyce", true, has, no).unwrap();
+        assert_eq!(
+            (p.label.as_str(), p.corners, p.mismatch_models),
+            ("mc_mm", vec!["mc".to_string()], true)
+        );
         let m = MonteCarlo {
             mode: McMode::Mismatch,
             mismatch_corner: "tt_mm".into(),
             ..Default::default()
         };
-        assert!(plan(&m, "xyce", true, has, no).is_ok());
-        assert!(plan(&mc(McMode::Process), "xyce", true, has, no).is_ok());
+        assert!(!plan(&m, "xyce", true, has, no).unwrap().mismatch_models);
+        assert!(
+            !plan(&mc(McMode::Process), "xyce", true, has, no)
+                .unwrap()
+                .mismatch_models
+        );
+        // The `mc` corner set of the IHP Xyce models needs its `_vfbo_mm` parameters tied.
+        let p = plan(&mc(McMode::Process), "xyce", true, has, no).unwrap();
+        assert_eq!(p.extra.len(), 4);
+        assert!(p.extra[0].starts_with(".param sg13g2_lv_nmos_vfbo_mm="));
+        assert!(
+            plan(&mc(McMode::Mismatch), "xyce", true, has, no)
+                .unwrap()
+                .extra
+                .is_empty()
+        );
+        assert!(
+            plan(&mc(McMode::Process), "ngspice", false, has, no)
+                .unwrap()
+                .extra
+                .is_empty()
+        );
+        // The corner sets must exist in the Xyce models.
+        assert!(plan(&mc(McMode::Both), "xyce", true, |_| false, no).is_err());
     }
 }

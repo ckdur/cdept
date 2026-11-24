@@ -148,8 +148,22 @@ point and the record. They run in parallel through the job queue. Views of
   project is IHP only.
 - **IHP SG13G2, Xyce** (`libs.tech/xyce/models`). The `mc` corner set has the same
   `gauss()` parameters (sigma scaled by `mc_ok`), but there are no transistor mismatch
-  sections (`tt_mm` only covers the MOS capacitor), so `mismatch` and `both` are
-  refused with a message naming `mismatch_corner`/`both_corner`.
+  sections (`tt_mm` only covers the MOS capacitor): `sg13g2_moslv_mod.lib` and
+  `sg13g2_moshv_mod.lib` have the transistor subcircuits without `mm_ok` and without the
+  `agauss()` offsets, and there are no `sg13g2_*_{delvto,factuo,dw,dl}_mm` parameters.
+  Xyce itself can do it: under `.SAMPLING useExpr=true` every `agauss()` of an expression
+  is its own random variable, also inside a subcircuit, so each instance of a subcircuit
+  draws for itself (checked: two instances of one subcircuit get different values, the
+  same `-randseed` repeats them, `mm_ok=0` gives the nominal value). So CDePT does not
+  draw anything for Xyce: `libcdept::sim::xyce_mm` writes the two MOS files again with
+  `mm_ok` and `if(mm_ok == 1, agauss(...), nominal)` on `w`, `l`, `delvto` and `factuo`
+  (the ngspice mismatch models' expressions, the form of the PDK's own Xyce MOS capacitor
+  mismatch) and reads the sigmas from the ngspice `sg13g2_mos{lv,hv}_mismatch.lib`. The
+  files go to `<project>/.cdept/xyce-mm/<pdk>/` (links to the PDK's other Xyce files),
+  and a mismatch or both run reads the model files from there (`mc::Plan::mismatch_models`):
+  `mismatch` is the Xyce `tt_mm` corner set, `both` is `mc`, as in ngspice. Process
+  variation stays Xyce's `gauss()` `.param`s. `mismatch_corner`/`both_corner` still
+  replace this with a corner set of the PDK's own.
 
 ### How the seed gets in
 
@@ -175,8 +189,9 @@ point and the record. They run in parallel through the job queue. Views of
   (one per line, built by `deck::xyce_args`).
 - **IHP Xyce statistical files are incomplete.** `mos_tt_stat` defines `sg13g2_*_vfbo`
   but the device files read `sg13g2_lv_pmos_vfbo_mm` (and the other three): Xyce stops
-  with `Parameter VFBO ... contains unrecognized symbols`. The `xyce_mc` view ties them
-  in `[variables]` (`sg13g2_lv_pmos_vfbo_mm = "sg13g2_lv_pmos_vfbo"`, ...). Check the
+  with `Parameter VFBO ... contains unrecognized symbols`. `mc::plan` ties them for every
+  Xyce run that uses the `mc` corner set (`.param sg13g2_lv_pmos_vfbo_mm=sg13g2_lv_pmos_vfbo`,
+  ... after the model lines; the views no longer need them in `[variables]`). Check the
   PDK's tests (`sg13g2_tests_xyce/mc_*`) when its files change.
 
 ## 5b. Statistics

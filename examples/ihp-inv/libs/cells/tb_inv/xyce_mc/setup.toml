@@ -1,12 +1,13 @@
 # Monte Carlo with Xyce: each run is one `.SAMPLING useExpr=true` sample with its own
 # `-randseed` (the same seed repeats, another changes the gauss() draws of the IHP
-# `mos_tt_stat` models). Process variation only: the PDK's Xyce models have no
-# transistor mismatch sections.
+# `mos_tt_stat` models). Process variation only: for the transistor mismatch run the
+# `mismatch` and `both` views with `--simulator xyce` (CDePT writes the models, the PDK's
+# Xyce files have none).
 #   cdept sim run cells tb_inv --view xyce_mc [--runs 50 --seed 7]
 # Needs Xyce ($CDEPT_XYCE or PATH). The model plugins (PSP103) are passed with -plugin
 # from tech.toml. The PDK's Xyce statistical files leave `sg13g2_*_pmos_vfbo_mm` and the
 # hv equivalents undefined (the _stat sections define `sg13g2_*_vfbo` instead), which
-# Xyce rejects; the [variables] below tie them to the drawn parameters.
+# Xyce rejects; CDePT ties them to the drawn parameters itself (mc::plan).
 schematic = "cells/tb_inv"
 simulator = "xyce"
 temperatures = [27]
@@ -17,10 +18,6 @@ measures = [
 
 [variables]
 vdd = "1.2"
-sg13g2_lv_nmos_vfbo_mm = "sg13g2_lv_nmos_vfbo"
-sg13g2_lv_pmos_vfbo_mm = "sg13g2_lv_pmos_vfbo"
-sg13g2_hv_nmos_vfbo_mm = "sg13g2_hv_nmos_vfbo"
-sg13g2_hv_pmos_vfbo_mm = "sg13g2_hv_pmos_vfbo"
 
 [montecarlo]
 runs = 8

@@ -329,18 +329,60 @@ fn xyce_montecarlo_follows_the_seed() {
     assert_eq!(distinct.len(), 3, "{a:?}");
     assert_eq!(tpds(&run(1)), a);
     assert_ne!(tpds(&run(2)), a);
-    // Mismatch needs a corner of its own: the PDK's Xyce models have none for the MOS.
-    let o = RunOptions {
-        mc_runs: Some(2),
-        mc_mode: Some(sim::setup::McMode::Mismatch),
-        no_store: true,
-        ..Default::default()
+}
+
+/// Xyce mismatch and both (the PDK's Xyce models have no transistor mismatch: CDePT's
+/// overlay models do): the draws are per device, follow the seed, and their statistics
+/// agree with ngspice's. 60 runs each: the means within 2 %, the mismatch standard
+/// deviation within 25 % (the generators differ, only the distributions agree).
+#[test]
+fn xyce_mismatch_and_both_agree_with_ngspice() {
+    let Some(xyce) = Simulator::find_kind(sim::run::SimKind::Xyce) else {
+        eprintln!("skipped: Xyce not found");
+        return;
     };
-    let err = sim::run_testbench_with(&project, &tb, &xyce, &[], &o)
-        .err()
-        .map(|e| format!("{e:#}"))
-        .unwrap_or_default();
-    assert!(err.contains("mismatch_corner"), "{err}");
+    let Some((_dir, project, ngspice)) = open_example() else {
+        return;
+    };
+    let stats = |view: &str, simulator: &Simulator, name: &str, runs: u32, seed: u64| {
+        let mut tb = sim::open(&project, "cells", "tb_inv", view).unwrap();
+        tb.setup.set_simulator(name).unwrap();
+        let o = RunOptions {
+            mc_runs: Some(runs),
+            mc_seed: Some(seed),
+            no_store: true,
+            ..Default::default()
+        };
+        tpds(&sim::run_testbench_with(&project, &tb, simulator, &[], &o).unwrap())
+    };
+    let moments = |v: &[f64]| {
+        let n = v.len() as f64;
+        let mean = v.iter().sum::<f64>() / n;
+        let var = v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0);
+        (mean, var.sqrt())
+    };
+    // The PDK's Xyce statistical files have other sigmas than its ngspice ones, so the
+    // process variation alone is not compared: mismatch is, and `both` must be the
+    // process and mismatch spreads added in quadrature.
+    let process = moments(&stats("montecarlo", &xyce, "xyce", 60, 5));
+    let mut mismatch_std = 0.0;
+    for view in ["mismatch", "both"] {
+        let x = stats(view, &xyce, "xyce", 60, 5);
+        // The same seed is the same circuits; another seed is not.
+        assert_eq!(stats(view, &xyce, "xyce", 3, 5), x[..3].to_vec(), "{view}");
+        assert_ne!(stats(view, &xyce, "xyce", 3, 6), x[..3].to_vec(), "{view}");
+        let (xm, xs) = moments(&x);
+        let (nm, ns) = moments(&stats(view, &ngspice, "ngspice", 60, 5));
+        eprintln!("{view}: xyce {xm:.4e} +- {xs:.3e}, ngspice {nm:.4e} +- {ns:.3e}");
+        assert!((xm - nm).abs() < 0.02 * nm, "{view}: mean {xm} vs {nm}");
+        if view == "mismatch" {
+            assert!((xs - ns).abs() < 0.25 * ns, "{view}: std {xs} vs {ns}");
+            mismatch_std = xs;
+        } else {
+            let quad = (process.1 * process.1 + mismatch_std * mismatch_std).sqrt();
+            assert!((xs - quad).abs() < 0.3 * quad, "both {xs} vs {quad}");
+        }
+    }
 }
 
 /// `[[output]]` expressions run on the raw file of every point: the calculator's delay

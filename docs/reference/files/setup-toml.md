@@ -125,8 +125,8 @@ same distribution): [VACASK.md](../../VACASK.md#5-monte-carlo).
 | `seed` | integer | 1 | Base seed; run `i` gets its own derived seed, stored in `result.json`. |
 | `mode` | `process`, `mismatch`, `both` | `process` | What is drawn. |
 | `corner` | string | `mc` | Corner set for process variation. |
-| `mismatch_corner` | string | `tt_mm` | Corner set for `mismatch`. Required with Xyce. |
-| `both_corner` | string | `mc_mm`, else `corner` with the model's `mc_mm_switch` set to 1 | Corner set for `both`. Required with Xyce. |
+| `mismatch_corner` | string | `tt_mm` | Corner set for `mismatch`. With Xyce, empty means CDePT's generated mismatch models on the PDK's `tt_mm`. |
+| `both_corner` | string | `mc_mm`, else `corner` with the model's `mc_mm_switch` set to 1 | Corner set for `both`. With Xyce, empty means `corner` with CDePT's generated mismatch models. |
 
 ## `[cace]`
 
