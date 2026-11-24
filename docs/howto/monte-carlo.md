@@ -69,11 +69,20 @@ all specs                                           6/6   100.0%
 
 ## With Xyce
 
-Xyce does process Monte Carlo (`simulator = "xyce"`); each run is one `.SAMPLING` sample
-with its own `-randseed`. Mismatch and both are refused unless `mismatch_corner` or
-`both_corner` names a corner set that has transistor mismatch (the IHP Xyce models have
-none). The `xyce_mc` view shows the variables the IHP Xyce statistical files need. See
-[Other simulators](other-simulators.md).
+Xyce does process, mismatch and both (`simulator = "xyce"`, or `--simulator xyce` on the
+`montecarlo`, `mismatch` and `both` views); each run is one `.SAMPLING` sample with its
+own `-randseed`, so the same seed repeats a run. The IHP Xyce models have no transistor
+mismatch, so for `mismatch` and `both` CDePT writes MOS models that have it from the
+PDK's own (`<project>/.cdept/xyce-mm/`, sigmas from the ngspice mismatch files); each
+transistor draws on its own, as in ngspice. On `tb_inv` (150 runs of `tpd`) the
+`mismatch` mean agrees to 0.5 % and the standard deviation to 4 % with ngspice. The
+process variation does not agree: the PDK's Xyce statistical files have larger sigmas
+than its ngspice ones (for example `vfbo` 0.01 against 0.005), so the process spread is
+33 % larger with Xyce (5.4e-12 against 4.0e-12) and `both` follows it (5.6e-12 against
+4.3e-12; in quadrature with the mismatch spread in both simulators). Xyce's numbers for
+a seed are not ngspice's. `mismatch_corner` / `both_corner` replace the generated
+models with a corner set of the PDK's own. The `xyce_mc` view shows the variables the
+IHP Xyce statistical files need (CDePT adds them). See [Other simulators](other-simulators.md).
 
 ## With VACASK
 

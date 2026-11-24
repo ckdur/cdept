@@ -92,12 +92,14 @@ sim set simulator vacask
 sim expect_no_problem
 sim set simulator ngspice
 sim expect_no_problem
-# Xyce: process only, unless a corner set with mismatch is named.
+# Xyce draws all three modes (the transistor mismatch is CDePT's overlay models).
 sim set simulator xyce
 sim set_mc mode mismatch
-sim expect_mc_note mismatch_corner
+sim expect_no_problem
+sim set_mc mode both
+sim expect_no_problem
 sim set_mc mode process
-sim expect_mc_note
+sim expect_no_problem
 sim revert
 sim expect_dirty no
 

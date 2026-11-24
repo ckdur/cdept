@@ -55,8 +55,9 @@ Where the results go
   (`ROADMAP.md`) say `results/<run-id>/` inside the view; that is no longer so.
 
 Xyce, Monte Carlo and mismatch
-: Xyce does process variation only (the PDK's Xyce models have no mismatch sections),
-  and its random draws are not the same
+: The PDK's Xyce models have no transistor mismatch sections; CDePT writes them for
+  `mismatch` and `both` (`.cdept/xyce-mm/`), MOS transistors only (the Xyce resistor
+  models have their own). Xyce's random draws are not the same
   as ngspice's for the same seed: the two simulators give different, equally valid
   samples. See [other simulators](../howto/other-simulators.md).
 

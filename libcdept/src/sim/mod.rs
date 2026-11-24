@@ -20,6 +20,7 @@ pub mod starter;
 pub mod stats;
 pub mod suite;
 pub mod template;
+pub mod xyce_mm;
 
 pub use deck::{RunPoint, build as build_deck};
 pub use run::{Outcome, Simulator, run, run_in_job};
@@ -177,6 +178,28 @@ pub fn monte_carlo_plan(
         .map_err(|e| eyre!("{e} (there are: {})", set_models.corner_names().join(", ")))
 }
 
+/// The PDK's Xyce model folder and the folder with the same files plus the transistor
+/// mismatch ([`xyce_mm::overlay`], in `.cdept/xyce-mm/<set>` of the project).
+fn xyce_mismatch_models(
+    project: &Project,
+    models: &crate::tech::models::ModelsTech,
+    xyce: &crate::tech::models::ModelSet,
+) -> Result<(PathBuf, PathBuf)> {
+    let var = |n: &str| project.var(n);
+    let from = xyce.dir.resolve(var).map_err(|e| eyre!(e))?;
+    let (_, ngspice) = models.set("ngspice").ok_or_else(|| {
+        eyre!("Xyce mismatch takes its sigmas from the ngspice models, which the technology lacks")
+    })?;
+    let sigmas = ngspice.dir.resolve(var).map_err(|e| eyre!(e))?;
+    let pdk = project
+        .tech
+        .as_ref()
+        .map_or("pdk".to_string(), |t| t.pdk.name.clone());
+    let to = project.root.join(".cdept").join("xyce-mm").join(pdk);
+    let to = xyce_mm::overlay(&from, &sigmas, &to)?;
+    Ok((from, to))
+}
+
 /// [`run_testbench`] with options.
 pub fn run_testbench_with(
     project: &Project,
@@ -263,6 +286,13 @@ pub fn run_testbench_with(
         .set(&set)
         .ok_or_else(|| eyre!("the technology has no models '{set}'"))?;
     let title = format!("{}/{}/{}", tb.library, tb.cell, tb.view);
+    // Xyce mismatch: the PDK's Xyce models have none, CDePT's overlay folder has it.
+    let xyce_overlay = match &mc_plan {
+        Some(plan) if plan.mismatch_models => {
+            Some(xyce_mismatch_models(project, models, model_set)?)
+        }
+        _ => None,
+    };
     let env = project.tool_env();
     let workers = if options.jobs > 0 {
         options.jobs
@@ -324,7 +354,10 @@ pub fn run_testbench_with(
                         );
                     }
                     all.extend(plan.extra.iter().cloned());
-                    all
+                    match &xyce_overlay {
+                        Some((from, to)) => xyce_mm::redirect(&all, from, to),
+                        None => all,
+                    }
                 }
                 None => models
                     .lines(&set, &point.corner, |n| project.var(n))

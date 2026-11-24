@@ -24,9 +24,12 @@ simulator = "xyce"
 - One analysis per setup (plus `op`); split a testbench that needs two.
 - Options are written `package.name` (`timeint.reltol`); a bare name goes to `device`.
 - Corners, temperatures, sweeps and calculator outputs work as with ngspice.
-- Monte Carlo: process variation only on the IHP models; `mismatch` and `both` are refused
-  unless `mismatch_corner` / `both_corner` names a corner set that has transistor
-  mismatch. See the `xyce_mc` view of `tb_inv`.
+- Monte Carlo: `process`, `mismatch` and `both`, with the same seeds, corner sets and
+  statistics as ngspice (Xyce's own random numbers, so the same seed is not the same
+  circuit as in ngspice). The IHP Xyce models have no transistor mismatch, so CDePT
+  writes models that have it (`.cdept/xyce-mm/` in the project). Try
+  `cdept sim run cells tb_inv --view mismatch --simulator xyce`; see also the `xyce_mc`
+  view of `tb_inv`. Only the MOS transistors have mismatch.
 
 ## VACASK
 
