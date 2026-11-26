@@ -1269,7 +1269,10 @@ impl View for MagicView {
             && self.editable
             && (response.has_focus() || response.contains_pointer())
             && ui.input_mut(|i| {
-                i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::COMMAND, egui::Key::S))
+                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    Modifiers::COMMAND,
+                    egui::Key::S,
+                ))
             })
         {
             self.save();

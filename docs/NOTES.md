@@ -393,6 +393,18 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
       (not on the development host); the Tools tab has no row for `cdept-magic` itself.
 - [ ] ihp-sg13g2 Magic device map not checked against a real generate (sky130A was).
 - [ ] The example's `tech.catalog.json` (2.8 MB) is not committed (`cdept tech refresh`).
+- [x] Torture (cdept-magic/tests/torture.rs, libcdept/tests/magic_refs.rs,
+      magic-torture.script) found and fixed: paths with non-ASCII letters or spaces
+      (Magic refuses them: the folder becomes its working folder), the start-up script
+      read as UTF-8, the current point on the window border after a resize (commands
+      failed with an empty error), windows under 64×64, Ctrl+S passed to Magic instead of
+      saving. Survived: 3000 queued inputs + 60 resizes, 100000×100000 (clamped), a
+      40000-rectangle layout (~1 s), kill -9 mid-edit (file intact, clean restart), Magic's
+      own `quit`, two helpers at once, a failed rename rolled back, a sparse 512 MB file
+      (refused by size), CRLF files, 5000 `use` lines, broken sidecars, cycles.
+- [ ] Hung `Xyce -v` probes (tool detection of GUI runs) piled up and used up inotify
+      instances, which breaks `libcdept/tests/watch.rs` ("cannot watch files"); fixed in
+      main by "Tool probes: Open MPI single-process settings" (not in this branch).
 
 ### Smaller gaps left in what exists
 - [x] Edit project fields (name, description, technology, PDK folder) from the GUI.

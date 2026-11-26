@@ -197,7 +197,7 @@ fn a_large_layout_and_names_with_spaces_and_letters() {
 #[test]
 fn magic_quit_closes_the_session_and_two_helpers_run_side_by_side() {
     let tmp = tempfile::tempdir().unwrap();
-    let Some((p, file, _pdk)) = project(tmp.path(), "lib", "a", SMALL) else {
+    let Some((_, file, _pdk)) = project(tmp.path(), "lib", "a", SMALL) else {
         return;
     };
     let other = tmp.path().join("lib/b/layout/b.mag");
