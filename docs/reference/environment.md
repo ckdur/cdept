@@ -21,6 +21,13 @@ described in [External tools](../tools.md).
 | `CDEPT_VACASK_PYTHON` | VACASK's Python folder (the one holding `ng2vclib`), used to convert ngspice models. | `<prefix>/lib/vacask/python` of the VACASK program, else what `vacask -dp` prints | `cdept vacask models` |
 | `CDEPT_OPENVAF` | The OpenVAF compiler. | `openvaf-r` or `openvaf` on `PATH` | `cdept openvaf`, VACASK models |
 | `CDEPT_MAGIC` | The Magic program. | `magic` on `PATH` | `cdept magic`, technology scan |
+| `CDEPT_MAGIC_HELPER` | The helper program that shows Magic in a tab (`cdept-magic`). | next to `cdept`, else on `PATH` | Magic tabs |
+| `CDEPT_MAGIC_TCLDIR` | Magic's Tcl folder (`magic.tcl`, `tclmagic.so`) for the helper. | what `magic --prefix` prints, `/magic/tcl` | Magic tabs |
+| `CDEPT_MAGIC_SCREEN` | Largest Magic window in a tab, `<w>x<h>`. | `3840x2160` | Magic tabs |
+| `CDEPT_MAGIC_SHAREDIR` | The helper's Tcl files (`cdept-magic.tcl`, `faketk.tcl`). | `../share/cdept-magic` next to the helper, else the build tree | Magic tabs |
+| `CDEPT_MAGIC_TRACE`, `CDEPT_MAGIC_LOG`, `CDEPT_MAGIC_DEBUG` | Debugging of the Magic helper: window/event traces on stderr, requests into a file, the Tcl stack of a failed start. | not set | Magic tabs |
+| `CDEPT_XSCHEM_PROGRAM` | A stock xschem for "xschem window" (Open With). | `xschem` on `PATH` | `cdept open`, Open With |
+| `VISUAL` | The text editor of "Open With › Text editor". | `xdg-open` | `cdept open`, Open With |
 | `CDEPT_NETGEN` | The netgen program. | `netgen-lvs` or `netgen` on `PATH` | `cdept netgen` |
 | `CDEPT_YOSYS` | The Yosys program. | `yosys` on `PATH` | `cdept yosys` |
 | `CDEPT_OPENROAD` | The OpenROAD program. | `openroad` on `PATH` | `cdept openroad` |

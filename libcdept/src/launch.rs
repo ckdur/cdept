@@ -164,7 +164,12 @@ impl Launcher {
 
     /// Open `file` with the external tool of `choice` (an embedded choice is the
     /// caller's to open in a tab).
-    pub fn open(&self, project: Option<&Project>, choice: Choice, file: Option<&Path>) -> Result<Launched> {
+    pub fn open(
+        &self,
+        project: Option<&Project>,
+        choice: Choice,
+        file: Option<&Path>,
+    ) -> Result<Launched> {
         if choice.embedded {
             bail!("{} opens in a tab of CDePT", choice.label);
         }
@@ -271,7 +276,9 @@ impl Launcher {
     /// Stop window `index` (asked politely with SIGTERM, then killed).
     pub fn stop(&self, index: usize) -> Result<()> {
         let mut procs = self.lock();
-        let p = procs.get_mut(index).ok_or_else(|| eyre!("no window {index}"))?;
+        let p = procs
+            .get_mut(index)
+            .ok_or_else(|| eyre!("no window {index}"))?;
         if p.exit.is_none() {
             terminate(&mut p.child);
             p.exit = Some("stopped by CDePT".into());
@@ -283,7 +290,9 @@ impl Launcher {
     pub fn restart(&self, index: usize) -> Result<u32> {
         self.stop(index)?;
         let mut procs = self.lock();
-        let p = procs.get_mut(index).ok_or_else(|| eyre!("no window {index}"))?;
+        let p = procs
+            .get_mut(index)
+            .ok_or_else(|| eyre!("no window {index}"))?;
         let out = std::fs::OpenOptions::new()
             .append(true)
             .create(true)
@@ -360,7 +369,11 @@ fn require(tool: &str, env: &str, names: &[&str]) -> Result<PathBuf> {
 }
 
 /// The command line of an external tool for `file`.
-pub fn command_for(project: Option<&Project>, choice: Choice, file: Option<&Path>) -> Result<Command> {
+pub fn command_for(
+    project: Option<&Project>,
+    choice: Choice,
+    file: Option<&Path>,
+) -> Result<Command> {
     let mut cmd;
     match choice.id {
         "xschem-window" => {
@@ -393,7 +406,10 @@ pub fn command_for(project: Option<&Project>, choice: Choice, file: Option<&Path
         }
         "magic-window" => {
             cmd = Command::new(crate::magic::Magic::find().ok_or_else(|| {
-                eyre!("magic was not found on PATH (or set {})", crate::magic::MAGIC_ENV)
+                eyre!(
+                    "magic was not found on PATH (or set {})",
+                    crate::magic::MAGIC_ENV
+                )
             })?);
             cmd.args(["-d", "XR"]);
             if let Some(p) = project
@@ -469,7 +485,10 @@ mod tests {
             panic!("{first:?}")
         };
         // The same file again: not a second window.
-        assert!(matches!(l.open(None, EDITOR, Some(&file)).unwrap(), Launched::Reused(_)));
+        assert!(matches!(
+            l.open(None, EDITOR, Some(&file)).unwrap(),
+            Launched::Reused(_)
+        ));
         std::thread::sleep(std::time::Duration::from_millis(300));
         assert!(std::fs::read_to_string(&log).unwrap().contains("opened"));
         assert_eq!(l.processes().len(), 1);

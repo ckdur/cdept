@@ -382,7 +382,11 @@ impl Helper {
 fn trace(text: &str) {
     if let Some(file) = std::env::var_os("CDEPT_MAGIC_LOG") {
         use std::io::Write as _;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file)
+        {
             let short: String = text.chars().take(300).collect();
             let _ = writeln!(f, "{short}");
         }
@@ -545,7 +549,7 @@ fn run_test(args: Args) -> Result<(), String> {
         let mut pixels = vec![0u8; (stride * height) as usize];
         magic.read_pixels(&mut pixels, stride, Rect::new(0, 0, width, height));
         let mut out = format!("P6\n{width} {height}\n255\n").into_bytes();
-        for pixel in pixels.chunks_exact(4) {
+        for pixel in pixels.as_chunks::<4>().0 {
             out.extend_from_slice(&pixel[..3]);
         }
         std::fs::write(ppm, out).map_err(|e| format!("{}: {e}", ppm.display()))?;

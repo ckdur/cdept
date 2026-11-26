@@ -41,7 +41,11 @@ pub fn pdk_map(pdk: &str) -> Option<PathBuf> {
     if let Some(tree) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
         dirs.push(tree.join("pdk"));
     }
-    if let Some(dir) = klayout.as_deref().and_then(Path::parent).and_then(Path::parent) {
+    if let Some(dir) = klayout
+        .as_deref()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+    {
         dirs.insert(0, dir.to_path_buf());
     }
     dirs.into_iter()
@@ -213,7 +217,9 @@ impl Plan {
         let mut out = Vec::new();
         for a in &self.actions {
             out.push(match a {
-                Action::Add(w) => format!("{}: missing in the layout ({})", w.name, w.target.label()),
+                Action::Add(w) => {
+                    format!("{}: missing in the layout ({})", w.name, w.target.label())
+                }
                 Action::Update(w, p) => format!(
                     "{}: {} in the layout, the schematic says {}{}",
                     w.name,
@@ -221,7 +227,9 @@ impl Plan {
                     w.target.label(),
                     params_text(&w.target)
                 ),
-                Action::Extra(p) => format!("{}: {} is not in the schematic", p.instance, describe(p)),
+                Action::Extra(p) => {
+                    format!("{}: {} is not in the schematic", p.instance, describe(p))
+                }
             });
         }
         for (name, reason) in &self.problems {
@@ -262,7 +270,11 @@ fn describe(p: &Placed) -> String {
             let shown: Vec<&String> = params.iter().take(6).collect();
             format!(
                 "{lib}/{dev} ({})",
-                shown.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ")
+                shown
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
             )
         }
         None => p.cell.clone(),
@@ -290,7 +302,8 @@ pub fn plan(schematic: &Schematic, placed: &[Placed]) -> Plan {
             .collect(),
         ..Default::default()
     };
-    let by_name: BTreeMap<&str, &Placed> = placed.iter().map(|p| (p.instance.as_str(), p)).collect();
+    let by_name: BTreeMap<&str, &Placed> =
+        placed.iter().map(|p| (p.instance.as_str(), p)).collect();
     for w in &schematic.wanted {
         let Some(p) = by_name.get(w.name.as_str()) else {
             out.actions.push(Action::Add(w.clone()));
@@ -385,11 +398,7 @@ pub fn apply_script(top: &str, plan: &Plan, placed: &[Placed], remove: bool) -> 
                         if let Some(dir) = file.parent() {
                             t += &format!("catch {{addpath {}}}\n", word(&dir.to_string_lossy()));
                         }
-                        t += &format!(
-                            "getcell {}\nidentify {}\n",
-                            word(cell),
-                            word(&w.name)
-                        );
+                        t += &format!("getcell {}\nidentify {}\n", word(cell), word(&w.name));
                     }
                 }
                 t += "select clear\n";
@@ -463,11 +472,15 @@ pub fn record(project: &Project, file: &Path, schematic: &Schematic) -> Result<(
 
 /// The schematic a Magic layout is linked with (its sidecar's `source`), else the
 /// cell's own schematic.
-pub fn source_of(project: &Project, library: &str, cell: &str, file: &Path) -> Result<(Source, PathBuf)> {
+pub fn source_of(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    file: &Path,
+) -> Result<(Source, PathBuf)> {
     if let Ok(Some(meta)) = Meta::read_for(file)
         && let Some(s) = meta.source
-        && let Ok(found) =
-            crate::link::schematic_view(project, &s.library, &s.cell, Some(&s.view))
+        && let Ok(found) = crate::link::schematic_view(project, &s.library, &s.cell, Some(&s.view))
     {
         return Ok(found);
     }

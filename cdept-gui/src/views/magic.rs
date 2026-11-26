@@ -184,11 +184,9 @@ impl MagicView {
         }
     }
 
-
     pub fn file(&self) -> &Path {
         &self.file
     }
-
 
     pub fn is_running(&self) -> bool {
         self.session.status() == Status::Running
@@ -347,9 +345,6 @@ impl MagicView {
         let file = tcl::quote(&self.file.to_string_lossy());
         self.session.tcl(&format!("cdept::magic::reload {file}"));
     }
-
-
-
 
     pub fn start_drc(&mut self) {
         self.drc.open = true;
@@ -654,7 +649,9 @@ impl MagicView {
                 }
             }
         }
-        if self.state_asked.is_none() && Instant::now() >= self.next_poll && !self.mirror.has_modal()
+        if self.state_asked.is_none()
+            && Instant::now() >= self.next_poll
+            && !self.mirror.has_modal()
         {
             self.next_poll = Instant::now() + POLL;
             self.state_asked = Some(self.session.tcl(
@@ -1008,9 +1005,11 @@ impl MagicView {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.strong("Magic stopped");
-                    egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
-                        ui.label(text);
-                    });
+                    egui::ScrollArea::vertical()
+                        .max_height(140.0)
+                        .show(ui, |ui| {
+                            ui.label(text);
+                        });
                     ui.add_space(4.0);
                     if ui.button("Restart").clicked() {
                         self.session.restart();
@@ -1158,11 +1157,19 @@ const TOOLS: [(&str, &str, &str); 9] = [
     ("Fit", "Zoom to the whole cell (v)", "view"),
     ("Zoom In", "Zoom in (z)", "zoom 0.5"),
     ("Zoom Out", "Zoom out (Z)", "zoom 2"),
-    ("Box", "Box tool: left/right buttons place the box corners", "tool box"),
+    (
+        "Box",
+        "Box tool: left/right buttons place the box corners",
+        "tool box",
+    ),
     ("Wire", "Wiring tool", "tool wiring"),
     ("Select", "Select what is under the box (s)", "select"),
     ("Delete", "Delete the selection (d)", "delete"),
-    ("Expand", "Show the inside of the selected cells (x)", "expand"),
+    (
+        "Expand",
+        "Show the inside of the selected cells (x)",
+        "expand",
+    ),
     ("Grid", "Grid on or off (g)", "grid"),
 ];
 
@@ -1286,7 +1293,10 @@ impl View for MagicView {
                 ui.separator();
                 for (label, command) in [
                     ("Edit Selected Cell (descend)", "edit"),
-                    ("Back to the Top Cell", "load [lindex [cellname list topcells] 0]"),
+                    (
+                        "Back to the Top Cell",
+                        "load [lindex [cellname list topcells] 0]",
+                    ),
                     ("Expand All", "expand"),
                     ("Unexpand All", "unexpand"),
                     ("Clear Selection", "select clear"),
@@ -1361,7 +1371,11 @@ impl View for MagicView {
                     self.command(command);
                 }
             }
-            if ui.button("DRC").on_hover_text("Check the cell as it is now").clicked() {
+            if ui
+                .button("DRC")
+                .on_hover_text("Check the cell as it is now")
+                .clicked()
+            {
                 self.start_drc();
             }
             ui.toggle_value(&mut self.show_layers, "Layers");
@@ -1422,7 +1436,10 @@ pub(crate) fn script(view: &mut MagicView, args: &[String]) -> Result<(), String
             Some(n) => (true, n),
             None => (false, text.trim()),
         };
-        Ok((more, n.parse().map_err(|_| format!("'{text}' is not a number"))?))
+        Ok((
+            more,
+            n.parse().map_err(|_| format!("'{text}' is not a number"))?,
+        ))
     };
     match args.first().map(String::as_str) {
         Some("command") => view.run_command(&rest),
@@ -1485,7 +1502,11 @@ pub(crate) fn script(view: &mut MagicView, args: &[String]) -> Result<(), String
         Some("expect_missing") => {
             let n = count(&rest)?.1;
             if view.missing.len() != n {
-                return Err(format!("{} missing cell(s): {:?}", view.missing.len(), view.missing));
+                return Err(format!(
+                    "{} missing cell(s): {:?}",
+                    view.missing.len(),
+                    view.missing
+                ));
             }
         }
         Some("lvs") => return Err("magic lvs needs the project: use the Cell menu".into()),

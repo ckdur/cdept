@@ -38,7 +38,11 @@ fn project(dir: &Path) -> Project {
     write(&inv_dir.join("inv.mag"), &mag_with(&[]));
     write(
         &dir.join("deep/er/libs/top/chip/layout/chip.mag"),
-        &mag_with(&[("inv", "inv_0", &inv_dir.canonicalize().unwrap().to_string_lossy())]),
+        &mag_with(&[(
+            "inv",
+            "inv_0",
+            &inv_dir.canonicalize().unwrap().to_string_lossy(),
+        )]),
     );
     write(
         &dir.join("deep/er/libs/top/other/layout/other.mag"),
@@ -68,15 +72,24 @@ fn references_resolve_normalize_and_follow() {
 
     // check: an absolute path and a name-only use are reported
     let problems = refs::check(&p, false);
-    assert!(problems.iter().any(|x| x.text.contains("absolute path")), "{problems:?}");
-    assert!(problems.iter().any(|x| x.text.contains("by name only")), "{problems:?}");
+    assert!(
+        problems.iter().any(|x| x.text.contains("absolute path")),
+        "{problems:?}"
+    );
+    assert!(
+        problems.iter().any(|x| x.text.contains("by name only")),
+        "{problems:?}"
+    );
 
     // normalize: relative paths, sidecar entries
     let n = refs::normalize(&p, &chip).unwrap();
     assert_eq!(n.paths, 1);
     assert!(n.sidecar);
     let text = fs::read_to_string(&chip).unwrap();
-    assert!(text.contains("use inv  inv_0 ../../../../../../libs/base/inv/layout\n"), "{text}");
+    assert!(
+        text.contains("use inv  inv_0 ../../../../../../libs/base/inv/layout\n"),
+        "{text}"
+    );
     let meta = Meta::read(&sidecar_path(&chip)).unwrap();
     assert_eq!(meta.label(), "top/chip/layout");
     assert_eq!(meta.references["inv"].library, "base");
@@ -84,34 +97,60 @@ fn references_resolve_normalize_and_follow() {
     let n = refs::normalize(&p, &chip).unwrap();
     assert_eq!((n.paths, n.sidecar), (0, false));
     refs::normalize(&p, &other).unwrap();
-    assert!(refs::check(&p, false).is_empty(), "{:?}", refs::check(&p, false));
+    assert!(
+        refs::check(&p, false).is_empty(),
+        "{:?}",
+        refs::check(&p, false)
+    );
 
     // rename base/inv -> nand: both placing views follow (use line and sidecar)
     let base = p.library("base").unwrap();
     let followed = base.rename_cell_following(&p, "inv", "nand").unwrap();
-    assert_eq!(followed.iter().filter(|f| !f.is_problem()).count(), 2, "{followed:?}");
+    assert_eq!(
+        followed.iter().filter(|f| !f.is_problem()).count(),
+        2,
+        "{followed:?}"
+    );
     let p = Project::load(&dir).unwrap();
     let text = fs::read_to_string(&chip).unwrap();
-    assert!(text.contains("use nand  inv_0 ../../../../../../libs/base/nand/layout\n"), "{text}");
+    assert!(
+        text.contains("use nand  inv_0 ../../../../../../libs/base/nand/layout\n"),
+        "{text}"
+    );
     let meta = Meta::read(&sidecar_path(&chip)).unwrap();
     assert_eq!(meta.references["nand"].cell, "nand");
     assert!(!meta.references.contains_key("inv"));
     // the renamed view's own sidecar says what it is now
     let own = dir.join("libs/base/nand/layout/nand.mag");
     let own_meta = Meta::read(&sidecar_path(&own)).unwrap();
-    assert_eq!((own_meta.cell.as_str(), own_meta.top.as_str()), ("nand", "nand"));
-    assert!(refs::check(&p, false).is_empty(), "{:?}", refs::check(&p, false));
+    assert_eq!(
+        (own_meta.cell.as_str(), own_meta.top.as_str()),
+        ("nand", "nand")
+    );
+    assert!(
+        refs::check(&p, false).is_empty(),
+        "{:?}",
+        refs::check(&p, false)
+    );
 
     // copy top/chip into base (another depth): its relative path is written again
     let top = p.library("top").unwrap();
-    top.copy_cell("chip", p.library("base").unwrap(), "chip2").unwrap();
+    top.copy_cell("chip", p.library("base").unwrap(), "chip2")
+        .unwrap();
     let copy = dir.join("libs/base/chip2/layout/chip2.mag");
     let text = fs::read_to_string(&copy).unwrap();
-    assert!(text.contains("use nand  inv_0 ../../nand/layout\n"), "{text}");
+    assert!(
+        text.contains("use nand  inv_0 ../../nand/layout\n"),
+        "{text}"
+    );
     let m = Meta::read(&sidecar_path(&copy)).unwrap();
     assert_eq!(m.label(), "base/chip2/layout");
     let p = Project::load(&dir).unwrap();
-    assert!(refs::check(&p, false).is_empty(), "{:?}", refs::check(&p, false));
+    assert!(
+        refs::check(&p, false).is_empty(),
+        "{:?}",
+        refs::check(&p, false)
+    );
 
     // delete base/nand: the views that placed it are reported, and show it missing
     let orphans = refs::placed_by(&p, "base", "nand", None);
@@ -142,10 +181,17 @@ fn cyclic_names_spaces_and_broken_files_do_not_break_anything() {
     write(&a, &mag_with(&[("bé", "x", "../../bé/layout")]));
     write(&b, &mag_with(&[("a.b", "y", "../../a.b/layout")]));
     // a truncated file, an empty file, a binary file and a broken sidecar
-    write(&dir.join("lib one/cut/layout/cut.mag"), "magic\ntech x\nuse a.b  z ../../a.b/layo");
+    write(
+        &dir.join("lib one/cut/layout/cut.mag"),
+        "magic\ntech x\nuse a.b  z ../../a.b/layo",
+    );
     write(&dir.join("lib one/empty/layout/empty.mag"), "");
     fs::create_dir_all(dir.join("lib one/bin/layout")).unwrap();
-    fs::write(dir.join("lib one/bin/layout/bin.mag"), [0u8, 159, 146, 150, 255, 10, 117]).unwrap();
+    fs::write(
+        dir.join("lib one/bin/layout/bin.mag"),
+        [0u8, 159, 146, 150, 255, 10, 117],
+    )
+    .unwrap();
     write(&sidecar_path(&b), "{ not json");
     let p = Project::load(&dir).unwrap();
     for v in refs::mag_views(&p) {
@@ -153,8 +199,15 @@ fn cyclic_names_spaces_and_broken_files_do_not_break_anything() {
         let _ = refs::normalize(&p, &v.file);
     }
     let problems = refs::check(&p, false);
-    assert!(problems.iter().any(|x| x.view.contains("cut") && x.text.contains("cut short")));
-    assert!(problems.iter().any(|x| x.view.contains("bin")), "{problems:?}");
+    assert!(
+        problems
+            .iter()
+            .any(|x| x.view.contains("cut") && x.text.contains("cut short"))
+    );
+    assert!(
+        problems.iter().any(|x| x.view.contains("bin")),
+        "{problems:?}"
+    );
     // the broken sidecar was replaced by a good one by normalize
     assert!(Meta::read(&sidecar_path(&b)).is_ok());
     let r = refs::resolve_file(&p, &a).unwrap();
@@ -173,7 +226,10 @@ fn read_only_libraries_are_reported_not_changed() {
     );
     write(&dir.join("base/inv/layout/inv.mag"), &mag_with(&[]));
     let user = dir.join("ro/user/layout/user.mag");
-    write(&user, &mag_with(&[("inv", "i", "../../../base/inv/layout")]));
+    write(
+        &user,
+        &mag_with(&[("inv", "i", "../../../base/inv/layout")]),
+    );
     let before = fs::read(&user).unwrap();
     let p = Project::load(&dir).unwrap();
     let n = refs::normalize(&p, &user).unwrap();
@@ -203,17 +259,32 @@ fn large_hierarchies_resolve_quickly() {
             Vec::new()
         } else {
             (0..20)
-                .map(|k| (format!("c{}", i - 1), format!("u{k}"), format!("../../c{}/layout", i - 1)))
+                .map(|k| {
+                    (
+                        format!("c{}", i - 1),
+                        format!("u{k}"),
+                        format!("../../c{}/layout", i - 1),
+                    )
+                })
                 .collect()
         };
-        let refs: Vec<(&str, &str, &str)> =
-            uses.iter().map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str())).collect();
-        write(&dir.join(format!("l/c{i}/layout/c{i}.mag")), &mag_with(&refs));
+        let refs: Vec<(&str, &str, &str)> = uses
+            .iter()
+            .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str()))
+            .collect();
+        write(
+            &dir.join(format!("l/c{i}/layout/c{i}.mag")),
+            &mag_with(&refs),
+        );
     }
     let p = Project::load(&dir).unwrap();
     let start = std::time::Instant::now();
     let problems = refs::check(&p, false);
-    assert!(problems.is_empty(), "{:?}", &problems[..problems.len().min(3)]);
+    assert!(
+        problems.is_empty(),
+        "{:?}",
+        &problems[..problems.len().min(3)]
+    );
     assert!(start.elapsed().as_secs() < 30, "{:?}", start.elapsed());
     let m = mag::read(&dir.join("l/c199/layout/c199.mag")).unwrap();
     assert_eq!(m.uses.len(), 20);
@@ -247,7 +318,10 @@ fn refactor_moves_copies_and_renames_magic_cells() {
     let meta = Meta::read(&sidecar_path(&chip)).unwrap();
     assert_eq!(meta.references["buf"].library, "top");
     let own = dir.join("deep/er/libs/top/buf/layout/buf.mag");
-    assert_eq!(Meta::read(&sidecar_path(&own)).unwrap().label(), "top/buf/layout");
+    assert_eq!(
+        Meta::read(&sidecar_path(&own)).unwrap().label(),
+        "top/buf/layout"
+    );
     let r = refs::resolve_file(&p, &chip).unwrap();
     assert!(matches!(&r[0].target, Target::Project(v) if v.label() == "top/buf/layout"));
 
@@ -270,7 +344,11 @@ fn refactor_moves_copies_and_renames_magic_cells() {
         "{text}"
     );
     let p = Project::load(&dir).unwrap();
-    assert!(refs::check(&p, false).is_empty(), "{:?}", refs::check(&p, false));
+    assert!(
+        refs::check(&p, false).is_empty(),
+        "{:?}",
+        refs::check(&p, false)
+    );
 
     // a file open with unsaved changes blocks the rename
     let mut options = Options::default();

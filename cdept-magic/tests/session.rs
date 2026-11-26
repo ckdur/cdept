@@ -109,7 +109,9 @@ fn magic_draws_edits_and_survives_a_kill() {
     let file = tmp.path().join("logic/top/layout/top.mag");
     let session = open(&project, &file);
     session.resize(400, 300);
-    wait_for("running", 60, || (session.status() == Status::Running).then_some(()));
+    wait_for("running", 60, || {
+        (session.status() == Status::Running).then_some(())
+    });
     assert_eq!(tcl(&session, "tech name").unwrap(), "sky130A");
     assert_eq!(tcl(&session, "cellname list self").unwrap(), "top");
     // The placed cell came from the other cell's folder through the relative path.
@@ -132,12 +134,36 @@ fn magic_draws_edits_and_survives_a_kill() {
     frame_pixels(&session, 320, 200);
 
     // Input: the `b` key macro is `box`, a left click moves the box corner there.
-    session.input(Input::Motion { x: 100, y: 100, state: 0 });
-    session.input(Input::ButtonPress { button: button::LEFT, x: 100, y: 100, state: 0 });
-    session.input(Input::ButtonRelease { button: button::LEFT, x: 100, y: 100, state: 0 });
+    session.input(Input::Motion {
+        x: 100,
+        y: 100,
+        state: 0,
+    });
+    session.input(Input::ButtonPress {
+        button: button::LEFT,
+        x: 100,
+        y: 100,
+        state: 0,
+    });
+    session.input(Input::ButtonRelease {
+        button: button::LEFT,
+        x: 100,
+        y: 100,
+        state: 0,
+    });
     let box1 = tcl(&session, "box values").unwrap();
-    session.input(Input::ButtonPress { button: button::RIGHT, x: 200, y: 50, state: 0 });
-    session.input(Input::ButtonRelease { button: button::RIGHT, x: 200, y: 50, state: 0 });
+    session.input(Input::ButtonPress {
+        button: button::RIGHT,
+        x: 200,
+        y: 50,
+        state: 0,
+    });
+    session.input(Input::ButtonRelease {
+        button: button::RIGHT,
+        x: 200,
+        y: 50,
+        state: 0,
+    });
     let box2 = tcl(&session, "box values").unwrap();
     assert_ne!(box1, box2, "the right button should move the box corner");
 
@@ -154,7 +180,11 @@ fn magic_draws_edits_and_survives_a_kill() {
         (session.epoch() > epoch && session.status() == Status::Running).then_some(())
     });
     assert_ne!(helper_pid(&session), pid);
-    assert_eq!(std::fs::read(&file).unwrap(), before, "a kill must not touch the file");
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        before,
+        "a kill must not touch the file"
+    );
     assert_eq!(tcl(&session, "cellname list self").unwrap(), "top");
     assert_eq!(tcl(&session, "cdept::magic::modified").unwrap(), "");
 

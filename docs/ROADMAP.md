@@ -177,9 +177,13 @@ Original to-do (kept for the record):
 - **Milestone:** create a project for sg13g2 or sky130 in 3 clicks. All tools open with the
   correct tech.
 
-### Phase 3: Tool Hub & IPC (~110 h) ← highest technical risk
+### Phase 3: Tool Hub & IPC (~110 h) — done 2026-11-27 (open items in NOTES.md)
 - Process supervisor: launch, track, restart, collect logs per tool, one instance per tool
-  reused across cells.
+  reused across cells. *Done:* the job queue for batch runs ([JOBS.md](JOBS.md)); the
+  embedded helpers restart after a crash (three tries, then a Restart button); tool
+  windows are supervised by `libcdept::launch` (a log per window in
+  `<project>/.cdept/logs/`, at most 8 per tool, a file already open is not opened again,
+  Stop/Restart in the Tools tab) ([tools.md](tools.md)).
 - **xschem:** embedded (decided 2026-11-17, working since 2026-11-18). xschem's C code
   is built from a submodule into a GPL helper process, `cdept-xschem`, with stand-ins
   for Xlib and Tk; its editor, menus and dialogs show in a CDePT tab, and the same
@@ -197,20 +201,36 @@ Original to-do (kept for the record):
   cross-probing, nets (opens, shorts, flylines, net probing) ([LINKING.md](LINKING.md)).
 - *Done 2026-11-23:* process supervisor/job queue ([JOBS.md](JOBS.md)); Magic batch ([MAGIC.md](MAGIC.md));
   in-process libngspice ([NGSPICE.md](NGSPICE.md)); Xyce, netgen, yosys, OpenROAD ([BATCH.md](BATCH.md)).
-  Not done: VACASK, Qucs-S, Magic GUI socket server, supervisor restart/limits.
-- **Magic:** `magic -dnull -noconsole` with Tcl over a pipe for batch (ext, LEF, DRC). For the
-  GUI, source a Tcl socket-server script.
+- **Magic:** embedded (2026-11-27) instead of the socket-server window planned here.
+  A GPL helper, `cdept-magic`, loads the installed Magic's `tclmagic.so` (nothing is
+  compiled or patched) with a Tk package and an X display of its own (cairo surfaces);
+  Magic's Cairo driver draws into a CDePT tab; its key macros, box tool and commands
+  work; CDePT adds the tool bar, command line, messages, layer list, DRC panel. `.mag`
+  views reference each other across libraries with relative `use` paths and
+  `<cell>.mag.json` sidecars (the `cdept-layout` schema), kept right on rename/copy/move;
+  missing cells are listed. Layout from schematic with the PDK's device generators
+  (`pdk/<PDK>/magic-devices.toml`), check-source, cross-probing of instances, LVS with
+  netgen, LEF, GDS import/export. Batch: `magic -dnull -noconsole` with Tcl on a pipe.
+  Magic's licence is permissive (HPND-UC, not GPL). Plan, results and gaps:
+  [MAGIC.md](MAGIC.md), [howto](howto/magic-layout.md).
 - **ngspice:** in-process via `libngspice` (shared API: `ngSpice_Init`, `ngSpice_Command`,
   callbacks for live vectors). *Done:* hand-written bindings loaded with dlopen, and the
   testbench backend `simulator_backend = "inproc"` with progress and cancel
   ([NGSPICE.md](NGSPICE.md)); cancel of Xyce runs and a Magic time limit ([JOBS.md](JOBS.md)).
 - **KLayout extras:** `klive` (salt package, JSON on port 8082) already reloads a GDS in a
   running KLayout. Use it as the first "open layout" path before our own bridge exists.
-  The productivity suite and xsection are detected as salt packages too.
+  The productivity suite and xsection are detected as salt packages too. *Done:* "KLayout
+  window" sends a GDS to a running KLayout through klive before starting one
+  (`libcdept::klayout::klive`).
 - **Xyce, VACASK, Qucs-S, netgen, yosys, OpenROAD:** batch adapters (command and parse output).
 - **Python tools** (KLayout pip module, gdsfactory, CACE, pygmid…) run with the detected
-  interpreter. Same supervisor, with the venv/interpreter recorded per project.
+  interpreter. Same supervisor, with the venv/interpreter recorded per project. *Done:*
+  `[python] venv|interpreter` in `cdept.toml`, `python` in `cdept.local.toml`; tools get
+  `CDEPT_PYTHON`, `VIRTUAL_ENV` and the venv first on `PATH`.
 - **Milestone:** double-click a view to open it in the correct tool. Netlist any cell from CDePT.
+  *Done:* a double click opens a view in its tab or its tool's window, and asks when
+  several tabs can show it (a GDS in KLayout or Magic); Open With lists every tool;
+  `cdept open`. Netlisting: Netlist to View in the cell menu and `cdept netlist`.
 
 ### Phase 4: Simulation Environment, "ADE-lite" (~120 h)
 Done 2026-11-23 ([SIMULATION.md](SIMULATION.md)): testbench view, deck, ngspice and Xyce batch runs,
@@ -321,7 +341,8 @@ Still to do: the rest of the list below as written.
   "connectivity check").
 - Built for KLayout with the PDK's decks (2026-11-20): cross-probing of instances and
   nets, generate/update from the schematic, flylines, `check-source` and `check-nets`
-  ([LINKING.md](LINKING.md)); Magic generators not yet.
+  ([LINKING.md](LINKING.md)); Magic generators for Magic layouts (2026-11-27,
+  [MAGIC.md](MAGIC.md)), without nets.
 - **Milestone:** generate a layout skeleton of a 5T-OTA from its schematic, then cross-probe
   a net.
 

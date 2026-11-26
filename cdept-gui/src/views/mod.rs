@@ -219,7 +219,8 @@ impl Views {
             };
             for view in &mut schematics {
                 if let Some(prefix) = link_prefix(view, &file) {
-                    let lifted: Vec<String> = names.iter().map(|n| format!("{prefix}{n}")).collect();
+                    let lifted: Vec<String> =
+                        names.iter().map(|n| format!("{prefix}{n}")).collect();
                     view.probe_in(&lifted);
                 }
             }

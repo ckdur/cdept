@@ -177,7 +177,8 @@ pub fn parse(text: &str) -> MagFile {
             "use" => {
                 in_use = true;
                 if words.len() < 2 {
-                    mag.warnings.push(format!("line {}: 'use' without a cell", n + 1));
+                    mag.warnings
+                        .push(format!("line {}: 'use' without a cell", n + 1));
                     in_use = false;
                     continue;
                 }
@@ -234,7 +235,10 @@ pub fn parse(text: &str) -> MagFile {
                     continue;
                 };
                 let skip = if words[0] == "rlabel" { 5 } else { 10 };
-                let text = rest.get(i + skip..).map(|w| w.join(" ")).unwrap_or_default();
+                let text = rest
+                    .get(i + skip..)
+                    .map(|w| w.join(" "))
+                    .unwrap_or_default();
                 mag.labels.push(Label {
                     layer: layer_name.to_string(),
                     text,
@@ -520,7 +524,10 @@ flabel metal2 s 1 2 3 4 0 FreeSans 400 0 0 0 Y\nport 2 nsew signal output\n\
         assert!(use_dir("$CDEPT_SURELY_UNSET_VAR_X/a", parent, &[]).is_none());
         assert!(use_dir("", parent, &[]).is_none());
         assert_eq!(
-            relative_dir(Path::new("/p/libB/top/layout"), Path::new("/p/libA/inv/layout")),
+            relative_dir(
+                Path::new("/p/libB/top/layout"),
+                Path::new("/p/libA/inv/layout")
+            ),
             PathBuf::from("../../../libA/inv/layout")
         );
         assert_eq!(

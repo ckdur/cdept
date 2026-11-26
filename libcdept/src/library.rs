@@ -332,7 +332,9 @@ impl Library {
     ) -> Result<Vec<layout::follow::Followed>> {
         self.rename_cell(old, new)?;
         let mut followed = layout::follow::cell_renamed(project, &self.name, old, new);
-        followed.extend(crate::magic::refs::cell_renamed(project, &self.name, old, new));
+        followed.extend(crate::magic::refs::cell_renamed(
+            project, &self.name, old, new,
+        ));
         Ok(followed)
     }
 
@@ -400,8 +402,7 @@ impl Library {
             ) else {
                 continue;
             };
-            if let Err(e) = crate::magic::refs::retarget(file, old, &self.name, new, &entry.name)
-            {
+            if let Err(e) = crate::magic::refs::retarget(file, old, &self.name, new, &entry.name) {
                 tracing::warn!("{e:#}");
             }
         }

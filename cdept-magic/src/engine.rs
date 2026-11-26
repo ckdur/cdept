@@ -23,9 +23,17 @@ unsafe extern "C" {
     fn cdm_every(ms: c_int, tick: extern "C" fn());
     fn cdm_set_ui_sink(sink: extern "C" fn(*const c_char));
     fn cdm_display_resize(width: c_int, height: c_int);
-    fn cdm_display_event(kind: c_int, x: c_int, y: c_int, keysym: c_ulong, button: c_int, state: c_int);
+    fn cdm_display_event(
+        kind: c_int,
+        x: c_int,
+        y: c_int,
+        keysym: c_ulong,
+        button: c_int,
+        state: c_int,
+    );
     fn cdm_display_size(width: *mut c_int, height: *mut c_int) -> c_int;
-    fn cdm_display_take_damage(x: *mut c_int, y: *mut c_int, w: *mut c_int, h: *mut c_int) -> c_int;
+    fn cdm_display_take_damage(x: *mut c_int, y: *mut c_int, w: *mut c_int, h: *mut c_int)
+    -> c_int;
     fn cdm_display_read(dst: *mut c_uchar, stride: c_int, x: c_int, y: c_int, w: c_int, h: c_int);
     fn cdm_display_title() -> *const c_char;
 }
@@ -148,7 +156,9 @@ impl Magic {
             list.join(" "),
             q(&magic_tcl)
         );
-        magic.eval(&start).map_err(|e| format!("Magic did not start: {e}"))?;
+        magic
+            .eval(&start)
+            .map_err(|e| format!("Magic did not start: {e}"))?;
         if let Some(rcfile) = &options.rcfile {
             magic
                 .eval(&format!("source {}", q(rcfile)))
@@ -159,7 +169,8 @@ impl Magic {
     }
 
     pub fn eval(&self, script: &str) -> Result<String, String> {
-        let script = CString::new(script).map_err(|_| "the script contains a NUL byte".to_string())?;
+        let script =
+            CString::new(script).map_err(|_| "the script contains a NUL byte".to_string())?;
         // SAFETY: the interpreter exists and we are on its thread.
         let status = unsafe { cdm_eval(script.as_ptr()) };
         let result = self.result();
@@ -296,7 +307,10 @@ pub fn find_magic_tcl_dir(explicit: Option<&Path>) -> Result<PathBuf, String> {
         return if ok(dir) {
             Ok(dir.to_path_buf())
         } else {
-            Err(format!("{}: no magic.tcl and tclmagic.so there", dir.display()))
+            Err(format!(
+                "{}: no magic.tcl and tclmagic.so there",
+                dir.display()
+            ))
         };
     }
     if let Some(dir) = std::env::var_os("CDEPT_MAGIC_TCLDIR").map(PathBuf::from)

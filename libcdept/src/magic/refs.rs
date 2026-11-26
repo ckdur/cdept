@@ -116,10 +116,21 @@ fn path_vars(project: &Project) -> Vec<(String, String)> {
     let mut vars: Vec<(String, String)> = project
         .tool_env()
         .into_iter()
-        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+        .map(|(k, v)| {
+            (
+                k.to_string_lossy().into_owned(),
+                v.to_string_lossy().into_owned(),
+            )
+        })
         .collect();
-    let root = vars.iter().find(|(k, _)| k == "PDK_ROOT").map(|(_, v)| v.clone());
-    let pdk = vars.iter().find(|(k, _)| k == "PDK").map(|(_, v)| v.clone());
+    let root = vars
+        .iter()
+        .find(|(k, _)| k == "PDK_ROOT")
+        .map(|(_, v)| v.clone());
+    let pdk = vars
+        .iter()
+        .find(|(k, _)| k == "PDK")
+        .map(|(_, v)| v.clone());
     if let (Some(root), Some(pdk)) = (root, pdk)
         && !vars.iter().any(|(k, _)| k == "PDKPATH")
     {
@@ -138,8 +149,15 @@ fn view_of_file<'a>(views: &'a [MagView], file: &Path) -> Option<&'a MagView> {
 }
 
 /// The Magic view of `library/cell` (view `view`, else `layout`, else the first).
-fn find_view<'a>(views: &'a [MagView], library: &str, cell: &str, view: Option<&str>) -> Option<&'a MagView> {
-    let mut of_cell = views.iter().filter(|v| v.library == library && v.cell == cell);
+fn find_view<'a>(
+    views: &'a [MagView],
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+) -> Option<&'a MagView> {
+    let mut of_cell = views
+        .iter()
+        .filter(|v| v.library == library && v.cell == cell);
     let all: Vec<&MagView> = of_cell.by_ref().collect();
     view.and_then(|w| all.iter().find(|v| v.view == w).copied())
         .or_else(|| all.iter().find(|v| v.view == "layout").copied())
@@ -148,7 +166,11 @@ fn find_view<'a>(views: &'a [MagView], library: &str, cell: &str, view: Option<&
 
 /// The Magic view whose file is `<name>.mag`, searching the placing file's own library
 /// first.
-fn find_by_name<'a>(views: &'a [MagView], own_library: Option<&str>, name: &str) -> Option<&'a MagView> {
+fn find_by_name<'a>(
+    views: &'a [MagView],
+    own_library: Option<&str>,
+    name: &str,
+) -> Option<&'a MagView> {
     let named = |v: &&MagView| v.file.file_stem().is_some_and(|s| s == name);
     views
         .iter()
@@ -226,7 +248,13 @@ pub fn resolve_file(project: &Project, file: &Path) -> Result<Vec<Resolved>> {
     let mag_file = mag::read(file)?;
     let meta = Meta::read_for(file).ok().flatten();
     let views = mag_views(project);
-    Ok(resolve_with(project, &views, file, &mag_file, meta.as_ref()))
+    Ok(resolve_with(
+        project,
+        &views,
+        file,
+        &mag_file,
+        meta.as_ref(),
+    ))
 }
 
 /// What [`normalize`] did.
@@ -320,7 +348,10 @@ pub fn normalize(project: &Project, file: &Path) -> Result<Normalized> {
             // Keep what the sidecar knew of a missing cell: a cell made again under
             // that name is found again, and the marker keeps its size.
             Target::Missing => {
-                if let Some(old) = old_meta.as_ref().and_then(|m| m.references.get(&r.placed.cell)) {
+                if let Some(old) = old_meta
+                    .as_ref()
+                    .and_then(|m| m.references.get(&r.placed.cell))
+                {
                     refs.insert(r.placed.cell.clone(), old.clone());
                 }
             }
@@ -339,13 +370,7 @@ pub fn normalize(project: &Project, file: &Path) -> Result<Normalized> {
 /// After the view file `file` was copied or moved from `old_file`: relative `use`
 /// paths are written again for the new folder (so they still reach the same cells),
 /// and the sidecar names the view it now is (`library/cell/view`, top `new_cell`).
-pub fn retarget(
-    file: &Path,
-    old_file: &Path,
-    library: &str,
-    cell: &str,
-    view: &str,
-) -> Result<()> {
+pub fn retarget(file: &Path, old_file: &Path, library: &str, cell: &str, view: &str) -> Result<()> {
     let old_dir = old_file.parent().unwrap_or(Path::new(".")).to_path_buf();
     let new_dir = canonical(file.parent().unwrap_or(Path::new(".")));
     mag::rewrite_file(file, |u| {
@@ -442,9 +467,9 @@ fn follow(
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let mut meta =
-                meta.clone()
-                    .unwrap_or_else(|| Meta::new(&v.library, &v.cell, &v.view, &stem));
+            let mut meta = meta
+                .clone()
+                .unwrap_or_else(|| Meta::new(&v.library, &v.cell, &v.view, &stem));
             for (name, t) in &hits {
                 meta.references.remove(name);
                 let cell = new_cell.map_or_else(|| t.cell.clone(), str::to_string);
@@ -466,9 +491,8 @@ fn follow(
             label: v.label(),
             kind: match result {
                 Ok(()) => FollowedKind::Updated {
-                    structure: new_cell.and_then(|n| {
-                        hits.first().map(|(old, _)| (old.clone(), n.to_string()))
-                    }),
+                    structure: new_cell
+                        .and_then(|n| hits.first().map(|(old, _)| (old.clone(), n.to_string()))),
                 },
                 Err(e) => FollowedKind::Failed {
                     error: format!("{e:#}"),
@@ -560,7 +584,12 @@ pub fn library_renamed(
 
 /// The Magic views placing `library/cell` (any view, or only `view`): what a deletion
 /// leaves without its cell. Changes nothing.
-pub fn placed_by(project: &Project, library: &str, cell: &str, view: Option<&str>) -> Vec<Followed> {
+pub fn placed_by(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+) -> Vec<Followed> {
     let views = mag_views(project);
     let mut out = Vec::new();
     for v in &views {
@@ -615,7 +644,10 @@ pub fn check(project: &Project, fix: bool) -> Vec<Problem> {
             match normalize(project, &v.file) {
                 Ok(n) => {
                     if n.paths > 0 {
-                        out.push(problem(format!("fixed: {} use path(s) made relative", n.paths)));
+                        out.push(problem(format!(
+                            "fixed: {} use path(s) made relative",
+                            n.paths
+                        )));
                     }
                     for (inst, cell) in n.missing {
                         out.push(problem(format!("{inst}: cell '{cell}' cannot be found")));

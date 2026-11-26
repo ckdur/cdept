@@ -76,7 +76,9 @@ fn real_generate_update_export_import_and_refs() {
 
     // The schematic changes: one update, made in place; the old device cell goes.
     let sch = dir.join("libs/cells/inv/schematic/inv.sch");
-    let text = fs::read_to_string(&sch).unwrap().replacen("W=1\n", "W=2.5\n", 1);
+    let text = fs::read_to_string(&sch)
+        .unwrap()
+        .replacen("W=1\n", "W=2.5\n", 1);
     fs::write(&sch, text).unwrap();
     let check = flows::generate(&magic, &p, "cells", "inv", None, false, true).unwrap();
     assert_eq!(check.plan.actions.len(), 1);
@@ -86,23 +88,39 @@ fn real_generate_update_export_import_and_refs() {
     assert!(check.plan.in_sync(), "{:?}", check.plan.lines());
     let devices = fs::read_dir(dir.join("libs/cells/inv/layout"))
         .unwrap()
-        .filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with("sky130_fd_pr"))
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("sky130_fd_pr")
+        })
         .count();
     assert_eq!(devices, 2, "the old version of M1 is removed");
     // The sidecar records the link.
-    let meta = libcdept::layout::meta::Meta::read_for(&g.layout).unwrap().unwrap();
+    let meta = libcdept::layout::meta::Meta::read_for(&g.layout)
+        .unwrap()
+        .unwrap();
     assert_eq!(meta.source.unwrap().cell, "inv");
     assert_eq!(meta.instances["M1"].params["w"], "2.5");
 
     // GDS out, and into another library as Magic views with relative paths.
     let gds = dir.join("out/inv.gds");
-    flows::export_gds(&magic, &Source::Mag { file: g.layout.clone() }, &gds).unwrap();
+    flows::export_gds(
+        &magic,
+        &Source::Mag {
+            file: g.layout.clone(),
+        },
+        &gds,
+    )
+    .unwrap();
     assert!(fs::metadata(&gds).unwrap().len() > 1000);
     fs::write(
         dir.join("cdept.toml"),
-        fs::read_to_string(dir.join("cdept.toml"))
-            .unwrap()
-            .replace("[libraries]\n", "[libraries]\nimported = { path = \"libs/imported\", layout = \"cells\" }\n"),
+        fs::read_to_string(dir.join("cdept.toml")).unwrap().replace(
+            "[libraries]\n",
+            "[libraries]\nimported = { path = \"libs/imported\", layout = \"cells\" }\n",
+        ),
     )
     .unwrap();
     fs::create_dir_all(dir.join("libs/imported")).unwrap();
@@ -114,8 +132,16 @@ fn real_generate_update_export_import_and_refs() {
     let p = Project::load(&dir).unwrap();
     let inv = dir.join("libs/imported/inv/layout/inv.mag");
     let r = refs::resolve_file(&p, &inv).unwrap();
-    assert!(r.iter().all(|x| matches!(x.target, refs::Target::Project(_))), "{r:?}");
-    assert!(refs::check(&p, false).is_empty(), "{:?}", refs::check(&p, false));
+    assert!(
+        r.iter()
+            .all(|x| matches!(x.target, refs::Target::Project(_))),
+        "{r:?}"
+    );
+    assert!(
+        refs::check(&p, false).is_empty(),
+        "{:?}",
+        refs::check(&p, false)
+    );
     // Again: the cells are there already.
     let again = flows::import_gds(&magic, &p, &gds, lib, &["inv".into()], false).unwrap();
     assert!(again.cells.is_empty() && !again.skipped.is_empty());
@@ -126,7 +152,9 @@ fn real_lvs_runs_and_reports() {
     let Some((_tmp, dir, _pdk)) = setup() else {
         return;
     };
-    if std::env::var_os("CDEPT_XSCHEM").is_none() || libcdept::batch::netgen::ADAPTER.require().is_err() {
+    if std::env::var_os("CDEPT_XSCHEM").is_none()
+        || libcdept::batch::netgen::ADAPTER.require().is_err()
+    {
         eprintln!("skipped: no xschem helper or netgen");
         return;
     }

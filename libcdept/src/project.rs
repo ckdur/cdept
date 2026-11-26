@@ -839,14 +839,18 @@ impl Project {
         } else if path.is_file() {
             self.python.interpreter = Some(path);
         } else {
-            self.warnings.push(format!("{from}: {} does not exist", path.display()));
+            self.warnings
+                .push(format!("{from}: {} does not exist", path.display()));
         }
     }
 
     /// The Python interpreter for this project: [`PythonSettings`], else the one CDePT
     /// finds ([`crate::tools::python`]).
     pub fn python(&self) -> Option<PathBuf> {
-        self.python.interpreter.clone().or_else(crate::tools::python)
+        self.python
+            .interpreter
+            .clone()
+            .or_else(crate::tools::python)
     }
 
     /// `[sim]`: `timeout` and `openvaf_timeout`, durations like `[magic] timeout`.

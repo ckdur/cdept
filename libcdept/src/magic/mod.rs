@@ -1,7 +1,7 @@
 //! Magic in batch mode (docs/MAGIC.md): extraction to SPICE, DRC, LEF export and GDS
 //! import.
 //!
-//! Magic is GPL, so it only ever runs as a process of its own:
+//! Magic (its licence is permissive, docs/MAGIC.md) runs as a process of its own:
 //! `magic -dnull -noconsole -rcfile <rc>` with a Tcl script on its standard input, in
 //! the PDK environment of the project ([`Project::tool_env`]). The scripts
 //! ([`tcl`]) print `CDEPT:` lines that are read back ([`parse`]); a failed run is an

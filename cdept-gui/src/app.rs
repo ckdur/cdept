@@ -206,7 +206,9 @@ impl CdeptApp {
             .library(&doc.library)?
             .cell(&doc.cell)?
             .entry(&doc.view)?;
-        opens_in_tab(entry).then(|| entry.main_file.clone()).flatten()
+        opens_in_tab(entry)
+            .then(|| entry.main_file.clone())
+            .flatten()
     }
 
     fn start_document(&mut self, ctx: &Context, id: DocId, doc: DocRef) -> bool {
@@ -317,7 +319,9 @@ impl CdeptApp {
         // Several tabs can show it (a GDS in KLayout or Magic), or only tool windows
         // can (a Qucs-S schematic, a netlist): the user's choice for the format, else
         // ask. The windows of the tools that have a tab are in "Open With".
-        let choices = self.view_entry(&selection).map(libcdept::launch::choices_for);
+        let choices = self
+            .view_entry(&selection)
+            .map(libcdept::launch::choices_for);
         let tabs = choices
             .as_ref()
             .map_or(0, |c| c.iter().filter(|c| c.embedded).count());
@@ -438,11 +442,17 @@ impl CdeptApp {
 
     /// Start a tool's window without a file (tool bar, Tools menu).
     fn launch(&mut self, choice: libcdept::launch::Choice) {
-        match self.ctx.launcher.open(self.ctx.project.as_ref(), choice, None) {
+        match self
+            .ctx
+            .launcher
+            .open(self.ctx.project.as_ref(), choice, None)
+        {
             Ok(libcdept::launch::Launched::Started { log, .. }) => {
                 tracing::info!(target: "cdept::tools", "{} started (log {})", choice.label, log.display())
             }
-            Ok(libcdept::launch::Launched::Reused(text)) => tracing::info!(target: "cdept::tools", "{text}"),
+            Ok(libcdept::launch::Launched::Reused(text)) => {
+                tracing::info!(target: "cdept::tools", "{text}")
+            }
             Err(e) => self.ctx.error(format!("{}: {e:#}", choice.label)),
         }
     }

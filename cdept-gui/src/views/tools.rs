@@ -43,42 +43,45 @@ fn processes_ui(ui: &mut Ui, ctx: &mut AppCtx) {
     }
     ui.strong("Tool windows started by CDePT");
     let mut todo: Option<(usize, bool)> = None;
-    Grid::new("tool-windows").striped(true).num_columns(5).show(ui, |ui| {
-        for p in &procs {
-            ui.label(p.tool);
-            ui.label(
-                p.file
-                    .as_ref()
-                    .and_then(|f| f.file_name())
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "(no file)".into()),
-            );
-            match &p.exit {
-                None => ui.label(format!("running ({})", p.pid)),
-                Some(exit) => ui.weak(exit),
-            };
-            if ui
-                .small_button("log")
-                .on_hover_text(p.log.display().to_string())
-                .clicked()
-            {
-                ui.ctx().copy_text(p.log.display().to_string());
-            }
-            ui.horizontal(|ui| {
-                if p.exit.is_none() && ui.small_button("Stop").clicked() {
-                    todo = Some((p.index, false));
-                }
+    Grid::new("tool-windows")
+        .striped(true)
+        .num_columns(5)
+        .show(ui, |ui| {
+            for p in &procs {
+                ui.label(p.tool);
+                ui.label(
+                    p.file
+                        .as_ref()
+                        .and_then(|f| f.file_name())
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "(no file)".into()),
+                );
+                match &p.exit {
+                    None => ui.label(format!("running ({})", p.pid)),
+                    Some(exit) => ui.weak(exit),
+                };
                 if ui
-                    .small_button("Restart")
-                    .on_hover_text("Start it again with the same command")
+                    .small_button("log")
+                    .on_hover_text(p.log.display().to_string())
                     .clicked()
                 {
-                    todo = Some((p.index, true));
+                    ui.ctx().copy_text(p.log.display().to_string());
                 }
-            });
-            ui.end_row();
-        }
-    });
+                ui.horizontal(|ui| {
+                    if p.exit.is_none() && ui.small_button("Stop").clicked() {
+                        todo = Some((p.index, false));
+                    }
+                    if ui
+                        .small_button("Restart")
+                        .on_hover_text("Start it again with the same command")
+                        .clicked()
+                    {
+                        todo = Some((p.index, true));
+                    }
+                });
+                ui.end_row();
+            }
+        });
     if let Some((index, restart)) = todo {
         let result = if restart {
             ctx.launcher.restart(index).map(|_| ())

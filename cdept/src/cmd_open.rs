@@ -68,7 +68,11 @@ pub fn run(args: OpenArgs, project: &Project) -> Result<()> {
     let launcher = Launcher::new();
     match launcher.open(Some(project), choice, entry.main_file.as_deref())? {
         Launched::Started { pid, log } => {
-            println!("{}: started (process {pid}), log {}", choice.label, log.display())
+            println!(
+                "{}: started (process {pid}), log {}",
+                choice.label,
+                log.display()
+            )
         }
         Launched::Reused(text) => println!("{text}"),
     }

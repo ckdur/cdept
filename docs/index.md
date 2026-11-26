@@ -49,6 +49,7 @@ howto/other-simulators
 howto/remote-runs
 howto/view-waveforms
 howto/lvs-drc
+howto/magic-layout
 howto/import-files
 howto/cace
 ```

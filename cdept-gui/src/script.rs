@@ -630,7 +630,10 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
             _ => return Err("usage: open_with <library> <cell> <view> <tool>".into()),
         },
         "expect_open_choice" => Command::ExpectOpenChoice(
-            text()?.trim().parse().map_err(|_| "usage: expect_open_choice <n>".to_string())?,
+            text()?
+                .trim()
+                .parse()
+                .map_err(|_| "usage: expect_open_choice <n>".to_string())?,
         ),
         "magic" => Command::Magic(args.iter().map(|word| word.to_string()).collect()),
         "wave" => Command::Wave(args.iter().map(|word| word.to_string()).collect()),
@@ -1536,7 +1539,9 @@ impl Script {
             Command::ExpectOpenChoice(n) => {
                 let have = app.script_open_choice();
                 if have != Some(n) {
-                    return Err(format!("the Open With question shows {have:?} tools, expected {n}"));
+                    return Err(format!(
+                        "the Open With question shows {have:?} tools, expected {n}"
+                    ));
                 }
                 app.script_close_open_choice();
             }
@@ -1669,11 +1674,14 @@ impl Script {
                 }
             }
             Command::Tcl(script) => {
-                app.script_tcl_view().ok_or("no schematic or Magic layout is open")?;
+                app.script_tcl_view()
+                    .ok_or("no schematic or Magic layout is open")?;
                 self.ask(app, &script, Answer::Log);
             }
             Command::TclSend(script) => {
-                let doc = app.script_tcl_view().ok_or("no schematic or Magic layout is open")?;
+                let doc = app
+                    .script_tcl_view()
+                    .ok_or("no schematic or Magic layout is open")?;
                 doc.tcl(&script);
                 // The script may have changed the selection.
                 if let Some(view) = doc.as_schematic_mut() {
@@ -1681,7 +1689,8 @@ impl Script {
                 }
             }
             Command::TclExpect(expected, script) => {
-                app.script_tcl_view().ok_or("no schematic or Magic layout is open")?;
+                app.script_tcl_view()
+                    .ok_or("no schematic or Magic layout is open")?;
                 self.ask(app, &script, Answer::Expect(expected));
             }
             Command::Menu(labels) => {
@@ -1929,7 +1938,9 @@ impl Script {
             Command::Sim(args) => app.script_sim(&args)?,
             Command::Magic(args) => {
                 let doc = app.script_view().ok_or("no document is open")?;
-                let view = doc.as_magic_mut().ok_or("the active document is not a Magic layout")?;
+                let view = doc
+                    .as_magic_mut()
+                    .ok_or("the active document is not a Magic layout")?;
                 crate::views::magic_script(view, &args)?;
             }
             Command::Wave(args) => crate::uberwave::script(app.script_project(), &args)?,

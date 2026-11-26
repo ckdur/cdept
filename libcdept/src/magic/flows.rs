@@ -151,10 +151,17 @@ pub fn export_gds(magic: &Magic, src: &Source, out: &Path) -> Result<PathBuf> {
             bail!("the layout is GDS already");
         }
     }
-    body += &format!("select top cell\ngds write {}\n", word(&out.to_string_lossy()));
+    body += &format!(
+        "select top cell\ngds write {}\n",
+        word(&out.to_string_lossy())
+    );
     let log = magic.run(&guard(&body), &dir)?;
     if !out.is_file() {
-        bail!("Magic wrote no {}\n{}", out.display(), parse::tail(&log, 25));
+        bail!(
+            "Magic wrote no {}\n{}",
+            out.display(),
+            parse::tail(&log, 25)
+        );
     }
     Ok(out)
 }
@@ -273,8 +280,7 @@ impl WorkDir {
             .join(".cdept")
             .join(format!("import-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir)
-            .wrap_err_with(|| format!("cannot make {}", dir.display()))?;
+        std::fs::create_dir_all(&dir).wrap_err_with(|| format!("cannot make {}", dir.display()))?;
         Ok(WorkDir(dir))
     }
 
@@ -325,8 +331,8 @@ pub fn lvs(magic: &Magic, project: &Project, library: &str, cell: &str) -> Resul
     if lvs.setup.is_none() {
         notes.push("the technology snapshot names no netgen set-up file: devices are compared without the PDK's rules".into());
     }
-    let report = netgen::run(&program, &lvs, &dir, &project.tool_env())
-        .map_err(|e| eyre!("{e:#}"))?;
+    let report =
+        netgen::run(&program, &lvs, &dir, &project.tool_env()).map_err(|e| eyre!("{e:#}"))?;
     Ok(LvsResult {
         layout_netlist: extracted.spice,
         schematic_netlist: sch_out,

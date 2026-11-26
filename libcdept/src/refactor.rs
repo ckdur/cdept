@@ -1371,9 +1371,11 @@ impl Work<'_> {
         let mut details: Vec<String> = Vec::new();
         let new_text = mag::rewrite_uses(&text, |u| {
             if let Some((name, dir, to)) = targets.get(&u.cell) {
-                let path = dir
-                    .as_ref()
-                    .map(|d| mag::relative_dir(&dir_after_c, &canon(d)).to_string_lossy().into_owned());
+                let path = dir.as_ref().map(|d| {
+                    mag::relative_dir(&dir_after_c, &canon(d))
+                        .to_string_lossy()
+                        .into_owned()
+                });
                 if name != &u.cell {
                     details.push(format!("use {} -> {name} ({})", u.cell, to.label()));
                 }
@@ -1386,7 +1388,11 @@ impl Work<'_> {
                 let target = canon(&old_dir.join(&u.path));
                 return Some(mag::UseEdit {
                     cell: None,
-                    path: Some(mag::relative_dir(&dir_after_c, &target).to_string_lossy().into_owned()),
+                    path: Some(
+                        mag::relative_dir(&dir_after_c, &target)
+                            .to_string_lossy()
+                            .into_owned(),
+                    ),
                 });
             }
             None
@@ -1435,7 +1441,11 @@ impl Work<'_> {
         // is (a new one would not be renamed with a moved view); the next save makes it.
         if old_meta.as_ref() != Some(&m) && (old_meta.is_some() || new_file.is_none()) {
             let text = m.to_json()?;
-            self.put(&sidecar, text.into_bytes(), format!("sidecar: this is {}", after.label()));
+            self.put(
+                &sidecar,
+                text.into_bytes(),
+                format!("sidecar: this is {}", after.label()),
+            );
         }
         Ok(())
     }
