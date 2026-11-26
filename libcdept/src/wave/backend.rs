@@ -16,7 +16,8 @@ use std::sync::Mutex;
 use eyre::{Result, eyre};
 use serde_json::{Value, json};
 
-use super::ipc::{Client, Signal, Trace};
+use super::embedded::{CursorValue, Cursors, Marker};
+use super::ipc::{Client, PaneSel, Signal, Trace};
 use crate::Project;
 
 /// Environment variable that chooses the backend: `embedded` or `process`.
@@ -105,15 +106,48 @@ pub trait ViewerOps {
         file: Option<&str>,
         filter: Option<&str>,
     ) -> Result<(Vec<Signal>, bool)>;
-    /// Show signals in a pane (a number or `"new"`); the pane they went to.
-    fn show(&mut self, signals: &[String], pane: Option<Value>) -> Result<Option<u64>>;
+    /// Show signals in a pane; the pane they went to.
+    fn show(&mut self, signals: &[String], pane: PaneSel) -> Result<Option<u64>>;
     fn add_trace(&mut self, trace: &Trace) -> Result<()>;
     fn remove_trace(&mut self, name: &str) -> Result<()>;
     /// Save the window as PNG (absolute path).
     fn screenshot(&mut self, path: &Path) -> Result<()>;
     /// Traces should be thinned before they are sent (a socket carries them as JSON).
     fn wants_decimation(&self) -> bool;
+    /// Place the cursors (`None` leaves one alone).
+    fn set_cursors(&mut self, a: Option<f64>, b: Option<f64>) -> Result<()>;
+    /// The cursors and the values of the plotted traces under them.
+    fn cursors(&mut self) -> Result<Cursors>;
+    /// CDePT's markers (measured instants and points) on the plot.
+    fn add_marker(&mut self, marker: &Marker) -> Result<()>;
+    /// Remove the markers of a group (`None`: all).
+    fn clear_markers(&mut self, group: Option<&str>) -> Result<u32>;
 }
+
+/// The cursors of a `get_cursors` answer (`{a, b, values:{sig:{a,b}}}`).
+fn cursors_of(v: &Value) -> Cursors {
+    let num = |x: Option<&Value>| x.and_then(Value::as_f64).filter(|f| f.is_finite());
+    Cursors {
+        a: num(v.get("a")),
+        b: num(v.get("b")),
+        values: v
+            .get("values")
+            .and_then(Value::as_object)
+            .map(|m| {
+                m.iter()
+                    .map(|(k, x)| CursorValue {
+                        signal: k.clone(),
+                        a: num(x.get("a")),
+                        b: num(x.get("b")),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
+const NO_MARKERS: &str =
+    "markers need the built-in UberWave (the UberWaveViewer process has no markers)";
 
 impl ViewerOps for Client {
     fn open(&mut self, path: &Path, analysis: Option<&str>, tag: Option<&str>) -> Result<()> {
@@ -129,7 +163,7 @@ impl ViewerOps for Client {
     ) -> Result<(Vec<Signal>, bool)> {
         Client::list_signals(self, file, filter)
     }
-    fn show(&mut self, signals: &[String], pane: Option<Value>) -> Result<Option<u64>> {
+    fn show(&mut self, signals: &[String], pane: PaneSel) -> Result<Option<u64>> {
         Client::show(self, signals, pane)
     }
     fn add_trace(&mut self, trace: &Trace) -> Result<()> {
@@ -144,6 +178,18 @@ impl ViewerOps for Client {
     }
     fn wants_decimation(&self) -> bool {
         true
+    }
+    fn set_cursors(&mut self, a: Option<f64>, b: Option<f64>) -> Result<()> {
+        Client::set_cursors(self, a, b)
+    }
+    fn cursors(&mut self) -> Result<Cursors> {
+        Ok(cursors_of(&self.get_cursors()?))
+    }
+    fn add_marker(&mut self, _marker: &Marker) -> Result<()> {
+        Err(eyre!(NO_MARKERS))
+    }
+    fn clear_markers(&mut self, _group: Option<&str>) -> Result<u32> {
+        Err(eyre!(NO_MARKERS))
     }
 }
 
@@ -185,7 +231,7 @@ impl ViewerOps for Connection {
             Connection::Embedded(v) => v.list_signals(file, filter),
         }
     }
-    fn show(&mut self, signals: &[String], pane: Option<Value>) -> Result<Option<u64>> {
+    fn show(&mut self, signals: &[String], pane: PaneSel) -> Result<Option<u64>> {
         match self {
             Connection::Ipc(c) => ViewerOps::show(c, signals, pane),
             Connection::Embedded(v) => v.show(signals, pane),
@@ -211,6 +257,30 @@ impl ViewerOps for Connection {
     }
     fn wants_decimation(&self) -> bool {
         matches!(self, Connection::Ipc(_))
+    }
+    fn set_cursors(&mut self, a: Option<f64>, b: Option<f64>) -> Result<()> {
+        match self {
+            Connection::Ipc(c) => ViewerOps::set_cursors(c, a, b),
+            Connection::Embedded(v) => v.set_cursors(a, b),
+        }
+    }
+    fn cursors(&mut self) -> Result<Cursors> {
+        match self {
+            Connection::Ipc(c) => ViewerOps::cursors(c),
+            Connection::Embedded(v) => v.cursors(),
+        }
+    }
+    fn add_marker(&mut self, marker: &Marker) -> Result<()> {
+        match self {
+            Connection::Ipc(c) => ViewerOps::add_marker(c, marker),
+            Connection::Embedded(v) => v.add_marker(marker),
+        }
+    }
+    fn clear_markers(&mut self, group: Option<&str>) -> Result<u32> {
+        match self {
+            Connection::Ipc(c) => ViewerOps::clear_markers(c, group),
+            Connection::Embedded(v) => v.clear_markers(group),
+        }
     }
 }
 

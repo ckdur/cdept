@@ -1,6 +1,9 @@
 //! The stand-in when UberWave is not built in: same API, nothing runs.
 
-use crate::{Cursors, Error, NOT_BUILT_IN, Options, Pane, Result};
+use crate::{
+    CursorListener, Cursors, Error, FileInfo, Marker, NOT_BUILT_IN, Options, Pane, Result,
+    SignalList, TraceStyle,
+};
 
 /// A viewer window. Never exists in the stub: [`Viewer::start`] fails.
 pub struct Viewer {
@@ -28,10 +31,10 @@ impl Viewer {
     pub fn import(&self, _path: &str, _analysis: Option<&str>, _tag: Option<&str>) -> Result<()> {
         no()
     }
-    pub fn list_files(&self) -> Result<String> {
+    pub fn list_files(&self) -> Result<Vec<FileInfo>> {
         no()
     }
-    pub fn list_signals(&self, _file: Option<&str>, _filter: Option<&str>) -> Result<String> {
+    pub fn list_signals(&self, _file: Option<&str>, _filter: Option<&str>) -> Result<SignalList> {
         no()
     }
     pub fn set_analysis(&self, _name: &str, _file: Option<&str>) -> Result<()> {
@@ -52,6 +55,9 @@ impl Viewer {
     pub fn cursors(&self) -> Result<Cursors> {
         no()
     }
+    pub fn set_cursor_listener(&mut self, _listener: Option<CursorListener>) -> Result<()> {
+        no()
+    }
     pub fn set_range(&self, _x0: f64, _x1: f64) -> Result<()> {
         no()
     }
@@ -69,13 +75,29 @@ impl Viewer {
     ) -> Result<()> {
         no()
     }
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_trace_styled(
+        &self,
+        _name: &str,
+        _x: &[f64],
+        _y: &[f64],
+        _unit: Option<&str>,
+        _x_unit: Option<&str>,
+        _pane: Pane,
+        _style: TraceStyle,
+    ) -> Result<()> {
+        no()
+    }
     pub fn remove_trace(&self, _name: &str) -> Result<()> {
         no()
     }
-    pub fn screenshot(&self, _path: &str) -> Result<()> {
+    pub fn add_marker(&self, _marker: &Marker) -> Result<()> {
         no()
     }
-    pub fn command(&self, _request_json: &str) -> Result<String> {
+    pub fn clear_markers(&self, _group: Option<&str>) -> Result<u32> {
+        no()
+    }
+    pub fn screenshot(&self, _path: &str) -> Result<()> {
         no()
     }
 }

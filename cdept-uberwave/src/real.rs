@@ -1,9 +1,14 @@
 //! The real thing: hand-written declarations of `uberwave_shim.h` and the safe wrapper.
+//! Every call is a plain C call with C values; lists come back as C structs the library
+//! owns, copied into Rust values and freed at once. No JSON anywhere.
 
-use std::ffi::{CStr, CString, c_char, c_double, c_int};
+use std::ffi::{CStr, CString, c_char, c_double, c_int, c_void};
 use std::marker::PhantomData;
 
-use crate::{Cursors, Error, Options, Pane, Result};
+use crate::{
+    CursorListener, CursorValue, Cursors, Error, FileInfo, Marker, Options, Pane, Result,
+    SignalInfo, SignalList, TraceStyle,
+};
 
 #[repr(C)]
 struct UwViewer {
@@ -21,6 +26,79 @@ struct UwOptions {
     platform: *const c_char,
     write_ini: i32,
 }
+
+#[repr(C)]
+struct UwFileInfo {
+    tag: *const c_char,
+    path: *const c_char,
+    analyses: *const *const c_char,
+    n_analyses: usize,
+}
+
+#[repr(C)]
+struct UwFileList {
+    files: *const UwFileInfo,
+    n: usize,
+}
+
+#[repr(C)]
+struct UwSignalInfo {
+    name: *const c_char,
+    file: *const c_char,
+    unit: *const c_char,
+    analysis: *const c_char,
+    complex: i32,
+}
+
+#[repr(C)]
+struct UwSignalList {
+    signals: *const UwSignalInfo,
+    n: usize,
+    truncated: i32,
+}
+
+#[repr(C)]
+struct UwCursorValue {
+    signal: *const c_char,
+    a: c_double,
+    b: c_double,
+}
+
+#[repr(C)]
+struct UwCursorState {
+    a: c_double,
+    b: c_double,
+    values: *const UwCursorValue,
+    n: usize,
+}
+
+#[repr(C)]
+struct UwTrace {
+    struct_size: u32,
+    name: *const c_char,
+    x: *const c_double,
+    y: *const c_double,
+    n: usize,
+    unit: *const c_char,
+    x_unit: *const c_char,
+    pane: i32,
+    x_log: i32,
+    fold_period: c_double,
+    fold_offset: c_double,
+}
+
+#[repr(C)]
+struct UwMarker {
+    struct_size: u32,
+    group: *const c_char,
+    label: *const c_char,
+    x: c_double,
+    y: c_double,
+    pane: i32,
+    rgba: u32,
+}
+
+type UwCursorFn = unsafe extern "C" fn(user: *mut c_void, a: c_double, b: c_double);
 
 unsafe extern "C" {
     fn uw_version() -> *const c_char;
@@ -43,13 +121,15 @@ unsafe extern "C" {
         analysis: *const c_char,
         tag: *const c_char,
     ) -> c_int;
-    fn uw_list_files(viewer: *mut UwViewer, json_out: *mut *mut c_char) -> c_int;
+    fn uw_list_files(viewer: *mut UwViewer, out: *mut *mut UwFileList) -> c_int;
+    fn uw_free_file_list(list: *mut UwFileList);
     fn uw_list_signals(
         viewer: *mut UwViewer,
         file: *const c_char,
         filter: *const c_char,
-        json_out: *mut *mut c_char,
+        out: *mut *mut UwSignalList,
     ) -> c_int;
+    fn uw_free_signal_list(list: *mut UwSignalList);
     fn uw_set_analysis(viewer: *mut UwViewer, name: *const c_char, file: *const c_char) -> c_int;
     fn uw_show(
         viewer: *mut UwViewer,
@@ -61,32 +141,20 @@ unsafe extern "C" {
     fn uw_hide(viewer: *mut UwViewer, signals: *const *const c_char, n: usize) -> c_int;
     fn uw_set_cursors(viewer: *mut UwViewer, a: *const c_double, b: *const c_double) -> c_int;
     fn uw_clear_cursors(viewer: *mut UwViewer) -> c_int;
-    fn uw_get_cursors(
+    fn uw_get_cursors(viewer: *mut UwViewer, out: *mut *mut UwCursorState) -> c_int;
+    fn uw_free_cursor_state(state: *mut UwCursorState);
+    fn uw_set_cursor_callback(
         viewer: *mut UwViewer,
-        a: *mut c_double,
-        b: *mut c_double,
-        values_json: *mut *mut c_char,
+        f: Option<UwCursorFn>,
+        user: *mut c_void,
     ) -> c_int;
     fn uw_set_range(viewer: *mut UwViewer, x0: c_double, x1: c_double) -> c_int;
     fn uw_fit(viewer: *mut UwViewer) -> c_int;
-    fn uw_add_trace(
-        viewer: *mut UwViewer,
-        name: *const c_char,
-        x: *const c_double,
-        y: *const c_double,
-        n: usize,
-        unit: *const c_char,
-        x_unit: *const c_char,
-        pane: c_int,
-    ) -> c_int;
+    fn uw_add_trace_ex(viewer: *mut UwViewer, trace: *const UwTrace) -> c_int;
     fn uw_remove_trace(viewer: *mut UwViewer, name: *const c_char) -> c_int;
+    fn uw_add_marker(viewer: *mut UwViewer, marker: *const UwMarker) -> c_int;
+    fn uw_clear_markers(viewer: *mut UwViewer, group: *const c_char, removed: *mut c_int) -> c_int;
     fn uw_screenshot(viewer: *mut UwViewer, path: *const c_char) -> c_int;
-    fn uw_command(
-        viewer: *mut UwViewer,
-        request_json: *const c_char,
-        reply_out: *mut *mut c_char,
-    ) -> c_int;
-    fn uw_free_string(text: *mut c_char);
 }
 
 pub(crate) fn version() -> String {
@@ -108,17 +176,47 @@ fn ptr(text: &Option<CString>) -> *const c_char {
     text.as_ref().map_or(std::ptr::null(), |c| c.as_ptr())
 }
 
-/// Text the library allocated; freed with `uw_free_string`.
-fn take(text: *mut c_char) -> String {
-    if text.is_null() {
+/// A string of a library-owned struct.
+///
+/// # Safety
+/// `p` is null or a NUL-terminated string that lives while it is read.
+unsafe fn text(p: *const c_char) -> String {
+    if p.is_null() {
         return String::new();
     }
-    // SAFETY: a malloc'ed NUL-terminated string from the shim, freed once.
-    let owned = unsafe { CStr::from_ptr(text) }
-        .to_string_lossy()
-        .into_owned();
-    unsafe { uw_free_string(text) };
-    owned
+    // SAFETY: as documented.
+    unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
+}
+
+/// A slice of a library-owned array (empty for null).
+///
+/// # Safety
+/// `p` is null or points to `n` valid items that live while the slice is used.
+unsafe fn items<'a, T>(p: *const T, n: usize) -> &'a [T] {
+    if p.is_null() || n == 0 {
+        return &[];
+    }
+    // SAFETY: as documented.
+    unsafe { std::slice::from_raw_parts(p, n) }
+}
+
+fn finite(v: f64) -> Option<f64> {
+    v.is_finite().then_some(v)
+}
+
+/// The listener's box, kept alive while the viewer may call it.
+struct ListenerBox(CursorListener);
+
+unsafe extern "C" fn trampoline(user: *mut c_void, a: c_double, b: c_double) {
+    if user.is_null() {
+        return;
+    }
+    // SAFETY: `user` is the ListenerBox the Viewer keeps until the callback is removed;
+    // a panic must not cross into C.
+    let listener = unsafe { &*(user as *const ListenerBox) };
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        (listener.0)(finite(a), finite(b))
+    }));
 }
 
 /// A viewer window running on its own thread in this process. Closed (and the thread
@@ -126,10 +224,12 @@ fn take(text: *mut c_char) -> String {
 /// type is `Send` but not `Sync`.
 pub struct Viewer {
     raw: *mut UwViewer,
+    listener: Option<Box<ListenerBox>>,
     _not_sync: PhantomData<std::cell::Cell<()>>,
 }
 
-// SAFETY: the C API is thread safe (every call is marshalled onto the viewer thread).
+// SAFETY: the C API is thread safe (every call is marshalled onto the viewer thread);
+// the listener is Send + Sync.
 unsafe impl Send for Viewer {}
 
 impl Viewer {
@@ -152,24 +252,19 @@ impl Viewer {
         let raw = unsafe { uw_viewer_start(&raw_options) };
         if raw.is_null() {
             // SAFETY: a NUL-terminated string valid until the next call on this thread.
-            let why = unsafe { CStr::from_ptr(uw_start_error()) }
-                .to_string_lossy()
-                .into_owned();
+            let why = unsafe { text(uw_start_error()) };
             return Err(Error(why));
         }
         Ok(Viewer {
             raw,
+            listener: None,
             _not_sync: PhantomData,
         })
     }
 
     fn fail(&self) -> Error {
         // SAFETY: valid until the next uw_error call on this thread; copied at once.
-        Error(
-            unsafe { CStr::from_ptr(uw_error(self.raw)) }
-                .to_string_lossy()
-                .into_owned(),
-        )
+        Error(unsafe { text(uw_error(self.raw)) })
     }
 
     fn check(&self, code: c_int) -> Result<()> {
@@ -206,22 +301,62 @@ impl Viewer {
         self.check(unsafe { uw_import(self.raw, p.as_ptr(), ptr(&a), ptr(&t)) })
     }
 
-    /// The files of the session as JSON (`[{"tag","path","analyses"}]`).
-    pub fn list_files(&self) -> Result<String> {
-        let mut out: *mut c_char = std::ptr::null_mut();
+    /// The files of the session.
+    pub fn list_files(&self) -> Result<Vec<FileInfo>> {
+        let mut out: *mut UwFileList = std::ptr::null_mut();
         // SAFETY: out is a valid location.
         self.check(unsafe { uw_list_files(self.raw, &mut out) })?;
-        Ok(take(out))
+        if out.is_null() {
+            return Ok(Vec::new());
+        }
+        // SAFETY: the list and everything it points to live until uw_free_file_list.
+        let files = unsafe {
+            items((*out).files, (*out).n)
+                .iter()
+                .map(|f| FileInfo {
+                    tag: text(f.tag),
+                    path: text(f.path),
+                    analyses: items(f.analyses, f.n_analyses)
+                        .iter()
+                        .map(|a| text(*a))
+                        .collect(),
+                })
+                .collect()
+        };
+        // SAFETY: freed once, nothing of it is used afterwards.
+        unsafe { uw_free_file_list(out) };
+        Ok(files)
     }
 
-    /// The signals as JSON (`[{"name","file","unit","complex","analysis"}]`), of the file
-    /// with this tag (`(external)`: the traces added with [`Viewer::add_trace`]) or of all.
-    pub fn list_signals(&self, file: Option<&str>, filter: Option<&str>) -> Result<String> {
+    /// The signals of the file with this tag (`(external)`: the traces added with
+    /// [`Viewer::add_trace`]) or of all, whose name contains `filter` (case-blind).
+    pub fn list_signals(&self, file: Option<&str>, filter: Option<&str>) -> Result<SignalList> {
         let (f, g) = (opt_cstring(file)?, opt_cstring(filter)?);
-        let mut out: *mut c_char = std::ptr::null_mut();
+        let mut out: *mut UwSignalList = std::ptr::null_mut();
         // SAFETY: as above.
         self.check(unsafe { uw_list_signals(self.raw, ptr(&f), ptr(&g), &mut out) })?;
-        Ok(take(out))
+        if out.is_null() {
+            return Ok(SignalList::default());
+        }
+        // SAFETY: the list lives until uw_free_signal_list.
+        let list = unsafe {
+            SignalList {
+                signals: items((*out).signals, (*out).n)
+                    .iter()
+                    .map(|s| SignalInfo {
+                        name: text(s.name),
+                        file: text(s.file),
+                        unit: text(s.unit),
+                        analysis: text(s.analysis),
+                        complex: s.complex != 0,
+                    })
+                    .collect(),
+                truncated: (*out).truncated != 0,
+            }
+        };
+        // SAFETY: freed once.
+        unsafe { uw_free_signal_list(out) };
+        Ok(list)
     }
 
     pub fn set_analysis(&self, name: &str, file: Option<&str>) -> Result<()> {
@@ -260,16 +395,50 @@ impl Viewer {
         self.check(unsafe { uw_clear_cursors(self.raw) })
     }
 
+    /// The cursors and the value of every plotted trace under them.
     pub fn cursors(&self) -> Result<Cursors> {
-        let (mut a, mut b) = (f64::NAN, f64::NAN);
-        let mut values: *mut c_char = std::ptr::null_mut();
-        // SAFETY: valid locations.
-        self.check(unsafe { uw_get_cursors(self.raw, &mut a, &mut b, &mut values) })?;
-        Ok(Cursors {
-            a: a.is_finite().then_some(a),
-            b: b.is_finite().then_some(b),
-            values: take(values),
-        })
+        let mut out: *mut UwCursorState = std::ptr::null_mut();
+        // SAFETY: valid location.
+        self.check(unsafe { uw_get_cursors(self.raw, &mut out) })?;
+        if out.is_null() {
+            return Ok(Cursors::default());
+        }
+        // SAFETY: the state lives until uw_free_cursor_state.
+        let cursors = unsafe {
+            Cursors {
+                a: finite((*out).a),
+                b: finite((*out).b),
+                values: items((*out).values, (*out).n)
+                    .iter()
+                    .map(|v| CursorValue {
+                        signal: text(v.signal),
+                        a: finite(v.a),
+                        b: finite(v.b),
+                    })
+                    .collect(),
+            }
+        };
+        // SAFETY: freed once.
+        unsafe { uw_free_cursor_state(out) };
+        Ok(cursors)
+    }
+
+    /// Call `listener` when a cursor moves (`None`: no listener). The old listener is
+    /// never called after this returns.
+    pub fn set_cursor_listener(&mut self, listener: Option<CursorListener>) -> Result<()> {
+        let new = listener.map(|l| Box::new(ListenerBox(l)));
+        let user = new.as_ref().map_or(std::ptr::null_mut(), |b| {
+            &**b as *const ListenerBox as *mut c_void
+        });
+        let f: Option<UwCursorFn> = new.as_ref().map(|_| trampoline as UwCursorFn);
+        // SAFETY: `user` stays alive in self.listener until it is replaced, which only
+        // happens after the library stopped calling the old one (this call returned).
+        let code = unsafe { uw_set_cursor_callback(self.raw, f, user) };
+        if code != 0 {
+            return Err(self.fail());
+        }
+        self.listener = new;
+        Ok(())
     }
 
     pub fn set_range(&self, x0: f64, x1: f64) -> Result<()> {
@@ -293,6 +462,21 @@ impl Viewer {
         x_unit: Option<&str>,
         pane: Pane,
     ) -> Result<()> {
+        self.add_trace_styled(name, x, y, unit, x_unit, pane, TraceStyle::default())
+    }
+
+    /// [`Viewer::add_trace`] with a log X axis or folded into an eye diagram.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_trace_styled(
+        &self,
+        name: &str,
+        x: &[f64],
+        y: &[f64],
+        unit: Option<&str>,
+        x_unit: Option<&str>,
+        pane: Pane,
+        style: TraceStyle,
+    ) -> Result<()> {
         if x.len() != y.len() {
             return Err(Error(format!(
                 "trace '{name}': {} x values but {} y values",
@@ -301,19 +485,22 @@ impl Viewer {
             )));
         }
         let (n, u, xu) = (cstring(name)?, opt_cstring(unit)?, opt_cstring(x_unit)?);
+        let (fold_period, fold_offset) = style.fold.unwrap_or((0.0, 0.0));
+        let trace = UwTrace {
+            struct_size: size_of::<UwTrace>() as u32,
+            name: n.as_ptr(),
+            x: x.as_ptr(),
+            y: y.as_ptr(),
+            n: x.len(),
+            unit: ptr(&u),
+            x_unit: ptr(&xu),
+            pane: pane.code(),
+            x_log: style.x_log as i32,
+            fold_period,
+            fold_offset,
+        };
         // SAFETY: the slices and strings live through the call; the library copies the data.
-        self.check(unsafe {
-            uw_add_trace(
-                self.raw,
-                n.as_ptr(),
-                x.as_ptr(),
-                y.as_ptr(),
-                x.len(),
-                ptr(&u),
-                ptr(&xu),
-                pane.code(),
-            )
-        })
+        self.check(unsafe { uw_add_trace_ex(self.raw, &trace) })
     }
 
     pub fn remove_trace(&self, name: &str) -> Result<()> {
@@ -322,26 +509,44 @@ impl Viewer {
         self.check(unsafe { uw_remove_trace(self.raw, n.as_ptr()) })
     }
 
+    /// Put a marker on the plot.
+    pub fn add_marker(&self, marker: &Marker) -> Result<()> {
+        let (g, l) = (cstring(&marker.group)?, cstring(&marker.label)?);
+        let raw = UwMarker {
+            struct_size: size_of::<UwMarker>() as u32,
+            group: g.as_ptr(),
+            label: l.as_ptr(),
+            x: marker.x,
+            y: marker.y.unwrap_or(f64::NAN),
+            pane: marker.pane.map_or(-1, |p| p.min(i32::MAX as u32) as i32),
+            rgba: marker.rgba,
+        };
+        // SAFETY: the strings live through the call.
+        self.check(unsafe { uw_add_marker(self.raw, &raw) })
+    }
+
+    /// Remove the markers of a group (`None`: all); how many went.
+    pub fn clear_markers(&self, group: Option<&str>) -> Result<u32> {
+        let g = opt_cstring(group)?;
+        let mut removed: c_int = 0;
+        // SAFETY: as above.
+        self.check(unsafe { uw_clear_markers(self.raw, ptr(&g), &mut removed) })?;
+        Ok(removed.max(0) as u32)
+    }
+
     /// Save the window as a PNG (absolute path).
     pub fn screenshot(&self, path: &str) -> Result<()> {
         let p = cstring(path)?;
         // SAFETY: as above.
         self.check(unsafe { uw_screenshot(self.raw, p.as_ptr()) })
     }
-
-    /// Any protocol command (`{"cmd": ..., ...}` without `id`); the reply object as JSON.
-    pub fn command(&self, request_json: &str) -> Result<String> {
-        let r = cstring(request_json)?;
-        let mut out: *mut c_char = std::ptr::null_mut();
-        // SAFETY: as above.
-        self.check(unsafe { uw_command(self.raw, r.as_ptr(), &mut out) })?;
-        Ok(take(out))
-    }
 }
 
 impl Drop for Viewer {
     fn drop(&mut self) {
-        // SAFETY: closes the window, joins the thread and frees the handle once.
+        // SAFETY: closes the window, joins the thread and frees the handle once; the
+        // listener box outlives every call of it (it is dropped after this).
         unsafe { uw_viewer_destroy(self.raw) };
+        self.listener = None;
     }
 }

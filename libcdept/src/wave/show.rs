@@ -8,10 +8,8 @@
 
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
-
 use super::backend::ViewerOps;
-use super::ipc::Signal;
+use super::ipc::{PaneSel, Signal};
 use super::session::ViewFile;
 use crate::Project;
 
@@ -288,7 +286,7 @@ pub fn apply(
         return done;
     }
     let deadline = Instant::now() + wait;
-    let mut pane: Value = json!("new");
+    let mut pane = PaneSel::New;
     for f in files {
         let Some(signals) = wait_signals(client, &f.tag, deadline) else {
             done.notes.push(format!(
@@ -313,10 +311,10 @@ pub fn apply(
             continue;
         }
         let qualified: Vec<String> = names.iter().map(|n| format!("{}:{n}", f.tag)).collect();
-        match client.show(&qualified, Some(pane.clone())) {
+        match client.show(&qualified, pane) {
             Ok(p) => {
                 if let Some(p) = p {
-                    pane = json!(p);
+                    pane = PaneSel::Index(p.min(u32::MAX as u64) as u32);
                 }
                 done.shown.extend(qualified);
             }

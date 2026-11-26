@@ -425,10 +425,14 @@ pub(crate) fn script(project: Option<&Project>, args: &[String]) -> Result<(), S
         }
         [files, tags @ ..] if files == "embedded_files" && !tags.is_empty() => {
             let viewer = embedded_viewer()?;
-            let json = viewer.list_files_json().map_err(|e| format!("{e:#}"))?;
+            let files = viewer.list_files().map_err(|e| format!("{e:#}"))?;
+            let have: Vec<&str> = files.iter().map(|f| f.tag.as_str()).collect();
             for t in tags {
-                if !json.contains(&format!("\"tag\":\"{t}\"")) {
-                    return Err(format!("the embedded viewer has no file '{t}': {json}"));
+                if !have.contains(&t.as_str()) {
+                    return Err(format!(
+                        "the embedded viewer has no file '{t}' (it has {})",
+                        have.join(", ")
+                    ));
                 }
             }
             Ok(())
@@ -436,14 +440,16 @@ pub(crate) fn script(project: Option<&Project>, args: &[String]) -> Result<(), S
         [signal, file, name @ ..] if signal == "embedded_signal" && !name.is_empty() => {
             let viewer = embedded_viewer()?;
             let name = name.join(" ");
-            let json = viewer
-                .list_signals_json(Some(file))
+            let list = viewer
+                .signals(Some(file), None)
                 .map_err(|e| format!("{e:#}"))?;
-            if json.contains(&format!("\"name\":{}", serde_json::json!(name))) {
+            if list.signals.iter().any(|s| s.name == name) {
                 Ok(())
             } else {
+                let have: Vec<&str> = list.signals.iter().map(|s| s.name.as_str()).collect();
                 Err(format!(
-                    "the embedded viewer has no signal '{name}' in '{file}': {json}"
+                    "the embedded viewer has no signal '{name}' in '{file}' (it has {})",
+                    have.join(", ")
                 ))
             }
         }
