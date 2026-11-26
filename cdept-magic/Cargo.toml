@@ -1,0 +1,28 @@
+[package]
+name = "cdept-magic"
+description = "CDePT helper process: Magic's layout editor drawing into a CDePT tab"
+version.workspace = true
+# The helper loads Magic (HPND-UC licence, permissive) and runs the Tk stand-in of the
+# xschem helper (shim/tcl/faketk.tcl of cdept-xschem, GPL-2.0-or-later), so the program
+# is GPL. The rest of the workspace is MIT and only talks to it over a socket.
+license = "GPL-2.0-or-later"
+categories.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "cdept-magic"
+path = "src/main.rs"
+
+[dependencies]
+libcdept.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[build-dependencies]
+cc = "1"
+pkg-config = "0.3"
