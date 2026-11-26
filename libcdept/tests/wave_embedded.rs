@@ -129,12 +129,15 @@ fn a_family_opens_in_this_process_is_reused_and_takes_calculator_traces() {
     );
 
     let viewer = wave::embedded::running().expect("the window is open");
-    let files = viewer.list_files_json().unwrap();
+    let files = viewer.list_files().unwrap();
     for tag in ["tt_27", "ff_27", "ss_27"] {
-        assert!(files.contains(&format!("\"tag\":\"{tag}\"")), "{files}");
+        assert!(files.iter().any(|f| f.tag == tag), "{files:?}");
     }
-    let ext = viewer.list_signals_json(Some("(external)")).unwrap();
-    assert!(ext.contains("@ tt_27"), "{ext}");
+    let ext = viewer.signals(Some("(external)"), None).unwrap();
+    assert!(
+        ext.signals.iter().any(|s| s.name.contains("@ tt_27") && s.file == "(external)"),
+        "{ext:?}"
+    );
 
     let png = tmp.path().join("shot.png");
     viewer.screenshot(&png).unwrap();
