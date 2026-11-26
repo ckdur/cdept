@@ -282,7 +282,7 @@ impl Library {
                 .into_bytes();
         }
         fs::write(&file, contents).wrap_err_with(|| format!("cannot write {}", file.display()))?;
-        if template == Template::GdsLayout {
+        if matches!(template, Template::GdsLayout | Template::MagicLayout) {
             meta::Meta::new(&self.name, cell, template.view_name(), cell).write_for(&file)?;
         }
         Ok(file)

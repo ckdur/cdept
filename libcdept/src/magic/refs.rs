@@ -67,11 +67,12 @@ pub fn mag_views(project: &Project) -> Vec<MagView> {
     out
 }
 
-/// The folders holding Magic views of the project, each once: Magic's search path
-/// (`addpath`) for cells placed without a usable path.
+/// The folders holding Magic views of the project's own (writable) libraries, each
+/// once: Magic's search path (`addpath`) for cells placed without a usable path. The
+/// PDK's libraries are on the path the PDK's start-up file sets.
 pub fn search_dirs(project: &Project) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
-    for v in mag_views(project) {
+    for v in mag_views(project).into_iter().filter(|v| !v.read_only) {
         if let Some(dir) = v.file.parent()
             && !dirs.iter().any(|d| d == dir)
         {
@@ -180,8 +181,14 @@ fn resolve_with(
                     how: How::Sidecar,
                 };
             }
-            // 2. the path of the use line
-            if let Some(dir) = mag::use_dir(&u.path, parent, &vars) {
+            // 2. the path of the use line (none: the placing file's folder, where Magic
+            //    looks first; generated devices are written there)
+            let dir = if u.path.is_empty() {
+                Some(parent.to_path_buf())
+            } else {
+                mag::use_dir(&u.path, parent, &vars)
+            };
+            if let Some(dir) = dir {
                 let candidate = dir.join(format!("{}.mag", u.cell));
                 if candidate.is_file() {
                     let target = match view_of_file(views, &candidate) {
@@ -591,13 +598,14 @@ pub struct Problem {
     pub text: String,
 }
 
-/// Check every Magic view of the project: unreadable files, cells that cannot be
-/// found, `use` paths that are absolute or not normalized. With `fix`, run
-/// [`normalize`] on each writable view.
+/// Check every Magic view of the project's own (writable) libraries: unreadable
+/// files, cells that cannot be found, `use` paths that are absolute or not normalized.
+/// With `fix`, run [`normalize`] on each. The PDK's (read-only) libraries are not
+/// looked at: they are not the project's to change.
 pub fn check(project: &Project, fix: bool) -> Vec<Problem> {
     let views = mag_views(project);
     let mut out = Vec::new();
-    for v in &views {
+    for v in views.iter().filter(|v| !v.read_only) {
         let problem = |text: String| Problem {
             view: v.label(),
             file: v.file.clone(),

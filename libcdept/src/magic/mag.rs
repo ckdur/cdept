@@ -73,6 +73,9 @@ pub struct MagFile {
     pub has_header: bool,
     /// Names of the layers with geometry.
     pub layers: Vec<String>,
+    /// `string <key> <value>` lines of the `<< properties >>` section (a device made
+    /// by a PDK generator has `gencell`, `library`, `parameters`).
+    pub properties: std::collections::BTreeMap<String, String>,
     /// Problems found while reading (for the user; the file is still used).
     pub warnings: Vec<String>,
 }
@@ -130,6 +133,7 @@ fn ints<const N: usize>(words: &[&str]) -> Option<[i64; N]> {
 pub fn parse(text: &str) -> MagFile {
     let mut mag = MagFile::default();
     let mut in_use = false;
+    let mut in_properties = false;
     let mut dropped_uses = 0usize;
     for (n, raw) in text.lines().enumerate() {
         let line = raw.trim();
@@ -147,6 +151,7 @@ pub fn parse(text: &str) -> MagFile {
         if let Some(rest) = line.strip_prefix("<<") {
             let name = rest.trim_end_matches(">>").trim().to_string();
             in_use = false;
+            in_properties = name == "properties";
             if name == "end" {
                 mag.complete = true;
                 break;
@@ -201,6 +206,15 @@ pub fn parse(text: &str) -> MagFile {
                 in_use = false;
             }
             "array" if in_use => {}
+            "string" if in_properties && words.len() >= 2 && mag.properties.len() < 1000 => {
+                let value = line
+                    .splitn(3, char::is_whitespace)
+                    .nth(2)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                mag.properties.insert(words[1].to_string(), value);
+            }
             "rlabel" | "flabel" => {
                 if mag.labels.len() >= MAX_LABELS {
                     continue;
@@ -417,7 +431,8 @@ box 0 0 100 100\n\
 use sky130_fd_sc_hd__inv_1  sky130_fd_sc_hd__inv_1_0 $PDKPATH/libs.ref/sky130_fd_sc_hd/mag\n\
 timestamp 1752481779\ntransform 1 0 300 0 1 0\nbox -19 -24 157 296\n\
 << labels >>\nrlabel metal1 s 0 0 10 10 0 A\nport 1 nsew signal input\n\
-flabel metal2 s 1 2 3 4 0 FreeSans 400 0 0 0 Y\nport 2 nsew signal output\n<< end >>\n";
+flabel metal2 s 1 2 3 4 0 FreeSans 400 0 0 0 Y\nport 2 nsew signal output\n\
+<< properties >>\nstring gencell sky130_fd_pr__nfet_01v8\nstring parameters w 1 l 0.15 nf 1\n<< end >>\n";
 
     #[test]
     fn a_file_is_read() {
@@ -440,6 +455,8 @@ flabel metal2 s 1 2 3 4 0 FreeSans 400 0 0 0 Y\nport 2 nsew signal output\n<< en
         assert_eq!(ports[1].text, "Y");
         assert_eq!(ports[1].rect, [1, 2, 3, 4]);
         assert!(m.layers.contains(&"metal2".to_string()));
+        assert_eq!(m.properties["gencell"], "sky130_fd_pr__nfet_01v8");
+        assert_eq!(m.properties["parameters"], "w 1 l 0.15 nf 1");
         assert!(m.warnings.is_empty(), "{:?}", m.warnings);
     }
 

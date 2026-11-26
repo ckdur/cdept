@@ -1,0 +1,40 @@
+{
+  "format": "cdept-layout",
+  "version": 2,
+  "library": "cells",
+  "cell": "inv",
+  "view": "layout",
+  "top": "inv",
+  "references": {},
+  "source": {
+    "library": "cells",
+    "cell": "inv",
+    "view": "schematic"
+  },
+  "instances": {
+    "M1": {
+      "symbol": "sky130_fd_pr/nfet_01v8.sym",
+      "kind": "gencell",
+      "library": "sky130",
+      "cell": "sky130_fd_pr__nfet_01v8",
+      "params": {
+        "l": "0.15",
+        "m": "1",
+        "nf": "1",
+        "w": "1"
+      }
+    },
+    "M2": {
+      "symbol": "sky130_fd_pr/pfet_01v8.sym",
+      "kind": "gencell",
+      "library": "sky130",
+      "cell": "sky130_fd_pr__pfet_01v8",
+      "params": {
+        "l": "0.15",
+        "m": "1",
+        "nf": "1",
+        "w": "2"
+      }
+    }
+  }
+}

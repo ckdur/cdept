@@ -1,0 +1,84 @@
+# CDePT project file. Edit it by hand or from the Library Manager.
+format = 1
+name = "sky130-inv"
+technology = "sky130A"
+
+# The PDK: its name ($PDK). The folder PDKs are installed in ($PDK_ROOT) differs per
+# machine: it is `pdk_root` in cdept.local.toml next to this file (not committed), else
+# PDK_ROOT of the environment CDePT is started in. Both are used in the paths below
+# and given to every tool CDePT starts.
+# `cdept init --technology <pdk>` and `cdept tech scan` read the PDK's files and write
+# tech.toml next to this file: tool set-ups, decks, model corners, the PDK's libraries.
+# What is set in this file wins over tech.toml.
+# technology = "ihp-sg13g2"
+
+# Libraries, as  name = "folder"  (relative to this file; $VAR and ~ are expanded).
+# Long form, for reference libraries such as PDK primitives:
+#   sg13g2_pr = { path = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/sg13g2_pr", read_only = true }
+# Optional  layout = "cells"  (<library>/<cell>/<view>/<files>)  or  "flat"
+# (<library>/<cell>.<ext>, one view per file); detected from the folder when left out.
+[libraries]
+cells = { path = "libs/cells", layout = "cells" }
+
+# What a file suffix means in this project, where CDePT's guess is wrong or missing
+# (spice, cdl, verilog, liberty, gds, …; "none": not a design file):
+#   [suffixes]
+#   ".lib" = "spice"
+#   ".net" = "spice"
+
+# Start-up file of the PDK for the embedded xschem (it is read before the libraries
+# above are added to xschem's search path; default: the one tech.toml names):
+#   [xschem]
+#   rc = "$PDK_ROOT/ihp-sg13g2/libs.tech/xschem/xschemrc"
+
+# The embedded KLayout: folders for KLAYOUT_PATH (default: the PDK's libs.tech/klayout),
+# the technology (a name or a .lyt file), the layer properties (.lyp) and the DRC and
+# LVS decks (defaults: what tech.toml names, else found in the KLAYOUT_PATH folders):
+#   [klayout]
+#   path = ["$PDK_ROOT/ihp-sg13g2/libs.tech/klayout"]
+#   tech = "sg13g2"
+#   layer_properties = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/sg13g2.lyp"
+#   drc = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/drc/ihp-sg13g2.drc"
+#   lvs = "$PDK_ROOT/ihp-sg13g2/libs.tech/klayout/tech/lvs/sg13g2.lvs"
+#   devices = "devices.toml"   # schematic symbol -> layout PCell (docs/LINKING.md)
+# How flylines look in this project (on top of each user's own settings):
+#   [klayout.flylines]
+#   color = '#ff40ff'   # also highlight, short
+#   width = 2
+#   line = "dashed"     # solid, dashed, dotted, dash-dotted
+#   opacity = 80        # percent
+#   live = true         # follow the edits
+
+# Magic in batch mode (cdept magic extract|drc|lef): a run that takes longer is stopped
+# (default 15m; "0" is no limit):
+#   [magic]
+#   timeout = "10m"
+
+# Remotes the run points of a testbench can be sent to (docs/howto/remote-runs.md): over
+# ssh, or as SLURM batch jobs, on a folder the remote sees at the same path. A testbench
+# names one with `remote = "name"` in its setup.toml, or `cdept sim run --remote name`:
+#   [jobs]
+#   default = "cluster"        # optional: used when a testbench names none
+#   [jobs.remote.cluster]
+#   kind = "slurm"             # or "ssh"
+#   host = "login1"            # empty: sbatch is local
+#   partition = "short"
+#   time = "00:30:00"
+#   max_jobs = 16
+
+# Simulator runs: a run point that takes longer is stopped and ends as an error (default
+# 30m; "0" is no limit; a testbench's setup.toml `timeout` and `cdept sim run --timeout`
+# come first). `openvaf_timeout` bounds one OpenVAF compilation of the VACASK models
+# (default 20m):
+#   [sim]
+#   timeout = "30m"
+#   openvaf_timeout = "20m"
+
+# Waveforms (cdept wave --calc): a calculator trace with more points than this goes to the
+# viewer as a min/max envelope of half of them (default 200000; 0 never decimates):
+#   [wave]
+#   max_points = 200000
+#
+# Which UberWave: "embedded" (built into this executable) or "process" (the separate
+# UberWaveViewer); default: the built-in one when there is one:
+#   backend = "process"

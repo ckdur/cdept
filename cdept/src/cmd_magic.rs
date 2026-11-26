@@ -1,11 +1,12 @@
-//! `cdept magic extract|drc|lef …`: Magic in batch mode (docs/MAGIC.md).
+//! `cdept magic extract|drc|lef|lvs|link|check-source|refs|import-gds|export-gds …`:
+//! Magic in batch mode and the project's Magic views (docs/MAGIC.md).
 
 use std::time::Duration;
 
 use clap::{Subcommand, ValueEnum};
 use eyre::{Result, WrapErr, eyre};
 use libcdept::Project;
-use libcdept::magic::{self, ExtractOptions, Magic, Parasitics, Source};
+use libcdept::magic::{self, ExtractOptions, Magic, Parasitics, Source, flows};
 
 #[derive(Clone, Copy, ValueEnum)]
 pub enum Pex {
@@ -61,6 +62,61 @@ pub enum MagicCommand {
         #[arg(long, value_parser = parse_timeout)]
         timeout: Option<Duration>,
     },
+    /// LVS of a Magic layout against the cell's xschem schematic (netgen).
+    ///
+    /// Magic extracts, xschem netlists the schematic (the layout's linked schematic,
+    /// else the cell's), netgen compares with the PDK's set-up file. Exit status 1 when
+    /// the netlists do not match.
+    Lvs {
+        library: String,
+        cell: String,
+        #[arg(long, value_parser = parse_timeout)]
+        timeout: Option<Duration>,
+    },
+    /// Generate or update the Magic layout of a cell from its schematic, with the
+    /// PDK's Magic device generators (pdk/<PDK>/magic-devices.toml).
+    ///
+    /// Missing devices are added in a row, changed ones regenerated in place; layout
+    /// instances share the schematic instance names.
+    Link {
+        library: String,
+        cell: String,
+        /// The schematic view (default: the linked one, else `schematic`).
+        #[arg(long)]
+        schematic: Option<String>,
+        /// Also delete layout instances that are not in the schematic.
+        #[arg(long)]
+        remove: bool,
+        #[arg(long, value_parser = parse_timeout)]
+        timeout: Option<Duration>,
+    },
+    /// Compare a Magic layout with its schematic; exit status 1 when out of sync.
+    CheckSource { library: String, cell: String },
+    /// Check the references between the project's Magic views (use lines, sidecars).
+    Refs {
+        /// Make project paths relative and write the sidecars.
+        #[arg(long)]
+        fix: bool,
+    },
+    /// Read a GDS file into a library as Magic views (one cell each).
+    ImportGds {
+        file: std::path::PathBuf,
+        library: String,
+        /// Only these cells (and what they place); default: all.
+        #[arg(long = "cell")]
+        cells: Vec<String>,
+        /// Replace cells the library has already.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Write a Magic layout, with everything it places, as one GDS file.
+    ExportGds {
+        library: String,
+        cell: String,
+        /// The file (default: <project>/magic/<library>/<cell>/<cell>.gds).
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+    },
 }
 
 fn parse_timeout(text: &str) -> Result<Duration, String> {
@@ -70,6 +126,60 @@ fn parse_timeout(text: &str) -> Result<Duration, String> {
 pub fn run(command: MagicCommand, project: &Project) -> Result<()> {
     let mut magic = Magic::for_project(project)?;
     let (library, cell, timeout) = match &command {
+        MagicCommand::Refs { fix } => return refs(project, *fix),
+        MagicCommand::ImportGds {
+            file,
+            library,
+            cells,
+            replace,
+        } => {
+            let lib = project
+                .library(library)
+                .ok_or_else(|| eyre!("no library '{library}'"))?;
+            let done = flows::import_gds(&magic, project, file, lib, cells, *replace)?;
+            for c in &done.cells {
+                println!("{library}/{c}");
+            }
+            for c in &done.skipped {
+                println!("{library}/{c}: the library has it already (--replace to replace it)");
+            }
+            return Ok(());
+        }
+        MagicCommand::ExportGds {
+            library,
+            cell,
+            output,
+        } => {
+            let file = flows::link_layout(project, library, cell)?;
+            let out = output.clone().unwrap_or_else(|| {
+                magic::out_dir(project, library, cell).join(format!("{cell}.gds"))
+            });
+            let written = flows::export_gds(&magic, &Source::Mag { file }, &out)?;
+            println!("{}", written.display());
+            return Ok(());
+        }
+        MagicCommand::CheckSource { library, cell } => {
+            let found = flows::generate(&magic, project, library, cell, None, false, true)?;
+            if found.plan.in_sync() {
+                println!("{library}/{cell}: the layout matches its schematic");
+                return Ok(());
+            }
+            for line in found.plan.lines() {
+                println!("  {line}");
+            }
+            std::process::exit(1);
+        }
+        MagicCommand::Lvs {
+            library,
+            cell,
+            timeout,
+        }
+        | MagicCommand::Link {
+            library,
+            cell,
+            timeout,
+            ..
+        } => (library.clone(), cell.clone(), *timeout),
         MagicCommand::Extract {
             library,
             cell,
@@ -91,6 +201,49 @@ pub fn run(command: MagicCommand, project: &Project) -> Result<()> {
     };
     if let Some(limit) = timeout {
         magic = magic.with_timeout(limit);
+    }
+    match &command {
+        MagicCommand::Lvs { .. } => {
+            let r = flows::lvs(&magic, project, &library, &cell)?;
+            for note in &r.notes {
+                println!("note: {note}");
+            }
+            println!("layout:    {}", r.layout_netlist.display());
+            println!("schematic: {}", r.schematic_netlist.display());
+            if let Some(log) = &r.report.log {
+                println!("log:       {}", log.display());
+            }
+            println!("{library}/{cell}: {}", r.report.result);
+            if !r.report.verdict.clean() {
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+        MagicCommand::Link {
+            schematic, remove, ..
+        } => {
+            let made = flows::generate(
+                &magic,
+                project,
+                &library,
+                &cell,
+                schematic.as_deref(),
+                *remove,
+                false,
+            )?;
+            println!("{}", made.layout.display());
+            if made.plan.actions.is_empty() {
+                println!("  in sync, nothing to do");
+            }
+            for line in flows::plan_summary(&made.plan) {
+                println!("  {line}");
+            }
+            for (name, reason) in &made.plan.problems {
+                println!("  ! {name}: {reason}");
+            }
+            return Ok(());
+        }
+        _ => {}
     }
     let src = Source::of_cell(project, &library, &cell)?;
     let dir = magic::out_dir(project, &library, &cell);
@@ -135,6 +288,12 @@ pub fn run(command: MagicCommand, project: &Project) -> Result<()> {
                 std::process::exit(1);
             }
         }
+        MagicCommand::Lvs { .. }
+        | MagicCommand::Link { .. }
+        | MagicCommand::Refs { .. }
+        | MagicCommand::ImportGds { .. }
+        | MagicCommand::ExportGds { .. }
+        | MagicCommand::CheckSource { .. } => unreachable!("handled above"),
         MagicCommand::Lef { hide, .. } => {
             let l = magic.lef(&src, &dir, hide)?;
             println!("{}", l.file.display());
@@ -143,6 +302,26 @@ pub fn run(command: MagicCommand, project: &Project) -> Result<()> {
                 println!("  {} {w} x {h} um, {} pins", s.name, s.pins.len());
             }
         }
+    }
+    Ok(())
+}
+
+fn refs(project: &Project, fix: bool) -> Result<()> {
+    let problems = magic::refs::check(project, fix);
+    let views = magic::refs::mag_views(project)
+        .iter()
+        .filter(|v| !v.read_only)
+        .count();
+    for p in &problems {
+        println!("{}: {}", p.view, p.text);
+    }
+    let bad = problems
+        .iter()
+        .filter(|p| !p.text.starts_with("fixed:"))
+        .count();
+    println!("{views} Magic view(s), {bad} problem(s)");
+    if bad > 0 {
+        std::process::exit(1);
     }
     Ok(())
 }

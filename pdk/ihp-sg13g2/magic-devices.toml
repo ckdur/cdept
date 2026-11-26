@@ -1,0 +1,61 @@
+# CDePT device map for Magic in IHP SG13G2 (docs/MAGIC.md, "Layout from schematic"):
+# which device generator of the PDK's Magic set-up (ihp-sg13g2-*.tcl, `magic::gencell
+# sg13g2::<device>`) an xschem symbol of sg13g2_pr becomes. Same format as the KLayout
+# map (docs/LINKING.md §3). The xschem symbols give w and l with a unit ("1.0u"); the
+# generators take µm without one: `@{w|um}`.
+format = "cdept-devices"
+version = 1
+
+[[device]]
+symbol = "sg13g2_pr/sg13_lv_nmos.sym"
+library = "sg13g2"
+cell = "sg13_lv_nmos"
+params = { w = "@{w|um}", l = "@{l|um}", ng = "@ng", m = "@m" }
+
+[[device]]
+symbol = "sg13g2_pr/sg13_lv_pmos.sym"
+library = "sg13g2"
+cell = "sg13_lv_pmos"
+params = { w = "@{w|um}", l = "@{l|um}", ng = "@ng", m = "@m" }
+
+[[device]]
+symbol = "sg13g2_pr/sg13_hv_nmos.sym"
+library = "sg13g2"
+cell = "sg13_hv_nmos"
+params = { w = "@{w|um}", l = "@{l|um}", ng = "@ng", m = "@m" }
+
+[[device]]
+symbol = "sg13g2_pr/sg13_hv_pmos.sym"
+library = "sg13g2"
+cell = "sg13_hv_pmos"
+params = { w = "@{w|um}", l = "@{l|um}", ng = "@ng", m = "@m" }
+
+[[device]]
+symbol = "sg13g2_pr/rsil.sym"
+library = "sg13g2"
+cell = "rsil"
+params = { w = "@{w|um}", l = "@{l|um}" }
+
+[[device]]
+symbol = "sg13g2_pr/rppd.sym"
+library = "sg13g2"
+cell = "rppd"
+params = { w = "@{w|um}", l = "@{l|um}" }
+
+[[device]]
+symbol = "sg13g2_pr/rhigh.sym"
+library = "sg13g2"
+cell = "rhigh"
+params = { w = "@{w|um}", l = "@{l|um}" }
+
+[[device]]
+symbol = "sg13g2_pr/cap_cmim.sym"
+library = "sg13g2"
+cell = "cap_cmim"
+params = { w = "@{w|um}", l = "@{l|um}" }
+
+[[device]]
+symbol = "sg13g2_pr/cap_rfcmim.sym"
+library = "sg13g2"
+cell = "cap_rfcmim"
+params = { w = "@{w|um}", l = "@{l|um}" }
