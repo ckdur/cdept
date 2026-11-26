@@ -408,7 +408,26 @@ pub fn send(
     if traces.is_empty() && markers.is_empty() {
         return sent;
     }
-    let files: Vec<ViewFile> = points.iter().map(ViewFile::from).collect();
+    // A point whose raw file cannot be read (cut to nothing, noise) is left out of the
+    // viewer's session: the others still open and get their traces.
+    let mut files: Vec<ViewFile> = vec![];
+    for p in points {
+        match RawFile::open(&p.raw) {
+            Ok(_) => files.push(ViewFile::from(p)),
+            Err(e) => {
+                let why = format!("{e:#}");
+                sent.notes.push(format!(
+                    "{} left out of the viewer: {}",
+                    p.point,
+                    why.lines().next().unwrap_or("")
+                ));
+            }
+        }
+    }
+    if files.is_empty() {
+        sent.problem = Some("no run point has a raw file the viewer can open".into());
+        return sent;
+    }
     let opened = match open_files(
         Some(project),
         &run_key(library, cell, view),

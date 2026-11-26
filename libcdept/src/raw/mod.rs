@@ -452,7 +452,19 @@ fn parse_plot(data: &[u8], mut pos: usize) -> Result<(Plot, usize)> {
                 if !seen_header && key.is_empty() {
                     continue;
                 }
-                bail!("unexpected header line '{line}'");
+                // binary noise must not end up in a message as it is
+                let shown: String = line
+                    .chars()
+                    .take(60)
+                    .map(|c| {
+                        if c.is_control() || c == '\u{fffd}' {
+                            '?'
+                        } else {
+                            c
+                        }
+                    })
+                    .collect();
+                bail!("unexpected header line '{shown}'");
             }
         }
         seen_header = true;
