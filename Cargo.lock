@@ -342,6 +342,7 @@ dependencies = [
  "eyre",
  "libcdept",
  "serde_json",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]

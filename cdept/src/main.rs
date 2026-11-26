@@ -1269,7 +1269,12 @@ fn main() -> Result<()> {
         Command::Wave(args) => {
             init_tracing(cli.verbose, None);
             let project = project_root(cli.project).and_then(|r| Project::load(&r).ok());
-            cmd_wave::run(args, project.as_ref())
+            let result = cmd_wave::run(args, project.as_ref());
+            // A viewer window still open after an error (a file it could not read): close
+            // it and join its thread before the process ends, or the exit races the
+            // viewer's thread (seen as a segfault at exit).
+            libcdept::wave::embedded::close();
+            result
         }
         Command::Vacask(command) => {
             init_tracing(cli.verbose, None);
