@@ -130,9 +130,9 @@ proc cdept::magic::save {{all 0}} {
   set written {}
   foreach c [modified] {
     set f {}
-    catch {set f [cellname filepath $c]}
-    if {$all || $f eq {} || $f eq "(UNNAMED)" || [cdept::magic::is_own $f]} {
-      save $c
+    catch {set f [file dirname [magic::cellname list filepath $c]]}
+    if {$all || $f eq {} || [string match *UNNAMED* $f] || [is_own $f]} {
+      magic::save $c
       lappend written $c
     }
   }

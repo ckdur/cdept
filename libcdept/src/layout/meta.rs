@@ -364,11 +364,14 @@ pub fn sidecar_path(layout_file: &Path) -> PathBuf {
 }
 
 /// True for a file name that is a sidecar of a layout file (`*.gds.json`,
-/// `*.gds.gz.json`, `*.oas.json`, …), which the library scanner must skip.
+/// `*.gds.gz.json`, `*.oas.json`, Magic's `*.mag.json`, …), which the library scanner
+/// must skip.
 pub fn is_sidecar_name(name: &str) -> bool {
     name.strip_suffix(".json")
         .and_then(crate::Format::split_name)
-        .is_some_and(|(_, format)| crate::Format::tool(format) == Some("KLayout"))
+        .is_some_and(|(_, format)| {
+            matches!(crate::Format::tool(format), Some("KLayout") | Some("Magic"))
+        })
 }
 
 #[cfg(test)]
@@ -394,6 +397,7 @@ mod tests {
         assert!(is_sidecar_name("inv.gds.json"));
         assert!(is_sidecar_name("inv.gds.gz.json"));
         assert!(is_sidecar_name("inv.oas.json"));
+        assert!(is_sidecar_name("inv.mag.json"));
         assert!(!is_sidecar_name("inv.json"));
         assert!(!is_sidecar_name("inv.gds"));
         assert!(!is_sidecar_name("setup.json"));

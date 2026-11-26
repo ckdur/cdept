@@ -254,6 +254,7 @@ impl Helper {
     }
 
     fn handle(&self, request: Request) {
+        trace(&format!("request {request:?}"));
         match request {
             Request::Tcl { id, script } => {
                 let (ok, value) = match self.magic.eval(&script) {
@@ -373,6 +374,17 @@ impl Helper {
                 let start: String = json.chars().take(200).collect();
                 eprintln!("cdept-magic: bad widget update ({error}): {start}");
             }
+        }
+    }
+}
+
+/// With `$CDEPT_MAGIC_LOG` set: a line about each request in that file (debugging).
+fn trace(text: &str) {
+    if let Some(file) = std::env::var_os("CDEPT_MAGIC_LOG") {
+        use std::io::Write as _;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
+            let short: String = text.chars().take(300).collect();
+            let _ = writeln!(f, "{short}");
         }
     }
 }

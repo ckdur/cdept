@@ -7,7 +7,10 @@
 //! ([`tcl`]) print `CDEPT:` lines that are read back ([`parse`]); a failed run is an
 //! error that carries the tail of Magic's output.
 
+pub mod embed;
+pub mod mag;
 pub mod parse;
+pub mod refs;
 pub mod tcl;
 
 use std::ffi::OsString;
