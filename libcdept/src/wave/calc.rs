@@ -34,12 +34,23 @@ pub enum Evaluated {
 pub struct PointOutcome {
     pub point: String,
     pub result: std::result::Result<Evaluated, String>,
+    /// Where the expression measured (crossings, edges, extremes): markers in the viewer.
+    pub marks: Vec<calc::Mark>,
 }
 
 /// Evaluate `expr` on a point's raw file. The environment has the point's `corner`,
 /// `temp`, `seed`, `run` and swept variables when its `result.json` is next to the
 /// raw file. `plot` limits the search to one analysis (as `cdept calc --plot`).
 pub fn evaluate_raw(raw_file: &Path, expr: &str, plot: Option<&str>) -> Result<Value> {
+    evaluate_raw_marked(raw_file, expr, plot).map(|(v, _)| v)
+}
+
+/// [`evaluate_raw`] and the places it measured at.
+pub fn evaluate_raw_marked(
+    raw_file: &Path,
+    expr: &str,
+    plot: Option<&str>,
+) -> Result<(Value, Vec<calc::Mark>)> {
     let raw = RawFile::open(raw_file)?;
     let mut env = Env::new(&raw);
     if let Some(p) = plot {
@@ -65,14 +76,15 @@ pub fn evaluate_raw(raw_file: &Path, expr: &str, plot: Option<&str>) -> Result<V
         }
     }
     match calc::evaluate(expr, &env) {
-        Ok(v) => Ok(v),
+        Ok(v) => Ok((v, env.take_marks())),
         Err(first) => {
             // `v(out)` for `v("out")`: tried only when the expression as written failed,
             // so what is valid keeps its meaning (a bare name there is a variable).
-            if let Some(quoted) = quote_bare_nodes(expr)
-                && let Ok(v) = calc::evaluate(&quoted, &env)
-            {
-                return Ok(v);
+            if let Some(quoted) = quote_bare_nodes(expr) {
+                env.take_marks();
+                if let Ok(v) = calc::evaluate(&quoted, &env) {
+                    return Ok((v, env.take_marks()));
+                }
             }
             let mut text = first.render(expr);
             if text.contains("unknown name") && expr.contains('(') {
@@ -202,11 +214,17 @@ pub fn evaluate_points(
     let single = points.len() == 1;
     points
         .iter()
-        .map(|p| PointOutcome {
-            point: p.point.clone(),
-            result: evaluate_raw(&p.raw, expr, plot)
-                .map(|v| to_evaluated(&v, &trace_name(expr, name, &p.point, single)))
-                .map_err(|e| format!("{e:#}")),
+        .map(|p| match evaluate_raw_marked(&p.raw, expr, plot) {
+            Ok((v, marks)) => PointOutcome {
+                point: p.point.clone(),
+                result: Ok(to_evaluated(&v, &trace_name(expr, name, &p.point, single))),
+                marks,
+            },
+            Err(e) => PointOutcome {
+                point: p.point.clone(),
+                result: Err(format!("{e:#}")),
+                marks: vec![],
+            },
         })
         .collect()
 }
@@ -222,6 +240,8 @@ pub struct Request {
     /// Traces with more points are decimated: `None` the project's `[wave] max_points`
     /// (default [`decimate::DEFAULT_MAX_POINTS`]), `Some(0)` never.
     pub max_points: Option<usize>,
+    /// Put markers where scalar results were measured (embedded UberWave only).
+    pub markers: bool,
 }
 
 /// What [`send`] did.
@@ -286,7 +306,17 @@ pub fn send(
         })
         .flatten()
         .collect();
-    if traces.is_empty() {
+    // Markers go to the built-in viewer only, and start no viewer by themselves.
+    let embedded = matches!(
+        super::backend::choose(Some(project)),
+        Ok(super::backend::Backend::Embedded)
+    );
+    let markers = if embedded && (!traces.is_empty() || super::embedded::running().is_some()) {
+        markers_of(&sent.outcomes, expr, name, req.markers)
+    } else {
+        vec![]
+    };
+    if traces.is_empty() && markers.is_empty() {
         return sent;
     }
     let files: Vec<ViewFile> = points.iter().map(ViewFile::from).collect();
@@ -337,7 +367,59 @@ pub fn send(
         }
     }
     sent.pushed = pushed;
+    if !markers.is_empty() {
+        let _ = client.clear_markers(Some(MARKER_GROUP));
+        for m in &markers {
+            if let Err(e) = client.add_marker(m) {
+                sent.notes.push(format!("markers: {e:#}"));
+                break;
+            }
+        }
+    }
     sent
+}
+
+/// The group of the calculator's markers in the viewer (replaced by each send).
+pub const MARKER_GROUP: &str = "cdept-calc";
+
+/// The markers of the scalar results: where each point's expression measured, labelled
+/// with the name (or expression), the point when there are several, and the value.
+pub fn markers_of(
+    outcomes: &[PointOutcome],
+    expr: &str,
+    name: Option<&str>,
+    wanted: bool,
+) -> Vec<super::embedded::Marker> {
+    if !wanted {
+        return vec![];
+    }
+    let single = outcomes.len() == 1;
+    let mut out = vec![];
+    for o in outcomes {
+        let Ok(Evaluated::Scalar(value)) = &o.result else {
+            continue;
+        };
+        let label = name.unwrap_or(expr.trim());
+        for (i, m) in o.marks.iter().enumerate().take(50) {
+            let mut text = if single {
+                format!("{label} {}", m.what)
+            } else {
+                format!("{label} {} @ {}", m.what, o.point)
+            };
+            if i + 1 == o.marks.len().min(50) {
+                text.push_str(&format!(" = {value}"));
+            }
+            out.push(super::embedded::Marker {
+                group: MARKER_GROUP.into(),
+                label: text,
+                x: m.x,
+                y: m.y,
+                pane: None,
+                rgba: 0,
+            });
+        }
+    }
+    out
 }
 
 /// The trace as it goes to the viewer: itself, or its min/max envelope (name with

@@ -274,6 +274,7 @@ fn calc(
         plot: args.analysis.clone(),
         show: args.show_choice(),
         max_points: args.no_decimate.then_some(0),
+        markers: true,
     };
     let sent = wave::calc::send(project, library, cell, view, chosen, &req);
     let table = sent.table();

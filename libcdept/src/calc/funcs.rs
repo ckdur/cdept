@@ -488,26 +488,36 @@ static FUNCS: &[Func] = &[
         names: &["min"],
         params: &["w", "?b", "?from", "?to"],
         doc: "Smallest value of a waveform (within from..to), or min(a, b) of two numbers.",
-        run: |_, b| {
+        run: |env, b| {
             if let (Value::Num(a), Some(Value::Num(c))) =
                 (b.value("w")?, b.has("b").then(|| b.value("b").unwrap()))
             {
                 return num(a.min(*c));
             }
-            num(measure::min(&b.range()?.apply(b.wave("w")?))?)
+            let w = b.range()?.apply(b.wave("w")?);
+            let v = measure::min(&w)?;
+            if let Ok(x) = measure::argext(&w, false) {
+                env.mark(x, Some(v), "min");
+            }
+            num(v)
         },
     },
     Func {
         names: &["max"],
         params: &["w", "?b", "?from", "?to"],
         doc: "Largest value of a waveform (within from..to), or max(a, b) of two numbers.",
-        run: |_, b| {
+        run: |env, b| {
             if let (Value::Num(a), Some(Value::Num(c))) =
                 (b.value("w")?, b.has("b").then(|| b.value("b").unwrap()))
             {
                 return num(a.max(*c));
             }
-            num(measure::max(&b.range()?.apply(b.wave("w")?))?)
+            let w = b.range()?.apply(b.wave("w")?);
+            let v = measure::max(&w)?;
+            if let Ok(x) = measure::argext(&w, true) {
+                env.mark(x, Some(v), "max");
+            }
+            num(v)
         },
     },
     Func {
@@ -589,8 +599,11 @@ static FUNCS: &[Func] = &[
         names: &["value_at", "at", "interp"],
         params: &["w", "x"],
         doc: "Value at x, linear interpolation; a complex number for a complex waveform.",
-        run: |_, b| {
+        run: |env, b| {
             let c = measure::value_at(b.wave("w")?, b.num("x")?)?;
+            if !b.wave("w")?.y.is_complex() {
+                env.mark(b.num("x")?, Some(c.re), "at");
+            }
             Ok(if b.wave("w")?.y.is_complex() {
                 Value::Complex(c)
             } else {
@@ -647,14 +660,17 @@ static FUNCS: &[Func] = &[
         names: &["cross"],
         params: &["w", "?level", "?edge", "?n", "?from", "?to"],
         doc: "x of the n-th crossing (1 = first, -1 = last) of `level` (default 0); edge rise, fall or either (default).",
-        run: |_, b| {
-            num(measure::cross(
+        run: |env, b| {
+            let level = b.num_or("level", 0.0)?;
+            let x = measure::cross(
                 b.wave("w")?,
-                b.num_or("level", 0.0)?,
+                level,
                 b.edge_or("edge", "either")?,
                 b.int_or("n", 1)?,
                 b.range()?,
-            )?)
+            )?;
+            env.mark(x, Some(level), "cross");
+            num(x)
         },
     },
     Func {
@@ -673,56 +689,78 @@ static FUNCS: &[Func] = &[
             "?to",
         ],
         doc: "Time from the trig_n-th trig_edge crossing of `trig` to the targ_n-th targ_edge crossing of `targ` after it. `level` is the threshold of both unless trig_level/targ_level say otherwise; edges default to rise.",
-        run: |_, b| {
+        run: |env, b| {
             let level = b.opt_num("level")?;
             let pick = |name: &str| -> Result<f64> {
                 b.opt_num(name)?
                     .or(level)
                     .ok_or_else(|| eyre!("delay needs `level` (or trig_level and targ_level)"))
             };
-            num(measure::delay(
+            let (lt, lg) = (pick("trig_level")?, pick("targ_level")?);
+            let (t0, t1) = measure::delay_times(
                 b.wave("trig")?,
                 b.wave("targ")?,
-                pick("trig_level")?,
-                pick("targ_level")?,
+                lt,
+                lg,
                 b.edge_or("trig_edge", "rise")?,
                 b.edge_or("targ_edge", "rise")?,
                 b.int_or("trig_n", 1)?,
                 b.int_or("targ_n", 1)?,
                 b.range()?,
-            )?)
+            )?;
+            env.mark(t0, Some(lt), "trigger");
+            env.mark(t1, Some(lg), "target");
+            num(t1 - t0)
         },
     },
     Func {
         names: &["rise_time", "trise"],
         params: &["w", "?lo", "?hi", "?vlow", "?vhigh", "?n", "?from", "?to"],
         doc: "Time for the n-th rising edge to go from lo to hi (fractions of the swing, default 0.1 and 0.9). The swing is vlow..vhigh, default the waveform's min and max.",
-        run: |_, b| {
-            num(measure::rise_time(
+        run: |env, b| {
+            let e = measure::edge(
                 b.wave("w")?,
+                true,
                 b.num_or("lo", 0.1)?,
                 b.num_or("hi", 0.9)?,
                 b.opt_num("vlow")?,
                 b.opt_num("vhigh")?,
                 b.int_or("n", 1)?,
                 b.range()?,
-            )?)
+            )?;
+            let (first, second) = if true {
+                (e.low, e.high)
+            } else {
+                (e.high, e.low)
+            };
+            env.mark(e.t_low, Some(first), "start");
+            env.mark(e.t_high, Some(second), "end");
+            num(e.t_high - e.t_low)
         },
     },
     Func {
         names: &["fall_time", "tfall"],
         params: &["w", "?lo", "?hi", "?vlow", "?vhigh", "?n", "?from", "?to"],
         doc: "Time for the n-th falling edge to go from hi to lo; arguments as rise_time.",
-        run: |_, b| {
-            num(measure::fall_time(
+        run: |env, b| {
+            let e = measure::edge(
                 b.wave("w")?,
+                false,
                 b.num_or("lo", 0.1)?,
                 b.num_or("hi", 0.9)?,
                 b.opt_num("vlow")?,
                 b.opt_num("vhigh")?,
                 b.int_or("n", 1)?,
                 b.range()?,
-            )?)
+            )?;
+            let (first, second) = if false {
+                (e.low, e.high)
+            } else {
+                (e.high, e.low)
+            };
+            env.mark(e.t_low, Some(first), "start");
+            env.mark(e.t_high, Some(second), "end");
+            num(e.t_high - e.t_low)
         },
     },
     Func {
@@ -775,14 +813,18 @@ static FUNCS: &[Func] = &[
         names: &["settling_time", "settle"],
         params: &["w", "?tol", "?initial", "?final", "?from"],
         doc: "Time after `from` (default the start) until the response stays within tol (fraction of the step, default 0.02) of its final value.",
-        run: |_, b| {
-            num(measure::settling_time(
-                b.wave("w")?,
+        run: |env, b| {
+            let w = b.wave("w")?;
+            let t = measure::settling_time(
+                w,
                 b.num_or(TOLERANCE, 0.02)?,
                 b.opt_num("initial")?,
                 b.opt_num("final")?,
                 b.opt_num("from")?,
-            )?)
+            )?;
+            let t0 = b.opt_num("from")?.unwrap_or(w.x[0]);
+            env.mark(t0 + t, None, "settled");
+            num(t)
         },
     },
     Func {

@@ -80,6 +80,17 @@ impl Value {
     }
 }
 
+/// A place an evaluation measured at: a crossing, an edge, an extreme. The GUI shows
+/// them as markers in the viewer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mark {
+    pub x: f64,
+    /// `None`: an instant (a vertical line); else a point.
+    pub y: Option<f64>,
+    /// What it is: `cross`, `trigger`, `target`, `10%`, `max`, ...
+    pub what: String,
+}
+
 /// What expressions are evaluated against.
 pub struct Env<'a> {
     raw: Option<&'a RawFile>,
@@ -87,6 +98,7 @@ pub struct Env<'a> {
     plot: Option<String>,
     vars: BTreeMap<String, Value>,
     cache: RefCell<HashMap<(usize, String), Waveform>>,
+    marks: RefCell<Vec<Mark>>,
 }
 
 impl<'a> Env<'a> {
@@ -97,6 +109,7 @@ impl<'a> Env<'a> {
             plot: None,
             vars: Self::builtins(),
             cache: RefCell::default(),
+            marks: RefCell::default(),
         }
     }
 
@@ -106,7 +119,25 @@ impl<'a> Env<'a> {
             plot: None,
             vars: Self::builtins(),
             cache: RefCell::default(),
+            marks: RefCell::default(),
         }
+    }
+
+    /// Note a place the evaluation measured at (finite x only; at most 10000).
+    pub fn mark(&self, x: f64, y: Option<f64>, what: &str) {
+        let mut m = self.marks.borrow_mut();
+        if x.is_finite() && m.len() < 10_000 {
+            m.push(Mark {
+                x,
+                y: y.filter(|v| v.is_finite()),
+                what: what.to_string(),
+            });
+        }
+    }
+
+    /// The marks noted since the last call.
+    pub fn take_marks(&self) -> Vec<Mark> {
+        std::mem::take(&mut self.marks.borrow_mut())
     }
 
     fn builtins() -> BTreeMap<String, Value> {
@@ -461,6 +492,20 @@ mod tests {
             assert!(e.msg.contains(needle), "{src}: {}", e.msg);
             assert_eq!(e.span.unwrap().start, at, "{src}");
         }
+    }
+
+    #[test]
+    fn measures_leave_marks() {
+        let raw = rc_raw();
+        let env = Env::new(&raw);
+        evaluate("max(v(\"out\"))", &env).unwrap();
+        let m = env.take_marks();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].what, "max");
+        assert!(m[0].y.is_some());
+        assert!(env.take_marks().is_empty());
+        let _ = evaluate("cross(v(\"out\"), 0.5)", &env);
+        assert!(env.take_marks().iter().all(|m| m.what == "cross"));
     }
 
     /// Hostile expressions: errors, never a panic, a hang or a stack overflow, also on a
