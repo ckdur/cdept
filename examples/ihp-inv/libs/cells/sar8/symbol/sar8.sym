@@ -1,0 +1,22 @@
+v {xschem version=3.4.8RC file_version=1.3}
+K {type=subcircuit
+format="@name @pinlist @symname"
+spectre_format="@name ( @pinlist ) @symname"
+template="name=x1"
+schematic=cells/@symname/schematic/@symname.sch
+}
+T {@symname} -36 -6 0 0 0.3 0.3 {}
+T {@name} 135 -32 0 0 0.2 0.2 {}
+P 4 5 130 -20 -130 -20 -130 20 130 20 130 -20 {}
+B 5 -152.5 -12.5 -147.5 -7.5 {name=in dir=in}
+L 4 -150 -10 -130 -10 {}
+T {in} -125 -14 0 0 0.2 0.2 {}
+B 5 147.5 -12.5 152.5 -7.5 {name=code dir=out}
+L 4 130 -10 150 -10 {}
+T {code} 125 -14 0 1 0.2 0.2 {}
+B 5 -152.5 7.5 -147.5 12.5 {name=ref dir=in}
+L 4 -150 10 -130 10 {}
+T {ref} -125 6 0 0 0.2 0.2 {}
+B 5 147.5 7.5 152.5 12.5 {name=vss dir=inout}
+L 7 130 10 150 10 {}
+T {vss} 125 6 0 1 0.2 0.2 {}

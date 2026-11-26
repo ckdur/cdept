@@ -11,7 +11,7 @@ use eyre::{Result, eyre};
 
 use super::backend::ViewerOps;
 use super::decimate;
-use super::ipc::Trace;
+use super::ipc::{PaneSel, Trace};
 use super::session::{Mode, ViewFile, open_files, run_key};
 use super::show::{Show, ShowRequest};
 use super::{PointRaw, analyses};
@@ -51,8 +51,21 @@ pub fn evaluate_raw_marked(
     expr: &str,
     plot: Option<&str>,
 ) -> Result<(Value, Vec<calc::Mark>)> {
+    evaluate_raw_with(raw_file, expr, plot, &[])
+}
+
+/// [`evaluate_raw_marked`] with more names (`cursor_a`, `cursor_b`, ...).
+pub fn evaluate_raw_with(
+    raw_file: &Path,
+    expr: &str,
+    plot: Option<&str>,
+    extra: &[(String, f64)],
+) -> Result<(Value, Vec<calc::Mark>)> {
     let raw = RawFile::open(raw_file)?;
     let mut env = Env::new(&raw);
+    for (k, v) in extra {
+        env.set(k, Value::Num(*v));
+    }
     if let Some(p) = plot {
         env = env.with_plot(p);
     }
@@ -151,7 +164,10 @@ pub fn to_evaluated(value: &Value, name: &str) -> Evaluated {
 
 /// The raw file names a vector's kind (`time`, `voltage`), the viewer wants a unit.
 fn si_unit(kind: &str) -> Option<String> {
-    let u = match kind.to_lowercase().as_str() {
+    let lower = kind.to_lowercase();
+    // ngspice writes `frequency grid=3`, `time grid=..`: the first word is the kind
+    let first = lower.split_whitespace().next().unwrap_or("");
+    let u = match first {
         "" => return None,
         "time" => "s",
         "voltage" => "V",
@@ -211,10 +227,21 @@ pub fn evaluate_points(
     name: Option<&str>,
     plot: Option<&str>,
 ) -> Vec<PointOutcome> {
+    evaluate_points_with(points, expr, name, plot, &[])
+}
+
+/// [`evaluate_points`] with more names for the expression.
+pub fn evaluate_points_with(
+    points: &[PointRaw],
+    expr: &str,
+    name: Option<&str>,
+    plot: Option<&str>,
+    extra: &[(String, f64)],
+) -> Vec<PointOutcome> {
     let single = points.len() == 1;
     points
         .iter()
-        .map(|p| match evaluate_raw_marked(&p.raw, expr, plot) {
+        .map(|p| match evaluate_raw_with(&p.raw, expr, plot, extra) {
             Ok((v, marks)) => PointOutcome {
                 point: p.point.clone(),
                 result: Ok(to_evaluated(&v, &trace_name(expr, name, &p.point, single))),
@@ -242,6 +269,68 @@ pub struct Request {
     pub max_points: Option<usize>,
     /// Put markers where scalar results were measured (embedded UberWave only).
     pub markers: bool,
+    /// How the traces are laid out in the viewer.
+    pub layout: Layout,
+    /// More names for the expression (`cursor_a`, `cursor_b` from the viewer's cursors).
+    pub extra: Vec<(String, f64)>,
+}
+
+/// How calculator traces are laid out.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum Layout {
+    /// Into the viewer's active pane (a complex result as `(mag dB)` and `(phase)`).
+    #[default]
+    Plain,
+    /// A Bode plot: magnitudes in one new pane, phases in another, both on log X.
+    Bode,
+    /// An eye diagram: every `period` from `offset` on drawn on top of the others, in a
+    /// new pane.
+    Eye { period: f64, offset: f64 },
+}
+
+/// Arrange the traces of a send for `layout`: panes, log X, folding.
+pub fn lay_out(traces: Vec<Trace>, layout: Layout) -> Vec<Trace> {
+    match layout {
+        Layout::Plain => traces,
+        Layout::Bode => {
+            let (mut mags, mut phases): (Vec<Trace>, Vec<Trace>) = traces
+                .into_iter()
+                .partition(|t| !t.name.ends_with(" (phase)"));
+            for (i, t) in mags.iter_mut().enumerate() {
+                t.x_log = true;
+                t.pane = if i == 0 {
+                    PaneSel::New
+                } else {
+                    PaneSel::Default
+                };
+            }
+            for (i, t) in phases.iter_mut().enumerate() {
+                t.x_log = true;
+                t.pane = if i == 0 {
+                    PaneSel::New
+                } else {
+                    PaneSel::Default
+                };
+            }
+            mags.extend(phases);
+            mags
+        }
+        Layout::Eye { period, offset } => traces
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut t)| {
+                t.fold = Some((period, offset));
+                t.pane = if i == 0 {
+                    PaneSel::New
+                } else {
+                    PaneSel::Default
+                };
+                // its own X axis (0..period), not linked to the time axis of other panes
+                t.x_unit = Some(format!("{} (folded)", t.x_unit.as_deref().unwrap_or("s")));
+                t
+            })
+            .collect(),
+    }
 }
 
 /// What [`send`] did.
@@ -288,7 +377,7 @@ pub fn send(
     req: &Request,
 ) -> Sent {
     let (expr, name, plot) = (req.expr.as_str(), req.name.as_deref(), req.plot.as_deref());
-    let outcomes = evaluate_points(points, expr, name, plot);
+    let outcomes = evaluate_points_with(points, expr, name, plot, &req.extra);
     let mut sent = Sent {
         outcomes,
         pushed: vec![],
@@ -349,7 +438,8 @@ pub fn send(
     };
     let limit = req.max_points.unwrap_or(project.wave.max_points);
     let mut pushed = Vec::new();
-    for t in traces {
+    let traces = lay_out(traces.into_iter().cloned().collect(), req.layout);
+    for t in &traces {
         // Only a socket needs thinned traces: the embedded viewer takes the raw slices.
         let t = if client.wants_decimation() {
             decimated(t, limit, &mut sent.notes)

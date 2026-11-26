@@ -50,6 +50,18 @@ pub struct WaveArgs {
     /// digital file without --show opens in Surfer or GTKWave).
     #[arg(long, value_delimiter = ',', conflicts_with = "no_show")]
     show: Vec<String>,
+    /// With --calc: a complex (AC) result as a Bode plot, magnitude and phase in two new
+    /// panes on a log frequency axis.
+    #[arg(long, conflicts_with = "eye")]
+    pub bode: bool,
+    /// With --calc: the waveform result as an eye diagram, every PERIOD (from OFFSET, default
+    /// the start) drawn on top of the others in a new pane: `--eye 1n` or `--eye 1n,250p`.
+    #[arg(long, value_name = "PERIOD[,OFFSET]")]
+    pub eye: Option<String>,
+    /// With --calc: no markers where scalar results were measured (crossings, edges,
+    /// extremes; built-in UberWave only).
+    #[arg(long)]
+    pub no_markers: bool,
     /// Plot nothing: the viewer opens as it is (File traces are added in the viewer).
     #[arg(long)]
     no_show: bool,
@@ -125,6 +137,30 @@ pub fn run(args: WaveArgs, project: Option<&Project>) -> Result<()> {
         None => file(&args, Path::new(&args.first), project),
         Some(cell) => point(&args, cell, project),
     }
+}
+
+fn layout_of(args: &WaveArgs) -> Result<wave::calc::Layout> {
+    if args.bode {
+        return Ok(wave::calc::Layout::Bode);
+    }
+    let Some(eye) = &args.eye else {
+        return Ok(wave::calc::Layout::Plain);
+    };
+    let mut parts = eye.split(',');
+    let num = |t: Option<&str>| -> Result<Option<f64>> {
+        match t.map(str::trim).filter(|t| !t.is_empty()) {
+            None => Ok(None),
+            Some(t) => libcdept::calc::parse_spice_number(t)
+                .map(Some)
+                .ok_or_else(|| eyre!("--eye: '{t}' is not a number")),
+        }
+    };
+    let period = num(parts.next())?.ok_or_else(|| eyre!("--eye needs a period"))?;
+    if !(period > 0.0 && period.is_finite()) {
+        return Err(eyre!("--eye: the period must be positive"));
+    }
+    let offset = num(parts.next())?.unwrap_or(0.0);
+    Ok(wave::calc::Layout::Eye { period, offset })
 }
 
 fn file(args: &WaveArgs, raw: &Path, project: Option<&Project>) -> Result<()> {
@@ -274,7 +310,9 @@ fn calc(
         plot: args.analysis.clone(),
         show: args.show_choice(),
         max_points: args.no_decimate.then_some(0),
-        markers: true,
+        markers: !args.no_markers,
+        layout: layout_of(args)?,
+        extra: vec![],
     };
     let sent = wave::calc::send(project, library, cell, view, chosen, &req);
     let table = sent.table();
