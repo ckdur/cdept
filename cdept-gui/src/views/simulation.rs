@@ -111,6 +111,10 @@ pub(super) struct Form {
     models: String,
     schematic: String,
     schematic_view: String,
+    /// The device under test, `library/cell`.
+    pub(super) dut: String,
+    /// The time limit of a run point (`10m`, `90s`); empty: the project's.
+    timeout: String,
     corners: Vec<String>,
     temperatures: String,
     variables: Vec<(String, String)>,
@@ -120,6 +124,8 @@ pub(super) struct Form {
     analyses: Vec<AnalysisForm>,
     /// name, min, max
     specs: Vec<(String, String, String)>,
+    /// `[[output]]`: name, expression, plot.
+    pub(super) outputs: Vec<(String, String, String)>,
     /// The setup's own `[[sweep]]` rows (the template's are in `inherited`).
     sweeps: Vec<SweepForm>,
     /// What the template brings: sweeps and Monte Carlo, shown read-only.
@@ -200,6 +206,8 @@ impl Form {
             models: setup.models.clone(),
             schematic: setup.schematic.clone(),
             schematic_view: setup.schematic_view.clone(),
+            dut: setup.dut.clone(),
+            timeout: setup.timeout.clone(),
             corners: setup.corners.clone(),
             temperatures: setup
                 .temperatures
@@ -222,6 +230,11 @@ impl Form {
                         s.max.map(|v| v.to_string()).unwrap_or_default(),
                     )
                 })
+                .collect(),
+            outputs: setup
+                .outputs
+                .iter()
+                .map(|o| (o.name.clone(), o.expr.clone(), o.plot.clone()))
                 .collect(),
             sweeps: sweeps::own_rows(&setup.sweeps, &inherited),
             mc: setup.montecarlo.is_some() && setup.montecarlo != inherited.mc,
@@ -275,6 +288,8 @@ impl Form {
         set("models", string(&self.models));
         set("schematic", string(&self.schematic));
         set("schematic_view", string(&self.schematic_view));
+        set("dut", string(&self.dut));
+        set("timeout", string(&self.timeout));
         set(
             "corners",
             Value::Array(self.corners.iter().map(|c| string(c)).collect()),
@@ -354,6 +369,18 @@ impl Form {
             specs.push(Value::Table(t));
         }
         set("spec", Value::Array(specs));
+        let mut outputs = Vec::new();
+        for (name, expr, plot) in &self.outputs {
+            if name.trim().is_empty() && expr.trim().is_empty() {
+                continue;
+            }
+            let mut t = toml::Table::new();
+            t.insert("name".into(), string(name));
+            t.insert("expr".into(), string(expr));
+            t.insert("plot".into(), string(plot));
+            outputs.push(Value::Table(t));
+        }
+        set("output", Value::Array(outputs));
         let own = sweeps::own_sweeps(&self.sweeps)?;
         let all = sweeps::overlay(&self.inherited.sweeps, &own);
         set(
@@ -890,6 +917,55 @@ fn bound(spec: &sim::Spec) -> String {
     }
 }
 
+/// The `[[output]]` rows: name, expression (checked as it is typed), plot.
+fn outputs_editor(ui: &mut Ui, outputs: &mut Vec<(String, String, String)>) {
+    let mut remove = None;
+    Grid::new("sim-outputs").num_columns(4).show(ui, |ui| {
+        for (i, (name, expr, plot)) in outputs.iter_mut().enumerate() {
+            ui.add(
+                TextEdit::singleline(name)
+                    .desired_width(110.0)
+                    .hint_text("name"),
+            );
+            let bad = if expr.trim().is_empty() {
+                None
+            } else {
+                libcdept::calc::parse(expr).err().map(|e| e.render(expr))
+            };
+            let edit = ui.add(
+                TextEdit::singleline(expr)
+                    .desired_width(320.0)
+                    .code_editor()
+                    .hint_text("expression, e.g. delay(v(\"in\"), v(\"out\"), 0.6)"),
+            );
+            if let Some(b) = &bad {
+                edit.on_hover_text(b.clone());
+            }
+            ui.add(
+                TextEdit::singleline(plot)
+                    .desired_width(50.0)
+                    .hint_text("plot"),
+            );
+            ui.horizontal(|ui| {
+                if bad.is_some() {
+                    ui.colored_label(ui.visuals().error_fg_color, "⚠")
+                        .on_hover_text(bad.unwrap_or_default());
+                }
+                if ui.small_button("✖").on_hover_text("Remove").clicked() {
+                    remove = Some(i);
+                }
+            });
+            ui.end_row();
+        }
+    });
+    if let Some(i) = remove {
+        outputs.remove(i);
+    }
+    if ui.small_button("＋ Add output").clicked() {
+        outputs.push(Default::default());
+    }
+}
+
 fn list_editor(ui: &mut Ui, id: &str, rows: &mut Vec<(String, String)>, names: (&str, &str)) {
     let mut remove = None;
     Grid::new(id).num_columns(3).show(ui, |ui| {
@@ -973,6 +1049,23 @@ impl SimulationView {
                             .hint_text("view"),
                     );
                 });
+                ui.end_row();
+                ui.label("DUT").on_hover_text(
+                    "The device under test, library/cell: the netlist must hold its subcircuit; post-layout runs swap it (Phase 7)",
+                );
+                ui.add(
+                    TextEdit::singleline(&mut form.dut)
+                        .desired_width(200.0)
+                        .hint_text("library/cell (optional)"),
+                );
+                ui.end_row();
+                ui.label("Time limit")
+                    .on_hover_text("Of one run point: 10m, 90s, 1h30m; 0 is none; empty: the project's [sim] timeout");
+                ui.add(
+                    TextEdit::singleline(&mut form.timeout)
+                        .desired_width(100.0)
+                        .hint_text("project default"),
+                );
                 ui.end_row();
                 ui.label("Corners")
                     .on_hover_text("From the technology snapshot (tech.toml)");
@@ -1093,6 +1186,10 @@ impl SimulationView {
                 .desired_width(f32::INFINITY)
                 .code_editor(),
         );
+
+        ui.add_space(4.0);
+        ui.strong("Outputs  (calculator expressions, docs/CALC.md)");
+        outputs_editor(ui, &mut form.outputs);
 
         ui.add_space(4.0);
         ui.strong("Specs");

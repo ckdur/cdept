@@ -12,6 +12,18 @@
 //! view = "tb_inv/power"
 //! ```
 //!
+//! A `[[combine]]` computes a figure from the results of several tests at the same run
+//! point (corner and temperature), after they all ran: `<test>.<measure>` names a
+//! measure of a test (its view name, or its `name`), as in
+//!
+//! ```toml
+//! [[combine]]
+//! test = "psrr"                      # whose run points get the result (and its spec)
+//! name = "psrr_rejection_db"
+//! expr = "ac_open.gain_db - psrr.xfer_db"
+//! min = 60
+//! ```
+//!
 //! [`run`] runs every test's points on one shared job queue, each test's runs are stored
 //! as usual (`result.json`, `results.db`), and the whole thing is one [`SuiteReport`]:
 //! a combined table (rows per test and point, a column per key output), a verdict
@@ -46,10 +58,26 @@ pub struct Suite {
     pub simulator: String,
     #[serde(rename = "test")]
     pub tests: Vec<TestRef>,
+    /// Figures computed from several tests' results at the same run point.
+    #[serde(rename = "combine", skip_serializing_if = "Vec::is_empty")]
+    pub combines: Vec<Combine>,
     /// The CACE datasheet the suite came from (`cdept cace import`): its header and the
     /// parameters that are not testbenches. Not used to run (docs/reference/files/cace.md).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cace: Option<toml::Table>,
+}
+
+/// A figure from several tests' results at the same run point (`[[combine]]`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Combine {
+    /// The test whose run points get the figure (its view name or its `name`).
+    pub test: String,
+    pub name: String,
+    /// A calculator expression (docs/CALC.md) over `<test>.<measure>` names.
+    pub expr: String,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
 }
 
 /// One test of the family.
@@ -74,6 +102,29 @@ impl Suite {
                 bail!("test view '{}' is not library/cell/view", t.view);
             }
         }
+        for c in &s.combines {
+            if c.name.trim().is_empty() || c.name.contains(char::is_whitespace) {
+                bail!("combine '{}': the name must be one word", c.name);
+            }
+            if !s
+                .tests
+                .iter()
+                .any(|t| t.key() == c.test || t.name == c.test)
+            {
+                bail!(
+                    "combine '{}': no test '{}' in the suite (tests: {})",
+                    c.name,
+                    c.test,
+                    s.tests
+                        .iter()
+                        .map(TestRef::key)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            crate::calc::parse(&c.expr)
+                .map_err(|e| eyre!("combine '{}': {}", c.name, e.render(&c.expr)))?;
+        }
         Ok(s)
     }
 
@@ -85,6 +136,16 @@ impl Suite {
 }
 
 impl TestRef {
+    /// The name `[[combine]]` knows the test by: its view (the last part of `view`).
+    pub fn key(&self) -> String {
+        self.view
+            .trim()
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .to_string()
+    }
+
     /// The `(library, cell, view)` of the test, relative to the suite's own.
     pub fn resolve(&self, library: &str, cell: &str) -> (String, String, String) {
         let parts: Vec<&str> = self.view.trim().split('/').collect();
@@ -313,6 +374,8 @@ pub fn run(
             .map(|h| h.join().expect("a suite test panicked"))
             .collect()
     });
+    let mut tests = tests;
+    combine(&suite, &mut tests, !options.no_store);
     let report = SuiteReport {
         library: library.into(),
         cell: cell.into(),
@@ -328,6 +391,104 @@ pub fn run(
         tracing::warn!("suite record: {e:#}");
     }
     Ok(report)
+}
+
+/// Evaluate the suite's `[[combine]]`s on every run point of their test: the measures of
+/// all tests at the point of the same name are the expression's `<test>.<measure>`
+/// names. The figure joins the point's measures (a calculator measure), its spec is
+/// checked, and the point's `result.json` is written again (`write`).
+pub fn combine(suite: &Suite, tests: &mut [TestReport], write: bool) {
+    if suite.combines.is_empty() {
+        return;
+    }
+    // test key -> point -> measures
+    let mut by_test: Vec<(
+        Vec<String>,
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, f64>>,
+    )> = vec![];
+    for (t, report) in suite.tests.iter().zip(tests.iter()) {
+        let mut names = vec![t.key()];
+        if !t.name.is_empty() {
+            names.push(t.name.clone());
+        }
+        let points = report
+            .records
+            .iter()
+            .map(|r| (r.point.name.clone(), r.measures.clone()))
+            .collect();
+        by_test.push((names, points));
+    }
+    for c in &suite.combines {
+        let Some(target) = suite
+            .tests
+            .iter()
+            .position(|t| t.key() == c.test || t.name == c.test)
+        else {
+            continue;
+        };
+        let Ok(expr) = crate::calc::parse(&c.expr) else {
+            continue;
+        };
+        for record in &mut tests[target].records {
+            let mut env = crate::calc::Env::empty();
+            for (names, points) in &by_test {
+                if let Some(m) = points.get(&record.point.name) {
+                    for (k, v) in m {
+                        for n in names {
+                            env.set(&format!("{n}.{k}"), crate::calc::Value::Num(*v));
+                        }
+                    }
+                }
+            }
+            let key = c.name.to_lowercase();
+            let value = match crate::calc::eval(&expr, &env) {
+                Ok(v) => match v.as_f64().filter(|v| v.is_finite()) {
+                    Some(v) => Some(v),
+                    None => {
+                        record.calc_errors.insert(
+                            key.clone(),
+                            format!("{} is not a finite number", v.display()),
+                        );
+                        None
+                    }
+                },
+                Err(e) => {
+                    record.calc_errors.insert(key.clone(), e.render(&c.expr));
+                    None
+                }
+            };
+            if let Some(v) = value {
+                record.measures.insert(key.clone(), v);
+                record.calc_errors.remove(&key);
+            }
+            if !record.calc.contains(&key) {
+                record.calc.push(key.clone());
+            }
+            if c.min.is_some() || c.max.is_some() {
+                let verdict = match value {
+                    None => Verdict::Missing,
+                    Some(v) if c.min.is_some_and(|m| v < m) || c.max.is_some_and(|m| v > m) => {
+                        Verdict::Fail
+                    }
+                    Some(_) => Verdict::Pass,
+                };
+                record.specs.retain(|s| s.name.to_lowercase() != key);
+                record.specs.push(super::results::SpecRecord {
+                    name: key.clone(),
+                    value,
+                    min: c.min,
+                    max: c.max,
+                    verdict,
+                });
+            }
+            if write
+                && record.dir.is_dir()
+                && let Err(e) = record.write()
+            {
+                tracing::warn!("combine {}: {e:#}", c.name);
+            }
+        }
+    }
 }
 
 fn run_test(
@@ -625,6 +786,54 @@ mod tests {
             max: Some(max),
             verdict,
         }
+    }
+
+    #[test]
+    fn combines_use_other_tests_at_the_same_point() {
+        let suite = Suite::parse(
+            "[[test]]\nview='ac_open'\n[[test]]\nview='psrr'\n\
+             [[combine]]\ntest='psrr'\nname='rejection_db'\nexpr='ac_open.gain_db - psrr.xfer_db'\nmin=40\n",
+        )
+        .unwrap();
+        let mut tests = vec![
+            TestReport {
+                records: vec![
+                    record("ac_open", "tt_27", &[("gain_db", 36.0)], vec![]),
+                    record("ac_open", "ss_27", &[("gain_db", 33.0)], vec![]),
+                ],
+                ..Default::default()
+            },
+            TestReport {
+                records: vec![
+                    record("psrr", "tt_27", &[("xfer_db", -10.0)], vec![]),
+                    record("psrr", "ss_27", &[("xfer_db", -5.0)], vec![]),
+                    record("psrr", "ff_27", &[("xfer_db", -5.0)], vec![]),
+                ],
+                ..Default::default()
+            },
+        ];
+        combine(&suite, &mut tests, false);
+        let r = &tests[1].records;
+        assert_eq!(r[0].measures["rejection_db"], 46.0);
+        assert_eq!(r[0].specs[0].verdict, Verdict::Pass);
+        assert_eq!(r[1].measures["rejection_db"], 38.0);
+        assert_eq!(r[1].specs[0].verdict, Verdict::Fail);
+        // ac_open has no ff_27: missing, with the reason
+        assert!(!r[2].measures.contains_key("rejection_db"));
+        assert_eq!(r[2].specs[0].verdict, Verdict::Missing);
+        assert!(r[2].calc_errors["rejection_db"].contains("ac_open.gain_db"));
+        // bad combines are refused when the suite is read
+        assert!(
+            Suite::parse("[[test]]\nview='a'\n[[combine]]\ntest='b'\nname='x'\nexpr='1'").is_err()
+        );
+        assert!(
+            Suite::parse("[[test]]\nview='a'\n[[combine]]\ntest='a'\nname='x'\nexpr='1 +'")
+                .is_err()
+        );
+        assert!(
+            Suite::parse("[[test]]\nview='a'\n[[combine]]\ntest='a'\nname='x y'\nexpr='1'")
+                .is_err()
+        );
     }
 
     #[test]
