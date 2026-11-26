@@ -24,7 +24,8 @@ Commands:
   klayout       Use the embedded KLayout directly
   pdk           The PDKs installed on this machine and their versions (ciel)
   ngspice       ngspice in-process (libngspice, loaded at run time)
-  magic         Magic in batch mode: extraction, DRC, LEF export
+  magic         Magic: batch runs (extraction, DRC, LVS, LEF, GDS) and the project's Magic views (layout from schematic, references)
+  open          Open a view in a tool's own window (KLayout through klive when one runs)
   sim           Testbenches: decks and ngspice runs with corners and specs
   jobs          Remotes for run points: list them, check that they answer (ssh, SLURM)
   cace          CACE datasheets: import into testbenches and a suite, export with the results
@@ -826,15 +827,21 @@ Options:
 ### cdept magic
 
 ```text
-Magic in batch mode: extraction, DRC, LEF export
+Magic: batch runs (extraction, DRC, LVS, LEF, GDS) and the project's Magic views (layout from schematic, references)
 
 Usage: cdept magic [OPTIONS] <COMMAND>
 
 Commands:
-  extract  Extract a layout to SPICE with the PDK's extraction style
-  drc      Check a layout against the PDK's DRC rules; prints the rules violated
-  lef      Write the LEF abstract of a layout
-  help     Print this message or the help of the given subcommand(s)
+  extract       Extract a layout to SPICE with the PDK's extraction style
+  drc           Check a layout against the PDK's DRC rules; prints the rules violated
+  lef           Write the LEF abstract of a layout
+  lvs           LVS of a Magic layout against the cell's xschem schematic (netgen)
+  link          Generate or update the Magic layout of a cell from its schematic, with the PDK's Magic device generators (pdk/<PDK>/magic-devices.toml)
+  check-source  Compare a Magic layout with its schematic; exit status 1 when out of sync
+  refs          Check the references between the project's Magic views (use lines, sidecars)
+  import-gds    Read a GDS file into a library as Magic views (one cell each)
+  export-gds    Write a Magic layout, with everything it places, as one GDS file
+  help          Print this message or the help of the given subcommand(s)
 ```
 
 #### cdept magic extract
@@ -908,6 +915,125 @@ Arguments:
 Options:
       --hide               Hide the inside of the cell (`lef write -hide`)
       --timeout <TIMEOUT>  Stop Magic after this long: 90s, 10m, 1h; 0 for no limit (default: [magic] timeout in cdept.toml, else 15m)
+```
+
+#### cdept magic lvs
+
+```text
+LVS of a Magic layout against the cell's xschem schematic (netgen).
+
+Magic extracts, xschem netlists the schematic (the layout's linked schematic, else the cell's), netgen compares with the PDK's set-up file. Exit status 1 when the netlists do not match.
+
+Usage: cdept magic lvs [OPTIONS] <LIBRARY> <CELL>
+
+Arguments:
+  <LIBRARY>
+          
+
+  <CELL>
+          
+
+Options:
+      --timeout <TIMEOUT>
+          
+```
+
+#### cdept magic link
+
+```text
+Generate or update the Magic layout of a cell from its schematic, with the PDK's Magic device generators (pdk/<PDK>/magic-devices.toml).
+
+Missing devices are added in a row, changed ones regenerated in place; layout instances share the schematic instance names.
+
+Usage: cdept magic link [OPTIONS] <LIBRARY> <CELL>
+
+Arguments:
+  <LIBRARY>
+          
+
+  <CELL>
+          
+
+Options:
+      --schematic <SCHEMATIC>
+          The schematic view (default: the linked one, else `schematic`)
+
+      --remove
+          Also delete layout instances that are not in the schematic
+
+      --timeout <TIMEOUT>
+          
+```
+
+#### cdept magic check-source
+
+```text
+Compare a Magic layout with its schematic; exit status 1 when out of sync
+
+Usage: cdept magic check-source [OPTIONS] <LIBRARY> <CELL>
+
+Arguments:
+  <LIBRARY>  
+  <CELL>     
+```
+
+#### cdept magic refs
+
+```text
+Check the references between the project's Magic views (use lines, sidecars)
+
+Usage: cdept magic refs [OPTIONS]
+
+Options:
+      --fix                Make project paths relative and write the sidecars
+```
+
+#### cdept magic import-gds
+
+```text
+Read a GDS file into a library as Magic views (one cell each)
+
+Usage: cdept magic import-gds [OPTIONS] <FILE> <LIBRARY>
+
+Arguments:
+  <FILE>     
+  <LIBRARY>  
+
+Options:
+      --cell <CELLS>       Only these cells (and what they place); default: all
+      --replace            Replace cells the library has already
+```
+
+#### cdept magic export-gds
+
+```text
+Write a Magic layout, with everything it places, as one GDS file
+
+Usage: cdept magic export-gds [OPTIONS] <LIBRARY> <CELL>
+
+Arguments:
+  <LIBRARY>  
+  <CELL>     
+
+Options:
+  -o, --output <OUTPUT>    The file (default: <project>/magic/<library>/<cell>/<cell>.gds)
+```
+
+### cdept open
+
+```text
+Open a view in a tool's own window (KLayout through klive when one runs)
+
+Usage: cdept open [OPTIONS] <LIBRARY> <CELL> [VIEW]
+
+Arguments:
+  <LIBRARY>  
+  <CELL>     
+  [VIEW]     The view (default: the first that has a tool)
+
+Options:
+      --tool <TOOL>        The tool: xschem, klayout, magic, qucs, editor (default: the first external tool of the view's format)
+      --list               Only list the tools that can open the view
 ```
 
 ### cdept sim
