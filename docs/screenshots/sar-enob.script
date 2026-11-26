@@ -55,6 +55,12 @@ wait 0.5
 screenshot @SHOTS@/sar-calc.png
 sim setup_section open
 wave embedded_screenshot @SHOTS@/sar-uberwave.png
+# Markers: where a scalar result was measured (the third rising crossing of the input at
+# mid scale; each send replaces the calculator's markers).
+sim calc expr cross(v("in"), 0.6, edge="rise", n=3)
+sim calc send
+wait 0.5
+wave embedded_screenshot @SHOTS@/sar-markers.png
 
 # An output of the testbench from the panel, with a spec; saved and run again.
 sim calc expr sfdr(sample(v("code"), 1u, from=950n), window="rect")

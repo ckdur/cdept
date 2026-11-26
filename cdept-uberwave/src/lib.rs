@@ -126,6 +126,8 @@ pub struct Marker {
     pub label: String,
     pub x: f64,
     pub y: Option<f64>,
+    /// The X unit (`s`, `Hz`): drawn only in panes of that X unit; empty: every pane.
+    pub x_unit: String,
     /// `None`: every pane.
     pub pane: Option<u32>,
     /// `0xRRGGBBAA`, 0: the default colour.

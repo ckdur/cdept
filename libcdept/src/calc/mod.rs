@@ -89,6 +89,8 @@ pub struct Mark {
     pub y: Option<f64>,
     /// What it is: `cross`, `trigger`, `target`, `10%`, `max`, ...
     pub what: String,
+    /// The x unit of the waveform it was measured on (`time`, `frequency`, ...).
+    pub x_unit: String,
 }
 
 /// What expressions are evaluated against.
@@ -124,13 +126,14 @@ impl<'a> Env<'a> {
     }
 
     /// Note a place the evaluation measured at (finite x only; at most 10000).
-    pub fn mark(&self, x: f64, y: Option<f64>, what: &str) {
+    pub fn mark(&self, x: f64, y: Option<f64>, what: &str, x_unit: &str) {
         let mut m = self.marks.borrow_mut();
         if x.is_finite() && m.len() < 10_000 {
             m.push(Mark {
                 x,
                 y: y.filter(|v| v.is_finite()),
                 what: what.to_string(),
+                x_unit: x_unit.to_string(),
             });
         }
     }

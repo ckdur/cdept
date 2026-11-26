@@ -504,6 +504,7 @@ pub fn markers_of(
                 label: text,
                 x: m.x,
                 y: m.y,
+                x_unit: si_unit(&m.x_unit).unwrap_or_default(),
                 pane: None,
                 rgba: 0,
             });

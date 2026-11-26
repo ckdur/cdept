@@ -497,7 +497,7 @@ static FUNCS: &[Func] = &[
             let w = b.range()?.apply(b.wave("w")?);
             let v = measure::min(&w)?;
             if let Ok(x) = measure::argext(&w, false) {
-                env.mark(x, Some(v), "min");
+                env.mark(x, Some(v), "min", &w.x_unit);
             }
             num(v)
         },
@@ -515,7 +515,7 @@ static FUNCS: &[Func] = &[
             let w = b.range()?.apply(b.wave("w")?);
             let v = measure::max(&w)?;
             if let Ok(x) = measure::argext(&w, true) {
-                env.mark(x, Some(v), "max");
+                env.mark(x, Some(v), "max", &w.x_unit);
             }
             num(v)
         },
@@ -602,7 +602,7 @@ static FUNCS: &[Func] = &[
         run: |env, b| {
             let c = measure::value_at(b.wave("w")?, b.num("x")?)?;
             if !b.wave("w")?.y.is_complex() {
-                env.mark(b.num("x")?, Some(c.re), "at");
+                env.mark(b.num("x")?, Some(c.re), "at", &b.wave("w")?.x_unit);
             }
             Ok(if b.wave("w")?.y.is_complex() {
                 Value::Complex(c)
@@ -669,7 +669,7 @@ static FUNCS: &[Func] = &[
                 b.int_or("n", 1)?,
                 b.range()?,
             )?;
-            env.mark(x, Some(level), "cross");
+            env.mark(x, Some(level), "cross", &b.wave("w")?.x_unit);
             num(x)
         },
     },
@@ -708,8 +708,8 @@ static FUNCS: &[Func] = &[
                 b.int_or("targ_n", 1)?,
                 b.range()?,
             )?;
-            env.mark(t0, Some(lt), "trigger");
-            env.mark(t1, Some(lg), "target");
+            env.mark(t0, Some(lt), "trigger", &b.wave("trig")?.x_unit);
+            env.mark(t1, Some(lg), "target", &b.wave("targ")?.x_unit);
             num(t1 - t0)
         },
     },
@@ -733,8 +733,8 @@ static FUNCS: &[Func] = &[
             } else {
                 (e.high, e.low)
             };
-            env.mark(e.t_low, Some(first), "start");
-            env.mark(e.t_high, Some(second), "end");
+            env.mark(e.t_low, Some(first), "start", &b.wave("w")?.x_unit);
+            env.mark(e.t_high, Some(second), "end", &b.wave("w")?.x_unit);
             num(e.t_high - e.t_low)
         },
     },
@@ -758,8 +758,8 @@ static FUNCS: &[Func] = &[
             } else {
                 (e.high, e.low)
             };
-            env.mark(e.t_low, Some(first), "start");
-            env.mark(e.t_high, Some(second), "end");
+            env.mark(e.t_low, Some(first), "start", &b.wave("w")?.x_unit);
+            env.mark(e.t_high, Some(second), "end", &b.wave("w")?.x_unit);
             num(e.t_high - e.t_low)
         },
     },
@@ -823,7 +823,7 @@ static FUNCS: &[Func] = &[
                 b.opt_num("from")?,
             )?;
             let t0 = b.opt_num("from")?.unwrap_or(w.x[0]);
-            env.mark(t0 + t, None, "settled");
+            env.mark(t0 + t, None, "settled", &w.x_unit);
             num(t)
         },
     },

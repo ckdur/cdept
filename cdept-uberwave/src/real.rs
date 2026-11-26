@@ -96,6 +96,7 @@ struct UwMarker {
     y: c_double,
     pane: i32,
     rgba: u32,
+    x_unit: *const c_char,
 }
 
 type UwCursorFn = unsafe extern "C" fn(user: *mut c_void, a: c_double, b: c_double);
@@ -511,7 +512,11 @@ impl Viewer {
 
     /// Put a marker on the plot.
     pub fn add_marker(&self, marker: &Marker) -> Result<()> {
-        let (g, l) = (cstring(&marker.group)?, cstring(&marker.label)?);
+        let (g, l, u) = (
+            cstring(&marker.group)?,
+            cstring(&marker.label)?,
+            cstring(&marker.x_unit)?,
+        );
         let raw = UwMarker {
             struct_size: size_of::<UwMarker>() as u32,
             group: g.as_ptr(),
@@ -520,6 +525,7 @@ impl Viewer {
             y: marker.y.unwrap_or(f64::NAN),
             pane: marker.pane.map_or(-1, |p| p.min(i32::MAX as u32) as i32),
             rgba: marker.rgba,
+            x_unit: u.as_ptr(),
         };
         // SAFETY: the strings live through the call.
         self.check(unsafe { uw_add_marker(self.raw, &raw) })
