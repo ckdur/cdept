@@ -23,6 +23,7 @@ use super::{View, empty_state};
 use crate::state::{Action, AppCtx, Selection};
 
 mod avail;
+pub(crate) mod calc;
 mod keep;
 mod remote;
 mod sweeps;
@@ -400,6 +401,12 @@ impl Form {
         Ok(text)
     }
 
+    /// Add or replace the spec of `name`.
+    pub(super) fn add_spec(&mut self, name: &str, min: String, max: String) {
+        self.specs.retain(|(n, _, _)| !n.eq_ignore_ascii_case(name));
+        self.specs.push((name.to_string(), min, max));
+    }
+
     fn setup(&self) -> Result<Setup, String> {
         super::testlib::parse(&self.to_text()?).map_err(|e| format!("{e:#}"))
     }
@@ -517,6 +524,8 @@ pub struct SimulationView {
     pub(super) tests: super::testlib::TestsUi,
     /// Whether VACASK can run the project's technology (simulation/avail.rs).
     avail: avail::Avail,
+    /// The calculator panel (simulation/calc.rs).
+    pub(crate) calc: calc::CalcPanel,
 }
 
 impl SimulationView {
@@ -1388,6 +1397,63 @@ impl SimulationView {
             });
     }
 
+    /// `(library, cell, view)` of the open testbench.
+    pub(crate) fn target_run(&self) -> Option<(String, String, String)> {
+        self.target
+            .as_ref()
+            .map(|t| (t.library.clone(), t.cell.clone(), t.view.clone()))
+    }
+
+    /// The calculator panel, on the run points on disk (also from earlier sessions).
+    fn calc_ui(&mut self, ui: &mut Ui, project: &Project) {
+        let Some(t) = self.target.clone() else { return };
+        let (outputs, specs) = match &self.form {
+            Some(f) => (
+                f.outputs.clone(),
+                f.setup().map(|s| s.specs).unwrap_or_default(),
+            ),
+            None => (vec![], vec![]),
+        };
+        let added = self.calc.ui(
+            ui,
+            project,
+            (&t.library, &t.cell, &t.view),
+            &outputs,
+            &specs,
+        );
+        if let Some(o) = added {
+            self.add_output(o);
+        }
+    }
+
+    /// "Add as output": the output (replacing one of that name) and its spec in the form.
+    pub(crate) fn add_output(&mut self, o: calc::NewOutput) {
+        let Some(form) = &mut self.form else {
+            self.calc.status = Some(("no testbench form is open".into(), true));
+            return;
+        };
+        form.outputs
+            .retain(|(n, _, _)| !n.eq_ignore_ascii_case(&o.name));
+        form.outputs
+            .push((o.name.clone(), o.expr.clone(), o.plot.clone()));
+        if o.min.is_some() || o.max.is_some() {
+            let text = |v: Option<f64>| v.map(|v| v.to_string()).unwrap_or_default();
+            form.add_spec(&o.name, text(o.min), text(o.max));
+        }
+        self.calc.status = Some((
+            format!(
+                "output '{}' added to the setup form{}: Save to keep it",
+                o.name,
+                if o.min.is_some() || o.max.is_some() {
+                    " with its spec"
+                } else {
+                    ""
+                }
+            ),
+            false,
+        ));
+    }
+
     fn results_ui(&mut self, ui: &mut Ui, project: &Project) {
         if let Some(e) = &self.run_error {
             ui.colored_label(
@@ -1395,6 +1461,7 @@ impl SimulationView {
                 e.lines().next().unwrap_or(""),
             );
         }
+        self.calc_ui(ui, project);
         if self.results.is_empty() {
             return;
         }
@@ -1704,6 +1771,9 @@ pub(crate) fn script(
         return result;
     }
     if let Some(result) = avail::script(view, &project, args) {
+        return result;
+    }
+    if let Some(result) = calc::script(view, &project, args) {
         return result;
     }
     let yes = |s: &str| matches!(s, "yes" | "on" | "true");
