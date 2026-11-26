@@ -1265,6 +1265,191 @@ impl Work<'_> {
         Ok(())
     }
 
+    // -- Magic views ----------------------------------------------------------
+
+    /// Magic views (docs/MAGIC.md): the `use` lines placing a moved or renamed cell
+    /// name it and its new folder (relative), a moved view's relative `use` paths are
+    /// written again for its new folder, and the sidecars follow.
+    fn follow_mags(&mut self) {
+        let mut files: Vec<(ViewId, PathBuf, bool)> = Vec::new();
+        for lib in self.project.libraries.iter().filter(|l| l.error.is_none()) {
+            for cell in &lib.cells {
+                for entry in cell.entries.iter().filter(|e| !e.is_member()) {
+                    if entry.format == Some(Format::Magic)
+                        && let Some(file) = &entry.main_file
+                    {
+                        let id = ViewId::new(&lib.name, &cell.name, &entry.name);
+                        files.push((id, file.clone(), lib.read_only));
+                    }
+                }
+            }
+        }
+        for (id, file, read_only) in files {
+            if let Err(e) = self.follow_mag(&id, &file, read_only) {
+                self.skip(&file, format!("{e:#}"));
+            }
+        }
+    }
+
+    fn follow_mag(&mut self, id: &ViewId, file: &Path, read_only: bool) -> Result<()> {
+        use crate::magic::mag;
+        let sidecar = meta::sidecar_path(file);
+        let new_id = self.ids.view(id);
+        let new_file = self.map.get(file);
+        let moved = new_id.is_some() || new_file.is_some();
+        let resolved = crate::magic::refs::resolve_file(self.project, file)?;
+        // (use cell name) -> (new cell name, new folder of its file), for cells that move
+        let mut targets: BTreeMap<String, (String, Option<PathBuf>, ViewId)> = BTreeMap::new();
+        for r in &resolved {
+            if let crate::magic::refs::Target::Project(v) = &r.target {
+                let old = ViewId::new(&v.library, &v.cell, &v.view);
+                let to = self.ids.view(&old);
+                let to_file = self.map.get(&v.file);
+                if to.is_some() || to_file.is_some() || moved {
+                    let to_id = to.clone().unwrap_or(old.clone());
+                    let after = to_file.unwrap_or_else(|| v.file.clone());
+                    let name = if to.as_ref().is_some_and(|t| t.cell != v.cell) {
+                        to_id.cell.clone()
+                    } else {
+                        r.placed.cell.clone()
+                    };
+                    targets.insert(
+                        r.placed.cell.clone(),
+                        (name, after.parent().map(Path::to_path_buf), to_id),
+                    );
+                }
+            }
+        }
+        // Relative paths to things outside the project, when this view moves.
+        let old_dir = file.parent().unwrap_or(Path::new(".")).to_path_buf();
+        if !moved && targets.is_empty() {
+            return Ok(());
+        }
+        if read_only && !self.copy {
+            if !targets.is_empty() {
+                let reason = format!(
+                    "library '{}' is read-only: it will place a cell that cannot be found",
+                    id.library
+                );
+                self.skip(file, reason);
+            }
+            return Ok(());
+        }
+        if !self.may_rewrite(file, "") {
+            return Ok(());
+        }
+        let dir_after = new_file
+            .as_deref()
+            .unwrap_or(file)
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_path_buf();
+        let canon = |p: &Path| -> PathBuf {
+            // the folder may not exist yet: canonicalize the longest existing part
+            let mut existing = p.to_path_buf();
+            let mut rest = Vec::new();
+            while !existing.exists() {
+                match (existing.file_name(), existing.parent()) {
+                    (Some(n), Some(parent)) => {
+                        rest.push(n.to_os_string());
+                        existing = parent.to_path_buf();
+                    }
+                    _ => break,
+                }
+            }
+            let mut out = existing.canonicalize().unwrap_or(existing);
+            for n in rest.into_iter().rev() {
+                out.push(n);
+            }
+            out
+        };
+        let dir_after_c = canon(&dir_after);
+        let text = match self.text(file) {
+            Some(t) => t,
+            None => return Ok(()),
+        };
+        let mut details: Vec<String> = Vec::new();
+        let new_text = mag::rewrite_uses(&text, |u| {
+            if let Some((name, dir, to)) = targets.get(&u.cell) {
+                let path = dir.as_ref().map(|d| {
+                    mag::relative_dir(&dir_after_c, &canon(d))
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                if name != &u.cell {
+                    details.push(format!("use {} -> {name} ({})", u.cell, to.label()));
+                }
+                return Some(mag::UseEdit {
+                    cell: Some(name.clone()),
+                    path,
+                });
+            }
+            if moved && !u.path.is_empty() && !u.path.starts_with(['/', '~', '$']) {
+                let target = canon(&old_dir.join(&u.path));
+                return Some(mag::UseEdit {
+                    cell: None,
+                    path: Some(
+                        mag::relative_dir(&dir_after_c, &target)
+                            .to_string_lossy()
+                            .into_owned(),
+                    ),
+                });
+            }
+            None
+        });
+        if let Some(new_text) = new_text {
+            if details.is_empty() {
+                details.push("use paths follow".into());
+            }
+            for d in &details {
+                self.put(file, new_text.clone().into_bytes(), d.clone());
+            }
+        }
+        // The sidecar: identity and references.
+        let old_meta = if sidecar.is_file() {
+            meta::Meta::read(&sidecar).ok()
+        } else {
+            None
+        };
+        let after = new_id.clone().unwrap_or_else(|| id.clone());
+        let top = new_file
+            .as_deref()
+            .unwrap_or(file)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| after.cell.clone());
+        let mut m = old_meta
+            .clone()
+            .unwrap_or_else(|| meta::Meta::new(&after.library, &after.cell, &after.view, &top));
+        m.library = after.library.clone();
+        m.cell = after.cell.clone();
+        m.view = after.view.clone();
+        m.top = top;
+        for (old_name, (name, _, to)) in &targets {
+            let bbox = m.references.remove(old_name).and_then(|r| r.bbox);
+            m.references.insert(
+                name.clone(),
+                meta::MetaRef {
+                    library: to.library.clone(),
+                    cell: to.cell.clone(),
+                    view: to.view.clone(),
+                    bbox,
+                },
+            );
+        }
+        // A sidecar that does not exist yet is only made for a view that stays where it
+        // is (a new one would not be renamed with a moved view); the next save makes it.
+        if old_meta.as_ref() != Some(&m) && (old_meta.is_some() || new_file.is_none()) {
+            let text = m.to_json()?;
+            self.put(
+                &sidecar,
+                text.into_bytes(),
+                format!("sidecar: this is {}", after.label()),
+            );
+        }
+        Ok(())
+    }
+
     // -- netlists and HDL -----------------------------------------------------
 
     /// `.subckt`, `.ends` and `module` names in the views of renamed cells, and the
@@ -1416,6 +1601,7 @@ impl Work<'_> {
         self.follow_instances();
         self.follow_links();
         self.follow_layouts();
+        self.follow_mags();
         self.follow_names();
     }
 }

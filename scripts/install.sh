@@ -9,6 +9,7 @@
 #   bin/cdept-xschem           the GPL helper (cdept looks next to its own executable)
 #   share/cdept-xschem/        what the helper reads at run time: xschem's Tcl and awk
 #                              files, systemlib, xschem_library/devices, cdept/ (Tcl)
+#   bin/cdept-magic, share/cdept-magic/   the Magic helper (GPL) and its Tcl files
 #   share/cdept-klayout/       the KLayout helper (Python, GPL), run by `klayout -zz`;
 #                              KLayout itself is not installed: cdept uses $CDEPT_KLAYOUT
 #                              or `klayout` next to cdept or on PATH
@@ -47,6 +48,7 @@ dest=$destdir$prefix
 if [ $build = 1 ]; then
     cargo build --release -p cdept
     [ $helper = 0 ] || cargo build --release -p cdept-xschem
+    [ $helper = 0 ] || cargo build --release -p cdept-magic
 fi
 
 install -d "$dest/bin"
@@ -65,6 +67,12 @@ if [ $helper = 1 ]; then
     cp -rL "$share/." "$dest/share/cdept-xschem/"
     rm -rf "$dest/share/cdept-xschem/cdept/tests"
     [ -f "$dest/share/cdept-xschem/xschem.tcl" ] || { echo "install.sh: share copy failed" >&2; exit 1; }
+    # The Magic helper (Magic in a tab) and its Tcl: its own and the Tk stand-in.
+    install -m 755 "$target/cdept-magic" "$dest/bin/cdept-magic"
+    install -m 644 cdept-magic/LICENSE "$dest/share/doc/cdept/LICENSE.cdept-magic"
+    rm -rf "$dest/share/cdept-magic"
+    install -d "$dest/share/cdept-magic"
+    install -m 644 cdept-magic/tcl/cdept-magic.tcl cdept-xschem/shim/tcl/faketk.tcl "$dest/share/cdept-magic/"
 fi
 
 if [ -f cdept-klayout/helper/cdept_klayout/main.py ]; then

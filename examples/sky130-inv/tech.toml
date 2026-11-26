@@ -1,0 +1,828 @@
+# CDePT technology snapshot of the PDK "sky130A": what CDePT read out of the PDK's
+# files when this project was set up for it. It says where each tool's set-up is
+# (KLayout technology and decks, xschemrc, magicrc, netgen set-up), which model files
+# and corners there are, and which libraries the PDK brings.
+#
+# Paths starting with $PDK_ROOT follow the PDK folder of each machine (cdept.local.toml
+# or the environment). The long lists (layers, PCells, symbols, cells) are next to
+# this file in tech.catalog.json.
+#
+# Made by `cdept init --technology sky130A`. This file is read as it is: edit it by hand
+# (the files of a library, a corner, ...) and the edit applies. `cdept tech refresh`
+# makes it again from the PDK and replaces the whole file (the old one is kept as
+# tech.toml.bak). What cdept.toml sets wins over this file.
+
+schema = "cdept-tech"
+version = 1
+notes = [
+    "KLayout: the technology's LEF/DEF reader names merged.lef, which is not in $PDK_ROOT/sky130A/libs.tech/klayout/tech",
+    "KLayout: 18 PCells read out of the PDK's Python sources (KLayout was not started); defaults that are expressions are kept as written",
+    "xschem: the xschemrc was read as text, not evaluated (the scan read files only): conditions and computed values are not followed",
+    "refs: the openlane configuration names libraries that are not installed: sky130_fd_sc_hdll, sky130_fd_sc_hs, sky130_fd_sc_ls, sky130_fd_sc_ms, sky130_osu_sc_t18",
+    "devices: CDePT ships no device map for sky130A; 45 of 75 devices were matched to KLayout PCells by guessing. Write the draft with `cdept tech devices`, check it, and name it in [klayout] devices",
+    "libraries: the PDK has two libraries named 'sky130_fd_pr'; a project lists $PDK_ROOT/sky130A/libs.tech/xschem/sky130_fd_pr and not $PDK_ROOT/sky130A/libs.ref/sky130_fd_pr (a library cannot have several folders yet)",
+]
+
+[pdk]
+name = "sky130A"
+family = "sky130"
+version = "1.0.530"
+commit = "8afc8346a57fe1ab7934ba5a6056ea8b43078e71"
+source = "ciel"
+description = "Skywater 0.13um CMOS, local interconnect + high-resistance poly + 5 metal layer backend stack + MiM caps + redistribution layer 1"
+tools = [
+    "combined",
+    "irsim",
+    "klayout",
+    "magic",
+    "netgen",
+    "ngspice",
+    "openlane",
+    "qflow",
+    "xcircuit",
+    "xschem",
+]
+
+[pdk.tested_with]
+magic = "8.3.525"
+
+[klayout]
+path = ["$PDK_ROOT/sky130A/libs.tech/klayout"]
+tech = "sky130"
+description = "SkyWater 130nm technology"
+lyt = "$PDK_ROOT/sky130A/libs.tech/klayout/tech/sky130A.lyt"
+base_path = "$PDK_ROOT/sky130A/libs.tech/klayout/tech"
+layer_properties = "$PDK_ROOT/sky130A/libs.tech/klayout/tech/sky130A.lyp"
+dbu = 0.001
+grids = [0.01, 0.005]
+default_grid = 0.005
+layer_maps = ["$PDK_ROOT/sky130A/libs.tech/klayout/tech/sky130A.map"]
+connectivity = [
+    "poly,licon,li",
+    "li,mcon,met1",
+    "met1,via1,met2",
+    "met2,via2,met3",
+    "met3,via3,met4",
+    "met4,via4,met5",
+]
+pcell_libraries = ["skywater130"]
+d25 = ["$PDK_ROOT/sky130A/libs.tech/klayout/d25/sky130.lyd25"]
+xsection = ["$PDK_ROOT/sky130A/libs.tech/klayout/tech/xsect/sky130.xs"]
+
+[[klayout.drc]]
+name = "sky130A_mr"
+file = "$PDK_ROOT/sky130A/libs.tech/klayout/drc/sky130A_mr.drc"
+form = "script"
+
+[[klayout.drc]]
+name = "sky130A"
+file = "$PDK_ROOT/sky130A/libs.tech/klayout/drc/sky130A.lydrc"
+form = "macro"
+
+[[klayout.drc]]
+name = "pin_label_purposes_overlapping_drawing.rb"
+file = "$PDK_ROOT/sky130A/libs.tech/klayout/drc/pin_label_purposes_overlapping_drawing.rb.drc"
+form = "script"
+
+[[klayout.drc]]
+name = "zeroarea.rb"
+file = "$PDK_ROOT/sky130A/libs.tech/klayout/drc/zeroarea.rb.drc"
+form = "script"
+
+[[klayout.drc]]
+name = "gf180mcu_density"
+file = "$PDK_ROOT/sky130A/libs.tech/klayout/drc/gf180mcu_density.lydrc"
+form = "macro"
+partial = true
+
+[[klayout.drc]]
+name = "met_min_ca_density"
+file = "$PDK_ROOT/sky130A/libs.tech/klayout/drc/met_min_ca_density.lydrc"
+form = "macro"
+partial = true
+
+[[klayout.drc]]
+name = "run_drc_beol"
+file = "$PDK_ROOT/sky130A/libs.tech/klayout/macros/run_drc_beol.lydrc"
+form = "macro"
+
+[[klayout.drc]]
+name = "run_drc_feol"
+file = "$PDK_ROOT/sky130A/libs.tech/klayout/macros/run_drc_feol.lydrc"
+form = "macro"
+
+[[klayout.drc]]
+name = "run_drc_full"
+file = "$PDK_ROOT/sky130A/libs.tech/klayout/macros/run_drc_full.lydrc"
+form = "macro"
+
+[[klayout.lvs]]
+name = "sky130"
+file = "$PDK_ROOT/sky130A/libs.tech/klayout/lvs/sky130.lvs"
+form = "script"
+
+[[klayout.lvs]]
+name = "sky130"
+file = "$PDK_ROOT/sky130A/libs.tech/klayout/lvs/sky130.lylvs"
+form = "macro"
+
+[klayout.lvs_variables]
+scale = "true"
+
+[magic]
+rc = "$PDK_ROOT/sky130A/libs.tech/magic/sky130A.magicrc"
+tech = "sky130A"
+tech_file = "$PDK_ROOT/sky130A/libs.tech/magic/sky130A.tech"
+version = "1.0.530-0-g8afc834"
+description = "SkyWater SKY130: Open Source rules and DRC"
+requires = "magic-8.3.411"
+tcl = "$PDK_ROOT/sky130A/libs.tech/magic/sky130A.tcl"
+scale = "10 nanometers"
+settings = ["drc euclidean on", "ext2spice scale off", "snap lambda"]
+cell_paths = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_pr/mag",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/mag",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/mag",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/mag",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_ml_xx_hd/mag",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/mag",
+]
+cifoutput = ["gdsii", "gdsii(origfill)", "drc", "density", "wafflefill", "wafflefill(tiled)"]
+cifinput = ["sky130", "sky130(vendor)", "rdlimport"]
+extract = [
+    "ngspice",
+    "ngspice(orig)",
+    "ngspice(si)",
+    "ngspice(hrhc)",
+    "ngspice(lrhc)",
+    "ngspice(hrlc)",
+    "ngspice(lrlc)",
+]
+drc = ["drc(fast)", "drc(full)", "drc(routing)"]
+
+[magic.globals]
+GND = "VGND"
+SUB = "VSUBS"
+VDD = "VPWR"
+
+[[magic.scripts]]
+role = "bump-bond"
+file = "$PDK_ROOT/sky130A/libs.tech/magic/bump_bond_generator"
+
+[[magic.scripts]]
+role = "antenna"
+file = "$PDK_ROOT/sky130A/libs.tech/magic/check_antenna.py"
+
+[[magic.scripts]]
+role = "density"
+file = "$PDK_ROOT/sky130A/libs.tech/magic/check_density.py"
+
+[[magic.scripts]]
+role = "fill"
+file = "$PDK_ROOT/sky130A/libs.tech/magic/generate_fill.py"
+
+[[magic.scripts]]
+role = "drc"
+file = "$PDK_ROOT/sky130A/libs.tech/magic/run_standard_drc.py"
+
+[[magic.scripts]]
+role = "seal-ring"
+file = "$PDK_ROOT/sky130A/libs.tech/magic/seal_ring_generator"
+
+[[magic.scripts]]
+role = "bind-keys"
+file = "$PDK_ROOT/sky130A/libs.tech/magic/sky130A-BindKeys"
+
+[[magic.scripts]]
+role = "gds-tech"
+file = "$PDK_ROOT/sky130A/libs.tech/magic/sky130A-GDS.tech"
+
+[netgen]
+setup = "$PDK_ROOT/sky130A/libs.tech/netgen/sky130A_setup.tcl"
+environment = ["NETGEN_COLUMNS", "MAGIC_EXT_USE_GDS"]
+
+[xschem]
+rc = "$PDK_ROOT/sky130A/libs.tech/xschem/xschemrc"
+evaluated = false
+start_window = "$PDK_ROOT/sky130A/libs.tech/xschem/sky130_tests/top.sch"
+library_path = ["$PDK_ROOT/sky130A/libs.tech/xschem"]
+model_symbols = ["sky130_fd_pr/corner.sym"]
+
+[xschem.variables]
+SKYWATER_MODELS = "$PDK_ROOT/sky130A/libs.tech/combined"
+SKYWATER_STDCELLS = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/spice"
+
+[xschem.references]
+mips_cpu = "mips_cpu/"
+sky130_fd_pr = "sky130_fd_pr/"
+sky130_stdcells = "sky130_stdcells/"
+sky130_tests = "sky130_tests/"
+stdcells = "stdcells/"
+xschem_verilog_import = "xschem_verilog_import/"
+
+[[xschem.libraries]]
+name = "mips_cpu"
+path = "$PDK_ROOT/sky130A/libs.tech/xschem/mips_cpu"
+layout = "flat"
+role = "examples"
+description = "xschem: examples of the PDK (12 symbols, 12 schematics)"
+enabled = false
+
+[[xschem.libraries]]
+name = "sky130_fd_pr"
+path = "$PDK_ROOT/sky130A/libs.tech/xschem/sky130_fd_pr"
+layout = "flat"
+role = "primitives"
+description = "xschem: device symbols (77 symbols, 0 schematics)"
+enabled = true
+
+[[xschem.libraries]]
+name = "sky130_stdcells"
+path = "$PDK_ROOT/sky130A/libs.tech/xschem/sky130_stdcells"
+layout = "flat"
+role = "stdcells"
+description = "xschem: standard cell symbols (437 symbols, 0 schematics)"
+enabled = true
+
+[[xschem.libraries]]
+name = "sky130_tests"
+path = "$PDK_ROOT/sky130A/libs.tech/xschem/sky130_tests"
+layout = "flat"
+role = "tests"
+description = "xschem: test benches of the PDK (78 symbols, 76 schematics)"
+enabled = false
+
+[[xschem.libraries]]
+name = "stdcells"
+path = "$PDK_ROOT/sky130A/libs.tech/xschem/stdcells"
+layout = "flat"
+role = "stdcells"
+description = "xschem: standard cell symbols (76 symbols, 0 schematics)"
+enabled = true
+
+[[xschem.libraries]]
+name = "xschem_verilog_import"
+path = "$PDK_ROOT/sky130A/libs.tech/xschem/xschem_verilog_import"
+layout = "flat"
+role = "examples"
+description = "xschem: examples of the PDK (4 symbols, 8 schematics)"
+enabled = false
+
+[models]
+default = "combined"
+corner = "tt"
+
+[models.combined]
+simulator = "ngspice"
+dir = "$PDK_ROOT/sky130A/libs.tech/combined"
+libraries = ["sky130.lib.spice"]
+init = ["$PDK_ROOT/sky130A/libs.tech/combined/spinit"]
+options = ["set ngbehavior=hsa", "set ng_nomodcheck"]
+tnom = 25.0
+
+[models.combined.corners]
+ff = ["sky130.lib.spice ff"]
+ff_mm = ["sky130.lib.spice ff_mm"]
+fs = ["sky130.lib.spice fs"]
+fs_mm = ["sky130.lib.spice fs_mm"]
+hh = ["sky130.lib.spice hh"]
+hl = ["sky130.lib.spice hl"]
+lh = ["sky130.lib.spice lh"]
+ll = ["sky130.lib.spice ll"]
+mc = ["sky130.lib.spice mc"]
+sf = ["sky130.lib.spice sf"]
+sf_mm = ["sky130.lib.spice sf_mm"]
+ss = ["sky130.lib.spice ss"]
+ss_mm = ["sky130.lib.spice ss_mm"]
+tt = ["sky130.lib.spice tt"]
+tt_mm = ["sky130.lib.spice tt_mm"]
+
+[models.ngspice]
+simulator = "ngspice"
+dir = "$PDK_ROOT/sky130A/libs.tech/ngspice"
+libraries = ["sky130.lib.spice"]
+includes = [
+    "sky130_fd_pr__model__diode_pd2nw_11v0.model.spice",
+    "sky130_fd_pr__model__diode_pw2nd_11v0.model.spice",
+    "sky130_fd_pr__model__inductors.model.spice",
+]
+init = ["$PDK_ROOT/sky130A/libs.tech/ngspice/spinit"]
+options = [
+    "set ngbehavior=hsa",
+    "set skywaterpdk",
+    "set ng_nomodcheck",
+    "set num_threads=8",
+    "option noinit",
+    "option klu",
+]
+tnom = 25.0
+
+[models.ngspice.corners]
+ff = ["sky130.lib.spice ff"]
+ff_mm = ["sky130.lib.spice ff_mm"]
+fs = ["sky130.lib.spice fs"]
+fs_mm = ["sky130.lib.spice fs_mm"]
+hh = ["sky130.lib.spice hh"]
+hl = ["sky130.lib.spice hl"]
+lh = ["sky130.lib.spice lh"]
+ll = ["sky130.lib.spice ll"]
+mc = ["sky130.lib.spice mc"]
+sf = ["sky130.lib.spice sf"]
+sf_mm = ["sky130.lib.spice sf_mm"]
+ss = ["sky130.lib.spice ss"]
+ss_mm = ["sky130.lib.spice ss_mm"]
+tt = ["sky130.lib.spice tt"]
+tt_mm = ["sky130.lib.spice tt_mm"]
+
+[devices]
+pcells = "guess"
+count = 75
+with_pcell = 45
+guessed = 45
+with_magic = 62
+without_model = 0
+
+[devices.classes]
+bjt = 2
+cap = 3
+diode = 3
+esd = 3
+mos = 40
+res = 22
+varactor = 2
+
+[refs]
+path = "$PDK_ROOT/sky130A/libs.ref"
+
+[[refs.library]]
+name = "sky130_fd_io"
+path = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io"
+layout = "ref"
+role = "io"
+description = "IO cells (2762 cells)"
+enabled = true
+cells = 2762
+formats = ["cdl", "gds", "lef", "lib", "mag", "maglef", "spice", "verilog"]
+default_corner = "tt_025C_1v80_3v30"
+
+[refs.library.liberty]
+ff_100C_1v60_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_100C_1v60_5v50.lib"
+ff_100C_1v95_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_100C_1v95_5v50.lib"
+ff_100C_1v95_5v50_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_100C_1v95_5v50_1v65.lib"
+ff_100C_1v95_5v50_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_100C_1v95_5v50_5v50.lib"
+ff_ff_100C_1v95_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*v2_ff_ff_100C_1v95_1v65.lib"
+ff_ff_100C_1v95_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ff_100C_1v95_5v50.lib"
+ff_ff_n40C_1v95_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*v2_ff_ff_n40C_1v95_1v65.lib"
+ff_ff_n40C_1v95_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ff_n40C_1v95_5v50.lib"
+ff_ff_n40C_1v95_5v50_nointpwr = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ff_n40C_1v95_5v50_nointpwr.lib"
+ff_n40C_1v35_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/sky130_fd_io__top_analog_pad_ff_n40C_1v35_5v50.lib"
+ff_n40C_1v40_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/sky130_fd_io__top_analog_pad_ff_n40C_1v40_5v50.lib"
+ff_n40C_1v60_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_n40C_1v60_5v50.lib"
+ff_n40C_1v95_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_n40C_1v95_5v50.lib"
+ff_n40C_1v95_5v50_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_n40C_1v95_5v50_1v65.lib"
+ff_n40C_1v95_5v50_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_n40C_1v95_5v50_5v50.lib"
+ff_ss_100C_1v65_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v65_1v65.lib"
+ff_ss_100C_1v65_1v65_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v65_1v65_1v65.lib"
+ff_ss_100C_1v95_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v95_1v65.lib"
+ff_ss_100C_1v95_1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v95_1v95.lib"
+ff_ss_100C_1v95_1v95_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v95_1v95_1v65.lib"
+ff_ss_100C_1v95_1v95_1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v95_1v95_1v95.lib"
+ff_ss_100C_1v95_5v50_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v95_5v50_1v65.lib"
+ff_ss_n40C_1v65_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v65_1v65.lib"
+ff_ss_n40C_1v65_1v65_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v65_1v65_1v65.lib"
+ff_ss_n40C_1v95_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v95_1v65.lib"
+ff_ss_n40C_1v95_1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v95_1v95.lib"
+ff_ss_n40C_1v95_1v95_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v95_1v95_1v65.lib"
+ff_ss_n40C_1v95_1v95_1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v95_1v95_1v95.lib"
+ff_ss_n40C_1v95_5v50_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v95_5v50_1v65.lib"
+ss_100C_1v40_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v40_1v65.lib"
+ss_100C_1v40_1v65_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v40_1v65_1v65.lib"
+ss_100C_1v45_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v45_1v65.lib"
+ss_100C_1v60_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v60_1v65.lib"
+ss_100C_1v60_1v65_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v60_1v65_1v65.lib"
+ss_100C_1v60_3v00 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v60_3v00.lib"
+ss_100C_1v60_3v00_3v00 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v60_3v00_3v00.lib"
+ss_100C_1v60_5v50_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v60_5v50_1v65.lib"
+ss_100C_1v65_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/sky130_fd_io__top_analog_pad_ss_100C_1v65_1v65.lib"
+ss_100C_1v95_1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v95_1v95.lib"
+ss_ff_100C_1v40_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_100C_1v40_5v50.lib"
+ss_ff_100C_1v40_5v50_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_100C_1v40_5v50_5v50.lib"
+ss_ff_100C_1v60_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*v2_ss_ff_100C_1v60_1v65.lib"
+ss_ff_100C_1v60_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_100C_1v60_5v50.lib"
+ss_ff_100C_1v60_5v50_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_100C_1v60_5v50_1v65.lib"
+ss_ff_100C_1v60_5v50_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_100C_1v60_5v50_5v50.lib"
+ss_ff_n40C_1v35_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_n40C_1v35_5v50.lib"
+ss_ff_n40C_1v35_5v50_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_n40C_1v35_5v50_5v50.lib"
+ss_ff_n40C_1v60_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*v2_ss_ff_n40C_1v60_1v65.lib"
+ss_ff_n40C_1v60_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_n40C_1v60_5v50.lib"
+ss_ff_n40C_1v60_5v50_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_n40C_1v60_5v50_1v65.lib"
+ss_ff_n40C_1v60_5v50_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_n40C_1v60_5v50_5v50.lib"
+ss_n40C_1v35_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v35_1v65.lib"
+ss_n40C_1v35_1v65_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v35_1v65_1v65.lib"
+ss_n40C_1v40_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v40_1v65.lib"
+ss_n40C_1v40_1v65_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v40_1v65_1v65.lib"
+ss_n40C_1v45_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v45_1v65.lib"
+ss_n40C_1v60_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v60_1v65.lib"
+ss_n40C_1v60_1v65_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v60_1v65_1v65.lib"
+ss_n40C_1v60_5v50_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v60_5v50_1v65.lib"
+ss_n40C_1v65_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v65_1v65.lib"
+ss_n40C_1v95_1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v95_1v95.lib"
+ss_ss_100C_1v40_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_100C_1v40_1v65.lib"
+ss_ss_100C_1v60_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_100C_1v60_1v65.lib"
+ss_ss_100C_1v60_3v00 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_100C_1v60_3v00.lib"
+ss_ss_n40C_1v35_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_n40C_1v35_1v65.lib"
+ss_ss_n40C_1v40_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_n40C_1v40_1v65.lib"
+ss_ss_n40C_1v60_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_n40C_1v60_1v65.lib"
+ss_ss_n40C_1v60_1v65_nointpwr = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_n40C_1v60_1v65_nointpwr.lib"
+tt_025C_1v80_3v30 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_tt_025C_1v80_3v30.lib"
+tt_025C_1v80_3v30_3v30 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_tt_025C_1v80_3v30_3v30.lib"
+tt_100C_1v80_3v30 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_tt_100C_1v80_3v30.lib"
+tt_tt_025C_1v80_3v30 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_tt_tt_025C_1v80_3v30.lib"
+
+[refs.library.files]
+source = "librelane config"
+gds = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/gds/sky130_ef_io.gds",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/gds/sky130_ef_io__analog.gds",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/gds/sky130_ef_io__bare_pad.gds",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/gds/sky130_ef_io__connect_vcchib_vccd_and_vswitch_vddio_slice_20um.gds",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/gds/sky130_ef_io__disconnect_vccd_slice_5um.gds",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/gds/sky130_ef_io__disconnect_vdda_slice_5um.gds",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/gds/sky130_ef_io__gpiov2_pad_wrapped.gds",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/gds/sky130_fd_io.gds",
+]
+spice = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/spice/sky130_ef_io__analog.spice",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/spice/sky130_fd_io.spice",
+]
+cdl = ["$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/cdl/sky130_ef_io.cdl"]
+lef = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lef/sky130_ef_io.lef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lef/sky130_fd_io.lef",
+]
+verilog = ["$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/verilog/sky130_ef_io.v"]
+liberty = [
+    { corner = "ff_100C_1v60_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_100C_1v60_5v50.lib" },
+    { corner = "ff_100C_1v95_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_100C_1v95_5v50.lib" },
+    { corner = "ff_100C_1v95_5v50_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_100C_1v95_5v50_1v65.lib" },
+    { corner = "ff_100C_1v95_5v50_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_100C_1v95_5v50_5v50.lib" },
+    { corner = "ff_ff_100C_1v95_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*v2_ff_ff_100C_1v95_1v65.lib" },
+    { corner = "ff_ff_100C_1v95_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ff_100C_1v95_5v50.lib" },
+    { corner = "ff_ff_n40C_1v95_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*v2_ff_ff_n40C_1v95_1v65.lib" },
+    { corner = "ff_ff_n40C_1v95_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ff_n40C_1v95_5v50.lib" },
+    { corner = "ff_ff_n40C_1v95_5v50_nointpwr", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ff_n40C_1v95_5v50_nointpwr.lib" },
+    { corner = "ff_n40C_1v35_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/sky130_fd_io__top_analog_pad_ff_n40C_1v35_5v50.lib" },
+    { corner = "ff_n40C_1v40_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/sky130_fd_io__top_analog_pad_ff_n40C_1v40_5v50.lib" },
+    { corner = "ff_n40C_1v60_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_n40C_1v60_5v50.lib" },
+    { corner = "ff_n40C_1v95_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_n40C_1v95_5v50.lib" },
+    { corner = "ff_n40C_1v95_5v50_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_n40C_1v95_5v50_1v65.lib" },
+    { corner = "ff_n40C_1v95_5v50_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_n40C_1v95_5v50_5v50.lib" },
+    { corner = "ff_ss_100C_1v65_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v65_1v65.lib" },
+    { corner = "ff_ss_100C_1v65_1v65_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v65_1v65_1v65.lib" },
+    { corner = "ff_ss_100C_1v95_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v95_1v65.lib" },
+    { corner = "ff_ss_100C_1v95_1v95", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v95_1v95.lib" },
+    { corner = "ff_ss_100C_1v95_1v95_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v95_1v95_1v65.lib" },
+    { corner = "ff_ss_100C_1v95_1v95_1v95", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v95_1v95_1v95.lib" },
+    { corner = "ff_ss_100C_1v95_5v50_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_100C_1v95_5v50_1v65.lib" },
+    { corner = "ff_ss_n40C_1v65_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v65_1v65.lib" },
+    { corner = "ff_ss_n40C_1v65_1v65_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v65_1v65_1v65.lib" },
+    { corner = "ff_ss_n40C_1v95_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v95_1v65.lib" },
+    { corner = "ff_ss_n40C_1v95_1v95", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v95_1v95.lib" },
+    { corner = "ff_ss_n40C_1v95_1v95_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v95_1v95_1v65.lib" },
+    { corner = "ff_ss_n40C_1v95_1v95_1v95", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v95_1v95_1v95.lib" },
+    { corner = "ff_ss_n40C_1v95_5v50_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ff_ss_n40C_1v95_5v50_1v65.lib" },
+    { corner = "ss_100C_1v40_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v40_1v65.lib" },
+    { corner = "ss_100C_1v40_1v65_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v40_1v65_1v65.lib" },
+    { corner = "ss_100C_1v45_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v45_1v65.lib" },
+    { corner = "ss_100C_1v60_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v60_1v65.lib" },
+    { corner = "ss_100C_1v60_1v65_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v60_1v65_1v65.lib" },
+    { corner = "ss_100C_1v60_3v00", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v60_3v00.lib" },
+    { corner = "ss_100C_1v60_3v00_3v00", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v60_3v00_3v00.lib" },
+    { corner = "ss_100C_1v60_5v50_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v60_5v50_1v65.lib" },
+    { corner = "ss_100C_1v65_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/sky130_fd_io__top_analog_pad_ss_100C_1v65_1v65.lib" },
+    { corner = "ss_100C_1v95_1v95", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_100C_1v95_1v95.lib" },
+    { corner = "ss_ff_100C_1v40_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_100C_1v40_5v50.lib" },
+    { corner = "ss_ff_100C_1v40_5v50_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_100C_1v40_5v50_5v50.lib" },
+    { corner = "ss_ff_100C_1v60_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*v2_ss_ff_100C_1v60_1v65.lib" },
+    { corner = "ss_ff_100C_1v60_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_100C_1v60_5v50.lib" },
+    { corner = "ss_ff_100C_1v60_5v50_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_100C_1v60_5v50_1v65.lib" },
+    { corner = "ss_ff_100C_1v60_5v50_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_100C_1v60_5v50_5v50.lib" },
+    { corner = "ss_ff_n40C_1v35_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_n40C_1v35_5v50.lib" },
+    { corner = "ss_ff_n40C_1v35_5v50_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_n40C_1v35_5v50_5v50.lib" },
+    { corner = "ss_ff_n40C_1v60_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*v2_ss_ff_n40C_1v60_1v65.lib" },
+    { corner = "ss_ff_n40C_1v60_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_n40C_1v60_5v50.lib" },
+    { corner = "ss_ff_n40C_1v60_5v50_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_n40C_1v60_5v50_1v65.lib" },
+    { corner = "ss_ff_n40C_1v60_5v50_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ff_n40C_1v60_5v50_5v50.lib" },
+    { corner = "ss_n40C_1v35_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v35_1v65.lib" },
+    { corner = "ss_n40C_1v35_1v65_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v35_1v65_1v65.lib" },
+    { corner = "ss_n40C_1v40_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v40_1v65.lib" },
+    { corner = "ss_n40C_1v40_1v65_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v40_1v65_1v65.lib" },
+    { corner = "ss_n40C_1v45_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v45_1v65.lib" },
+    { corner = "ss_n40C_1v60_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v60_1v65.lib" },
+    { corner = "ss_n40C_1v60_1v65_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v60_1v65_1v65.lib" },
+    { corner = "ss_n40C_1v60_5v50_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v60_5v50_1v65.lib" },
+    { corner = "ss_n40C_1v65_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v65_1v65.lib" },
+    { corner = "ss_n40C_1v95_1v95", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_n40C_1v95_1v95.lib" },
+    { corner = "ss_ss_100C_1v40_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_100C_1v40_1v65.lib" },
+    { corner = "ss_ss_100C_1v60_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_100C_1v60_1v65.lib" },
+    { corner = "ss_ss_100C_1v60_3v00", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_100C_1v60_3v00.lib" },
+    { corner = "ss_ss_n40C_1v35_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_n40C_1v35_1v65.lib" },
+    { corner = "ss_ss_n40C_1v40_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_n40C_1v40_1v65.lib" },
+    { corner = "ss_ss_n40C_1v60_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_n40C_1v60_1v65.lib" },
+    { corner = "ss_ss_n40C_1v60_1v65_nointpwr", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_ss_ss_n40C_1v60_1v65_nointpwr.lib" },
+    { corner = "tt_025C_1v80_3v30", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_tt_025C_1v80_3v30.lib" },
+    { corner = "tt_025C_1v80_3v30_3v30", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_tt_025C_1v80_3v30_3v30.lib" },
+    { corner = "tt_100C_1v80_3v30", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_tt_100C_1v80_3v30.lib" },
+    { corner = "tt_tt_025C_1v80_3v30", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_io/lib/*_tt_tt_025C_1v80_3v30.lib" },
+]
+
+[[refs.library]]
+name = "sky130_fd_pr"
+path = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_pr"
+layout = "ref"
+role = "primitives"
+description = "Device primitives (fixed layouts) (394 cells)"
+enabled = true
+cells = 394
+formats = ["gds", "lef", "mag", "maglef", "spice"]
+
+[refs.library.files]
+source = "folder scan"
+gds = ["$PDK_ROOT/sky130A/libs.ref/sky130_fd_pr/gds/sky130_fd_pr.gds"]
+spice = ["$PDK_ROOT/sky130A/libs.ref/sky130_fd_pr/spice/*.spice"]
+lef = ["$PDK_ROOT/sky130A/libs.ref/sky130_fd_pr/lef/sky130_fd_pr.lef"]
+
+[[refs.library]]
+name = "sky130_fd_sc_hd"
+path = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd"
+layout = "ref"
+role = "stdcells"
+description = "Standard cells (446 cells)"
+enabled = true
+cells = 446
+formats = ["cdl", "gds", "lef", "lib", "mag", "maglef", "spice", "techlef", "verilog"]
+techlef = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__max.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__min.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__nom.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__rram__max.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__rram__min.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__rram__nom.tlef",
+]
+default_corner = "tt_025C_1v80"
+
+[refs.library.sites]
+unithd = [0.46, 2.72]
+unithddbl = [0.46, 5.44]
+
+[refs.library.liberty]
+ff_100C_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ff_100C_1v65.lib"
+ff_100C_1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ff_100C_1v95.lib"
+ff_n40C_1v56 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ff_n40C_1v56.lib"
+ff_n40C_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ff_n40C_1v65.lib"
+ff_n40C_1v76 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ff_n40C_1v76.lib"
+ff_n40C_1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ff_n40C_1v95.lib"
+ff_n40C_1v95_ccsnoise = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ff_n40C_1v95_ccsnoise.lib"
+ss_100C_1v40 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_100C_1v40.lib"
+ss_100C_1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_100C_1v60.lib"
+ss_n40C_1v28 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_n40C_1v28.lib"
+ss_n40C_1v35 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_n40C_1v35.lib"
+ss_n40C_1v40 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_n40C_1v40.lib"
+ss_n40C_1v44 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_n40C_1v44.lib"
+ss_n40C_1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_n40C_1v60.lib"
+ss_n40C_1v60_ccsnoise = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_n40C_1v60_ccsnoise.lib"
+ss_n40C_1v76 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_n40C_1v76.lib"
+tt_025C_1v80 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib"
+tt_100C_1v80 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_100C_1v80.lib"
+
+[refs.library.files]
+source = "librelane config"
+gds = ["$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/gds/sky130_fd_sc_hd.gds"]
+spice = ["$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/spice/*.spice"]
+cdl = ["$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/cdl/sky130_fd_sc_hd.cdl"]
+lef = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lef/sky130_ef_sc_hd.lef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lef/sky130_fd_sc_hd.lef",
+]
+tech_lef = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__max.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__min.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/techlef/sky130_fd_sc_hd__nom.tlef",
+]
+verilog = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/verilog/sky130_fd_sc_hd.v",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/verilog/sky130_fd_sc_hd__blackbox.v",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/verilog/sky130_fd_sc_hd__blackbox_pp.v",
+]
+power_pins = ["VPWR", "VPB"]
+ground_pins = ["VGND", "VNB"]
+liberty = [
+    { corner = "ff_n40C_1v95", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ff_n40C_1v95.lib" },
+    { corner = "ss_100C_1v60", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__ss_100C_1v60.lib" },
+    { corner = "tt_025C_1v80", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib" },
+]
+
+[[refs.library]]
+name = "sky130_fd_sc_hvl"
+path = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl"
+layout = "ref"
+role = "stdcells"
+description = "Standard cells (71 cells)"
+enabled = true
+cells = 71
+formats = ["cdl", "gds", "lef", "lib", "mag", "maglef", "spice", "techlef", "verilog"]
+techlef = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/techlef/sky130_fd_sc_hvl__max.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/techlef/sky130_fd_sc_hvl__min.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/techlef/sky130_fd_sc_hvl__nom.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/techlef/sky130_fd_sc_hvl__rram__max.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/techlef/sky130_fd_sc_hvl__rram__min.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/techlef/sky130_fd_sc_hvl__rram__nom.tlef",
+]
+default_corner = "tt_025C_2v64_lv1v80"
+
+[refs.library.sites]
+unithv = [0.48, 4.07]
+unithvdbl = [0.48, 8.14]
+
+[refs.library.liberty]
+ff_085C_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_085C_5v50.lib"
+ff_085C_5v50_lv1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_085C_5v50_lv1v95.lib"
+ff_100C_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_100C_5v50.lib"
+ff_100C_5v50_lowhv1v65_lv1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_100C_5v50_lowhv1v65_lv1v95.lib"
+ff_100C_5v50_lv1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_100C_5v50_lv1v95.lib"
+ff_150C_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_150C_5v50.lib"
+ff_150C_5v50_lv1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_150C_5v50_lv1v95.lib"
+ff_n40C_4v40 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_n40C_4v40.lib"
+ff_n40C_4v40_lv1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_n40C_4v40_lv1v95.lib"
+ff_n40C_4v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_n40C_4v95.lib"
+ff_n40C_4v95_lv1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_n40C_4v95_lv1v95.lib"
+ff_n40C_5v50 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_n40C_5v50.lib"
+ff_n40C_5v50_ccsnoise = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_n40C_5v50_ccsnoise.lib"
+ff_n40C_5v50_lowhv1v65_lv1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_n40C_5v50_lowhv1v65_lv1v95.lib"
+ff_n40C_5v50_lv1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_n40C_5v50_lv1v95.lib"
+ff_n40C_5v50_lv1v95_ccsnoise = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_n40C_5v50_lv1v95_ccsnoise.lib"
+hvff_lvss_100C_5v50_lowhv1v65_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvff_lvss_100C_5v50_lowhv1v65_lv1v60.lib"
+hvff_lvss_100C_5v50_lv1v40 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvff_lvss_100C_5v50_lv1v40.lib"
+hvff_lvss_100C_5v50_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvff_lvss_100C_5v50_lv1v60.lib"
+hvff_lvss_n40C_5v50_lowhv1v65_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvff_lvss_n40C_5v50_lowhv1v65_lv1v60.lib"
+hvff_lvss_n40C_5v50_lv1v35 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvff_lvss_n40C_5v50_lv1v35.lib"
+hvff_lvss_n40C_5v50_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvff_lvss_n40C_5v50_lv1v60.lib"
+hvss_lvff_100C_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvss_lvff_100C_1v65.lib"
+hvss_lvff_100C_1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvss_lvff_100C_1v95.lib"
+hvss_lvff_100C_1v95_lowhv1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvss_lvff_100C_1v95_lowhv1v65.lib"
+hvss_lvff_100C_5v50_lowhv1v65_lv1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvss_lvff_100C_5v50_lowhv1v65_lv1v95.lib"
+hvss_lvff_n40C_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvss_lvff_n40C_1v65.lib"
+hvss_lvff_n40C_1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvss_lvff_n40C_1v95.lib"
+hvss_lvff_n40C_1v95_lowhv1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvss_lvff_n40C_1v95_lowhv1v65.lib"
+hvss_lvff_n40C_5v50_lowhv1v65_lv1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__hvss_lvff_n40C_5v50_lowhv1v65_lv1v95.lib"
+ss_100C_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_100C_1v65.lib"
+ss_100C_1v65_lv1v40 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_100C_1v65_lv1v40.lib"
+ss_100C_1v65_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_100C_1v65_lv1v60.lib"
+ss_100C_1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_100C_1v95.lib"
+ss_100C_2v40_lowhv1v65_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_100C_2v40_lowhv1v65_lv1v60.lib"
+ss_100C_2v70_lowhv1v65_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_100C_2v70_lowhv1v65_lv1v60.lib"
+ss_100C_3v00 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_100C_3v00.lib"
+ss_100C_3v00_lowhv1v65_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_100C_3v00_lowhv1v65_lv1v60.lib"
+ss_100C_5v50_lowhv1v65_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_100C_5v50_lowhv1v65_lv1v60.lib"
+ss_150C_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_150C_1v65.lib"
+ss_150C_1v65_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_150C_1v65_lv1v60.lib"
+ss_150C_3v00_lowhv1v65_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_150C_3v00_lowhv1v65_lv1v60.lib"
+ss_n40C_1v32 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_n40C_1v32.lib"
+ss_n40C_1v32_lv1v28 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_n40C_1v32_lv1v28.lib"
+ss_n40C_1v49 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_n40C_1v49.lib"
+ss_n40C_1v49_lv1v44 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_n40C_1v49_lv1v44.lib"
+ss_n40C_1v65 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_n40C_1v65.lib"
+ss_n40C_1v65_ccsnoise = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_n40C_1v65_ccsnoise.lib"
+ss_n40C_1v65_lv1v35 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_n40C_1v65_lv1v35.lib"
+ss_n40C_1v65_lv1v40 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_n40C_1v65_lv1v40.lib"
+ss_n40C_1v65_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_n40C_1v65_lv1v60.lib"
+ss_n40C_1v65_lv1v60_ccsnoise = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_n40C_1v65_lv1v60_ccsnoise.lib"
+ss_n40C_1v95 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_n40C_1v95.lib"
+ss_n40C_5v50_lowhv1v65_lv1v60 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_n40C_5v50_lowhv1v65_lv1v60.lib"
+tt_025C_2v64_lv1v80 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__tt_025C_2v64_lv1v80.lib"
+tt_025C_2v97_lv1v80 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__tt_025C_2v97_lv1v80.lib"
+tt_025C_3v30 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__tt_025C_3v30.lib"
+tt_025C_3v30_lv1v80 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__tt_025C_3v30_lv1v80.lib"
+tt_100C_3v30 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__tt_100C_3v30.lib"
+tt_100C_3v30_lv1v80 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__tt_100C_3v30_lv1v80.lib"
+tt_150C_3v30_lv1v80 = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__tt_150C_3v30_lv1v80.lib"
+
+[refs.library.files]
+source = "librelane config"
+gds = ["$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/gds/sky130_fd_sc_hvl.gds"]
+spice = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/spice/sky130_ef_sc_hvl__fill_8.spice",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/spice/sky130_fd_sc_hvl.spice",
+]
+cdl = ["$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/cdl/sky130_fd_sc_hvl.cdl"]
+lef = ["$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lef/sky130_fd_sc_hvl.lef"]
+tech_lef = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/techlef/sky130_fd_sc_hvl__max.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/techlef/sky130_fd_sc_hvl__min.tlef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/techlef/sky130_fd_sc_hvl__nom.tlef",
+]
+verilog = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/verilog/sky130_fd_sc_hvl.v",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/verilog/sky130_fd_sc_hvl__blackbox.v",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/verilog/sky130_fd_sc_hvl__blackbox_pp.v",
+]
+power_pins = ["VPWR", "VPB"]
+ground_pins = ["VGND", "VNB"]
+liberty = [
+    { corner = "ff_n40C_5v50", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ff_n40C_5v50.lib" },
+    { corner = "ss_150C_1v65", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__ss_150C_1v65.lib" },
+    { corner = "tt_025C_3v30", file = "$PDK_ROOT/sky130A/libs.ref/sky130_fd_sc_hvl/lib/sky130_fd_sc_hvl__tt_025C_3v30.lib" },
+]
+
+[[refs.library]]
+name = "sky130_ml_xx_hd"
+path = "$PDK_ROOT/sky130A/libs.ref/sky130_ml_xx_hd"
+layout = "ref"
+role = "other"
+description = "Reference library (98 cells)"
+enabled = false
+cells = 98
+formats = ["mag", "scripts"]
+
+[[refs.library]]
+name = "sky130_sram_macros"
+path = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros"
+layout = "ref"
+role = "memory"
+description = "Memory macros (608 cells)"
+enabled = true
+cells = 608
+formats = ["gds", "lef", "lib", "mag", "maglef", "spice", "verilog"]
+default_corner = "TT_1p7V_25C"
+
+[refs.library.liberty]
+FF_1p8V_25C = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/sram_1rw1r_32_256_8_sky130_FF_1p8V_25C.lib"
+SS_1p8V_25C = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/sram_1rw1r_32_256_8_sky130_SS_1p8V_25C.lib"
+TT_1p7V_25C = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/sram_1rw1r_32_256_8_sky130_TT_1p7V_25C.lib"
+TT_1p8V_0C = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/sram_1rw1r_32_256_8_sky130_TT_1p8V_0C.lib"
+TT_1p8V_100C = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/sram_1rw1r_32_256_8_sky130_TT_1p8V_100C.lib"
+TT_1p8V_25C = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/*_TT_1p8V_25C.lib"
+TT_1p9V_25C = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/sram_1rw1r_32_256_8_sky130_TT_1p9V_25C.lib"
+
+[refs.library.files]
+source = "folder scan"
+gds = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/gds/sky130_sram_1kbyte_1rw1r_32x256_8.gds",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/gds/sky130_sram_1kbyte_1rw1r_8x1024_8.gds",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/gds/sky130_sram_2kbyte_1rw1r_32x512_8.gds",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/gds/sram_1rw1r_32_256_8_sky130.gds",
+]
+spice = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/spice/sky130_sram_1kbyte_1rw1r_32x256_8.spice",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/spice/sky130_sram_1kbyte_1rw1r_8x1024_8.spice",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/spice/sky130_sram_2kbyte_1rw1r_32x512_8.spice",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/spice/sram_1rw1r_32_256_8_sky130.spice",
+]
+lef = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lef/sky130_sram_1kbyte_1rw1r_32x256_8.lef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lef/sky130_sram_1kbyte_1rw1r_8x1024_8.lef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lef/sky130_sram_2kbyte_1rw1r_32x512_8.lef",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lef/sram_1rw1r_32_256_8_sky130.lef",
+]
+verilog = [
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/verilog/sky130_sram_1kbyte_1rw1r_32x256_8.v",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/verilog/sky130_sram_1kbyte_1rw1r_8x1024_8.v",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/verilog/sky130_sram_2kbyte_1rw1r_32x512_8.v",
+    "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/verilog/sram_1rw1r_32_256_8_sky130.v",
+]
+liberty = [
+    { corner = "FF_1p8V_25C", file = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/sram_1rw1r_32_256_8_sky130_FF_1p8V_25C.lib" },
+    { corner = "SS_1p8V_25C", file = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/sram_1rw1r_32_256_8_sky130_SS_1p8V_25C.lib" },
+    { corner = "TT_1p7V_25C", file = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/sram_1rw1r_32_256_8_sky130_TT_1p7V_25C.lib" },
+    { corner = "TT_1p8V_0C", file = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/sram_1rw1r_32_256_8_sky130_TT_1p8V_0C.lib" },
+    { corner = "TT_1p8V_100C", file = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/sram_1rw1r_32_256_8_sky130_TT_1p8V_100C.lib" },
+    { corner = "TT_1p8V_25C", file = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/*_TT_1p8V_25C.lib" },
+    { corner = "TT_1p9V_25C", file = "$PDK_ROOT/sky130A/libs.ref/sky130_sram_macros/lib/sram_1rw1r_32_256_8_sky130_TT_1p9V_25C.lib" },
+]
+
+[refs.digital]
+flow = "openlane"
+config = "$PDK_ROOT/sky130A/libs.tech/openlane/config.tcl"
+default_library = "sky130_fd_sc_hd"
+rcx_rules = [
+    "$PDK_ROOT/sky130A/libs.tech/openlane/rules.openrcx.sky130A.max.calibre",
+    "$PDK_ROOT/sky130A/libs.tech/openlane/rules.openrcx.sky130A.max.magic",
+    "$PDK_ROOT/sky130A/libs.tech/openlane/rules.openrcx.sky130A.max.spef_extractor",
+    "$PDK_ROOT/sky130A/libs.tech/openlane/rules.openrcx.sky130A.min.calibre",
+    "$PDK_ROOT/sky130A/libs.tech/openlane/rules.openrcx.sky130A.min.magic",
+    "$PDK_ROOT/sky130A/libs.tech/openlane/rules.openrcx.sky130A.min.spef_extractor",
+    "$PDK_ROOT/sky130A/libs.tech/openlane/rules.openrcx.sky130A.nom.calibre",
+    "$PDK_ROOT/sky130A/libs.tech/openlane/rules.openrcx.sky130A.nom.magic",
+    "$PDK_ROOT/sky130A/libs.tech/openlane/rules.openrcx.sky130A.nom.spef_extractor",
+]
+config_hash = "ee2aa16c79dc5879"
+
+[refs.digital.libraries]
+sky130_fd_sc_hd = "$PDK_ROOT/sky130A/libs.tech/openlane/sky130_fd_sc_hd/config.tcl"
+sky130_fd_sc_hdll = "$PDK_ROOT/sky130A/libs.tech/openlane/sky130_fd_sc_hdll/config.tcl"
+sky130_fd_sc_hs = "$PDK_ROOT/sky130A/libs.tech/openlane/sky130_fd_sc_hs/config.tcl"
+sky130_fd_sc_hvl = "$PDK_ROOT/sky130A/libs.tech/openlane/sky130_fd_sc_hvl/config.tcl"
+sky130_fd_sc_ls = "$PDK_ROOT/sky130A/libs.tech/openlane/sky130_fd_sc_ls/config.tcl"
+sky130_fd_sc_ms = "$PDK_ROOT/sky130A/libs.tech/openlane/sky130_fd_sc_ms/config.tcl"
+sky130_osu_sc_t18 = "$PDK_ROOT/sky130A/libs.tech/openlane/sky130_osu_sc_t18/config.tcl"

@@ -372,13 +372,49 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
       PCells need `[klayout] tech` to read back live; bus instances (`M1[3:0]`) count
       as one name.
 
+### Phase 3: Magic and the tool hub (2026-11-27, [MAGIC.md](MAGIC.md), [tools.md](tools.md))
+- [x] Magic in a tab: helper `cdept-magic` (GPL because it runs faketk.tcl) loads the
+      installed `tclmagic.so` with a Tk stub table and Xlib of its own; no Magic build,
+      no submodule, no patch. Four Magic 8.3.623 problems worked around (MAGIC.md, "What
+      had to be worked around"), one of them by writing an unexported variable found in
+      `tclmagic.so`'s symbol table (`windCaptionPixels`): a stripped `tclmagic.so` gets a
+      warning and windows cut off at the bottom. **(verify)** on other Magic builds than
+      8.3.623 (the stub slots and `Tk_FakeWin` are Tk 8.6's).
+- [x] Magic's licence is permissive (HPND-UC); the old docs said GPL.
+- [x] `.mag` references: relative `use` paths + `<cell>.mag.json` (cdept-layout schema);
+      rename/copy/move (Library and refactor), Hierarchy index, `cdept magic refs`.
+- [x] Layout from schematic (`pdk/{sky130A,ihp-sg13g2}/magic-devices.toml`), check-source,
+      LVS (netgen), LEF, GDS import/export, cross-probing of instances, DRC panel.
+- [x] Opening views: choices per format, Open With, the question on double click,
+      `cdept open`, supervised tool windows (logs, limit, stop/restart), klive, `[python]`.
+- [ ] Magic: nets/flylines, net cross-probing; more than one window per helper; Magic's
+      wrapper (menus, coloured layer tool bar); crash backups (unsaved edits are lost
+      when the helper dies); gencell dialogs through faketk not exercised.
+- [ ] `cdept-magic` needs tk-dev (headers) to build; CI installs it, not yet seen on CI.
+- [ ] Tool windows are not stopped when CDePT quits; xschem window needs a stock xschem
+      (not on the development host); the Tools tab has no row for `cdept-magic` itself.
+- [ ] ihp-sg13g2 Magic device map not checked against a real generate (sky130A was).
+- [ ] The example's `tech.catalog.json` (2.8 MB) is not committed (`cdept tech refresh`).
+- [x] Torture (cdept-magic/tests/torture.rs, libcdept/tests/magic_refs.rs,
+      magic-torture.script) found and fixed: paths with non-ASCII letters or spaces
+      (Magic refuses them: the folder becomes its working folder), the start-up script
+      read as UTF-8, the current point on the window border after a resize (commands
+      failed with an empty error), windows under 64×64, Ctrl+S passed to Magic instead of
+      saving. Survived: 3000 queued inputs + 60 resizes, 100000×100000 (clamped), a
+      40000-rectangle layout (~1 s), kill -9 mid-edit (file intact, clean restart), Magic's
+      own `quit`, two helpers at once, a failed rename rolled back, a sparse 512 MB file
+      (refused by size), CRLF files, 5000 `use` lines, broken sidecars, cycles.
+- [ ] Hung `Xyce -v` probes (tool detection of GUI runs) piled up and used up inotify
+      instances, which breaks `libcdept/tests/watch.rs` ("cannot watch files"); fixed by
+      "Tool probes: Open MPI single-process settings" (Phase 4/5 round).
+
 ### Smaller gaps left in what exists
 - [x] Edit project fields (name, description, technology, PDK folder) from the GUI.
 - [ ] Edit or remove libraries that come from an `include` file; today the GUI refuses.
 - [ ] Change a library definition (path, read-only, layout): done in the CLI (`cdept lib
       set`); the GUI side was not checked.
 - [x] Rename and copy a single view (`cdept view`); rename a library (`cdept lib rename`).
-- [ ] Magic layout template (needs the technology name, so Phase 2).
+- [x] Magic layout template: the snapshot's `[magic] tech` (Phase 2), with a sidecar (2026-11-27).
 - [x] CLI for cells and views (`cdept cell`, `cdept view`).
 - [ ] A text field as fallback for the folder dialog (see §2.1).
 

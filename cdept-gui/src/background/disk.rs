@@ -35,6 +35,7 @@ fn shown(doc: &Document) -> Vec<PathBuf> {
     match doc {
         Document::Schematic(view) => vec![view.file().to_path_buf()],
         Document::Layout(view) => view.disk_files(),
+        Document::Magic(view) => view.disk_files(),
     }
 }
 
@@ -49,6 +50,7 @@ pub(super) fn reload(doc: &mut Document) {
             ));
         }
         Document::Layout(view) => view.disk_reload(),
+        Document::Magic(view) => view.disk_reload(),
     }
 }
 
@@ -134,6 +136,11 @@ pub(super) fn check(app: &mut AppCtx, views: &mut Views) {
                     state.known.insert(f.clone(), stamp(f));
                 }
             }
+            Document::Magic(view) => {
+                for f in view.disk_written() {
+                    state.known.insert(f.clone(), stamp(&f));
+                }
+            }
             Document::Schematic(_) => {
                 if state.was_modified && !modified {
                     state.known.insert(file.clone(), stamp(&file));
@@ -152,6 +159,7 @@ pub(super) fn check(app: &mut AppCtx, views: &mut Views) {
             .extend(suspects.iter().filter(|f| files.contains(f)).cloned());
         let busy = match doc {
             Document::Layout(view) => view.disk_busy(),
+            Document::Magic(view) => view.disk_busy(),
             Document::Schematic(_) => false,
         };
         if state.pending.is_empty() || busy || !doc.is_running() {

@@ -42,6 +42,12 @@ const NUDGE: Duration = Duration::from_millis(300);
 #[derive(Debug, Clone, PartialEq)]
 enum Command {
     Open(Selection),
+    /// `open_with <library> <cell> <view> <tool>`: as "Open With" (a tab or a window).
+    OpenWith(Selection, String),
+    /// `open_view <library> <cell> <view>`: what a double click on the view does.
+    OpenView(Selection),
+    /// `expect_open_choice <n>`: the "Open with" question is up with n tools.
+    ExpectOpenChoice(usize),
     Close,
     CloseTab,
     CloseAnswer(CloseChoice),
@@ -114,6 +120,8 @@ enum Command {
     Organise(Vec<String>),
     /// Changes on disk, git marks, the trash (background/script.rs).
     Disk(crate::background::script::DiskCommand),
+    /// `magic <verb> …`: the active Magic tab (views/magic.rs).
+    Magic(Vec<String>),
     Quit,
 }
 
@@ -231,6 +239,9 @@ impl Command {
         if let Command::Sim(args) = self {
             return crate::views::simulation::patient(args);
         }
+        if let Command::Magic(args) = self {
+            return crate::views::magic_patient(args);
+        }
         matches!(
             self,
             Command::Menu(_)
@@ -238,6 +249,7 @@ impl Command {
                 | Command::DialogType(..)
                 | Command::CloseAnswer(_)
                 | Command::ExpectDialog(_)
+                | Command::ExpectOpenChoice(_)
                 | Command::ExpectPane(_)
                 | Command::ExpectPixel(..)
                 | Command::ExpectDocuments(_)
@@ -287,6 +299,7 @@ impl Command {
     fn patience(&self) -> Duration {
         match self {
             Command::Sim(args) if args.first().map(String::as_str) == Some("wait") => SIM_PATIENCE,
+            Command::Magic(_) => SIM_PATIENCE,
             Command::Sim(args) if args.first().map(String::as_str) == Some("suite_wait") => {
                 SUITE_PATIENCE
             }
@@ -606,6 +619,23 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
         "log" => Command::Log(rest.to_string()),
         "tech" => Command::Tech(args.iter().map(|word| word.to_string()).collect()),
         "sim" => Command::Sim(args.iter().map(|word| word.to_string()).collect()),
+        "open_view" => match args.as_slice() {
+            [library, cell, view] => Command::OpenView(Selection::view(library, cell, view)),
+            _ => return Err("usage: open_view <library> <cell> <view>".into()),
+        },
+        "open_with" => match args.as_slice() {
+            [library, cell, view, tool] => {
+                Command::OpenWith(Selection::view(library, cell, view), tool.to_string())
+            }
+            _ => return Err("usage: open_with <library> <cell> <view> <tool>".into()),
+        },
+        "expect_open_choice" => Command::ExpectOpenChoice(
+            text()?
+                .trim()
+                .parse()
+                .map_err(|_| "usage: expect_open_choice <n>".to_string())?,
+        ),
+        "magic" => Command::Magic(args.iter().map(|word| word.to_string()).collect()),
         "wave" => Command::Wave(args.iter().map(|word| word.to_string()).collect()),
         "organise" => Command::Organise(args.iter().map(|word| word.to_string()).collect()),
         "quit" => Command::Quit,
@@ -1169,7 +1199,7 @@ impl Script {
     }
 
     fn ask(&mut self, app: &mut CdeptApp, script: &str, answer: Answer) {
-        if let Some(view) = app.script_schematic() {
+        if let Some(view) = app.script_tcl_view() {
             let id = view.tcl(script);
             self.nudge = Instant::now() + NUDGE;
             self.waiting = Waiting::Reply(id, Instant::now() + TIMEOUT, answer);
@@ -1499,7 +1529,22 @@ impl Script {
         };
         let none = Modifiers::NONE;
         match command {
-            Command::Open(selection) => app.script_request(Action::OpenView(selection)),
+            // Scripts open in the first tab that can show the view (KLayout for a GDS),
+            // without the "Open with" question.
+            Command::Open(selection) => app.script_request(app.script_open_action(selection)),
+            Command::OpenView(selection) => app.script_request(Action::OpenView(selection)),
+            Command::OpenWith(selection, tool) => {
+                app.script_request(Action::OpenWith(selection, tool))
+            }
+            Command::ExpectOpenChoice(n) => {
+                let have = app.script_open_choice();
+                if have != Some(n) {
+                    return Err(format!(
+                        "the Open With question shows {have:?} tools, expected {n}"
+                    ));
+                }
+                app.script_close_open_choice();
+            }
             Command::Close => {
                 let tab = app.script_document().ok_or("no document is open")?;
                 app.script_request(Action::CloseTab(tab));
@@ -1629,17 +1674,23 @@ impl Script {
                 }
             }
             Command::Tcl(script) => {
-                app.script_schematic().ok_or("no schematic is open")?;
+                app.script_tcl_view()
+                    .ok_or("no schematic or Magic layout is open")?;
                 self.ask(app, &script, Answer::Log);
             }
             Command::TclSend(script) => {
-                let view = app.script_schematic().ok_or("no schematic is open")?;
-                view.tcl(&script);
+                let doc = app
+                    .script_tcl_view()
+                    .ok_or("no schematic or Magic layout is open")?;
+                doc.tcl(&script);
                 // The script may have changed the selection.
-                view.reread_selection();
+                if let Some(view) = doc.as_schematic_mut() {
+                    view.reread_selection();
+                }
             }
             Command::TclExpect(expected, script) => {
-                app.script_schematic().ok_or("no schematic is open")?;
+                app.script_tcl_view()
+                    .ok_or("no schematic or Magic layout is open")?;
                 self.ask(app, &script, Answer::Expect(expected));
             }
             Command::Menu(labels) => {
@@ -1885,6 +1936,13 @@ impl Script {
             Command::Log(text) => tracing::info!(target: "cdept::script", "{text}"),
             Command::Tech(args) => app.script_tech(ctx, &args)?,
             Command::Sim(args) => app.script_sim(&args)?,
+            Command::Magic(args) => {
+                let doc = app.script_view().ok_or("no document is open")?;
+                let view = doc
+                    .as_magic_mut()
+                    .ok_or("the active document is not a Magic layout")?;
+                crate::views::magic_script(view, &args)?;
+            }
             Command::Wave(args) => crate::uberwave::script(app.script_project(), &args)?,
             Command::Organise(args) => app.script_organise(ctx, &args)?,
             Command::Disk(command) => {

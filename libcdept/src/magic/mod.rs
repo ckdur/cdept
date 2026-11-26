@@ -1,13 +1,18 @@
 //! Magic in batch mode (docs/MAGIC.md): extraction to SPICE, DRC, LEF export and GDS
 //! import.
 //!
-//! Magic is GPL, so it only ever runs as a process of its own:
+//! Magic (its licence is permissive, docs/MAGIC.md) runs as a process of its own:
 //! `magic -dnull -noconsole -rcfile <rc>` with a Tcl script on its standard input, in
 //! the PDK environment of the project ([`Project::tool_env`]). The scripts
 //! ([`tcl`]) print `CDEPT:` lines that are read back ([`parse`]); a failed run is an
 //! error that carries the tail of Magic's output.
 
+pub mod embed;
+pub mod flows;
+pub mod link;
+pub mod mag;
 pub mod parse;
+pub mod refs;
 pub mod tcl;
 
 use std::ffi::OsString;
@@ -169,6 +174,9 @@ pub struct Magic {
     pub timeout: Option<Duration>,
     /// Set to kill the running Magic (a job's [`crate::jobs::JobCtx::cancel_flag`]).
     pub cancel: Option<Arc<AtomicBool>>,
+    /// Folders added to Magic's search path before every script (`addpath`): the
+    /// folders of the project's Magic views, for cells placed without a path.
+    pub search: Vec<PathBuf>,
 }
 
 impl Magic {
@@ -187,6 +195,7 @@ impl Magic {
             env: Vec::new(),
             timeout: Some(DEFAULT_TIMEOUT),
             cancel: None,
+            search: Vec::new(),
         }
     }
 
@@ -211,6 +220,7 @@ impl Magic {
         Ok(Magic {
             rc: rc_file(project),
             env: project.tool_env(),
+            search: refs::search_dirs(project),
             ..Magic::new(program)
         }
         .with_timeout(project.magic.timeout.unwrap_or(DEFAULT_TIMEOUT)))
@@ -237,7 +247,14 @@ impl Magic {
             .spawn()
             .wrap_err_with(|| format!("cannot start {}", self.program.display()))?;
         let mut stdin = child.stdin.take().expect("piped");
-        let script = script.to_string();
+        let mut script = script.to_string();
+        if !self.search.is_empty() {
+            let mut paths = String::new();
+            for dir in &self.search {
+                paths += &format!("catch {{addpath {}}}\n", tcl::word(&dir.to_string_lossy()));
+            }
+            script.insert_str(0, &paths);
+        }
         // Written on a thread: a script bigger than the pipe must not block the reads.
         let writer = std::thread::spawn(move || {
             let _ = stdin.write_all(script.as_bytes());

@@ -33,6 +33,9 @@ pub struct Settings {
     /// A document without changes of its own opens its file again when it changed
     /// on disk; off: it shows a notice like a changed one.
     pub auto_reload: bool,
+    /// The tool a double click opens a view of a format with, when several can (format
+    /// name -> `libcdept::launch::Choice::id`); not set: CDePT asks.
+    pub open_with: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for Settings {
@@ -44,6 +47,7 @@ impl Default for Settings {
             pdk_folders: Vec::new(),
             watch: true,
             auto_reload: true,
+            open_with: Default::default(),
         }
     }
 }
@@ -106,6 +110,9 @@ pub enum Action {
     CloseTab(Tab),
     /// Open a view of a cell in its embedded tool, as a document tab.
     OpenView(Selection),
+    /// Open a view with a given tool (`libcdept::launch::Choice::id`): a tab, or the
+    /// tool's own window.
+    OpenWith(Selection, String),
     /// Open a file in its embedded tool: as the library view it is, if it is one.
     OpenFile(PathBuf),
     /// Move a tab into a new native window.
@@ -336,6 +343,10 @@ pub struct AppCtx {
     actions: Vec<Action>,
     /// Watching the files, scanning and git status behind the window.
     pub background: crate::background::Background,
+    /// The tool windows CDePT started (Tools tab: logs, stop, restart).
+    pub launcher: std::sync::Arc<libcdept::launch::Launcher>,
+    /// "Open with…": the view a double click asked for, while the user chooses.
+    pub open_choice: Option<(Selection, Vec<libcdept::launch::Choice>, bool)>,
 }
 
 impl AppCtx {
@@ -358,6 +369,8 @@ impl AppCtx {
             pick_window: WindowId::Main,
             actions: Vec::new(),
             background: Default::default(),
+            launcher: Default::default(),
+            open_choice: None,
         }
     }
 

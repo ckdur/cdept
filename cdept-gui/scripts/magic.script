@@ -1,0 +1,68 @@
+# Embedded Magic on examples/sky130-inv (docs/MAGIC.md): the picture, Magic's own
+# commands and key macros, saving (use paths, sidecar), DRC results with box and zoom,
+# Generate from Schematic, cross-probing with the schematic tab. Needs Magic, sky130A
+# and the helpers built (cargo build -p cdept-magic -p cdept-xschem):
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_MAGIC=/opt/ext/OpenLane/bin/magic \
+#   CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=sky130-inv \
+#       cdept-gui/scripts/run.sh cdept-gui/scripts/magic.script
+#
+# Screenshots go to /tmp/cdept-magic-*.png.
+
+open cells inv layout
+wait_frame
+tcl_expect sky130A tech name
+magic expect_cell inv
+magic expect_missing 0
+check_picture
+screenshot /tmp/cdept-magic-open.png
+
+# Magic's commands from CDePT's command line, and its answers in the messages.
+magic command box 0 -3um 0.1um -1um
+magic command paint m1
+magic expect_modified 1
+magic expect_log % paint m1
+
+# DRC as the cell is now: a 0.1 um wide metal1 strip is too narrow.
+magic drc
+magic expect_drc >0
+magic drc_show 0
+wait_frame
+screenshot /tmp/cdept-magic-drc.png
+
+# Undo with CDePT's Edit action (Magic's `undo`): the metal1 strip is gone (Magic
+# keeps the cell marked as changed). Then a change and a save.
+key z ctrl
+tcl_expect 0 llength [lindex [what -list] 0]
+magic command paint m2
+magic expect_modified 1
+magic save
+magic expect_saved
+tcl_expect 0 llength [cdept::magic::modified]
+
+# A key macro typed over the drawing: `v` is Magic's "view" (zoom to fit).
+move 200 150
+key v
+wait_frame
+check_picture
+
+# Generate from Schematic: the layout has the schematic's devices already.
+magic generate
+magic expect_generated
+magic expect_log in sync
+
+# Cross-probing: an instance selected in Magic is selected in the schematic, and back.
+open cells inv schematic
+wait_frame
+open cells inv layout
+tcl_send select clear; select cell M1
+magic expect_selected M1
+open cells inv schematic
+expect_selected M1
+tcl_send xschem unselect_all; xschem select instance M2
+wait 1
+open cells inv layout
+magic expect_selected M2
+screenshot /tmp/cdept-magic-probe.png
+
+quit

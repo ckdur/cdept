@@ -122,6 +122,13 @@ name = ""
 #   [magic]
 #   timeout = "10m"
 
+# The Python that Python tools (CACE, gdsfactory, the KLayout module, …) run with: a
+# virtual environment of the project, or an interpreter (default: $CDEPT_PYTHON, else
+# python3 on PATH). One user can use another with `python = "…"` in cdept.local.toml:
+#   [python]
+#   venv = ".venv"
+#   interpreter = "/usr/bin/python3.12"
+
 # Remotes the run points of a testbench can be sent to (docs/howto/remote-runs.md): over
 # ssh, or as SLURM batch jobs, on a folder the remote sees at the same path. A testbench
 # names one with `remote = "name"` in its setup.toml, or `cdept sim run --remote name`:
@@ -189,6 +196,9 @@ pub struct Project {
     pub klayout: KlayoutSettings,
     /// `[magic]`: the batch runs of Magic.
     pub magic: MagicSettings,
+    /// `[python]` (and `python` of the local file): the interpreter Python tools run
+    /// with.
+    pub python: PythonSettings,
     /// `[jobs]`: the remotes (SLURM, ssh) run points can be sent to.
     pub jobs: crate::jobs::remote::JobsSettings,
     /// `[sim]`: time limits of the simulator runs.
@@ -235,6 +245,18 @@ pub struct KlayoutSettings {
     /// `[klayout.flylines]`: how flylines look in this project (on top of the user's
     /// settings), docs/LINKING.md §8.
     pub flylines: crate::link::nets::FlylineOverride,
+}
+
+/// The Python Python tools (CACE, gdsfactory, KLayout's pip module, …) run with:
+/// `[python] interpreter` (a program) or `[python] venv` (a virtual environment
+/// folder, relative to the project) of `cdept.toml`, overridden per user by
+/// `python = "…"` in `cdept.local.toml` (a program or a venv folder).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PythonSettings {
+    /// The interpreter, resolved (absolute when it was a relative path).
+    pub interpreter: Option<PathBuf>,
+    /// The virtual environment it belongs to, when one was named.
+    pub venv: Option<PathBuf>,
 }
 
 /// `[magic]` in the project file (docs/MAGIC.md).
@@ -459,11 +481,12 @@ impl Project {
             description: text("description")?,
             technology,
             pdk_root,
-            local_env: local.env,
+            local_env: local.env.clone(),
             pdk,
             xschem_rc: Vec::new(),
             klayout: KlayoutSettings::default(),
             magic: MagicSettings::default(),
+            python: PythonSettings::default(),
             jobs: Default::default(),
             sim: SimSettings::default(),
             wave: WaveSettings::default(),
@@ -479,6 +502,7 @@ impl Project {
         project.load_xschem_rc(&doc);
         project.load_klayout(&doc);
         project.load_magic(&doc);
+        project.load_python(&doc, local.python.as_deref());
         project.load_jobs(&doc);
         project.load_sim(&doc);
         project.load_wave(&doc);
@@ -775,6 +799,60 @@ impl Project {
         }
     }
 
+    /// `[python]`: `interpreter` or `venv`; `local` is the local file's `python`, which
+    /// wins. A venv is a folder with `bin/python`; a missing one is a warning.
+    fn load_python(&mut self, doc: &DocumentMut, local: Option<&str>) {
+        let get = |key: &str| {
+            doc.get("python")
+                .and_then(|t| t.get(key))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        };
+        let (text, from) = match (local, get("interpreter"), get("venv")) {
+            (Some(l), _, _) => (l.to_string(), LOCAL_FILE),
+            (None, Some(i), _) => (i, "[python] interpreter"),
+            (None, None, Some(v)) => (v, "[python] venv"),
+            (None, None, None) => return,
+        };
+        let path = match self.resolve(&text, &self.root.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                self.warnings.push(format!("{from}: {e}"));
+                return;
+            }
+        };
+        if path.is_dir() {
+            let python = ["bin/python3", "bin/python"]
+                .iter()
+                .map(|b| path.join(b))
+                .find(|p| p.is_file());
+            match python {
+                Some(python) => {
+                    self.python.interpreter = Some(python);
+                    self.python.venv = Some(path);
+                }
+                None => self.warnings.push(format!(
+                    "{from}: {} is a folder without bin/python (not a virtual environment)",
+                    path.display()
+                )),
+            }
+        } else if path.is_file() {
+            self.python.interpreter = Some(path);
+        } else {
+            self.warnings
+                .push(format!("{from}: {} does not exist", path.display()));
+        }
+    }
+
+    /// The Python interpreter for this project: [`PythonSettings`], else the one CDePT
+    /// finds ([`crate::tools::python`]).
+    pub fn python(&self) -> Option<PathBuf> {
+        self.python
+            .interpreter
+            .clone()
+            .or_else(crate::tools::python)
+    }
+
     /// `[sim]`: `timeout` and `openvaf_timeout`, durations like `[magic] timeout`.
     fn load_sim(&mut self, doc: &DocumentMut) {
         if let Some(d) = self.duration_setting(doc, "sim", "timeout") {
@@ -1035,6 +1113,20 @@ impl Project {
         env.extend(self.pdk.env());
         if let Some(pdk) = self.pdk.dir() {
             env.push(("PDKPATH".into(), pdk.dir().into_os_string()));
+        }
+        // The project's Python: tools that start `python3` from PATH get the venv's, and
+        // CDePT's own Python steps take $CDEPT_PYTHON.
+        if let Some(python) = &self.python.interpreter {
+            env.push(("CDEPT_PYTHON".into(), python.clone().into_os_string()));
+        }
+        if let Some(venv) = &self.python.venv {
+            let mut path = std::ffi::OsString::from(venv.join("bin"));
+            if let Some(old) = std::env::var_os("PATH") {
+                path.push(":");
+                path.push(old);
+            }
+            env.push(("VIRTUAL_ENV".into(), venv.clone().into_os_string()));
+            env.push(("PATH".into(), path));
         }
         env
     }
@@ -1564,6 +1656,8 @@ struct Local {
     pdk_root: Option<String>,
     /// `[env]`, values expanded (`$VAR` of the environment, a leading `~`).
     env: BTreeMap<String, String>,
+    /// `python`: this user's interpreter or venv for the project, as written.
+    python: Option<String>,
 }
 
 impl Local {
@@ -1588,6 +1682,10 @@ impl Local {
                     Some(text) if text.trim().is_empty() => {}
                     Some(text) => local.pdk_root = Some(text.to_string()),
                     None => warnings.push(format!("{LOCAL_FILE}: `pdk_root` must be a text")),
+                },
+                "python" => match item.as_str() {
+                    Some(text) if !text.trim().is_empty() => local.python = Some(text.to_string()),
+                    _ => warnings.push(format!("{LOCAL_FILE}: `python` must be a text")),
                 },
                 "env" => {
                     let Some(table) = item.as_table_like() else {
@@ -1616,7 +1714,7 @@ impl Local {
                     }
                 }
                 other => warnings.push(format!(
-                    "{LOCAL_FILE}: unknown key `{other}` (known: pdk_root, [env])"
+                    "{LOCAL_FILE}: unknown key `{other}` (known: pdk_root, python, [env])"
                 )),
             }
         }

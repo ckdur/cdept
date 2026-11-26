@@ -58,6 +58,9 @@ folder of examples/):
 | `cdept-gui/scripts/technology.script` | the New Project wizard (PDKs found, scan, summary, libraries, Create), the Technology tab and its pages, a PDK symbol opening with the PDK's `xschemrc` in effect, Rescan with a tab open (the "Replace tech.toml?" question, then the offer to reopen it), listing and leaving out a PDK library (needs IHP SG13G2: `PDK_ROOT=/opt/ext/OpenPDKs run.sh cdept-gui/scripts/technology.script`; the `tech <verb>` commands are listed at the top of the script) | a new project next to the copy |
 | `cdept-gui/scripts/simulation.script` | the Simulation tab on examples/ihp-inv: tb_inv opening in it (double click), the setup form (corners from tech.toml, validation, save keeping the file's comments), Run / Cancel through the job queue, 3 PASS rows, FAIL rows, Run from the cell's context menu (needs the PDK, ngspice and the helper: `PDK_ROOT=/opt/ext/OpenPDKs CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=ihp-inv run.sh cdept-gui/scripts/simulation.script`; the `sim <verb>` commands are listed at the top of the script; `sim wait` is tried for 2 minutes) | `setup.toml` and `simulations/` of the copy |
 | `cdept-gui/scripts/vacask.script` | VACASK from the Simulation tab on examples/ihp-inv: tb_inv/testbench switched to `simulator = "vacask"` in the form and saved (comments kept), three corners run (PASS rows, `deck.sim` and `tran1.raw` in the point folders; the first run converts the PDK's models, a minute), a failing spec, then 6 Monte Carlo runs each of process, mismatch and both with statistics, and back to ngspice (needs the PDK, VACASK, OpenVAF, python3 and the helper: `CDEPT_VACASK=/opt/ext/OpenLane/bin/vacask` besides what simulation.script needs; set `CDEPT_SCRIPT_TIMEOUT` to 600) | `setup.toml` and `simulations/` of the copy |
+| `cdept-gui/scripts/magic.script` | Magic in a tab on examples/sky130-inv: the picture, Magic commands from the command line and their messages, DRC of the cell as it is (results, box and zoom), undo, save, a key macro over the drawing, Generate from Schematic, cross-probing of instances with the schematic tab (needs Magic, sky130A and both helpers: `PDK_ROOT=/opt/ext/OpenPDKs CDEPT_MAGIC=/opt/ext/OpenLane/bin/magic CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=sky130-inv run.sh cdept-gui/scripts/magic.script`) | into the copy |
+| `cdept-gui/scripts/magic-torture.script` | harder Magic cases on examples/sky130-inv: a cell placing a missing cell (red line), two Magic tabs and a schematic at once while the window changes size, Ctrl+S, unsaved changes on close (Cancel, Discard), Restart (same environment as magic.script) | into the copy |
+| `cdept-gui/scripts/open-with.script` | a double click on a GDS asks for the tool (four choices), Open With › Magic (tab) shows the GDS read-only with the PDK's set-up (needs Magic, IHP SG13G2 and the Magic helper: `CDEPT_EXAMPLE=ihp-inv`) | nothing |
 | `cdept-gui/scripts/uberwave.script` | "Open in UberWave" on examples/ihp-inv: after a run, `wave open <lib> <cell> <view> <point>` (what the button does, a script cannot press a button by its text) starts a stand-in viewer, `cdept-gui/scripts/fake-uberwave.sh`, which records its arguments and working folder in the point's folder: the raw path, and `--analysis tran` for a file with two analyses (set `CDEPT_UBERWAVE` to the stand-in, plus what simulation.script needs: `CDEPT_UBERWAVE=$PWD/cdept-gui/scripts/fake-uberwave.sh CDEPT_EXAMPLE=ihp-inv run.sh cdept-gui/scripts/uberwave.script`) | `simulations/` of the copy |
 | `cdept-gui/scripts/vacask-unavailable.script` | VACASK on a technology it cannot run (sky130A, a project made with `cdept init --technology sky130A` in a scratch folder): the simulator combo's VACASK entry is disabled (`sim expect_simulator_disabled vacask sky130A`, `sim select_simulator vacask` fails and the form keeps its simulator), a testbench file that names `simulator = "vacask"` shows the problem line (`sim expect_problem VACASK is not available`) and the run is refused; ngspice stays selectable. New verbs: `sim expect_simulator_disabled <name> [reason text]`, `sim expect_simulator_enabled <name>` and `sim select_simulator <name>` (what picking the combo entry does; an error for a disabled one). Needs the PDK sky130A (`PDK_ROOT=/opt/ext/OpenPDKs`) and the helper; VACASK itself is not needed | a scratch folder |
 | `cdept-gui/scripts/sweeps.script` | the Sweeps and Monte Carlo sections of the Simulation tab on examples/ihp-inv: a vdd sweep and Monte Carlo added in the form (live validation, run plan count, VACASK and Xyce notes), saved with the file's comments kept, 15 PASS points, Grid, Revert (needs the PDK, ngspice and the helper like simulation.script; the `sim add_sweep` / `set_sweep` / `remove_sweep` / `mc` / `set_mc` / `expect_sweep` / `expect_plan` / `expect_mc_note` commands are listed at the top of the script) | `setup.toml` and `simulations/` of the copy |
@@ -263,6 +266,21 @@ and path tools take **clicks**; a box can also be dragged (press, move, release)
 
 KLayout reports a changed modified flag with the next request it handles, so the
 `expect_*` commands above ask it for a sign of life while they wait.
+
+## Magic tabs and opening views
+
+`magic <verb> …` acts on the active Magic tab (docs/MAGIC.md): `command <magic
+command>`, `save`, `drc`, `drc_show <n>`, `generate`, `layers on|off`; the checks (tried
+again for a while) `expect_saved`, `expect_modified 0|1`, `expect_drc <n>` or `>n`,
+`expect_generated`, `expect_log <text>`, `expect_cell <name>`, `expect_selected
+<names…>`, `expect_missing <n>`. `tcl`, `tcl_send` and `tcl_expect` run Tcl in Magic when
+the active document is a Magic tab.
+
+`open_view <lib> <cell> <view>` does what a double click does (it may ask which tool);
+`expect_open_choice <n>` checks that the question offers n tools and closes it;
+`open_with <lib> <cell> <view> <tool>` opens with one tool (`klayout`, `magic`,
+`xschem`, or a window: `magic-window`, …). `open` opens in the first tab that can show
+the view, without asking.
 
 ## Library definitions and path prompts
 

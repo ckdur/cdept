@@ -984,6 +984,65 @@ impl Builder<'_> {
         }
     }
 
+    /// A Magic view: the cells its `use` lines place (docs/MAGIC.md), by cell name with
+    /// their instance names, and the schematic its sidecar links it with.
+    fn mag_file(&mut self, from: &ViewId, file: &Path, read_only: bool) {
+        let resolved = match crate::magic::refs::resolve_file(self.project, file) {
+            Ok(r) => r,
+            Err(e) => {
+                self.warnings.push(format!("{e:#}"));
+                return;
+            }
+        };
+        let mut tallies: BTreeMap<String, (Tally, Target)> = BTreeMap::new();
+        for r in resolved {
+            let target = match &r.target {
+                crate::magic::refs::Target::Project(v) => self.file_target(&v.file),
+                crate::magic::refs::Target::External(f) => Target::External(f.clone()),
+                crate::magic::refs::Target::Missing => Target::Unresolved,
+            };
+            let entry = tallies
+                .entry(r.placed.cell.clone())
+                .or_insert_with(|| (Tally::default(), target));
+            entry.0.count += 1;
+            if !r.placed.instance.is_empty() {
+                entry.0.instances.push(r.placed.instance.clone());
+            }
+        }
+        for (text, (tally, target)) in tallies {
+            self.references.push(Reference {
+                from: from.clone(),
+                file: file.to_path_buf(),
+                read_only,
+                kind: RefKind::Placement,
+                text,
+                count: tally.count.max(1),
+                instances: tally.instances,
+                target,
+            });
+        }
+        if let Ok(Some(meta)) = Meta::read_for(file)
+            && let Some(source) = &meta.source
+        {
+            let target = self
+                .view_file(&source.library, &source.cell, &source.view)
+                .map_or(Target::Unresolved, |file| Target::View {
+                    id: ViewId::new(&source.library, &source.cell, &source.view),
+                    file,
+                });
+            self.references.push(Reference {
+                from: from.clone(),
+                file: file.to_path_buf(),
+                read_only,
+                kind: RefKind::Source,
+                text: source.label(),
+                count: 1,
+                instances: Vec::new(),
+                target,
+            });
+        }
+    }
+
     fn view_file(&self, library: &str, cell: &str, view: &str) -> Option<PathBuf> {
         let entry = self.project.library(library)?.cell(cell)?.entry(view)?;
         entry.main_file.clone()
@@ -1221,6 +1280,7 @@ impl Index {
                 Format::Gds | Format::Oasis if !read_only => {
                     builder.layout_file(id, file, *read_only)
                 }
+                Format::Magic => builder.mag_file(id, file, *read_only),
                 f if is_netlist(*f) => builder.netlist_file(id, file, *read_only),
                 f if is_verilog(*f) => builder.verilog_file(id, file, *read_only),
                 _ => {}

@@ -25,6 +25,7 @@ else from the environment.
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `pdk_root` | string | not set | The folder PDKs are installed in: `$PDK_ROOT` for library paths and for every tool. A relative path is relative to the project folder. `$VAR` and a leading `~` are expanded; `$PDK_ROOT` itself is not allowed here. An empty string counts as not set. |
+| `python` | string | not set | This user's Python for the project's Python tools: a program, or a virtual environment folder. Wins over `[python]` of `cdept.toml`. Relative to the project folder. |
 | `[env]` | table of strings | empty | Variables for `$VAR` in the paths of `cdept.toml`, also added to the environment of every tool CDePT starts for the project. |
 
 `[env]` rules:
@@ -37,7 +38,7 @@ else from the environment.
 - In path expansion the lookup order is: `$PDK_ROOT` and `$PDK` of the project, then
   `[env]`, then the process environment.
 
-Any other key is a warning (`unknown key ..., known: pdk_root, [env]`) and is ignored.
+Any other key is a warning (`unknown key ..., known: pdk_root, python, [env]`) and is ignored.
 A value of the wrong type is a warning for that entry only; the rest of the file is
 used. A file that is not valid TOML is a warning and counts as empty.
 

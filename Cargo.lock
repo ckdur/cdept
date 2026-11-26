@@ -371,6 +371,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cdept-magic"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "libcdept",
+ "pkg-config",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "cdept-uberwave"
 version = "0.1.0"
 dependencies = [

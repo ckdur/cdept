@@ -282,7 +282,7 @@ impl Library {
                 .into_bytes();
         }
         fs::write(&file, contents).wrap_err_with(|| format!("cannot write {}", file.display()))?;
-        if template == Template::GdsLayout {
+        if matches!(template, Template::GdsLayout | Template::MagicLayout) {
             meta::Meta::new(&self.name, cell, template.view_name(), cell).write_for(&file)?;
         }
         Ok(file)
@@ -299,6 +299,7 @@ impl Library {
         let cell = self.existing(old)?;
         self.free_name(new)?;
         not_a_member(cell, "renamed")?;
+        let mags = magic_files(cell);
         match &cell.path {
             Some(dir) => {
                 let target = self.path.join(new);
@@ -315,7 +316,8 @@ impl Library {
             }
         }
         self.relink_symbols(new, self, old)?;
-        self.retarget_layouts(new, old)
+        self.retarget_layouts(new, old)?;
+        self.retarget_mags(new, &mags)
     }
 
     /// [`Library::rename_cell`], then make the layout views of `project` that place the
@@ -329,7 +331,11 @@ impl Library {
         new: &str,
     ) -> Result<Vec<layout::follow::Followed>> {
         self.rename_cell(old, new)?;
-        Ok(layout::follow::cell_renamed(project, &self.name, old, new))
+        let mut followed = layout::follow::cell_renamed(project, &self.name, old, new);
+        followed.extend(crate::magic::refs::cell_renamed(
+            project, &self.name, old, new,
+        ));
+        Ok(followed)
     }
 
     /// Copy a cell into `to` (which may be this library) under the name `new`.
@@ -341,6 +347,7 @@ impl Library {
         let source = self.existing(cell)?;
         to.free_name(new)?;
         not_a_member(source, "copied")?;
+        let mags = magic_files(source);
         match (&source.path, to.layout) {
             (Some(dir), LibraryLayout::Cells) => {
                 let target = to.path.join(new);
@@ -369,7 +376,37 @@ impl Library {
             }
         }
         to.relink_symbols(new, self, cell)?;
-        to.retarget_layouts(new, cell)
+        to.retarget_layouts(new, cell)?;
+        to.retarget_mags(new, &mags)
+    }
+
+    /// After a cell was copied or renamed to `new` in this library: its Magic views get
+    /// their relative `use` paths written again for their new folder and a sidecar
+    /// naming what they now are (`mags`: view name and file before the change).
+    fn retarget_mags(&self, new: &str, mags: &[(String, PathBuf)]) -> Result<()> {
+        if mags.is_empty() {
+            return Ok(());
+        }
+        let entries = match self.layout {
+            LibraryLayout::Cells => scan_cell(new, &self.path.join(new))?,
+            LibraryLayout::Flat | LibraryLayout::Ref => scan_flat(&self.path, &Cache::user())?
+                .into_iter()
+                .find(|c| c.name == new)
+                .map(|c| c.entries)
+                .unwrap_or_default(),
+        };
+        for entry in entries.iter().filter(|e| e.format == Some(Format::Magic)) {
+            let (Some(file), Some((_, old))) = (
+                &entry.main_file,
+                mags.iter().find(|(view, _)| *view == entry.name),
+            ) else {
+                continue;
+            };
+            if let Err(e) = crate::magic::refs::retarget(file, old, &self.name, new, &entry.name) {
+                tracing::warn!("{e:#}");
+            }
+        }
+        Ok(())
     }
 
     /// After cell `old` was copied or renamed to `new` in this library: the GDS layout
@@ -958,6 +995,15 @@ fn unique_view_name(taken: impl Fn(&str) -> bool, kind: ViewKind, file_name: &st
 }
 
 /// The new name of a file named after cell `old`: `old.sch` → `new.sch`.
+/// The Magic views of a cell: view name and file.
+fn magic_files(cell: &Cell) -> Vec<(String, PathBuf)> {
+    cell.entries
+        .iter()
+        .filter(|e| e.format == Some(Format::Magic) && !e.is_member())
+        .filter_map(|e| Some((e.name.clone(), e.main_file.clone()?)))
+        .collect()
+}
+
 fn renamed(file_name: &str, old: &str, new: &str) -> Option<String> {
     let rest = file_name.strip_prefix(old)?;
     (rest.is_empty() || rest.starts_with('.')).then(|| format!("{new}{rest}"))

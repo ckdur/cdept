@@ -280,6 +280,20 @@ fn view_items(
             &entry.name,
         )));
     }
+    let choices = libcdept::launch::choices_for(entry);
+    if choices.len() > 1 {
+        ui.menu_button("Open With", |ui| {
+            for c in &choices {
+                if ui.button(c.label).clicked() {
+                    cmds.push(Cmd::Action(Action::OpenWith(
+                        Selection::view(&lib.name, &cell.name, &entry.name),
+                        c.id.to_string(),
+                    )));
+                    ui.close();
+                }
+            }
+        });
+    }
     if entry.format == Some(libcdept::entry::Format::QucsSchematic)
         && let Some(file) = &entry.main_file
         && ui

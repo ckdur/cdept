@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["cdept", "cdept-gui", "cdept-uberwave", "cdept-xschem", "libcdept"]
-# cdept-xschem (GPL helper, needs Tcl, cairo, flex, bison) is built on request:
+members = ["cdept", "cdept-gui", "cdept-magic", "cdept-uberwave", "cdept-xschem", "libcdept"]
+# cdept-xschem (GPL helper, needs Tcl, cairo, flex, bison) and cdept-magic (GPL helper,
+# needs Tcl, Tk headers, cairo) are built on request:
 #   cargo build -p cdept-xschem
 default-members = ["cdept", "cdept-gui", "cdept-uberwave", "libcdept"]
 

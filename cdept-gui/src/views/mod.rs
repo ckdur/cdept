@@ -12,6 +12,7 @@ mod hierarchy;
 mod inspector;
 mod layout;
 mod library;
+mod magic;
 mod placeholder;
 mod schematic;
 pub(crate) mod search;
@@ -29,6 +30,8 @@ use egui::Ui;
 pub use self::document::Document;
 pub use self::hierarchy::HierarchyView;
 pub use self::layout::{LayoutView, Replacement, member_of as layout_member_of};
+pub use self::magic::MagicView;
+pub(crate) use self::magic::{patient as magic_patient, script as magic_script};
 pub use self::schematic::{
     CloseChoice, NETLIST_FORMATS, Picture, SchematicView, Selected, pretend_clipboard,
 };
@@ -197,10 +200,29 @@ impl Views {
     pub fn coordinate_links(&mut self, ctx: &mut AppCtx) {
         let mut schematics = Vec::new();
         let mut layouts = Vec::new();
+        let mut magics = Vec::new();
         for doc in self.documents.values_mut() {
             match doc {
                 Document::Schematic(view) => schematics.push(view),
                 Document::Layout(view) => layouts.push(view),
+                Document::Magic(view) => magics.push(view),
+            }
+        }
+        // Magic tabs: their selection goes to the schematic they are linked with, and
+        // the schematic's selection comes back (instance names, docs/MAGIC.md).
+        for magic in &mut magics {
+            let Some(names) = magic.take_probe_out() else {
+                continue;
+            };
+            let Some(file) = magic.link_schematic(ctx.project.as_ref()) else {
+                continue;
+            };
+            for view in &mut schematics {
+                if let Some(prefix) = link_prefix(view, &file) {
+                    let lifted: Vec<String> =
+                        names.iter().map(|n| format!("{prefix}{n}")).collect();
+                    view.probe_in(&lifted);
+                }
             }
         }
         for view in &mut schematics {
@@ -283,6 +305,22 @@ impl Views {
             let out = (view.take_probe_out(), view.take_net_probe_out());
             if out == (None, None) {
                 continue;
+            }
+            if let Some(names) = &out.0 {
+                for magic in &mut magics {
+                    let Some(file) = magic.link_schematic(ctx.project.as_ref()) else {
+                        continue;
+                    };
+                    let Some(prefix) = link_prefix(view, &file) else {
+                        continue;
+                    };
+                    let lowered: Vec<String> = names
+                        .iter()
+                        .filter_map(|n| n.strip_prefix(prefix.as_str()))
+                        .map(str::to_string)
+                        .collect();
+                    magic.probe_in(&lowered);
+                }
             }
             for layout in &mut layouts {
                 let Some(file) = layout.link_schematic().map(std::path::Path::to_path_buf) else {

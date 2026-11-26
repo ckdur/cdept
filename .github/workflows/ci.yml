@@ -26,7 +26,7 @@ jobs:
           sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libwayland-dev
       - name: Build tools and libraries for the xschem helper
-        run: sudo apt-get install -y flex bison tcl-dev libcairo2-dev libjpeg-dev fonts-dejavu-core
+        run: sudo apt-get install -y flex bison tcl-dev tk-dev libx11-dev libcairo2-dev libjpeg-dev fonts-dejavu-core
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets
@@ -61,7 +61,7 @@ jobs:
             libqt5svg5-dev libqt5xmlpatterns5-dev qtmultimedia5-dev python3-dev ruby-dev \
             zlib1g-dev libgit2-dev
       - name: Build tools and libraries for the xschem helper
-        run: sudo apt-get install -y flex bison tcl-dev libcairo2-dev libjpeg-dev fonts-dejavu-core
+        run: sudo apt-get install -y flex bison tcl-dev tk-dev libx11-dev libcairo2-dev libjpeg-dev fonts-dejavu-core
       - name: Cached KLayout build
         id: cache
         uses: actions/cache@v4
@@ -98,6 +98,6 @@ jobs:
           sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libwayland-dev
       - name: Build tools and libraries for the xschem helper
-        run: sudo apt-get install -y flex bison tcl-dev libcairo2-dev libjpeg-dev
+        run: sudo apt-get install -y flex bison tcl-dev tk-dev libx11-dev libcairo2-dev libjpeg-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --all-targets

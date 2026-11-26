@@ -46,6 +46,7 @@ bench = "libs/bench"
 | `[jobs]` | table | none | Remotes (ssh, SLURM) that run points can be sent to; see [`[jobs]`](#jobs). |
 | `[klayout]` | table | none | Settings of the embedded KLayout. |
 | `[magic]` | table | none | Batch runs of Magic. |
+| `[python]` | table | none | The Python that Python tools run with. |
 
 An empty string for `name`, `description` or `technology` counts as not set. A value of
 the wrong type for `name`, `description`, `technology` or `pdk_root` makes the project
@@ -209,6 +210,24 @@ timeout = "30m"
 A Magic that is stopped (out of time, or its job cancelled) is killed, and the error
 carries the last lines it printed. A value that is not a duration is a warning, and the
 default applies. See [MAGIC.md](../../MAGIC.md).
+
+## `[python]`
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `venv` | string | not set | A virtual environment of the project (a folder with `bin/python3` or `bin/python`), relative to the project folder. |
+| `interpreter` | string | not set | A Python program, when there is no venv. `venv` wins when both are set. |
+
+```toml
+[python]
+venv = ".venv"
+```
+
+Tools CDePT starts for the project get `CDEPT_PYTHON` (the interpreter), and with a venv
+`VIRTUAL_ENV` and its `bin` folder first on `PATH`, so a tool that starts `python3` gets
+the project's. One user can use another with `python` in `cdept.local.toml`. A path that
+does not exist, or a folder that is not a venv, is a warning. Without the table:
+`$CDEPT_PYTHON`, else `python3` on `PATH`.
 
 ## `[jobs]`
 
