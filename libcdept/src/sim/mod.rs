@@ -57,10 +57,10 @@ pub fn lock_runs(base: &Path) -> Result<std::fs::File> {
         .wrap_err_with(|| format!("cannot open the run lock in {}", base.display()))?;
     match file.try_lock() {
         Ok(()) => Ok(file),
-        Err(std::fs::TryLockError::WouldBlock) => bail!(
+        Err(std::fs::TryLockError::WouldBlock) => Err(eyre!(
             "this testbench is being run already ({} is locked): wait for that run or cancel it",
             base.display()
-        ),
+        )),
         Err(std::fs::TryLockError::Error(e)) => {
             Err(e).wrap_err_with(|| format!("cannot lock {}", base.display()))
         }
