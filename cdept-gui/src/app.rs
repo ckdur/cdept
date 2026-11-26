@@ -35,7 +35,7 @@ const LAUNCHERS: [&str; 4] = ["xschem", "KLayout", "Magic", "ngspice"];
 const DETACHED_SIZE: [f32; 2] = [1000.0, 700.0];
 
 /// The formats that open in a document tab: xschem schematics and symbols, layouts
-/// (KLayout) and LEF abstracts (KLayout, read-only).
+/// (KLayout), LEF abstracts (KLayout, read-only) and Magic layouts (Magic).
 fn embedded_format(format: Option<Format>) -> bool {
     matches!(
         format,
@@ -45,6 +45,7 @@ fn embedded_format(format: Option<Format>) -> bool {
                 | Format::Gds
                 | Format::Oasis
                 | Format::Lef
+                | Format::Magic
         )
     )
 }
@@ -194,6 +195,13 @@ impl CdeptApp {
             return false;
         };
         match Format::of_file(&file) {
+            Some(Format::Magic) => {
+                let editable = project
+                    .library(&doc.library)
+                    .is_none_or(|library| !library.read_only);
+                let view = crate::views::MagicView::open(id, doc, file, editable, project, ctx);
+                self.views.add_document(id, view);
+            }
             Some(Format::Gds | Format::Oasis | Format::Lef) => {
                 // Layouts of read-only libraries open for looking only.
                 // One cell of a file that holds several (a standard-cell GDS) too:
@@ -355,6 +363,11 @@ impl CdeptApp {
 
     pub(crate) fn script_schematic(&mut self) -> Option<&mut SchematicView> {
         self.script_view()?.as_schematic_mut()
+    }
+
+    /// The script's document when it runs Tcl: a schematic (xschem) or a Magic layout.
+    pub(crate) fn script_tcl_view(&mut self) -> Option<&mut crate::views::Document> {
+        self.script_view().filter(|d| d.runs_tcl())
     }
 
     pub(crate) fn script_layout(&mut self) -> Option<&mut LayoutView> {

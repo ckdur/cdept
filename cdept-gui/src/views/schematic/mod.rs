@@ -8,9 +8,9 @@
 mod clipboard;
 pub mod linking;
 pub use self::linking::LinkRequest;
-mod keys;
-mod mirror;
-mod picker;
+pub(crate) mod keys;
+pub(crate) mod mirror;
+pub(crate) mod picker;
 mod picture;
 mod widgets;
 

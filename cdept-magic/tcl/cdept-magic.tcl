@@ -70,6 +70,11 @@ proc cdept::magic::start {script} {
   rename ::exit {}
   rename ::cdept::magic::tcl_exit ::exit
   flushlog
+  # magic.tcl turns the background DRC off while it starts and on again only when
+  # `drc status` said 1 before, which it does not (it prints and returns nothing).
+  # Without it the areas a loaded file marks for checking (<< checkpaint >>) stay
+  # drawn as "not checked yet" (black) for ever.
+  if {!$failed} {catch {magic::drc on}}
   if {$failed} {
     if {[info exists ::env(CDEPT_MAGIC_DEBUG)]} {
       ::cdept::magic::tcl_puts stderr [dict get $options -errorinfo]
@@ -88,13 +93,18 @@ proc cdept::magic::loaded {args} {
 }
 
 # Magic was started with -nowindow (see engine.rs). Open the one layout window CDePT
-# shows, as Magic's own GUI wrapper does: without Magic's caption, scroll bars and
-# border (CDePT draws its own), so that the window is all drawing area.
+# shows, as Magic's own GUI wrapper does: without Magic's caption and scroll bars
+# (CDePT has its own). The caption must go: its height comes from a text measured
+# before any window exists, which gives an arbitrary number. The thin border stays:
+# without it a top-level window draws nothing (seen with 8.3.623).
 proc cdept::magic::initialized {args} {
   if {[magic::display] eq "NULL"} return
+  # See fix_caption() in shim/cdm.c: Magic's caption height is unset at this point.
+  if {![cdept::fixcaption 18]} {
+    puts stderr "cdept-magic: could not set Magic's caption height: small windows may be drawn cut off"
+  }
   magic::windowcaption off
   magic::windowscrollbars off
-  magic::windowborder off
   magic::openwindow
   ::cdept::setpoint
 }
@@ -109,7 +119,7 @@ proc cdept::magic::version {} {
 # The edit cell and whether it has unsaved changes: {cell modified}
 proc cdept::magic::state {} {
   set cell {}
-  catch {set cell [cellname list self]}
+  catch {set cell [lindex [magic::cellname list window] 0]}
   set modified 0
   if {$cell ne {} && ![catch {cellname list modified} mods]} {
     set modified [expr {[llength $mods] > 0}]
@@ -149,20 +159,77 @@ proc cdept::magic::is_own {dir} {
   return [expr {[file normalize $dir] eq [file normalize $own_dir]}]
 }
 
-# The selection: cell instances {use cell} and the box {llx lly urx ury} in microns.
+# The selection: the instances selected, as {use cell} pairs (Magic's `what -list`:
+# paint, labels, cells).
 proc cdept::magic::selection {} {
-  set uses {}
-  catch {
-    foreach u [what -list] {}
+  set out {}
+  if {![catch {magic::what -list} w]} {
+    foreach item [lindex $w 2] {
+      lappend out [list [lindex $item 0] [lindex $item 1]]
+    }
   }
-  set ids {}
-  catch {set ids [instance list selected]}
-  foreach id $ids {
-    set c {}
-    catch {set c [instance list celldef $id]}
-    lappend uses [list $id $c]
+  return $out
+}
+
+# Select these instances (cross-probing): the others are deselected. Names that are
+# not instances of the edit cell are left out. Returns the ones selected.
+proc cdept::magic::select_instances {names} {
+  magic::select clear
+  set done {}
+  foreach n $names {
+    if {[catch {magic::select more cell $n}] == 0} {lappend done $n}
   }
+  return $done
+}
+
+# DRC of the edit cell as it is now (unsaved edits included): {style {{why {llx lly
+# urx ury}} ...}} with the boxes in microns. At most `max` boxes.
+proc cdept::magic::drc {{max 5000}} {
+  set old [lindex [magic::units] 0]
   set box {}
-  catch {set box [box values]}
-  list $uses $box
+  catch {set box [magic::box values]}
+  # Check the whole edit cell again (areas painted while DRC was off are not queued).
+  magic::units microns
+  catch {magic::select top cell}
+  magic::drc check
+  magic::drc catchup
+  catch {magic::select clear}
+  set out {}
+  set n 0
+  foreach {why boxes} [magic::drc listall why] {
+    foreach b $boxes {
+      if {[incr n] > $max} break
+      lappend out [list $why $b]
+    }
+  }
+  set style {}
+  catch {set style [magic::drc list style]}
+  catch {magic::units internal; magic::box values {*}$box}
+  catch {magic::units $old}
+  return [list $style $out]
+}
+
+# Show the area {llx lly urx ury} (microns): the box on it, zoomed to it.
+proc cdept::magic::show_area {area} {
+  set old [lindex [magic::units] 0]
+  magic::units microns
+  magic::box values {*}$area
+  magic::findbox zoom
+  magic::zoom 2
+  catch {magic::units $old}
+}
+
+# The layer names of the technology (the first name of each).
+proc cdept::magic::layers {} {
+  if {[catch {magic::tech layers *} l]} {return {}}
+  return $l
+}
+
+# Reload the edit cell and what it places from disk (after CDePT changed the files).
+proc cdept::magic::reload {file} {
+  set cell [file rootname [file tail $file]]
+  catch {magic::flush $cell}
+  magic::load [file rootname $file]
+  catch {magic::select clear}
+  catch {magic::view}
 }

@@ -6,7 +6,7 @@ use std::path::Path;
 
 use egui::Ui;
 
-use super::{CloseChoice, EditAction, EditCaps, LayoutView, SchematicView, View};
+use super::{CloseChoice, EditAction, EditCaps, LayoutView, MagicView, SchematicView, View};
 use crate::state::AppCtx;
 
 // A handful of documents are open at a time; boxing would only add a hop.
@@ -14,6 +14,14 @@ use crate::state::AppCtx;
 pub enum Document {
     Schematic(SchematicView),
     Layout(LayoutView),
+    /// A Magic view, drawn by Magic in its helper (docs/MAGIC.md).
+    Magic(MagicView),
+}
+
+impl From<MagicView> for Document {
+    fn from(view: MagicView) -> Self {
+        Document::Magic(view)
+    }
 }
 
 impl From<SchematicView> for Document {
@@ -32,21 +40,43 @@ impl Document {
     pub fn as_schematic(&self) -> Option<&SchematicView> {
         match self {
             Document::Schematic(view) => Some(view),
-            Document::Layout(_) => None,
+            Document::Layout(_) | Document::Magic(_) => None,
         }
     }
 
     pub fn as_schematic_mut(&mut self) -> Option<&mut SchematicView> {
         match self {
             Document::Schematic(view) => Some(view),
-            Document::Layout(_) => None,
+            Document::Layout(_) | Document::Magic(_) => None,
+        }
+    }
+
+    /// The document runs Tcl (xschem or Magic): see [`tcl`](Self::tcl).
+    pub fn runs_tcl(&self) -> bool {
+        matches!(self, Document::Schematic(_) | Document::Magic(_))
+    }
+
+    /// Evaluate Tcl in the document's helper (xschem or Magic); the answer comes with
+    /// [`take_reply`](Self::take_reply). 0 for a document without Tcl.
+    pub fn tcl(&mut self, script: &str) -> u64 {
+        match self {
+            Document::Schematic(view) => view.tcl(script),
+            Document::Magic(view) => view.tcl(script),
+            Document::Layout(_) => 0,
+        }
+    }
+
+    pub fn as_magic_mut(&mut self) -> Option<&mut MagicView> {
+        match self {
+            Document::Magic(view) => Some(view),
+            _ => None,
         }
     }
 
     pub fn as_layout_mut(&mut self) -> Option<&mut LayoutView> {
         match self {
             Document::Layout(view) => Some(view),
-            Document::Schematic(_) => None,
+            Document::Schematic(_) | Document::Magic(_) => None,
         }
     }
 
@@ -54,6 +84,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view,
             Document::Layout(view) => view,
+            Document::Magic(view) => view,
         }
     }
 
@@ -61,6 +92,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view,
             Document::Layout(view) => view,
+            Document::Magic(view) => view,
         }
     }
 
@@ -69,6 +101,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.file(),
             Document::Layout(view) => view.file(),
+            Document::Magic(view) => view.file(),
         }
     }
 
@@ -77,6 +110,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.is_modified(),
             Document::Layout(view) => view.is_modified(),
+            Document::Magic(view) => view.is_modified(),
         }
     }
 
@@ -85,6 +119,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.save(),
             Document::Layout(view) => view.save(),
+            Document::Magic(view) => view.save(),
         }
     }
 
@@ -93,6 +128,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.take_reply(request).map(SchematicView::saved),
             Document::Layout(view) => view.take_done(request).map(|r| r.map(|_| ())),
+            Document::Magic(view) => view.take_reply(request).map(MagicView::saved),
         }
     }
 
@@ -101,6 +137,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.status() == libcdept::xschem::Status::Running,
             Document::Layout(view) => view.is_running(),
+            Document::Magic(view) => view.is_running(),
         }
     }
 
@@ -112,6 +149,7 @@ impl Document {
                 _ => None,
             },
             Document::Layout(view) => view.failure(),
+            Document::Magic(view) => view.failure(),
         }
     }
 
@@ -120,6 +158,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.may_close(),
             Document::Layout(view) => view.may_close(),
+            Document::Magic(view) => view.may_close(),
         }
     }
 
@@ -127,6 +166,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.asks_to_close(),
             Document::Layout(view) => view.asks_to_close(),
+            Document::Magic(view) => view.asks_to_close(),
         }
     }
 
@@ -134,6 +174,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.is_closing(),
             Document::Layout(view) => view.is_closing(),
+            Document::Magic(view) => view.is_closing(),
         }
     }
 
@@ -141,6 +182,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.close_with(choice, ctx),
             Document::Layout(view) => view.close_with(choice, ctx),
+            Document::Magic(view) => view.close_with(choice, ctx),
         }
     }
 
@@ -149,6 +191,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.frame_to_screen(x, y),
             Document::Layout(view) => view.frame_to_screen(x, y),
+            Document::Magic(view) => view.frame_to_screen(x, y),
         }
     }
 
@@ -157,6 +200,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.has_frame(),
             Document::Layout(view) => view.has_frame(),
+            Document::Magic(view) => view.has_frame(),
         }
     }
 
@@ -164,6 +208,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.frame_size(),
             Document::Layout(view) => view.frame_size(),
+            Document::Magic(view) => view.frame_size(),
         }
     }
 
@@ -171,6 +216,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.pixel(x, y),
             Document::Layout(view) => view.pixel(x, y),
+            Document::Magic(view) => view.pixel(x, y),
         }
     }
 
@@ -178,6 +224,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.compare_with_screen(screen),
             Document::Layout(view) => view.compare_with_screen(screen),
+            Document::Magic(view) => view.compare_with_screen(screen),
         }
     }
 
@@ -190,6 +237,7 @@ impl Document {
                 libcdept::klayout::protocol::method::INFO,
                 serde_json::json!({}),
             ),
+            Document::Magic(view) => view.tcl("expr 1"),
         }
     }
 
@@ -199,6 +247,7 @@ impl Document {
         match self {
             Document::Schematic(view) => view.take_reply(id),
             Document::Layout(view) => view.take_reply(id),
+            Document::Magic(view) => view.take_reply(id),
         }
     }
 }

@@ -15,6 +15,7 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <elf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -749,7 +750,9 @@ static void t_FreeCursor(Display *d, Tk_Cursor c) { (void)d; (void)c; }
 
 /* Images: Magic registers its "layer" image type; images of it are made only by its
  * GUI wrapper, which the helper does not use. */
-static void t_CreateImageType(const Tk_ImageType *type) { (void)type; }
+/* An address inside tclmagic.so (its image type record), to find that library. */
+static const void *magic_address = NULL;
+static void t_CreateImageType(const Tk_ImageType *type) { if(!magic_address) magic_address = type; }
 static void t_ImageChanged(Tk_ImageMaster m, int x, int y, int w, int h, int iw, int ih)
 { (void)m; (void)x; (void)y; (void)w; (void)h; (void)iw; (void)ih; }
 static CONST84_RETURN char *t_NameOfImage(Tk_ImageMaster m) { (void)m; return ""; }
@@ -890,6 +893,72 @@ static int setpoint_command(ClientData data, Tcl_Interp *ip, int objc, Tcl_Obj *
   return TCL_OK;
 }
 
+/* Magic 8.3 measures the height of a window caption once, in WindInit(), before any
+ * window exists: its Cairo driver's GrTextSize() then fails and leaves the rectangle
+ * unset, so `windCaptionPixels` gets whatever was on the stack. It is used for the
+ * minimum window height even when windows have no caption: a window of the tab's size
+ * is then made as tall as that garbage, and the drawing is cut off at the bottom.
+ * The variable is not exported, so it is found in the symbol table of tclmagic.so
+ * and set to a caption height here. Returns 1 when set. */
+static int fix_caption(int pixels)
+{
+  const void *sym = magic_address;
+  Dl_info info;
+  FILE *f;
+  Elf64_Ehdr eh;
+  Elf64_Shdr *sh = NULL;
+  int i, found = 0;
+  if(!sym || !dladdr(sym, &info) || !info.dli_fname) return 0;
+  f = fopen(info.dli_fname, "rb");
+  if(!f) return 0;
+  if(fread(&eh, sizeof(eh), 1, f) != 1 || memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0
+     || eh.e_ident[EI_CLASS] != ELFCLASS64 || eh.e_shentsize != sizeof(Elf64_Shdr)
+     || eh.e_shnum == 0 || eh.e_shnum > 4096) goto done;
+  sh = calloc(eh.e_shnum, sizeof(Elf64_Shdr));
+  if(fseek(f, (long)eh.e_shoff, SEEK_SET) != 0
+     || fread(sh, sizeof(Elf64_Shdr), eh.e_shnum, f) != eh.e_shnum) goto done;
+  for(i = 0; i < eh.e_shnum && !found; ++i) {
+    Elf64_Shdr *strtab;
+    char *names;
+    Elf64_Sym sy;
+    Elf64_Xword n, k;
+    if(sh[i].sh_type != SHT_SYMTAB || sh[i].sh_link >= eh.e_shnum) continue;
+    strtab = &sh[sh[i].sh_link];
+    if(strtab->sh_size == 0 || strtab->sh_size > (64u << 20)) continue;
+    names = malloc(strtab->sh_size + 1);
+    if(fseek(f, (long)strtab->sh_offset, SEEK_SET) != 0
+       || fread(names, 1, strtab->sh_size, f) != strtab->sh_size) { free(names); continue; }
+    names[strtab->sh_size] = 0;
+    n = sh[i].sh_entsize ? sh[i].sh_size / sh[i].sh_entsize : 0;
+    if(fseek(f, (long)sh[i].sh_offset, SEEK_SET) != 0) { free(names); continue; }
+    for(k = 0; k < n; ++k) {
+      if(fread(&sy, sizeof(sy), 1, f) != 1) break;
+      if(sy.st_name < strtab->sh_size && ELF64_ST_TYPE(sy.st_info) == STT_OBJECT
+         && sy.st_size == sizeof(int) && !strcmp(names + sy.st_name, "windCaptionPixels")) {
+        int *var = (int *)((char *)info.dli_fbase + sy.st_value);
+        TRACE("windCaptionPixels was %d, now %d\n", *var, pixels);
+        *var = pixels;
+        found = 1;
+        break;
+      }
+    }
+    free(names);
+  }
+done:
+  free(sh);
+  fclose(f);
+  return found;
+}
+
+static int fixcaption_command(ClientData data, Tcl_Interp *ip, int objc, Tcl_Obj *const objv[])
+{
+  int pixels = 18;
+  (void)data;
+  if(objc == 2 && Tcl_GetIntFromObj(ip, objv[1], &pixels) != TCL_OK) return TCL_ERROR;
+  Tcl_SetObjResult(ip, Tcl_NewIntObj(fix_caption(pixels)));
+  return TCL_OK;
+}
+
 int cdm_init(const char *argv0, int display, int sw, int sh)
 {
   if(sw > 0) screen_w = sw;
@@ -903,6 +972,7 @@ int cdm_init(const char *argv0, int display, int sw, int sh)
   Tcl_CreateObjCommand(interp, "cdept::ui", ui_command, NULL, NULL);
   Tcl_CreateObjCommand(interp, "cdept::colour", colour_command, NULL, NULL);
   Tcl_CreateObjCommand(interp, "cdept::setpoint", setpoint_command, NULL, NULL);
+  Tcl_CreateObjCommand(interp, "cdept::fixcaption", fixcaption_command, NULL, NULL);
   init_window(&main_window, ".", NULL, 1);
   main_window.fake.flags |= TK_MAPPED;
   main_window.fake.changes.width = screen_w;
