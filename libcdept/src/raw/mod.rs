@@ -310,14 +310,25 @@ fn parse_plot(data: &[u8], mut pos: usize) -> Result<(Plot, usize)> {
                 plot.points = npoints.min(available);
                 plot.layout = Layout::Binary(pos);
                 // A file cut short has fewer points; the next plot cannot be told, so stop.
-                let end = pos + plot.points * width;
+                let end = if plot.points < npoints {
+                    data.len()
+                } else {
+                    pos + plot.points * width
+                };
                 return Ok((plot, end));
             }
             "values" => {
                 if nvars == 0 || plot.vars.len() != nvars {
                     bail!("values before the variables");
                 }
-                let mut rows = Vec::with_capacity(npoints * nvars * 2);
+                // The counts are the file's word only: reserve no more than its bytes
+                // can hold (two numbers per value need at least two bytes each).
+                let mut rows = Vec::with_capacity(
+                    npoints
+                        .saturating_mul(nvars)
+                        .saturating_mul(2)
+                        .min(data.len() - pos),
+                );
                 let mut points = 0;
                 'points: for _ in 0..npoints {
                     // Point index, then one value per variable.
@@ -467,6 +478,78 @@ pub(crate) mod tests {
     fn rejects_garbage() {
         assert!(RawFile::from_bytes(b"hello world\n".to_vec()).is_err());
         assert!(RawFile::from_bytes(vec![]).is_err());
+    }
+
+    /// Headers that lie about their counts (the file that once took 51 GB in the
+    /// viewer), truncated files and binary noise: errors or few points, never a huge
+    /// allocation, a panic or a hang.
+    #[test]
+    fn hostile_headers_and_noise() {
+        let head = |vars: &str, points: &str, list: &str, mode: &str| {
+            format!(
+                "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: {vars}\nNo. Points: {points}\nVariables:\n{list}{mode}\n"
+            )
+            .into_bytes()
+        };
+        let two = "\t0\ttime\ttime\n\t1\tv(out)\tvoltage\n";
+        let noise: Vec<u8> = (0..1000u32).map(|i| (i * 37) as u8).collect();
+        let with = |mut h: Vec<u8>, tail: &[u8]| {
+            h.extend_from_slice(tail);
+            h
+        };
+        // more variables announced than listed: the list runs into the data
+        assert!(
+            RawFile::from_bytes(with(
+                head("99999999", "18446744073709551615", "", "Binary:"),
+                &noise
+            ))
+            .is_err()
+        );
+        // the points are cut to what the bytes hold (1000 / 16)
+        let raw = RawFile::from_bytes(with(
+            head("2", "18446744073709551615", two, "Binary:"),
+            &noise,
+        ))
+        .unwrap();
+        assert_eq!(raw.plots()[0].points, 62);
+        assert_eq!(raw.vector(0, "v(out)").unwrap().len(), 62);
+        // ascii claiming 2^64 points: no capacity overflow, the points that are there
+        let raw = RawFile::from_bytes(with(
+            head("2", "18446744073709551615", two, "Values:"),
+            b" 0\t1\n\t2\n 1\t3\n",
+        ))
+        .unwrap();
+        assert_eq!(raw.plots()[0].points, 1);
+        for bad in ["-5", "1e3", "two", ""] {
+            assert!(RawFile::from_bytes(with(head("2", bad, two, "Binary:"), &noise)).is_err());
+        }
+        assert!(RawFile::from_bytes(with(head("0", "5", "", "Binary:"), &noise)).is_err());
+        // every prefix of a good file: an error or a plot, never a panic
+        let good = binary_plot(
+            "Transient Analysis",
+            &[("time", "time"), ("v(a)", "voltage")],
+            &[vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]],
+            false,
+        );
+        for n in 0..good.len() {
+            if let Ok(raw) = RawFile::from_bytes(good[..n].to_vec()) {
+                let _ = raw.vector(0, "v(a)");
+            }
+        }
+        // binary noise of many shapes
+        let mut seed = 12345u64;
+        for _ in 0..200 {
+            let len = (seed % 4000) as usize;
+            let bytes: Vec<u8> = (0..len)
+                .map(|_| {
+                    seed = seed
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    (seed >> 33) as u8
+                })
+                .collect();
+            let _ = RawFile::from_bytes(bytes);
+        }
     }
 
     /// Xyce's own raw file (names in upper case, `V1#branch`), when there is a Xyce.
