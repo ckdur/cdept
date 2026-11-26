@@ -380,9 +380,9 @@ impl CalcPanel {
         }
         ui.horizontal_wrapped(|ui| {
             egui::ComboBox::from_id_salt("calc-point")
-                .selected_text(self.point.clone().unwrap_or_else(|| format!("all {} points", points.len())))
+                .selected_text(self.point.clone().unwrap_or_else(|| format!("all points ({})", points.len())))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.point, None, format!("all {} points", points.len()));
+                    ui.selectable_value(&mut self.point, None, format!("all points ({})", points.len()));
                     for p in points {
                         ui.selectable_value(&mut self.point, Some(p.point.clone()), &p.point);
                     }

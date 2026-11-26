@@ -526,6 +526,8 @@ pub struct SimulationView {
     avail: avail::Avail,
     /// The calculator panel (simulation/calc.rs).
     pub(crate) calc: calc::CalcPanel,
+    /// Open or fold the Setup section at the next frame (a script's `sim setup_section`).
+    setup_open: Option<bool>,
 }
 
 impl SimulationView {
@@ -929,8 +931,8 @@ fn bound(spec: &sim::Spec) -> String {
 /// The `[[output]]` rows: name, expression (checked as it is typed), plot.
 fn outputs_editor(ui: &mut Ui, outputs: &mut Vec<(String, String, String)>) {
     let mut remove = None;
-    Grid::new("sim-outputs").num_columns(4).show(ui, |ui| {
-        for (i, (name, expr, plot)) in outputs.iter_mut().enumerate() {
+    for (i, (name, expr, plot)) in outputs.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
             ui.add(
                 TextEdit::singleline(name)
                     .desired_width(110.0)
@@ -941,9 +943,11 @@ fn outputs_editor(ui: &mut Ui, outputs: &mut Vec<(String, String, String)>) {
             } else {
                 libcdept::calc::parse(expr).err().map(|e| e.render(expr))
             };
+            let width = (ui.available_width() - 110.0).max(160.0);
             let edit = ui.add(
                 TextEdit::singleline(expr)
-                    .desired_width(320.0)
+                    .id_salt(("sim-output-expr", i))
+                    .desired_width(width)
                     .code_editor()
                     .hint_text("expression, e.g. delay(v(\"in\"), v(\"out\"), 0.6)"),
             );
@@ -952,21 +956,18 @@ fn outputs_editor(ui: &mut Ui, outputs: &mut Vec<(String, String, String)>) {
             }
             ui.add(
                 TextEdit::singleline(plot)
-                    .desired_width(50.0)
+                    .desired_width(40.0)
                     .hint_text("plot"),
             );
-            ui.horizontal(|ui| {
-                if bad.is_some() {
-                    ui.colored_label(ui.visuals().error_fg_color, "⚠")
-                        .on_hover_text(bad.unwrap_or_default());
-                }
-                if ui.small_button("✖").on_hover_text("Remove").clicked() {
-                    remove = Some(i);
-                }
-            });
-            ui.end_row();
-        }
-    });
+            if let Some(b) = bad {
+                ui.colored_label(ui.visuals().error_fg_color, "⚠")
+                    .on_hover_text(b);
+            }
+            if ui.small_button("✖").on_hover_text("Remove").clicked() {
+                remove = Some(i);
+            }
+        });
+    }
     if let Some(i) = remove {
         outputs.remove(i);
     }
@@ -1741,6 +1742,7 @@ impl View for SimulationView {
                 if self.form.is_some() {
                     egui::CollapsingHeader::new("Setup")
                         .default_open(true)
+                        .open(self.setup_open.take())
                         .show(ui, |ui| self.editor(ui, &project));
                 }
                 ui.add_space(6.0);
@@ -1783,6 +1785,10 @@ pub(crate) fn script(
             .ok_or_else(|| "no testbench is open".to_string())
     }
     match arg(0)? {
+        "setup_section" => {
+            view.setup_open = Some(matches!(arg(1)?, "open" | "on" | "yes"));
+            Ok(())
+        }
         "open" => {
             let selection = Selection::view(arg(1)?, arg(2)?, arg(3)?);
             let target = testbench_of(&project, &selection).ok_or("not a testbench view")?;
