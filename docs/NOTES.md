@@ -4,7 +4,8 @@ What is still to do and what may cause trouble. [ROADMAP.md](ROADMAP.md) is the 
 file is the running list behind it. Update it when an item is done or a new problem shows
 up. Items marked **(verify)** are suspicions, not confirmed facts.
 
-Last updated: 2026-11-23 (Phase 1 and 2 built and merged into the docs; tests re-run green).
+Last updated: 2026-11-26 (old items checked against the code and the CLI; Phase 3, 4 and 5
+completion round started).
 
 ---
 
@@ -29,8 +30,9 @@ trash. Open:
 - [ ] Auto-reload can drop edits made within 0.3-2 s of an outside change.
 - [ ] Quick-open shortcuts only work in the main window (Ctrl+P is xschem's add-pin; use
       Ctrl+Shift+F).
-- [ ] Dead code: old New Project folder flow (`PickFor::NewProject`); `Library::rename_cell`,
-      `copy_cell`, `rename_cell_following`.
+- [ ] Old New Project folder flow (`PickFor::NewProject`) is still referenced (state, app,
+      library view); `Library::rename_cell_following` has no caller left. Check
+      `rename_cell`/`copy_cell` before removing.
 - [ ] Member (collection) cells are refused by refactor on purpose; categories follow
       rename/delete/move.
 - [ ] Not exercised: native-dialog fallback without a portal.
@@ -271,8 +273,8 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
 - [ ] Basic TEXT's computed (read-only) parameters are not recomputed in the form.
 - [ ] DRC/LVS: no cancel in the GUI; deck variables (-D) only from the CLI; only
       input/topcell/report/schematic/target_netlist are passed (IHP's names).
-- [ ] No library rename in CDePT yet (`layout::follow::library_renamed` is ready for it);
-      xschem instances are not rewritten when a cell is renamed.
+- [x] Library rename (`cdept lib rename`) and cell rename/move rewriting the schematics,
+      layouts, netlists and HDL that use a cell (`refactor.rs`, 2026-11-22).
 - [ ] In the properties script, a single click on a just-placed PCell sometimes selected
       nothing in the GUI (helper tests select it fine); not tracked down.
 - [ ] `install.sh` installs the helper script only, KLayout comes from the system or
@@ -373,18 +375,16 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
 ### Smaller gaps left in what exists
 - [x] Edit project fields (name, description, technology, PDK folder) from the GUI.
 - [ ] Edit or remove libraries that come from an `include` file; today the GUI refuses.
-- [ ] Change a library definition (path, read-only, layout) from the GUI; today remove
-      and add again, or edit `cdept.toml`.
-- [ ] Rename and copy a single view; rename a library.
+- [ ] Change a library definition (path, read-only, layout): done in the CLI (`cdept lib
+      set`); the GUI side was not checked.
+- [x] Rename and copy a single view (`cdept view`); rename a library (`cdept lib rename`).
 - [ ] Magic layout template (needs the technology name, so Phase 2).
-- [ ] CLI for cells and views (`cdept cell new|copy|rename|rm`); only `init`, `ls` and
-      `lib add|remove` exist.
+- [x] CLI for cells and views (`cdept cell`, `cdept view`).
 - [ ] A text field as fallback for the folder dialog (see §2.1).
 
 ### Carried to later phases
 - Phase 2: GDS template units and the xschem header version should come from the
   technology, not constants. `technology` in `cdept.toml` is read but unused.
-- Phase 3: double-click on a view only logs a line. `Format::tool()` already names the tool.
 - Phase 4: a testbench view is recognised by a `setup.toml` or a `tb_` name. That is a
   guess until the testbench format exists.
 
@@ -410,7 +410,8 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
   prints a one-line warning.
 - **Two libraries whose folders have the same name** (`a/analog`, `b/analog`) cannot be
   told apart by xschem: references and `schematic=` values read `analog/...` and the
-  first folder on the path wins. Not detected yet.
+  first folder on the path wins. CDePT warns (`hierarchy::shadowed_libraries`; read-only
+  PDK libraries are left out of the warning).
 - **How instances name symbols (confirmed).** A reference is a path below one of the
   folders on `XSCHEM_LIBRARY_PATH`. CDePT puts the parent of each library folder on
   that path, so references read `<library folder>/<cell>.sym` (flat) or
@@ -424,9 +425,8 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
 - **Folder dialog inside containers.** `rfd` uses the XDG desktop portal. The asic-all
   image and bare X sessions usually have no portal, so the dialog may never appear and
   New/Open Project silently does nothing. The CLI (`cdept init`, `cdept -p`) still works.
-- **Rename and copy leave stale references.** Until item 3 above, renaming a cell that
-  others instantiate breaks those schematics, and a renamed layout keeps its old
-  structure name inside the GDS.
+- **Renames outside CDePT** leave stale references; renames through CDePT rewrite them
+  (`refactor.rs`). The hierarchy gaps of §1 apply.
 - **Variables missing in the GUI's environment.** Solved for `PDK_ROOT`/`PDK` when the
   project sets `technology` and `pdk_root`; any other `$VAR` in `cdept.toml` still comes
   from the environment the app was started in.
@@ -470,11 +470,8 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
   renamed cells (not yet checked against a real clash).
 
 ### 2.3 File operations
-- **Delete is permanent.** No trash, no undo, git is not consulted. There is a
-  confirmation dialog, and Enter does not confirm it.
-- **Operations are not atomic.** Rename moves the cell folder, then renames files one by
-  one; copy works file by file. A failure in the middle (permissions, disk full) leaves a
-  half-renamed cell.
+- **Delete** goes to the trash since 2026-11-22. Rename and move have a rollback; copy
+  works file by file, so a failure in the middle can leave a partial copy **(verify)**.
 - **Copying a cell copies everything in its folder**, including simulation results once
   testbenches exist (possibly gigabytes). Needs an exclusion rule in Phase 4.
 - **Saving `cdept.toml`** goes through a temporary file and a rename: a symlinked project
@@ -482,8 +479,8 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
 - **Symlinked paths.** The project root is canonicalised but picked library folders are
   not, so a library inside the project reached through a symlink may be written as an
   absolute path.
-- **External edits while the GUI is open.** Saving re-reads the file first, so hand edits
-  are not lost, but the views are stale until Reload (no file watching yet).
+- **External edits while the GUI is open.** File watching reloads them (2026-11-22); see
+  the auto-reload item in §1.
 
 ### 2.4 GUI
 - **Scanning runs on the UI thread**, and every operation rescans all libraries. Fine

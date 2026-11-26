@@ -197,7 +197,8 @@ Original to-do (kept for the record):
   cross-probing, nets (opens, shorts, flylines, net probing) ([LINKING.md](LINKING.md)).
 - *Done 2026-11-23:* process supervisor/job queue ([JOBS.md](JOBS.md)); Magic batch ([MAGIC.md](MAGIC.md));
   in-process libngspice ([NGSPICE.md](NGSPICE.md)); Xyce, netgen, yosys, OpenROAD ([BATCH.md](BATCH.md)).
-  Not done: VACASK, Qucs-S, Magic GUI socket server, supervisor restart/limits.
+  VACASK ([VACASK.md](VACASK.md)) and Qucs-S export ([QUCS.md](QUCS.md)) followed the same
+  day. Open before the 2026-11-26 round: the Magic GUI, supervisor restart/limits.
 - **Magic:** `magic -dnull -noconsole` with Tcl over a pipe for batch (ext, LEF, DRC). For the
   GUI, source a Tcl socket-server script.
 - **ngspice:** in-process via `libngspice` (shared API: `ngSpice_Init`, `ngSpice_Command`,
