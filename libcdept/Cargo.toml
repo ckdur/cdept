@@ -30,6 +30,8 @@ libloading = "0.8"
 rusqlite = { version = "0.43.0", features = ["bundled"] }
 # CACE datasheets (YAML): libcdept::cace.
 serde_yaml_ng = "0.10"
+# Digital waveforms (VCD, FST, GHW): libcdept::raw::digital. BSD-3-Clause.
+wellen = { version = "0.25", default-features = false }
 
 [dev-dependencies]
 tempfile.workspace = true
