@@ -396,7 +396,11 @@ SAR ADC milestone. Found by torture and fixed: UberWave allocated 51 GB on a raw
 that lies about its counts (RawHeaderParser); CDePT's ascii raw reader overflowed its
 capacity on the same; the evaluator overflowed the stack on a long sum and the parser on
 deep nesting; `resample(n=1e12)`/`fft(n=2^40)` allocated terabytes; a non-ASCII unknown
-function name panicked. Open:
+function name panicked; `cdept wave` crashed (SIGSEGV) at exit after a refused file while
+the built-in viewer's thread lived; two concurrent runs of one testbench corrupted each
+other's raw files (now a run lock, `.run.lock`); a family with one garbage raw sent
+nothing (now the readable points go); `Xyce -v` probes hung forever and, orphaned by GUI
+runs and tests, used up the inotify instances (the watch tests then failed). Open:
 - [ ] GHW not tested with a real file (no GHDL here); FST tested with one Icarus file.
 - [ ] Digital signals in UberWave are step traces in one pane (no bus/hex view): use
       Surfer/GTKWave for real digital debugging. Surfer is not installed here (GTKWave is).
@@ -416,6 +420,9 @@ function name panicked. Open:
 - [ ] Versions: the worktree build cannot run vergen's git probe (symlinked submodules), so
       `cdept --version` shows defaults there.
 - [ ] No pss analysis: the installed ngspice 47 has none ("no such command").
+- [ ] The probes of the other worktree (agent-ae8c...) left `Xyce -v` processes too (built
+      before the probe fix); not touched by this agent.
+- [ ] `the_project_files_are_watched` failed once under full-suite load (passes alone).
 
 ---
 
