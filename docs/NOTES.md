@@ -370,13 +370,37 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
       PCells need `[klayout] tech` to read back live; bus instances (`M1[3:0]`) count
       as one name.
 
+### Phase 3: Magic and the tool hub (2026-11-27, [MAGIC.md](MAGIC.md), [tools.md](tools.md))
+- [x] Magic in a tab: helper `cdept-magic` (GPL because it runs faketk.tcl) loads the
+      installed `tclmagic.so` with a Tk stub table and Xlib of its own; no Magic build,
+      no submodule, no patch. Four Magic 8.3.623 problems worked around (MAGIC.md, "What
+      had to be worked around"), one of them by writing an unexported variable found in
+      `tclmagic.so`'s symbol table (`windCaptionPixels`): a stripped `tclmagic.so` gets a
+      warning and windows cut off at the bottom. **(verify)** on other Magic builds than
+      8.3.623 (the stub slots and `Tk_FakeWin` are Tk 8.6's).
+- [x] Magic's licence is permissive (HPND-UC); the old docs said GPL.
+- [x] `.mag` references: relative `use` paths + `<cell>.mag.json` (cdept-layout schema);
+      rename/copy/move (Library and refactor), Hierarchy index, `cdept magic refs`.
+- [x] Layout from schematic (`pdk/{sky130A,ihp-sg13g2}/magic-devices.toml`), check-source,
+      LVS (netgen), LEF, GDS import/export, cross-probing of instances, DRC panel.
+- [x] Opening views: choices per format, Open With, the question on double click,
+      `cdept open`, supervised tool windows (logs, limit, stop/restart), klive, `[python]`.
+- [ ] Magic: nets/flylines, net cross-probing; more than one window per helper; Magic's
+      wrapper (menus, coloured layer tool bar); crash backups (unsaved edits are lost
+      when the helper dies); gencell dialogs through faketk not exercised.
+- [ ] `cdept-magic` needs tk-dev (headers) to build; CI installs it, not yet seen on CI.
+- [ ] Tool windows are not stopped when CDePT quits; xschem window needs a stock xschem
+      (not on the development host); the Tools tab has no row for `cdept-magic` itself.
+- [ ] ihp-sg13g2 Magic device map not checked against a real generate (sky130A was).
+- [ ] The example's `tech.catalog.json` (2.8 MB) is not committed (`cdept tech refresh`).
+
 ### Smaller gaps left in what exists
 - [x] Edit project fields (name, description, technology, PDK folder) from the GUI.
 - [ ] Edit or remove libraries that come from an `include` file; today the GUI refuses.
 - [ ] Change a library definition (path, read-only, layout) from the GUI; today remove
       and add again, or edit `cdept.toml`.
 - [ ] Rename and copy a single view; rename a library.
-- [ ] Magic layout template (needs the technology name, so Phase 2).
+- [x] Magic layout template: the snapshot's `[magic] tech` (Phase 2), with a sidecar (2026-11-27).
 - [ ] CLI for cells and views (`cdept cell new|copy|rename|rm`); only `init`, `ls` and
       `lib add|remove` exist.
 - [ ] A text field as fallback for the folder dialog (see §2.1).
@@ -384,7 +408,7 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
 ### Carried to later phases
 - Phase 2: GDS template units and the xschem header version should come from the
   technology, not constants. `technology` in `cdept.toml` is read but unused.
-- Phase 3: double-click on a view only logs a line. `Format::tool()` already names the tool.
+- Phase 3: double-click on a view opens it in its tool, asking when several apply (done 2026-11-27, tools.md).
 - Phase 4: a testbench view is recognised by a `setup.toml` or a `tb_` name. That is a
   guess until the testbench format exists.
 

@@ -483,7 +483,17 @@ static void send_configure(CdmWin *w)
 static void set_point(int x, int y)
 {
   Tcl_Obj *cmd;
+  int w, h;
   if(!interp || !drawing || drawing->destroyed) return;
+  /* Outside the window the command would go to Magic's window client, which knows
+   * none of the layout commands. */
+  w = Tk_Width((Tk_Window)drawing);
+  h = Tk_Height((Tk_Window)drawing);
+  /* ... nor on the window's border (2 pixels; 4 to be safe) */
+  if(x < 4) x = 4;
+  if(y < 4) y = 4;
+  if(x > w - 5) x = w - 5;
+  if(y > h - 5) y = h - 5;
   cmd = Tcl_ObjPrintf("*bypass setpoint %d %d %s", x, y, drawing->path);
   Tcl_IncrRefCount(cmd);
   Tcl_EvalObjEx(interp, cmd, TCL_EVAL_GLOBAL);
@@ -1020,10 +1030,14 @@ void cdm_every(int ms, void (*tick)(void))
 /* ------------------------------------------------------------------------------ */
 /* The drawing window                                                              */
 
+/* Smallest window: Magic keeps a minimum size of its own (borders and 25 pixels); a
+ * smaller one would leave its idea of the window and the frame apart. */
+#define MIN_SIDE 64
+
 void cdm_display_resize(int width, int height)
 {
-  if(width < 1) width = 1;
-  if(height < 1) height = 1;
+  if(width < MIN_SIDE) width = MIN_SIDE;
+  if(height < MIN_SIDE) height = MIN_SIDE;
   if(width > screen_w) width = screen_w;
   if(height > screen_h) height = screen_h;
   want_w = width;
@@ -1037,7 +1051,10 @@ void cdm_display_resize(int width, int height)
   drawing->fake.changes.width = width;
   drawing->fake.changes.height = height;
   set_drw_vars();
-  if(drawing->fake.flags & TK_MAPPED) send_configure(drawing);
+  if(drawing->fake.flags & TK_MAPPED) {
+    send_configure(drawing);
+    set_point(pointer_x, pointer_y);
+  }
 }
 
 static const char *binding_name(int type, int button)

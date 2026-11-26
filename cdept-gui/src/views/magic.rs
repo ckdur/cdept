@@ -1425,8 +1425,8 @@ pub(crate) fn patient(args: &[String]) -> bool {
 }
 
 /// `magic <verb> …` of a test script (docs/GUI-TESTING.md):
-/// `command <magic command…>`, `save`, `drc`, `drc_show <n>`, `generate`, `lvs`,
-/// `layers on|off`, and the checks `expect_saved`, `expect_modified 0|1`,
+/// `command <magic command…>`, `save`, `drc`, `drc_show <n>`, `generate`,
+/// `layers on|off`, `restart`, and the checks `expect_saved`, `expect_modified 0|1`,
 /// `expect_drc <n>` (or `>n`), `expect_generated`, `expect_log <text>`,
 /// `expect_cell <name>`, `expect_selected <names…>`, `expect_missing <n>`.
 pub(crate) fn script(view: &mut MagicView, args: &[String]) -> Result<(), String> {
@@ -1453,6 +1453,7 @@ pub(crate) fn script(view: &mut MagicView, args: &[String]) -> Result<(), String
         Some("drc_show") => view.show_drc(count(&rest)?.1),
         Some("generate") => view.request_generate(),
         Some("layers") => view.show_layers = rest.trim() != "off",
+        Some("restart") => view.session.restart(),
         Some("expect_saved") => {
             if view.saving.is_some() || view.modified {
                 return Err("not saved yet".into());

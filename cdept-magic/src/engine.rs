@@ -161,7 +161,7 @@ impl Magic {
             .map_err(|e| format!("Magic did not start: {e}"))?;
         if let Some(rcfile) = &options.rcfile {
             magic
-                .eval(&format!("source {}", q(rcfile)))
+                .eval(&format!("source -encoding utf-8 {}", q(rcfile)))
                 .map_err(|e| format!("{}: {e}", rcfile.display()))?;
         }
         magic.eval("set ::cdept::starting 0").ok();

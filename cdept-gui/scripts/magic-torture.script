@@ -1,0 +1,63 @@
+# Harder cases for Magic tabs on examples/sky130-inv (docs/MAGIC.md): Ctrl+S, two Magic
+# tabs and a schematic at once, window size changes, a cell that places a missing cell,
+# unsaved changes when closing (Cancel, Discard), the helper restarted from the menu.
+# Needs what magic.script needs:
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_MAGIC=/opt/ext/OpenLane/bin/magic \
+#   CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=sky130-inv \
+#       cdept-gui/scripts/run.sh cdept-gui/scripts/magic-torture.script
+
+open cells inv layout
+wait_frame
+# A cell that places a cell nobody has, written by Magic's Tcl next to inv.
+tcl_send file mkdir [file join [file dirname [file dirname [file dirname [cellname list filepath inv]]]] ghost layout]
+tcl_send set f [open [file join [file dirname [file dirname [file dirname [cellname list filepath inv]]]] ghost layout ghost.mag] w]; puts $f "magic\ntech sky130A\ntimestamp 1\nuse nosuchcell  u1 ../../nowhere/layout\ntimestamp 1\ntransform 1 0 0 0 1 0\nbox 0 0 100 100\n<< end >>"; close $f
+wait 3
+open cells ghost layout
+wait_frame
+magic expect_missing 1
+screenshot /tmp/cdept-magic-missing.png
+
+# Two Magic tabs and a schematic tab at once; the window made smaller and larger.
+open cells inv schematic
+wait_frame
+open cells inv layout
+wait_frame
+window 900 650
+wait_frame
+check_picture
+window 1500 950
+wait_frame
+check_picture
+open cells ghost layout
+wait_frame
+check_picture
+
+# Ctrl+S saves a Magic tab.
+open cells inv layout
+magic command box 0 -3um 1um -2um
+magic command paint m2
+magic expect_modified 1
+key s ctrl
+magic expect_saved
+
+# Unsaved changes when closing: Cancel keeps the tab, Discard closes it.
+magic command paint m3
+magic expect_modified 1
+close
+close_answer cancel
+magic expect_modified 1
+close
+close_answer discard
+wait 1
+expect_documents 2
+
+# Restart from the menu: the file as saved comes back.
+open cells inv layout
+wait_frame
+magic restart
+wait 2
+wait_frame
+magic expect_cell inv
+magic expect_modified 0
+quit

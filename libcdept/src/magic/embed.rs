@@ -65,23 +65,37 @@ pub fn startup_script(project: &Project, file: &Path) -> String {
 /// Load `file` (a `.mag` view) as the edit cell and fit it in the window. A file that
 /// does not exist yet is created as an empty cell by Magic when it is saved.
 pub fn load_script(file: &Path) -> String {
+    // Magic takes a name with bytes outside ASCII for "illegal control characters"
+    // (signed chars), and splits search paths at spaces: the folder becomes Magic's
+    // working folder and the cell is loaded by its name.
+    let dir = file.parent().unwrap_or(Path::new("."));
+    let cd = format!("cd {}\n", word(&dir.to_string_lossy()));
+    let name = |p: &Path| -> String {
+        let text = p.to_string_lossy();
+        if text.is_ascii() && !text.contains(char::is_whitespace) {
+            word(&text)
+        } else {
+            word(
+                &p.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            )
+        }
+    };
     if crate::Format::of_file(file) == Some(crate::Format::Gds) {
         // A GDS view looked at in Magic: read, its (first) top cell shown.
         let stem = cell_of(file);
         return format!(
-            "gds read {f}\n\
+            "{cd}gds read {f}\n\
              if {{[cellname list exists {c}] ne {{0}}}} {{load {c}}} else {{\n\
                load [lindex [lsearch -inline -all -not -exact [cellname list topcells] (UNNAMED)] 0]\n\
              }}\nselect clear\ncatch {{view}}\n",
-            f = word(&file.to_string_lossy()),
+            f = name(file),
             c = word(&stem)
         );
     }
     let base = file.with_extension("");
-    format!(
-        "load {}\nselect clear\ncatch {{view}}\n",
-        word(&base.to_string_lossy())
-    )
+    format!("{cd}load {}\nselect clear\ncatch {{view}}\n", name(&base))
 }
 
 /// How to start the helper for `project`. `screen` bounds the window (pixels).

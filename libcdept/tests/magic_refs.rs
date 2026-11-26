@@ -361,3 +361,94 @@ fn refactor_moves_copies_and_renames_magic_cells() {
     let plan = refactor::plan(&p, &op, &options).unwrap();
     assert!(!plan.blockers.is_empty());
 }
+
+#[test]
+fn a_failed_rename_is_rolled_back() {
+    use libcdept::refactor::{self, Operation, Options};
+    use std::os::unix::fs::PermissionsExt;
+    let _env = libcdept::testutil::hermetic_env();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().canonicalize().unwrap();
+    let p = project(&dir);
+    let chip = dir.join("deep/er/libs/top/chip/layout/chip.mag");
+    refs::normalize(&p, &chip).unwrap();
+    let p = Project::load(&dir).unwrap();
+    let before_chip = fs::read(&chip).unwrap();
+    let before_meta = fs::read(sidecar_path(&chip)).unwrap();
+    // The folder of chip cannot be written: the rename moves base/inv, then fails on
+    // chip's rewrite, and everything is put back.
+    let chip_dir = chip.parent().unwrap().to_path_buf();
+    fs::set_permissions(&chip_dir, fs::Permissions::from_mode(0o555)).unwrap();
+    let op = Operation::RenameCell {
+        library: "base".into(),
+        cell: "inv".into(),
+        new: "inv9".into(),
+    };
+    let plan = refactor::plan(&p, &op, &Options::default()).unwrap();
+    let result = refactor::apply(&p, &plan);
+    fs::set_permissions(&chip_dir, fs::Permissions::from_mode(0o755)).unwrap();
+    if result.is_ok() {
+        // Running as root: the folder was writable after all; nothing to check.
+        eprintln!("skipped: the read-only folder could be written (root?)");
+        return;
+    }
+    assert!(
+        dir.join("libs/base/inv/layout/inv.mag").is_file(),
+        "the move was undone"
+    );
+    assert!(!dir.join("libs/base/inv9").exists());
+    assert_eq!(fs::read(&chip).unwrap(), before_chip);
+    assert_eq!(fs::read(sidecar_path(&chip)).unwrap(), before_meta);
+}
+
+#[test]
+fn oversized_and_odd_files_are_refused_or_read_safely() {
+    let _env = libcdept::testutil::hermetic_env();
+    let tmp = tempfile::tempdir().unwrap();
+    // A sparse file larger than the limit: refused from its size, nothing is read.
+    let big = tmp.path().join("big.mag");
+    let f = fs::File::create(&big).unwrap();
+    f.set_len(mag::MAX_FILE + 1).unwrap();
+    drop(f);
+    assert!(
+        mag::read(&big)
+            .unwrap_err()
+            .to_string()
+            .contains("more than")
+    );
+    assert!(mag::rewrite_file(&big, |_| None).is_err());
+    // Very long lines, many uses, a use with a path with spaces, CRLF line ends.
+    let mut text = String::from("magic\r\ntech x\r\n");
+    text += &"x".repeat(1 << 20);
+    text += "\r\nuse a  i1 ../my folder/a\r\n";
+    for i in 0..5000 {
+        text += &format!("use c{i}  u{i}\r\n");
+    }
+    text += "<< end >>\r\n";
+    let m = mag::parse(&text);
+    assert!(m.complete);
+    assert_eq!(m.uses.len(), 5001);
+    assert_eq!(m.uses[0].path, "../my folder/a");
+    // Rewriting keeps the CRLF ends.
+    let new = mag::rewrite_uses(&text, |u| {
+        (u.cell == "a").then(|| mag::UseEdit {
+            cell: Some("b".into()),
+            path: None,
+        })
+    })
+    .unwrap();
+    assert!(new.contains("use b  i1 ../my folder/a\r\n"));
+    assert_eq!(new.len(), text.len());
+    // A sidecar of the wrong format or version is an error, not a panic.
+    let file = tmp.path().join("v.mag");
+    fs::write(&file, "magic\n<< end >>\n").unwrap();
+    for bad in [
+        "{\"format\":\"other\",\"version\":1}",
+        "{\"format\":\"cdept-layout\",\"version\":99,\"library\":\"a\",\"cell\":\"b\",\"view\":\"c\",\"top\":\"d\"}",
+        "[]",
+        "",
+    ] {
+        fs::write(sidecar_path(&file), bad).unwrap();
+        assert!(Meta::read_for(&file).is_err(), "{bad}");
+    }
+}
