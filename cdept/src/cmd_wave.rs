@@ -9,7 +9,8 @@ use libcdept::wave;
 
 #[derive(Args)]
 pub struct WaveArgs {
-    /// A raw file (ngspice or Xyce) or a Spectre PSF folder; or a library, followed by the cell
+    /// A raw file (ngspice or Xyce), a Spectre PSF folder, a CSV table or a digital waveform
+    /// (VCD, FST, GHW); or a library, followed by the cell
     /// of a testbench whose run point is opened.
     first: String,
     /// The cell, to open the raw file of a run point of its testbench.
@@ -44,7 +45,9 @@ pub struct WaveArgs {
     name: Option<String>,
     /// Signals to plot (comma separated, `v(out)` or just `out`; the tag of each file is
     /// added). Default: the nodes the testbench `save`s, else the ones its measures use,
-    /// else the first four voltages that are not ground or a supply.
+    /// else the first four voltages that are not ground or a supply. For a CSV table or a
+    /// digital file (VCD, FST, GHW) the columns or signals sent to UberWave as traces (a
+    /// digital file without --show opens in Surfer or GTKWave).
     #[arg(long, value_delimiter = ',', conflicts_with = "no_show")]
     show: Vec<String>,
     /// Plot nothing: the viewer opens as it is (File traces are added in the viewer).
@@ -116,15 +119,9 @@ pub fn run(args: WaveArgs, project: Option<&Project>) -> Result<()> {
         });
     }
     match &args.cell {
-        None if args.family
-            || !args.points.is_empty()
-            || args.calc.is_some()
-            || !args.show.is_empty() =>
-        {
-            Err(eyre!(
-                "--family, --points, --calc and --show work on the run points of a testbench: cdept wave <library> <cell> --view V ..."
-            ))
-        }
+        None if args.family || !args.points.is_empty() || args.calc.is_some() => Err(eyre!(
+            "--family, --points and --calc work on the run points of a testbench: cdept wave <library> <cell> --view V ..."
+        )),
         None => file(&args, Path::new(&args.first), project),
         Some(cell) => point(&args, cell, project),
     }
@@ -142,6 +139,33 @@ fn file(args: &WaveArgs, raw: &Path, project: Option<&Project>) -> Result<()> {
             );
         }
         return Ok(());
+    }
+    match wave::other::kind(raw) {
+        wave::other::Kind::Digital if args.show.is_empty() => {
+            let line = wave::other::open_digital(project, raw)?;
+            let words: Vec<String> = line
+                .iter()
+                .map(|w| w.to_string_lossy().into_owned())
+                .collect();
+            println!("{}", words.join(" "));
+            return Ok(());
+        }
+        wave::other::Kind::Digital | wave::other::Kind::Table => {
+            let sent = wave::other::open_in_uberwave(project, raw, &args.show)?;
+            for (name, n) in &sent.pushed {
+                println!("sent '{name}' ({n} points)");
+            }
+            for note in &sent.notes {
+                eprintln!("note: {note}");
+            }
+            return finish(args, true);
+        }
+        wave::other::Kind::Spice if !args.show.is_empty() => {
+            return Err(eyre!(
+                "--show works on a CSV table, a digital file or the run points of a testbench (cdept wave <library> <cell> --view V ...)"
+            ));
+        }
+        wave::other::Kind::Spice => {}
     }
     let launched = wave::open_raw(project, raw, args.analysis.as_deref())?;
     println!("{}", launched.text());
