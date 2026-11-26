@@ -21,6 +21,7 @@ pub mod launch;
 pub mod layout;
 pub mod library;
 pub mod link;
+mod locale;
 pub mod magic;
 pub mod ngspice;
 pub mod project;

@@ -202,6 +202,7 @@ impl Connection {
         }
         command.envs(setup::helper_env(klayout));
         command.envs(options.env.iter().map(|(name, value)| (name, value)));
+        crate::locale::ensure_utf8(&mut command, &options.env);
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
