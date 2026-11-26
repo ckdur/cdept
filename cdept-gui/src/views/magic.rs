@@ -895,6 +895,16 @@ impl MagicView {
                     modifiers,
                     ..
                 } if keys => {
+                    // Ctrl+S is CDePT's save (as in layout tabs), not a Magic macro.
+                    if *key == egui::Key::S
+                        && (modifiers.ctrl || modifiers.command)
+                        && !modifiers.shift
+                    {
+                        if *pressed && self.editable {
+                            self.save();
+                        }
+                        continue;
+                    }
                     if let Some(action) = keys::edit_shortcut(*key, *modifiers) {
                         if *pressed {
                             self.undo_redo(action);
@@ -1251,6 +1261,18 @@ impl View for MagicView {
                 escape: true,
             };
             ui.memory_mut(|m| m.set_focus_lock_filter(response.id, filter));
+        }
+        // Ctrl+S saves the tab that has the keyboard or the pointer, also when the pointer
+        // is not over the drawing itself (the key events below need both).
+        if running
+            && !modal
+            && self.editable
+            && (response.has_focus() || response.contains_pointer())
+            && ui.input_mut(|i| {
+                i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::COMMAND, egui::Key::S))
+            })
+        {
+            self.save();
         }
         if running && !modal {
             let (events, modifiers) = ui.input(|i| (i.events.clone(), i.modifiers));

@@ -10,8 +10,9 @@
 open cells inv layout
 wait_frame
 # A cell that places a cell nobody has, written by Magic's Tcl next to inv.
-tcl_send file mkdir [file join [file dirname [file dirname [file dirname [cellname list filepath inv]]]] ghost layout]
-tcl_send set f [open [file join [file dirname [file dirname [file dirname [cellname list filepath inv]]]] ghost layout ghost.mag] w]; puts $f "magic\ntech sky130A\ntimestamp 1\nuse nosuchcell  u1 ../../nowhere/layout\ntimestamp 1\ntransform 1 0 0 0 1 0\nbox 0 0 100 100\n<< end >>"; close $f
+# (Magic's working folder is the layout folder of inv.)
+tcl_send file mkdir [file normalize [file join [pwd] .. .. ghost layout]]
+tcl_send set f [open [file normalize [file join [pwd] .. .. ghost layout ghost.mag]] w]; puts $f "magic\ntech sky130A\ntimestamp 1\nuse nosuchcell  u1 ../../nowhere/layout\ntimestamp 1\ntransform 1 0 0 0 1 0\nbox 0 0 100 100\n<< end >>"; close $f
 wait 3
 open cells ghost layout
 wait_frame
@@ -29,25 +30,27 @@ check_picture
 window 1500 950
 wait_frame
 check_picture
+# (no check_picture here: the red "cannot be found" line is drawn over the frame)
 open cells ghost layout
 wait_frame
-check_picture
+magic expect_missing 1
 
 # Ctrl+S saves a Magic tab.
 open cells inv layout
 magic command box 0 -3um 1um -2um
 magic command paint m2
 magic expect_modified 1
+move 300 200
 key s ctrl
 magic expect_saved
 
 # Unsaved changes when closing: Cancel keeps the tab, Discard closes it.
 magic command paint m3
 magic expect_modified 1
-close
+close_tab
 close_answer cancel
 magic expect_modified 1
-close
+close_tab
 close_answer discard
 wait 1
 expect_documents 2
