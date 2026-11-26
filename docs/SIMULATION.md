@@ -1,14 +1,11 @@
-# CDePT: simulation (Phase 4, first slice)
+# CDePT: simulation (Phase 4)
 
-Status 2026-11-23: a testbench view, the deck CDePT builds, batch ngspice runs over
-corners × temperatures, `.meas` results against specs. Code: `libcdept/src/sim/`, CLI
-`cdept sim`; the Simulation tab (section 8). Also design-variable sweeps, Monte Carlo
-(process, mismatch, both; ngspice and Xyce), a results store and statistics (sections
-4 to 7). Not built yet: VACASK, waveform viewer (Phase 5).
-`cdept sim`. Since 2026-11-23 also design-variable sweeps, Monte Carlo and a results
-store (sections 5 to 7). VACASK runs as a testbench simulator too ([VACASK.md](VACASK.md)). Not built yet: waveform viewer (Phase 5).
-`cdept sim`; the Simulation tab (§5). Not built yet: sweeps of design variables, Monte Carlo,
-Xyce/VACASK, results database, waveform viewer (Phase 5).
+Status 2026-11-27: a testbench view (`setup.toml`: DUT, analyses, design variables,
+corners, temperatures, saves, measures, calculator outputs, specs, sweeps, Monte Carlo,
+time limit), the deck CDePT builds, ngspice, Xyce and VACASK runs on a job queue (local,
+in-process ngspice, SLURM/ssh), a results store, suites, and the Simulation tab where all of
+it is edited and run (section 8). Code: `libcdept/src/sim/`, CLI `cdept sim`. Waveforms and
+the calculator: [CALC.md](CALC.md), [view waveforms](howto/view-waveforms.md).
 
 ## 1. The testbench view
 
@@ -19,6 +16,9 @@ is netlisted is an ordinary xschem schematic (DUT, sources, load, its own code b
 ```toml
 schematic = "lib/cell"        # default: the cell the view is in
 schematic_view = "schematic"  # default: the first xschem schematic
+dut = "cells/inv"             # optional: the device under test (library/cell); its .subckt
+                              # must be in the netlist; post-layout runs swap it (Phase 7)
+timeout = "10m"               # optional: time limit of one run point
 simulator = "ngspice"         # or "xyce", "vacask" (docs/VACASK.md)
 models = "ngspice"            # model set of [models] in tech.toml; default: the snapshot's
 corners = ["tt", "ff", "ss"]  # corner sets of that set; default: the snapshot's corner
@@ -27,7 +27,8 @@ save = ["v(in)", "v(out)"]    # .save
 measures = ["tran tpd trig v(in) val=0.6 rise=1 targ v(out) val=0.6 fall=1"]
 [variables]                   # .param name=value
 [options]                     # .options name=value
-[[analysis]]                  # kind = op | dc | ac | tran | noise
+[[analysis]]                  # kind = op | dc | ac | tran | noise (pss: the ngspice of
+                              # /opt/ext has none, "no such command"; not offered)
 kind = "tran"
 step = "5p"
 stop = "1.2n"
@@ -244,11 +245,11 @@ non-zero on any failed or errored run. `cdept sim results <lib> <cell> [--view V
 - Mismatch Monte Carlo of resistors/capacitors on IHP (the hand-written `mc_mm` corner set covers the MOS transistors); `cdept tech refresh` does not generate `mc_mm` for IHP.
 - Xyce mismatch (the PDK's Xyce models have none for transistors); Xyce `numsamples=N` in one run (each run is a separate sample-1 run today).
 - Sweeps of a model corner parameter, resuming a half-done sweep.
-- GUI: histograms are text bars (no plot widget yet); the Jobs panel is still a placeholder (the jobs are listed in the Simulation tab).
+- GUI: histograms are text bars (a histogram can go to UberWave from the calculator panel:
+  `histogram(...)`); the Jobs panel is still a placeholder (the jobs are listed in the
+  Simulation tab).
 - Only the first measurement value per name is kept (`.meas` inside sweeps repeats it).
-- Raw file reader (Phase 5); `out.raw` holds several plots when there are several analyses.
 - Post-layout: swap the DUT for the extracted netlist (Phase 7).
-- Xyce/VACASK through the same deck builder; OpenVAF for Verilog-A.
 
 ## 8. The Simulation tab (GUI)
 
@@ -259,7 +260,8 @@ Simulation** in the context menu of a view or of a cell opens it and runs at onc
 - **Setup.** A form over `sim::Setup`: simulator, model set, schematic, corners (the
   boxes are the corners of the model set in the project's `tech.toml`; a corner the
   technology lacks is shown with `?`), temperatures, `[variables]`, `[options]`,
-  analyses (per kind), measures, `.save`, specs. The form is validated live with
+  DUT, time limit, analyses (per kind), measures, `.save`, outputs (`[[output]]`:
+  name, expression checked as it is typed, plot), specs. The form is validated live with
   `Setup::parse` (the message is under the buttons). Save writes `setup.toml` again
   (keys sorted, empty ones left out, comment lines before the first key kept; comments
   elsewhere are lost), Revert reads it again. Run saves first.
@@ -283,7 +285,9 @@ Simulation** in the context menu of a view or of a cell opens it and runs at onc
   outside); then the points (collapsed above six): a table of the specs (value, bound,
   PASS green / FAIL red / MISSING amber) and the other measures; **Open folder** and
   **Open log** hand the point's folder or `out.log` to the desktop (`xdg-open`).
-- Test: `cdept-gui/scripts/simulation.script` (docs/GUI-TESTING.md).
+- **Calculator.** Expressions on the run points, waveforms to UberWave, "Add as output",
+  the viewer's cursors followed: [CALC.md §6](CALC.md#6-the-calculator-panel-gui-and-the-viewer).
+- Test: `cdept-gui/scripts/simulation.script`, `sar-enob.script` (docs/GUI-TESTING.md).
 
 ## 8. Calculator outputs
 
@@ -291,4 +295,14 @@ Simulation** in the context menu of a view or of a cell opens it and runs at onc
 
 ## 9. Test templates and suites
 
-A setup can start from a ready-made test (`template = "tran_delay"` with `[template_args]`; fields written in the setup override it), and a `suite.toml` view runs several testbenches together with one combined table: see [TESTS.md](TESTS.md).
+A setup can start from a ready-made test (`template = "tran_delay"` with `[template_args]`; fields written in the setup override it), and a `suite.toml` view runs several testbenches together with one combined table: see [TESTS.md](TESTS.md). A suite's `[[combine]]` computes a figure from several tests at the same run point (`ac_open.gain_db - psrr.xfer_db`).
+
+## 10. Example: an 8-bit SAR ADC
+
+`examples/ihp-inv/libs/cells/sar8` is a behavioural 8-bit SAR ADC drawn in xschem (sampling
+switch and hold capacitor, tanh comparator, eight latch switches and capacitors, a B-source
+DAC with an MSB weight error `msb_err`, its own 10 MHz sequencer: 1 MS/s), and
+`tb_sar8/enob` converts a coherent sine (11 cycles in 128 conversions): `enob =
+enob(sample(v("code"), 1u, from=950n), window="rect")` gives 8.06 (SNDR 50.3 dB, SFDR
+59.1 dB) in 1.8 s of ngspice. `tb_sar8/msb_sweep` sweeps `msb_err` 0..4 %: ENOB 8.06, 7.84,
+7.51, 6.82, 5.92. In the GUI: [CALC.md §6](CALC.md#6-the-calculator-panel-gui-and-the-viewer).

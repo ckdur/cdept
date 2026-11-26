@@ -212,7 +212,7 @@ Original to-do (kept for the record):
   interpreter. Same supervisor, with the venv/interpreter recorded per project.
 - **Milestone:** double-click a view to open it in the correct tool. Netlist any cell from CDePT.
 
-### Phase 4: Simulation Environment, "ADE-lite" (~120 h)
+### Phase 4: Simulation Environment, "ADE-lite" (~120 h) — done 2026-11-27
 Done 2026-11-23 ([SIMULATION.md](SIMULATION.md)): testbench view, deck, ngspice and Xyce batch runs,
 corners × temperatures × variable sweeps, Monte Carlo, measures and specs, job queue
 ([JOBS.md](JOBS.md)), results store (`result.json` + `results.db`), Simulation tab in the GUI.
@@ -237,7 +237,14 @@ and time-bound OpenVAF compiles, a clear error when OpenVAF is missing, and VACA
 per technology (`vacask::availability`; sky130A/B unavailable, the form disables it).
 SLURM and ssh remote runs (SYMBI-82, 2026-11-24) are there but smoke-tested only (fake `sbatch`/`squeue`/`ssh`,
 real ngspice behind them; [JOBS.md](JOBS.md#remote-backend-slurm-and-ssh-smoke-tested-only)).
-Still to do: the rest of the list below as written.
+**Phase 4 done 2026-11-27** (checked item by item against the list below): the testbench
+view has a DUT (`dut = "lib/cell"`, its subcircuit checked in the netlist), op/dc/ac/tran/
+noise (no pss: the installed ngspice has none), variables, corners, temperatures, saves,
+measures, calculator outputs, specs, sweeps, Monte Carlo and the time limit, all editable in
+the Simulation tab's form; the per-point time limit reaches remote runs too; suites combine
+tests at the same run point (`[[combine]]`: PSRR/CMRR from ac_open's gain of the same corner,
+replacing the fixed `adm_db`). Left out on purpose: VACASK on sky130 (backlog, SYMBI-79), a
+real SLURM cluster (smoke-tested only), the post-layout DUT swap (Phase 7).
 - Testbench view: DUT cell, analyses (op/dc/ac/tran/noise/pss if available), design
   variables, model corners (from tech.toml), temperature, saves/probes.
 - Netlisting pipeline: xschem netlist → wrapper with includes, `.param` and `.control`.
@@ -258,7 +265,7 @@ Still to do: the rest of the list below as written.
 - **Milestone:** corner sweep of an OTA from the GUI, with a spec table showing gain, PM
   and UGBW pass/fail.
 
-### Phase 5: Waveform Viewer + Calculator (~150 h)
+### Phase 5: Waveform Viewer + Calculator (~150 h) — done 2026-11-27
 - Readers: SPICE raw (binary and ascii, ngspice and Xyce flavours; small custom parser),
   CSV, digital VCD/FST/GHW via `wellen`.
 - **Decision: CDePT builds no waveform viewer of its own.** The analog viewer (egui plot,
@@ -287,12 +294,11 @@ Still to do: the rest of the list below as written.
      names), and a second open of the same run reuses the running viewer. Tested against a
      fake server (`cdept-gui/scripts/fake-uberwave-ipc.py`) and once by hand against the
      viewer build with IPC.
-  4. **Reached on the CDePT side**: the calculator feeds the viewer. `cdept wave ... --calc
+  4. **Done** (2026-11-27 for the last parts): the calculator feeds the viewer. `cdept wave ... --calc
      EXPR` and the expression line of the Simulation tab evaluate an expression on one point
      or on every point of a family and push waveform results as traces (`add_trace`); scalars
-     are printed. Still open: following the viewer's cursors in the spec table
-     (`subscribe` is in the client, nothing uses it yet), and showing CDePT's own measures as
-     markers.
+     are printed. The calculator panel follows the built-in viewer's cursors (a callback of
+     the shim) and CDePT's measures are markers in the viewer (embedded backend only).
   5. **Done** (SYMBI-83): UberWave built into the executable (`libcdept::wave::backend`:
      `Embedded` by default when built in, `Process` as the fallback; `[wave] backend`,
      `CDEPT_UBERWAVE_BACKEND`, `cdept wave --backend`; `cdept wave --screenshot`). One viewer
@@ -308,7 +314,21 @@ Still to do: the rest of the list below as written.
      parser (`winnow`/`chumsky`). Optional Python scripting via `pyo3` (numpy/scipy) for
      power users.
 - Expressions can be saved as testbench outputs (feeds the Phase 4 spec table).
-- Built 2026-11-23 (no GUI yet): raw reader, native function library, expression language, `[[output]]`, `cdept calc` ([CALC.md](CALC.md)). Open: jitter/PSD, CSV/VCD, panel in the GUI.
+- Built 2026-11-23 (no GUI yet): raw reader, native function library, expression language, `[[output]]`, `cdept calc` ([CALC.md](CALC.md)).
+- **Done 2026-11-27**: CSV and digital (VCD/FST/GHW through `wellen`, BSD-3) readers in the
+  calculator; tables to UberWave as traces, digital files to Surfer/GTKWave or as step
+  traces; jitter (period, cycle-to-cycle, TIE), PSD (Welch), histograms, percentiles,
+  sample-and-hold; the calculator panel of the Simulation tab (completion, function and
+  signal browsers with help, point/family, results table, Send to UberWave, Add as output);
+  UberWave extended for it (typed shim without JSON, Bode layout on log X, eye diagrams by
+  folding, CDePT's measures as markers, cursor callback): the spec table follows the
+  viewer's cursors (`cursor_a`/`cursor_b` outputs). Strips (panes), cursors and sweep-family
+  overlays were in UberWave already. pyo3 scripting skipped.
+- **Milestone reached 2026-11-27**: an 8-bit SAR ADC (`examples/ihp-inv`, cells/sar8,
+  tb_sar8) run from the Simulation tab, ENOB 8.06 from the transient through
+  `enob(sample(v("code"), 1u, from=950n), window="rect")` in the calculator panel, the code
+  spectrum in UberWave, no Python ([CALC.md §6](CALC.md), `cdept-gui/scripts/sar-enob.script`,
+  screenshots `sar-calc.png`, `sar-uberwave.png`, `sar-markers.png`).
 - **Milestone:** SAR-ADC transient → FFT → ENOB in the GUI with no Python written.
 
 ### Phase 6: Schematic ↔ Layout coherence, "XL-lite" (~100 h)
