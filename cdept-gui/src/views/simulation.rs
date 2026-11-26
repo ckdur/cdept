@@ -23,6 +23,7 @@ use super::{View, empty_state};
 use crate::state::{Action, AppCtx, Selection};
 
 mod avail;
+pub(crate) mod calc;
 mod keep;
 mod remote;
 mod sweeps;
@@ -111,6 +112,10 @@ pub(super) struct Form {
     models: String,
     schematic: String,
     schematic_view: String,
+    /// The device under test, `library/cell`.
+    pub(super) dut: String,
+    /// The time limit of a run point (`10m`, `90s`); empty: the project's.
+    timeout: String,
     corners: Vec<String>,
     temperatures: String,
     variables: Vec<(String, String)>,
@@ -120,6 +125,8 @@ pub(super) struct Form {
     analyses: Vec<AnalysisForm>,
     /// name, min, max
     specs: Vec<(String, String, String)>,
+    /// `[[output]]`: name, expression, plot.
+    pub(super) outputs: Vec<(String, String, String)>,
     /// The setup's own `[[sweep]]` rows (the template's are in `inherited`).
     sweeps: Vec<SweepForm>,
     /// What the template brings: sweeps and Monte Carlo, shown read-only.
@@ -200,6 +207,8 @@ impl Form {
             models: setup.models.clone(),
             schematic: setup.schematic.clone(),
             schematic_view: setup.schematic_view.clone(),
+            dut: setup.dut.clone(),
+            timeout: setup.timeout.clone(),
             corners: setup.corners.clone(),
             temperatures: setup
                 .temperatures
@@ -222,6 +231,11 @@ impl Form {
                         s.max.map(|v| v.to_string()).unwrap_or_default(),
                     )
                 })
+                .collect(),
+            outputs: setup
+                .outputs
+                .iter()
+                .map(|o| (o.name.clone(), o.expr.clone(), o.plot.clone()))
                 .collect(),
             sweeps: sweeps::own_rows(&setup.sweeps, &inherited),
             mc: setup.montecarlo.is_some() && setup.montecarlo != inherited.mc,
@@ -275,6 +289,8 @@ impl Form {
         set("models", string(&self.models));
         set("schematic", string(&self.schematic));
         set("schematic_view", string(&self.schematic_view));
+        set("dut", string(&self.dut));
+        set("timeout", string(&self.timeout));
         set(
             "corners",
             Value::Array(self.corners.iter().map(|c| string(c)).collect()),
@@ -354,6 +370,18 @@ impl Form {
             specs.push(Value::Table(t));
         }
         set("spec", Value::Array(specs));
+        let mut outputs = Vec::new();
+        for (name, expr, plot) in &self.outputs {
+            if name.trim().is_empty() && expr.trim().is_empty() {
+                continue;
+            }
+            let mut t = toml::Table::new();
+            t.insert("name".into(), string(name));
+            t.insert("expr".into(), string(expr));
+            t.insert("plot".into(), string(plot));
+            outputs.push(Value::Table(t));
+        }
+        set("output", Value::Array(outputs));
         let own = sweeps::own_sweeps(&self.sweeps)?;
         let all = sweeps::overlay(&self.inherited.sweeps, &own);
         set(
@@ -371,6 +399,12 @@ impl Form {
         let text = toml::to_string_pretty(&table).map_err(|e| e.to_string())?;
         super::testlib::parse(&text).map_err(|e| format!("{e:#}"))?;
         Ok(text)
+    }
+
+    /// Add or replace the spec of `name`.
+    pub(super) fn add_spec(&mut self, name: &str, min: String, max: String) {
+        self.specs.retain(|(n, _, _)| !n.eq_ignore_ascii_case(name));
+        self.specs.push((name.to_string(), min, max));
     }
 
     fn setup(&self) -> Result<Setup, String> {
@@ -490,6 +524,10 @@ pub struct SimulationView {
     pub(super) tests: super::testlib::TestsUi,
     /// Whether VACASK can run the project's technology (simulation/avail.rs).
     avail: avail::Avail,
+    /// The calculator panel (simulation/calc.rs).
+    pub(crate) calc: calc::CalcPanel,
+    /// Open or fold the Setup section at the next frame (a script's `sim setup_section`).
+    setup_open: Option<bool>,
 }
 
 impl SimulationView {
@@ -890,6 +928,54 @@ fn bound(spec: &sim::Spec) -> String {
     }
 }
 
+/// The `[[output]]` rows: name, expression (checked as it is typed), plot.
+fn outputs_editor(ui: &mut Ui, outputs: &mut Vec<(String, String, String)>) {
+    let mut remove = None;
+    for (i, (name, expr, plot)) in outputs.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.add(
+                TextEdit::singleline(name)
+                    .desired_width(110.0)
+                    .hint_text("name"),
+            );
+            let bad = if expr.trim().is_empty() {
+                None
+            } else {
+                libcdept::calc::parse(expr).err().map(|e| e.render(expr))
+            };
+            let width = (ui.available_width() - 110.0).max(160.0);
+            let edit = ui.add(
+                TextEdit::singleline(expr)
+                    .id_salt(("sim-output-expr", i))
+                    .desired_width(width)
+                    .code_editor()
+                    .hint_text("expression, e.g. delay(v(\"in\"), v(\"out\"), 0.6)"),
+            );
+            if let Some(b) = &bad {
+                edit.on_hover_text(b.clone());
+            }
+            ui.add(
+                TextEdit::singleline(plot)
+                    .desired_width(40.0)
+                    .hint_text("plot"),
+            );
+            if let Some(b) = bad {
+                ui.colored_label(ui.visuals().error_fg_color, "⚠")
+                    .on_hover_text(b);
+            }
+            if ui.small_button("✖").on_hover_text("Remove").clicked() {
+                remove = Some(i);
+            }
+        });
+    }
+    if let Some(i) = remove {
+        outputs.remove(i);
+    }
+    if ui.small_button("＋ Add output").clicked() {
+        outputs.push(Default::default());
+    }
+}
+
 fn list_editor(ui: &mut Ui, id: &str, rows: &mut Vec<(String, String)>, names: (&str, &str)) {
     let mut remove = None;
     Grid::new(id).num_columns(3).show(ui, |ui| {
@@ -973,6 +1059,23 @@ impl SimulationView {
                             .hint_text("view"),
                     );
                 });
+                ui.end_row();
+                ui.label("DUT").on_hover_text(
+                    "The device under test, library/cell: the netlist must hold its subcircuit; post-layout runs swap it (Phase 7)",
+                );
+                ui.add(
+                    TextEdit::singleline(&mut form.dut)
+                        .desired_width(200.0)
+                        .hint_text("library/cell (optional)"),
+                );
+                ui.end_row();
+                ui.label("Time limit")
+                    .on_hover_text("Of one run point: 10m, 90s, 1h30m; 0 is none; empty: the project's [sim] timeout");
+                ui.add(
+                    TextEdit::singleline(&mut form.timeout)
+                        .desired_width(100.0)
+                        .hint_text("project default"),
+                );
                 ui.end_row();
                 ui.label("Corners")
                     .on_hover_text("From the technology snapshot (tech.toml)");
@@ -1093,6 +1196,10 @@ impl SimulationView {
                 .desired_width(f32::INFINITY)
                 .code_editor(),
         );
+
+        ui.add_space(4.0);
+        ui.strong("Outputs  (calculator expressions, docs/CALC.md)");
+        outputs_editor(ui, &mut form.outputs);
 
         ui.add_space(4.0);
         ui.strong("Specs");
@@ -1291,6 +1398,63 @@ impl SimulationView {
             });
     }
 
+    /// `(library, cell, view)` of the open testbench.
+    pub(crate) fn target_run(&self) -> Option<(String, String, String)> {
+        self.target
+            .as_ref()
+            .map(|t| (t.library.clone(), t.cell.clone(), t.view.clone()))
+    }
+
+    /// The calculator panel, on the run points on disk (also from earlier sessions).
+    fn calc_ui(&mut self, ui: &mut Ui, project: &Project) {
+        let Some(t) = self.target.clone() else { return };
+        let (outputs, specs) = match &self.form {
+            Some(f) => (
+                f.outputs.clone(),
+                f.setup().map(|s| s.specs).unwrap_or_default(),
+            ),
+            None => (vec![], vec![]),
+        };
+        let added = self.calc.ui(
+            ui,
+            project,
+            (&t.library, &t.cell, &t.view),
+            &outputs,
+            &specs,
+        );
+        if let Some(o) = added {
+            self.add_output(o);
+        }
+    }
+
+    /// "Add as output": the output (replacing one of that name) and its spec in the form.
+    pub(crate) fn add_output(&mut self, o: calc::NewOutput) {
+        let Some(form) = &mut self.form else {
+            self.calc.status = Some(("no testbench form is open".into(), true));
+            return;
+        };
+        form.outputs
+            .retain(|(n, _, _)| !n.eq_ignore_ascii_case(&o.name));
+        form.outputs
+            .push((o.name.clone(), o.expr.clone(), o.plot.clone()));
+        if o.min.is_some() || o.max.is_some() {
+            let text = |v: Option<f64>| v.map(|v| v.to_string()).unwrap_or_default();
+            form.add_spec(&o.name, text(o.min), text(o.max));
+        }
+        self.calc.status = Some((
+            format!(
+                "output '{}' added to the setup form{}: Save to keep it",
+                o.name,
+                if o.min.is_some() || o.max.is_some() {
+                    " with its spec"
+                } else {
+                    ""
+                }
+            ),
+            false,
+        ));
+    }
+
     fn results_ui(&mut self, ui: &mut Ui, project: &Project) {
         if let Some(e) = &self.run_error {
             ui.colored_label(
@@ -1298,6 +1462,7 @@ impl SimulationView {
                 e.lines().next().unwrap_or(""),
             );
         }
+        self.calc_ui(ui, project);
         if self.results.is_empty() {
             return;
         }
@@ -1577,6 +1742,7 @@ impl View for SimulationView {
                 if self.form.is_some() {
                     egui::CollapsingHeader::new("Setup")
                         .default_open(true)
+                        .open(self.setup_open.take())
                         .show(ui, |ui| self.editor(ui, &project));
                 }
                 ui.add_space(6.0);
@@ -1609,6 +1775,9 @@ pub(crate) fn script(
     if let Some(result) = avail::script(view, &project, args) {
         return result;
     }
+    if let Some(result) = calc::script(view, &project, args) {
+        return result;
+    }
     let yes = |s: &str| matches!(s, "yes" | "on" | "true");
     fn form(view: &mut SimulationView) -> Result<&mut Form, String> {
         view.form
@@ -1616,6 +1785,10 @@ pub(crate) fn script(
             .ok_or_else(|| "no testbench is open".to_string())
     }
     match arg(0)? {
+        "setup_section" => {
+            view.setup_open = Some(matches!(arg(1)?, "open" | "on" | "yes"));
+            Ok(())
+        }
         "open" => {
             let selection = Selection::view(arg(1)?, arg(2)?, arg(3)?);
             let target = testbench_of(&project, &selection).ok_or("not a testbench view")?;

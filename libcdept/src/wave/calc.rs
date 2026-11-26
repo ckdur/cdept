@@ -11,7 +11,7 @@ use eyre::{Result, eyre};
 
 use super::backend::ViewerOps;
 use super::decimate;
-use super::ipc::Trace;
+use super::ipc::{PaneSel, Trace};
 use super::session::{Mode, ViewFile, open_files, run_key};
 use super::show::{Show, ShowRequest};
 use super::{PointRaw, analyses};
@@ -34,14 +34,38 @@ pub enum Evaluated {
 pub struct PointOutcome {
     pub point: String,
     pub result: std::result::Result<Evaluated, String>,
+    /// Where the expression measured (crossings, edges, extremes): markers in the viewer.
+    pub marks: Vec<calc::Mark>,
 }
 
 /// Evaluate `expr` on a point's raw file. The environment has the point's `corner`,
 /// `temp`, `seed`, `run` and swept variables when its `result.json` is next to the
 /// raw file. `plot` limits the search to one analysis (as `cdept calc --plot`).
 pub fn evaluate_raw(raw_file: &Path, expr: &str, plot: Option<&str>) -> Result<Value> {
+    evaluate_raw_marked(raw_file, expr, plot).map(|(v, _)| v)
+}
+
+/// [`evaluate_raw`] and the places it measured at.
+pub fn evaluate_raw_marked(
+    raw_file: &Path,
+    expr: &str,
+    plot: Option<&str>,
+) -> Result<(Value, Vec<calc::Mark>)> {
+    evaluate_raw_with(raw_file, expr, plot, &[])
+}
+
+/// [`evaluate_raw_marked`] with more names (`cursor_a`, `cursor_b`, ...).
+pub fn evaluate_raw_with(
+    raw_file: &Path,
+    expr: &str,
+    plot: Option<&str>,
+    extra: &[(String, f64)],
+) -> Result<(Value, Vec<calc::Mark>)> {
     let raw = RawFile::open(raw_file)?;
     let mut env = Env::new(&raw);
+    for (k, v) in extra {
+        env.set(k, Value::Num(*v));
+    }
     if let Some(p) = plot {
         env = env.with_plot(p);
     }
@@ -65,14 +89,15 @@ pub fn evaluate_raw(raw_file: &Path, expr: &str, plot: Option<&str>) -> Result<V
         }
     }
     match calc::evaluate(expr, &env) {
-        Ok(v) => Ok(v),
+        Ok(v) => Ok((v, env.take_marks())),
         Err(first) => {
             // `v(out)` for `v("out")`: tried only when the expression as written failed,
             // so what is valid keeps its meaning (a bare name there is a variable).
-            if let Some(quoted) = quote_bare_nodes(expr)
-                && let Ok(v) = calc::evaluate(&quoted, &env)
-            {
-                return Ok(v);
+            if let Some(quoted) = quote_bare_nodes(expr) {
+                env.take_marks();
+                if let Ok(v) = calc::evaluate(&quoted, &env) {
+                    return Ok((v, env.take_marks()));
+                }
             }
             let mut text = first.render(expr);
             if text.contains("unknown name") && expr.contains('(') {
@@ -139,7 +164,10 @@ pub fn to_evaluated(value: &Value, name: &str) -> Evaluated {
 
 /// The raw file names a vector's kind (`time`, `voltage`), the viewer wants a unit.
 fn si_unit(kind: &str) -> Option<String> {
-    let u = match kind.to_lowercase().as_str() {
+    let lower = kind.to_lowercase();
+    // ngspice writes `frequency grid=3`, `time grid=..`: the first word is the kind
+    let first = lower.split_whitespace().next().unwrap_or("");
+    let u = match first {
         "" => return None,
         "time" => "s",
         "voltage" => "V",
@@ -199,14 +227,31 @@ pub fn evaluate_points(
     name: Option<&str>,
     plot: Option<&str>,
 ) -> Vec<PointOutcome> {
+    evaluate_points_with(points, expr, name, plot, &[])
+}
+
+/// [`evaluate_points`] with more names for the expression.
+pub fn evaluate_points_with(
+    points: &[PointRaw],
+    expr: &str,
+    name: Option<&str>,
+    plot: Option<&str>,
+    extra: &[(String, f64)],
+) -> Vec<PointOutcome> {
     let single = points.len() == 1;
     points
         .iter()
-        .map(|p| PointOutcome {
-            point: p.point.clone(),
-            result: evaluate_raw(&p.raw, expr, plot)
-                .map(|v| to_evaluated(&v, &trace_name(expr, name, &p.point, single)))
-                .map_err(|e| format!("{e:#}")),
+        .map(|p| match evaluate_raw_with(&p.raw, expr, plot, extra) {
+            Ok((v, marks)) => PointOutcome {
+                point: p.point.clone(),
+                result: Ok(to_evaluated(&v, &trace_name(expr, name, &p.point, single))),
+                marks,
+            },
+            Err(e) => PointOutcome {
+                point: p.point.clone(),
+                result: Err(format!("{e:#}")),
+                marks: vec![],
+            },
         })
         .collect()
 }
@@ -222,6 +267,70 @@ pub struct Request {
     /// Traces with more points are decimated: `None` the project's `[wave] max_points`
     /// (default [`decimate::DEFAULT_MAX_POINTS`]), `Some(0)` never.
     pub max_points: Option<usize>,
+    /// Put markers where scalar results were measured (embedded UberWave only).
+    pub markers: bool,
+    /// How the traces are laid out in the viewer.
+    pub layout: Layout,
+    /// More names for the expression (`cursor_a`, `cursor_b` from the viewer's cursors).
+    pub extra: Vec<(String, f64)>,
+}
+
+/// How calculator traces are laid out.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum Layout {
+    /// Into the viewer's active pane (a complex result as `(mag dB)` and `(phase)`).
+    #[default]
+    Plain,
+    /// A Bode plot: magnitudes in one new pane, phases in another, both on log X.
+    Bode,
+    /// An eye diagram: every `period` from `offset` on drawn on top of the others, in a
+    /// new pane.
+    Eye { period: f64, offset: f64 },
+}
+
+/// Arrange the traces of a send for `layout`: panes, log X, folding.
+pub fn lay_out(traces: Vec<Trace>, layout: Layout) -> Vec<Trace> {
+    match layout {
+        Layout::Plain => traces,
+        Layout::Bode => {
+            let (mut mags, mut phases): (Vec<Trace>, Vec<Trace>) = traces
+                .into_iter()
+                .partition(|t| !t.name.ends_with(" (phase)"));
+            for (i, t) in mags.iter_mut().enumerate() {
+                t.x_log = true;
+                t.pane = if i == 0 {
+                    PaneSel::New
+                } else {
+                    PaneSel::Default
+                };
+            }
+            for (i, t) in phases.iter_mut().enumerate() {
+                t.x_log = true;
+                t.pane = if i == 0 {
+                    PaneSel::New
+                } else {
+                    PaneSel::Default
+                };
+            }
+            mags.extend(phases);
+            mags
+        }
+        Layout::Eye { period, offset } => traces
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut t)| {
+                t.fold = Some((period, offset));
+                t.pane = if i == 0 {
+                    PaneSel::New
+                } else {
+                    PaneSel::Default
+                };
+                // its own X axis (0..period), not linked to the time axis of other panes
+                t.x_unit = Some(format!("{} (folded)", t.x_unit.as_deref().unwrap_or("s")));
+                t
+            })
+            .collect(),
+    }
 }
 
 /// What [`send`] did.
@@ -268,7 +377,7 @@ pub fn send(
     req: &Request,
 ) -> Sent {
     let (expr, name, plot) = (req.expr.as_str(), req.name.as_deref(), req.plot.as_deref());
-    let outcomes = evaluate_points(points, expr, name, plot);
+    let outcomes = evaluate_points_with(points, expr, name, plot, &req.extra);
     let mut sent = Sent {
         outcomes,
         pushed: vec![],
@@ -286,10 +395,39 @@ pub fn send(
         })
         .flatten()
         .collect();
-    if traces.is_empty() {
+    // Markers go to the built-in viewer only, and start no viewer by themselves.
+    let embedded = matches!(
+        super::backend::choose(Some(project)),
+        Ok(super::backend::Backend::Embedded)
+    );
+    let markers = if embedded && (!traces.is_empty() || super::embedded::running().is_some()) {
+        markers_of(&sent.outcomes, expr, name, req.markers)
+    } else {
+        vec![]
+    };
+    if traces.is_empty() && markers.is_empty() {
         return sent;
     }
-    let files: Vec<ViewFile> = points.iter().map(ViewFile::from).collect();
+    // A point whose raw file cannot be read (cut to nothing, noise) is left out of the
+    // viewer's session: the others still open and get their traces.
+    let mut files: Vec<ViewFile> = vec![];
+    for p in points {
+        match RawFile::open(&p.raw) {
+            Ok(_) => files.push(ViewFile::from(p)),
+            Err(e) => {
+                let why = format!("{e:#}");
+                sent.notes.push(format!(
+                    "{} left out of the viewer: {}",
+                    p.point,
+                    why.lines().next().unwrap_or("")
+                ));
+            }
+        }
+    }
+    if files.is_empty() {
+        sent.problem = Some("no run point has a raw file the viewer can open".into());
+        return sent;
+    }
     let opened = match open_files(
         Some(project),
         &run_key(library, cell, view),
@@ -319,7 +457,8 @@ pub fn send(
     };
     let limit = req.max_points.unwrap_or(project.wave.max_points);
     let mut pushed = Vec::new();
-    for t in traces {
+    let traces = lay_out(traces.into_iter().cloned().collect(), req.layout);
+    for t in &traces {
         // Only a socket needs thinned traces: the embedded viewer takes the raw slices.
         let t = if client.wants_decimation() {
             decimated(t, limit, &mut sent.notes)
@@ -337,7 +476,60 @@ pub fn send(
         }
     }
     sent.pushed = pushed;
+    if !markers.is_empty() {
+        let _ = client.clear_markers(Some(MARKER_GROUP));
+        for m in &markers {
+            if let Err(e) = client.add_marker(m) {
+                sent.notes.push(format!("markers: {e:#}"));
+                break;
+            }
+        }
+    }
     sent
+}
+
+/// The group of the calculator's markers in the viewer (replaced by each send).
+pub const MARKER_GROUP: &str = "cdept-calc";
+
+/// The markers of the scalar results: where each point's expression measured, labelled
+/// with the name (or expression), the point when there are several, and the value.
+pub fn markers_of(
+    outcomes: &[PointOutcome],
+    expr: &str,
+    name: Option<&str>,
+    wanted: bool,
+) -> Vec<super::embedded::Marker> {
+    if !wanted {
+        return vec![];
+    }
+    let single = outcomes.len() == 1;
+    let mut out = vec![];
+    for o in outcomes {
+        let Ok(Evaluated::Scalar(value)) = &o.result else {
+            continue;
+        };
+        let label = name.unwrap_or(expr.trim());
+        for (i, m) in o.marks.iter().enumerate().take(50) {
+            let mut text = if single {
+                format!("{label} {}", m.what)
+            } else {
+                format!("{label} {} @ {}", m.what, o.point)
+            };
+            if i + 1 == o.marks.len().min(50) {
+                text.push_str(&format!(" = {value}"));
+            }
+            out.push(super::embedded::Marker {
+                group: MARKER_GROUP.into(),
+                label: text,
+                x: m.x,
+                y: m.y,
+                x_unit: si_unit(&m.x_unit).unwrap_or_default(),
+                pane: None,
+                rgba: 0,
+            });
+        }
+    }
+    out
 }
 
 /// The trace as it goes to the viewer: itself, or its min/max envelope (name with

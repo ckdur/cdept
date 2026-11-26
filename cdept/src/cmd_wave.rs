@@ -9,7 +9,8 @@ use libcdept::wave;
 
 #[derive(Args)]
 pub struct WaveArgs {
-    /// A raw file (ngspice or Xyce) or a Spectre PSF folder; or a library, followed by the cell
+    /// A raw file (ngspice or Xyce), a Spectre PSF folder, a CSV table or a digital waveform
+    /// (VCD, FST, GHW); or a library, followed by the cell
     /// of a testbench whose run point is opened.
     first: String,
     /// The cell, to open the raw file of a run point of its testbench.
@@ -44,9 +45,23 @@ pub struct WaveArgs {
     name: Option<String>,
     /// Signals to plot (comma separated, `v(out)` or just `out`; the tag of each file is
     /// added). Default: the nodes the testbench `save`s, else the ones its measures use,
-    /// else the first four voltages that are not ground or a supply.
+    /// else the first four voltages that are not ground or a supply. For a CSV table or a
+    /// digital file (VCD, FST, GHW) the columns or signals sent to UberWave as traces (a
+    /// digital file without --show opens in Surfer or GTKWave).
     #[arg(long, value_delimiter = ',', conflicts_with = "no_show")]
     show: Vec<String>,
+    /// With --calc: a complex (AC) result as a Bode plot, magnitude and phase in two new
+    /// panes on a log frequency axis.
+    #[arg(long, conflicts_with = "eye")]
+    pub bode: bool,
+    /// With --calc: the waveform result as an eye diagram, every PERIOD (from OFFSET, default
+    /// the start) drawn on top of the others in a new pane: `--eye 1n` or `--eye 1n,250p`.
+    #[arg(long, value_name = "PERIOD[,OFFSET]")]
+    pub eye: Option<String>,
+    /// With --calc: no markers where scalar results were measured (crossings, edges,
+    /// extremes; built-in UberWave only).
+    #[arg(long)]
+    pub no_markers: bool,
     /// Plot nothing: the viewer opens as it is (File traces are added in the viewer).
     #[arg(long)]
     no_show: bool,
@@ -116,18 +131,36 @@ pub fn run(args: WaveArgs, project: Option<&Project>) -> Result<()> {
         });
     }
     match &args.cell {
-        None if args.family
-            || !args.points.is_empty()
-            || args.calc.is_some()
-            || !args.show.is_empty() =>
-        {
-            Err(eyre!(
-                "--family, --points, --calc and --show work on the run points of a testbench: cdept wave <library> <cell> --view V ..."
-            ))
-        }
+        None if args.family || !args.points.is_empty() || args.calc.is_some() => Err(eyre!(
+            "--family, --points and --calc work on the run points of a testbench: cdept wave <library> <cell> --view V ..."
+        )),
         None => file(&args, Path::new(&args.first), project),
         Some(cell) => point(&args, cell, project),
     }
+}
+
+fn layout_of(args: &WaveArgs) -> Result<wave::calc::Layout> {
+    if args.bode {
+        return Ok(wave::calc::Layout::Bode);
+    }
+    let Some(eye) = &args.eye else {
+        return Ok(wave::calc::Layout::Plain);
+    };
+    let mut parts = eye.split(',');
+    let num = |t: Option<&str>| -> Result<Option<f64>> {
+        match t.map(str::trim).filter(|t| !t.is_empty()) {
+            None => Ok(None),
+            Some(t) => libcdept::calc::parse_spice_number(t)
+                .map(Some)
+                .ok_or_else(|| eyre!("--eye: '{t}' is not a number")),
+        }
+    };
+    let period = num(parts.next())?.ok_or_else(|| eyre!("--eye needs a period"))?;
+    if !(period > 0.0 && period.is_finite()) {
+        return Err(eyre!("--eye: the period must be positive"));
+    }
+    let offset = num(parts.next())?.unwrap_or(0.0);
+    Ok(wave::calc::Layout::Eye { period, offset })
 }
 
 fn file(args: &WaveArgs, raw: &Path, project: Option<&Project>) -> Result<()> {
@@ -142,6 +175,33 @@ fn file(args: &WaveArgs, raw: &Path, project: Option<&Project>) -> Result<()> {
             );
         }
         return Ok(());
+    }
+    match wave::other::kind(raw) {
+        wave::other::Kind::Digital if args.show.is_empty() => {
+            let line = wave::other::open_digital(project, raw)?;
+            let words: Vec<String> = line
+                .iter()
+                .map(|w| w.to_string_lossy().into_owned())
+                .collect();
+            println!("{}", words.join(" "));
+            return Ok(());
+        }
+        wave::other::Kind::Digital | wave::other::Kind::Table => {
+            let sent = wave::other::open_in_uberwave(project, raw, &args.show)?;
+            for (name, n) in &sent.pushed {
+                println!("sent '{name}' ({n} points)");
+            }
+            for note in &sent.notes {
+                eprintln!("note: {note}");
+            }
+            return finish(args, true);
+        }
+        wave::other::Kind::Spice if !args.show.is_empty() => {
+            return Err(eyre!(
+                "--show works on a CSV table, a digital file or the run points of a testbench (cdept wave <library> <cell> --view V ...)"
+            ));
+        }
+        wave::other::Kind::Spice => {}
     }
     let launched = wave::open_raw(project, raw, args.analysis.as_deref())?;
     println!("{}", launched.text());
@@ -250,6 +310,9 @@ fn calc(
         plot: args.analysis.clone(),
         show: args.show_choice(),
         max_points: args.no_decimate.then_some(0),
+        markers: !args.no_markers,
+        layout: layout_of(args)?,
+        extra: vec![],
     };
     let sent = wave::calc::send(project, library, cell, view, chosen, &req);
     let table = sent.table();

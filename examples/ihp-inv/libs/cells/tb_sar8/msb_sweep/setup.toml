@@ -1,0 +1,48 @@
+# ENOB of the 8-bit SAR ADC against the error of its MSB weight (a capacitor mismatch of
+# the DAC): the enob setup with msb_err swept from 0 to 4 %. Run it with
+#   cdept sim run cells tb_sar8 --view msb_sweep
+#
+# Dynamic performance of the behavioural 8-bit SAR ADC (cells/sar8): 128 conversions at
+# 1 MS/s of a coherent sine (11 cycles in 128 samples, 0.58 V amplitude around vref/2:
+# 97 % of full scale). The code is read once per conversion at 950 ns (after the LSB's
+# latch closed at 885 ns) with sample(), and the 128 codes go through the FFT with a
+# rectangular window (coherent sampling needs none). An ideal 8-bit quantiser gives
+# SNDR 49.9 dB, ENOB 8.0. msb_err is the relative error of the MSB weight, swept here
+# (ENOB 8.06 at 0, 7.84 at 0.5 %, 7.51 at 1 %, 6.82 at 2 %, 5.92 at 4 %).
+corners = ["tt"]
+save = ["v(in)", "v(code)", "v(xadc.hold)", "v(xadc.dac)"]
+
+[variables]
+vref = "1.2"
+ampl = "0.58"
+fin = "85.9375k"
+msb_err = "0"
+
+[[analysis]]
+kind = "tran"
+step = "1n"
+stop = "128.5u"
+
+[[output]]
+name = "enob"
+expr = 'enob(sample(v("code"), 1u, from=950n), window="rect")'
+
+[[output]]
+name = "sndr_db"
+expr = 'sndr(sample(v("code"), 1u, from=950n), window="rect")'
+
+[[output]]
+name = "sfdr_db"
+expr = 'sfdr(sample(v("code"), 1u, from=950n), window="rect")'
+
+[[output]]
+name = "code_span"
+expr = 'pkpk(sample(v("code"), 1u, from=950n))'
+
+[[sweep]]
+variable = "msb_err"
+values = ["0", "0.005", "0.01", "0.02", "0.04"]
+
+[[spec]]
+name = "enob"
+min = 7.0

@@ -64,14 +64,79 @@ pub struct Options {
     pub platform: Option<String>,
 }
 
+/// One file of the viewer's session.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileInfo {
+    pub tag: String,
+    pub path: String,
+    pub analyses: Vec<String>,
+}
+
+/// One signal the viewer has: of a file (`file` = its tag) or a host trace (`file` =
+/// `(external)`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SignalInfo {
+    pub name: String,
+    pub file: String,
+    pub unit: String,
+    pub analysis: String,
+    pub complex: bool,
+}
+
+/// The signals that matched, and whether there were more than the list holds.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SignalList {
+    pub signals: Vec<SignalInfo>,
+    pub truncated: bool,
+}
+
+/// The value of one plotted trace under the cursors (`None`: that cursor is off or
+/// outside the trace).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CursorValue {
+    /// `name` when one file is open, else `tag:name`; host traces by their name.
+    pub signal: String,
+    pub a: Option<f64>,
+    pub b: Option<f64>,
+}
+
 /// The cursors of the viewer.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Cursors {
     pub a: Option<f64>,
     pub b: Option<f64>,
-    /// `{"signal": {"a": y, "b": y}}`, as JSON text.
-    pub values: String,
+    pub values: Vec<CursorValue>,
 }
+
+/// How a host trace is drawn.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct TraceStyle {
+    /// X on a log scale (a Bode plot), when no file trace in the pane decides.
+    pub x_log: bool,
+    /// An eye diagram: every `period` from `offset` on is drawn on top of the others.
+    pub fold: Option<(f64, f64)>,
+}
+
+/// A marker of CDePT on the plot: a measured instant (`y` = `None`: a dashed vertical
+/// line) or point.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Marker {
+    /// Markers of a group are cleared together.
+    pub group: String,
+    pub label: String,
+    pub x: f64,
+    pub y: Option<f64>,
+    /// The X unit (`s`, `Hz`): drawn only in panes of that X unit; empty: every pane.
+    pub x_unit: String,
+    /// `None`: every pane.
+    pub pane: Option<u32>,
+    /// `0xRRGGBBAA`, 0: the default colour.
+    pub rgba: u32,
+}
+
+/// What is called when a cursor moves: `(a, b)` in X units, `None` when off. It runs
+/// on the viewer's thread and must return quickly; it must not call the viewer.
+pub type CursorListener = Box<dyn Fn(Option<f64>, Option<f64>) + Send + Sync + 'static>;
 
 /// UberWave is built into this executable (not the stub).
 pub const fn available() -> bool {

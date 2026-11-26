@@ -20,3 +20,17 @@ view = "power"
 view = "psrr"
 [[test]]
 view = "cmrr"
+
+# PSRR and CMRR from the open-loop gain of the same run point (corner and temperature)
+# rather than the fixed adm_db of the psrr/cmrr views: computed after all tests ran.
+[[combine]]
+test = "psrr"
+name = "psrr_point_db"
+expr = "ac_open.gain_db - psrr.xfer_db"
+min = 50
+[[combine]]
+test = "cmrr"
+name = "cmrr_point_db"
+expr = "ac_open.gain_db - cmrr.xfer_db"
+# 39.4 dB at sf, 125 C (the gain there is 32 dB, not the 36 dB the cmrr view assumes)
+min = 38

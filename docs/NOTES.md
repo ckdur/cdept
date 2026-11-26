@@ -71,7 +71,7 @@ Technology snapshot (`tech.toml` + `tech.catalog.json`, design in [TECH.md](TECH
 SIMULATION.md §4 (GUI, job queue, sweeps, results DB). `libcdept/tests/real_sim.rs` needs
 `CDEPT_XSCHEM` and `CDEPT_NGSPICE` set to run (else it skips).
 Job queue / process supervisor: `libcdept::jobs` ([JOBS.md](JOBS.md)); `sim::run_testbench` runs points in parallel, `cdept sim run --jobs N`. Open: results DB, process-group kill.
-- [x] SLURM/ssh remote runs (SYMBI-82): `[jobs.remote.NAME]` in cdept.toml, `remote` in setup.toml, `cdept sim run|suite --remote`, `cdept jobs remotes [--check]`; `libcdept::jobs::remote`, `sim::remote`. SMOKE-TESTED ONLY against fake ssh/rsync/sbatch/squeue/sacct/scancel (and real ngspice behind them); never a cluster. Shared folder is the mode to trust; rsync mode only against a fake rsync. The run point's time limit is a `Watch.timeout` (in `sim::run_testbench_with` the `timeout` passed to `sim::remote::run_in_job` is a `None` placeholder to wire to the per-point timeout when that lands). See howto/remote-runs.md.
+- [x] SLURM/ssh remote runs (SYMBI-82): `[jobs.remote.NAME]` in cdept.toml, `remote` in setup.toml, `cdept sim run|suite --remote`, `cdept jobs remotes [--check]`; `libcdept::jobs::remote`, `sim::remote`. SMOKE-TESTED ONLY against fake ssh/rsync/sbatch/squeue/sacct/scancel (and real ngspice behind them); never a cluster. Shared folder is the mode to trust; rsync mode only against a fake rsync. The run point's time limit is a `Watch.timeout` (wired: `sim::run_testbench_with` passes the per-point limit to `sim::remote::run_in_job`; checked 2026-11-27). See howto/remote-runs.md.
 - [x] In-process ngspice backend (SYMBI-71): `simulator_backend = "inproc"` / `cdept sim run --backend inproc`, one worker thread owns libngspice, points are queue jobs, progress from the status callback, cancel = `bg_halt`; same `tpd` as the process to 1e-12 (tt and Monte Carlo). See NGSPICE.md.
 - [x] Cancelling a Xyce point kills Xyce (`batch::Job::run_watched`); Magic batch runs have a time limit (`[magic] timeout`, `--timeout`, default 15m) and `Magic::in_job` for the queue (SYMBI-71).
 
@@ -90,8 +90,8 @@ Milestone (SYMBI-72, 2026-11-23, [TESTS.md](TESTS.md) §6): corner sweep of an O
 - [x] `startup_settle`: `settle_time` subtracted `t_step` twice (negative times); fixed.
 - [x] Tests: `libcdept/tests/real_ota.rs`, GUI `cdept-gui/scripts/ota.script`, screenshot
       `docs/_static/screenshots/ota-suite.png` (`docs/screenshots/ota-suite.script`).
-- [ ] `psrr_cmrr` takes the differential gain as a constant (`adm_db`), not from the
-      `ac_response` test of the same suite.
+- [x] `psrr_cmrr` takes the differential gain as a constant (`adm_db`): in a suite,
+      `[[combine]]` now uses the gain of the same run point (2026-11-27, TESTS.md §4).
 - [ ] ngspice runs slowly when many run at once on a loaded machine (the PSP OSDI models:
       a 1 us transient took 3 s alone, 67 s under a load average of 300).
 - [ ] No layout of the OTA.
@@ -387,6 +387,42 @@ a real Liberty file, GUI. The OpenLane Xyce hangs without the Open MPI single-pr
   technology, not constants. `technology` in `cdept.toml` is read but unused.
 - Phase 4: a testbench view is recognised by a `setup.toml` or a `tb_` name. That is a
   guess until the testbench format exists.
+
+### Phases 4 and 5 completed (2026-11-27, worktree agent-a608591bd9f97a5f7)
+Done: typed UberWave shim (no JSON on the embedded path; typed control `app/Control.cpp`
+shared with IPC), eye/Bode/markers/cursor callback in UberWave, CSV + VCD/FST/GHW readers,
+jitter/PSD/histogram/sample functions, the calculator panel, `dut`, `[[combine]]`, the
+SAR ADC milestone. Found by torture and fixed: UberWave allocated 51 GB on a raw header
+that lies about its counts (RawHeaderParser); CDePT's ascii raw reader overflowed its
+capacity on the same; the evaluator overflowed the stack on a long sum and the parser on
+deep nesting; `resample(n=1e12)`/`fft(n=2^40)` allocated terabytes; a non-ASCII unknown
+function name panicked; `cdept wave` crashed (SIGSEGV) at exit after a refused file while
+the built-in viewer's thread lived; two concurrent runs of one testbench corrupted each
+other's raw files (now a run lock, `.run.lock`); a family with one garbage raw sent
+nothing (now the readable points go); `Xyce -v` probes hung forever and, orphaned by GUI
+runs and tests, used up the inotify instances (the watch tests then failed). Open:
+- [ ] GHW not tested with a real file (no GHDL here); FST tested with one Icarus file.
+- [ ] Digital signals in UberWave are step traces in one pane (no bus/hex view): use
+      Surfer/GTKWave for real digital debugging. Surfer is not installed here (GTKWave is).
+- [ ] Tables and digital `--show` need the built-in UberWave (the process viewer cannot take
+      traces without a file); markers too (not in IPC protocol 1).
+- [ ] Each calculator send replaces its markers (one group); a family's markers carry the
+      point in their label but are not per-point groups.
+- [ ] Cursor values for an eye (folded) trace are NaN by design.
+- [ ] The calculator panel's cursor section needs the built-in UberWave; with the process
+      backend `subscribe` exists in the client but the GUI does not use it.
+- [ ] `IpcSocketRoundTrip` (UberWave ctest) failed once when run in parallel with
+      `ShimEmbedRoundTrip` on the user's desktop (cursor B read back off), passed 4 times
+      alone and paired afterwards; not reproduced.
+- [ ] `AsciiMultiPlotConvert`, `Wp2CompatTests` (UberWave ctest) fail here and at the base
+      commit: their fixtures (`wp2-parser/spicelib/...`) are not in the checkout.
+- [ ] `layout-checks.script` fails at a45461f too (not looked into, not Phase 4/5).
+- [ ] Versions: the worktree build cannot run vergen's git probe (symlinked submodules), so
+      `cdept --version` shows defaults there.
+- [ ] No pss analysis: the installed ngspice 47 has none ("no such command").
+- [ ] The probes of the other worktree (agent-ae8c...) left `Xyce -v` processes too (built
+      before the probe fix); not touched by this agent.
+- [ ] `the_project_files_are_watched` failed once under full-suite load (passes alone).
 
 ---
 

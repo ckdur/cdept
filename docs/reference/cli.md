@@ -1415,23 +1415,26 @@ Open the waveforms of a run point (or a raw file) in UberWave, the waveform view
 Usage: cdept wave [OPTIONS] <FIRST> [CELL]
 
 Arguments:
-  <FIRST>  A raw file (ngspice or Xyce) or a Spectre PSF folder; or a library, followed by the cell of a testbench whose run point is opened
+  <FIRST>  A raw file (ngspice or Xyce), a Spectre PSF folder, a CSV table or a digital waveform (VCD, FST, GHW); or a library, followed by the cell of a testbench whose run point is opened
   [CELL]   The cell, to open the raw file of a run point of its testbench
 
 Options:
-      --analysis <ANALYSIS>  The analysis to preselect (`tran`, `ac`, `dc`, `noise`, `op`; a PSF analysis name). Default: the transient one when the file has several
-      --view <VIEW>          The testbench view. Default: the only view of the cell that has results
-      --point <POINT>        The run point (a folder of simulations/<lib>/<cell>/<view>/). Default: the only one
-      --family               Open all the run points of the view in one viewer (tags = point names). Needs a viewer with IPC for more than the first; an older one opens the first and the other files are listed
-      --points <POINTS>      Open these run points (comma separated) in one viewer, as `--family` does for all
-      --calc <CALC>          Evaluate a calculator expression on the point (or on every point with `--family` / `--points`) and send waveform results to the viewer as traces (started when it is not running; needs a viewer with IPC). Scalar results are printed, as a table for several points. A complex waveform is sent as `<name> (mag dB)` and `<name> (phase)`
-      --name <NAME>          The name of the trace sent by `--calc` (default: the expression); with several points `<name> @ <point>`
-      --show <SHOW>          Signals to plot (comma separated, `v(out)` or just `out`; the tag of each file is added). Default: the nodes the testbench `save`s, else the ones its measures use, else the first four voltages that are not ground or a supply
-      --no-show              Plot nothing: the viewer opens as it is (File traces are added in the viewer)
-      --no-decimate          Send calculator traces whole, however many points they have (by default a trace with more than `[wave] max_points` of cdept.toml, 200000, goes as a min/max envelope of half of them, named `... (decimated)`)
-      --backend <BACKEND>    Which UberWave: `embedded` (built into this cdept: its window opens in this process and `cdept wave` waits until it is closed) or `process` (the separate `UberWaveViewer`, started and left running). Default: `embedded` when built in, else `process`; also `$CDEPT_UBERWAVE_BACKEND` and `[wave] backend` of cdept.toml [possible values: embedded, process]
-      --screenshot <PNG>     Save the viewer window as a PNG once everything is loaded and exit (embedded UberWave only; the window stays hidden and is 1280x720): for documentation and tests
-      --list                 Do not start the viewer: for a file, print its analyses and signal counts (CDePT's own reader); for a cell, the raw files of all its run points
+      --analysis <ANALYSIS>    The analysis to preselect (`tran`, `ac`, `dc`, `noise`, `op`; a PSF analysis name). Default: the transient one when the file has several
+      --view <VIEW>            The testbench view. Default: the only view of the cell that has results
+      --point <POINT>          The run point (a folder of simulations/<lib>/<cell>/<view>/). Default: the only one
+      --family                 Open all the run points of the view in one viewer (tags = point names). Needs a viewer with IPC for more than the first; an older one opens the first and the other files are listed
+      --points <POINTS>        Open these run points (comma separated) in one viewer, as `--family` does for all
+      --calc <CALC>            Evaluate a calculator expression on the point (or on every point with `--family` / `--points`) and send waveform results to the viewer as traces (started when it is not running; needs a viewer with IPC). Scalar results are printed, as a table for several points. A complex waveform is sent as `<name> (mag dB)` and `<name> (phase)`
+      --name <NAME>            The name of the trace sent by `--calc` (default: the expression); with several points `<name> @ <point>`
+      --show <SHOW>            Signals to plot (comma separated, `v(out)` or just `out`; the tag of each file is added). Default: the nodes the testbench `save`s, else the ones its measures use, else the first four voltages that are not ground or a supply. For a CSV table or a digital file (VCD, FST, GHW) the columns or signals sent to UberWave as traces (a digital file without --show opens in Surfer or GTKWave)
+      --bode                   With --calc: a complex (AC) result as a Bode plot, magnitude and phase in two new panes on a log frequency axis
+      --eye <PERIOD[,OFFSET]>  With --calc: the waveform result as an eye diagram, every PERIOD (from OFFSET, default the start) drawn on top of the others in a new pane: `--eye 1n` or `--eye 1n,250p`
+      --no-markers             With --calc: no markers where scalar results were measured (crossings, edges, extremes; built-in UberWave only)
+      --no-show                Plot nothing: the viewer opens as it is (File traces are added in the viewer)
+      --no-decimate            Send calculator traces whole, however many points they have (by default a trace with more than `[wave] max_points` of cdept.toml, 200000, goes as a min/max envelope of half of them, named `... (decimated)`)
+      --backend <BACKEND>      Which UberWave: `embedded` (built into this cdept: its window opens in this process and `cdept wave` waits until it is closed) or `process` (the separate `UberWaveViewer`, started and left running). Default: `embedded` when built in, else `process`; also `$CDEPT_UBERWAVE_BACKEND` and `[wave] backend` of cdept.toml [possible values: embedded, process]
+      --screenshot <PNG>       Save the viewer window as a PNG once everything is loaded and exit (embedded UberWave only; the window stays hidden and is 1280x720): for documentation and tests
+      --list                   Do not start the viewer: for a file, print its analyses and signal counts (CDePT's own reader); for a cell, the raw files of all its run points
 ```
 
 ### cdept vacask

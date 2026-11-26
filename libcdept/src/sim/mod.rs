@@ -43,6 +43,30 @@ pub fn runs_dir(project: &Project, library: &str, cell: &str, view: &str) -> Pat
         .join(view)
 }
 
+/// The lock of a testbench's run folder (`.run.lock`, an advisory file lock): taken by a
+/// run for its whole length; a second run of the same testbench, in this process or
+/// another, is refused while it is held. Released when the file is dropped (or the
+/// process ends).
+pub fn lock_runs(base: &Path) -> Result<std::fs::File> {
+    std::fs::create_dir_all(base).wrap_err_with(|| format!("cannot create {}", base.display()))?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(base.join(".run.lock"))
+        .wrap_err_with(|| format!("cannot open the run lock in {}", base.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(eyre!(
+            "this testbench is being run already ({} is locked): wait for that run or cancel it",
+            base.display()
+        )),
+        Err(std::fs::TryLockError::Error(e)) => {
+            Err(e).wrap_err_with(|| format!("cannot lock {}", base.display()))
+        }
+    }
+}
+
 /// A testbench found in a project.
 pub struct Testbench {
     pub library: String,
@@ -322,6 +346,9 @@ pub fn run_testbench_with(
         points.extend(all);
     }
     let base = runs_dir(project, &tb.library, &tb.cell, &tb.view);
+    // One run of a testbench at a time: two would write the same point folders (a raw
+    // file appended to by two simulators is garbage). Held until the run returns.
+    let _run_lock = lock_runs(&base)?;
     let netlist_file = base.join("netlist.spice");
     netlist_for(project, &tb.schematic, &netlist_file, &tb.setup.simulator)?;
     let netlist = std::fs::read_to_string(&netlist_file)
@@ -535,4 +562,22 @@ pub fn netlist(project: &Project, file: &Path, out: &Path) -> Result<()> {
     })();
     let _ = engine.shutdown();
     outcome
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    /// Two runs of one testbench at once wrote into the same point folders (a torture run
+    /// left a raw file with another simulator's data in its middle): the second is refused.
+    #[test]
+    fn a_second_run_of_a_testbench_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("simulations/l/c/v");
+        let first = lock_runs(&base).unwrap();
+        let err = lock_runs(&base).unwrap_err().to_string();
+        assert!(err.contains("being run already"), "{err}");
+        drop(first);
+        assert!(lock_runs(&base).is_ok());
+    }
 }

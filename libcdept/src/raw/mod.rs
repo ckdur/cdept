@@ -9,8 +9,16 @@
 //! points that are there.
 //!
 //! Names are matched without regard to case (Xyce prints `OUT`, ngspice `v(out)`).
+//!
+//! [`RawFile::open`] also reads CSV tables ([`csv`]) and digital waveforms (VCD, FST, GHW,
+//! [`digital`]) into the same plots and vectors, so the calculator and the listing of a
+//! file's analyses work on them unchanged.
+
+mod csv;
+pub(crate) mod digital;
 
 use std::path::Path;
+use std::sync::Arc;
 
 use eyre::{Result, WrapErr, bail, eyre};
 
@@ -47,6 +55,8 @@ enum Layout {
     Binary(usize),
     /// Ascii, parsed: `vars × points` rows of `(re, im)` pairs (im is 0 for real plots).
     Ascii(Vec<f64>),
+    /// A digital file: each variable is loaded on demand with its own time steps.
+    Digital(Arc<digital::Source>),
 }
 
 impl Plot {
@@ -68,12 +78,36 @@ impl Plot {
         }
     }
 
-    /// Index of a variable, ignoring case.
+    /// Index of a variable, ignoring case. A digital or table signal is also found by
+    /// the end of its hierarchical name (`clk` for `tb.dut.clk`) when only one ends so.
     pub fn var_index(&self, name: &str) -> Option<usize> {
         let lower = name.to_lowercase();
-        self.vars
+        if let Some(i) = self
+            .vars
             .iter()
             .position(|v| v.name.to_lowercase() == lower)
+        {
+            return Some(i);
+        }
+        if lower.is_empty() || !matches!(self.layout, Layout::Digital(_)) {
+            return None;
+        }
+        let tail = format!(".{lower}");
+        let mut found = self
+            .vars
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(_, v)| v.name.to_lowercase().ends_with(&tail));
+        match (found.next(), found.next()) {
+            (Some((i, _)), None) => Some(i),
+            _ => None,
+        }
+    }
+
+    /// The file is a digital waveform (VCD, FST, GHW).
+    pub fn is_digital(&self) -> bool {
+        matches!(self.layout, Layout::Digital(_))
     }
 
     /// Does this plot answer to `selector`: its index (`0`), its kind (`tran`), or a
@@ -115,8 +149,57 @@ impl std::fmt::Debug for RawFile {
 }
 
 impl RawFile {
-    /// Map `file` and read its plot headers.
+    /// Open a waveform file: a SPICE raw file (ngspice, Xyce), a CSV table (`.csv`,
+    /// `.tsv`, `.txt` and the like) or a digital waveform (VCD, FST, GHW, told by content).
     pub fn open(file: &Path) -> Result<RawFile> {
+        let ext = file
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if matches!(ext.as_str(), "csv" | "tsv" | "txt" | "dat" | "tab") {
+            let bytes =
+                std::fs::read(file).wrap_err_with(|| format!("cannot read {}", file.display()))?;
+            return Self::from_table(bytes)
+                .wrap_err_with(|| format!("{} is not a waveform table", file.display()));
+        }
+        if matches!(ext.as_str(), "vcd" | "fst" | "ghw") || !Self::looks_like_raw(file) {
+            if let Some(format) = digital::detect(file) {
+                let plot = digital::open(file, format)
+                    .wrap_err_with(|| format!("cannot read {} ({format})", file.display()))?;
+                return Ok(RawFile {
+                    bytes: Bytes::Owned(Vec::new()),
+                    plots: vec![plot],
+                });
+            }
+            if matches!(ext.as_str(), "vcd" | "fst" | "ghw") {
+                bail!("{} is not a {ext} file", file.display());
+            }
+        }
+        Self::open_raw(file)
+    }
+
+    /// The first bytes read like the header of a SPICE raw file.
+    fn looks_like_raw(file: &Path) -> bool {
+        use std::io::Read;
+        let mut head = [0u8; 64];
+        let n = std::fs::File::open(file)
+            .and_then(|mut f| f.read(&mut head))
+            .unwrap_or(0);
+        let text = String::from_utf8_lossy(&head[..n]).to_lowercase();
+        text.starts_with("title:") || text.starts_with("plotname:") || text.starts_with("date:")
+    }
+
+    /// A CSV/TSV table held in memory (see the module [`csv`]).
+    pub fn from_table(bytes: Vec<u8>) -> Result<RawFile> {
+        let plots = csv::parse(&bytes)?;
+        Ok(RawFile {
+            bytes: Bytes::Owned(Vec::new()),
+            plots,
+        })
+    }
+
+    /// Map `file` (a SPICE raw file) and read its plot headers.
+    fn open_raw(file: &Path) -> Result<RawFile> {
         let f = std::fs::File::open(file)
             .wrap_err_with(|| format!("cannot open {}", file.display()))?;
         // SAFETY: the map is read only; a simulator that rewrites the file under us is
@@ -160,6 +243,9 @@ impl RawFile {
         let col = p
             .var_index(name)
             .ok_or_else(|| eyre!("no vector '{name}' in plot '{}'", p.name))?;
+        if let Layout::Digital(source) = &p.layout {
+            return source.vector(p, col);
+        }
         let x: Vec<f64> = self.column(plot, 0)?.into_iter().map(|c| c.re).collect();
         let y = self.column(plot, col)?;
         let samples = if p.complex {
@@ -182,6 +268,7 @@ impl RawFile {
         let nv = p.vars.len();
         let mut out = Vec::with_capacity(p.points);
         match &p.layout {
+            Layout::Digital(_) => return Err(eyre!("a digital signal has no common time column")),
             Layout::Ascii(rows) => {
                 for i in 0..p.points {
                     let k = (i * nv + col) * 2;
@@ -310,14 +397,25 @@ fn parse_plot(data: &[u8], mut pos: usize) -> Result<(Plot, usize)> {
                 plot.points = npoints.min(available);
                 plot.layout = Layout::Binary(pos);
                 // A file cut short has fewer points; the next plot cannot be told, so stop.
-                let end = pos + plot.points * width;
+                let end = if plot.points < npoints {
+                    data.len()
+                } else {
+                    pos + plot.points * width
+                };
                 return Ok((plot, end));
             }
             "values" => {
                 if nvars == 0 || plot.vars.len() != nvars {
                     bail!("values before the variables");
                 }
-                let mut rows = Vec::with_capacity(npoints * nvars * 2);
+                // The counts are the file's word only: reserve no more than its bytes
+                // can hold (two numbers per value need at least two bytes each).
+                let mut rows = Vec::with_capacity(
+                    npoints
+                        .saturating_mul(nvars)
+                        .saturating_mul(2)
+                        .min(data.len() - pos),
+                );
                 let mut points = 0;
                 'points: for _ in 0..npoints {
                     // Point index, then one value per variable.
@@ -354,7 +452,19 @@ fn parse_plot(data: &[u8], mut pos: usize) -> Result<(Plot, usize)> {
                 if !seen_header && key.is_empty() {
                     continue;
                 }
-                bail!("unexpected header line '{line}'");
+                // binary noise must not end up in a message as it is
+                let shown: String = line
+                    .chars()
+                    .take(60)
+                    .map(|c| {
+                        if c.is_control() || c == '\u{fffd}' {
+                            '?'
+                        } else {
+                            c
+                        }
+                    })
+                    .collect();
+                bail!("unexpected header line '{shown}'");
             }
         }
         seen_header = true;
@@ -467,6 +577,78 @@ pub(crate) mod tests {
     fn rejects_garbage() {
         assert!(RawFile::from_bytes(b"hello world\n".to_vec()).is_err());
         assert!(RawFile::from_bytes(vec![]).is_err());
+    }
+
+    /// Headers that lie about their counts (the file that once took 51 GB in the
+    /// viewer), truncated files and binary noise: errors or few points, never a huge
+    /// allocation, a panic or a hang.
+    #[test]
+    fn hostile_headers_and_noise() {
+        let head = |vars: &str, points: &str, list: &str, mode: &str| {
+            format!(
+                "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: {vars}\nNo. Points: {points}\nVariables:\n{list}{mode}\n"
+            )
+            .into_bytes()
+        };
+        let two = "\t0\ttime\ttime\n\t1\tv(out)\tvoltage\n";
+        let noise: Vec<u8> = (0..1000u32).map(|i| (i * 37) as u8).collect();
+        let with = |mut h: Vec<u8>, tail: &[u8]| {
+            h.extend_from_slice(tail);
+            h
+        };
+        // more variables announced than listed: the list runs into the data
+        assert!(
+            RawFile::from_bytes(with(
+                head("99999999", "18446744073709551615", "", "Binary:"),
+                &noise
+            ))
+            .is_err()
+        );
+        // the points are cut to what the bytes hold (1000 / 16)
+        let raw = RawFile::from_bytes(with(
+            head("2", "18446744073709551615", two, "Binary:"),
+            &noise,
+        ))
+        .unwrap();
+        assert_eq!(raw.plots()[0].points, 62);
+        assert_eq!(raw.vector(0, "v(out)").unwrap().len(), 62);
+        // ascii claiming 2^64 points: no capacity overflow, the points that are there
+        let raw = RawFile::from_bytes(with(
+            head("2", "18446744073709551615", two, "Values:"),
+            b" 0\t1\n\t2\n 1\t3\n",
+        ))
+        .unwrap();
+        assert_eq!(raw.plots()[0].points, 1);
+        for bad in ["-5", "1e3", "two", ""] {
+            assert!(RawFile::from_bytes(with(head("2", bad, two, "Binary:"), &noise)).is_err());
+        }
+        assert!(RawFile::from_bytes(with(head("0", "5", "", "Binary:"), &noise)).is_err());
+        // every prefix of a good file: an error or a plot, never a panic
+        let good = binary_plot(
+            "Transient Analysis",
+            &[("time", "time"), ("v(a)", "voltage")],
+            &[vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0]],
+            false,
+        );
+        for n in 0..good.len() {
+            if let Ok(raw) = RawFile::from_bytes(good[..n].to_vec()) {
+                let _ = raw.vector(0, "v(a)");
+            }
+        }
+        // binary noise of many shapes
+        let mut seed = 12345u64;
+        for _ in 0..200 {
+            let len = (seed % 4000) as usize;
+            let bytes: Vec<u8> = (0..len)
+                .map(|_| {
+                    seed = seed
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    (seed >> 33) as u8
+                })
+                .collect();
+            let _ = RawFile::from_bytes(bytes);
+        }
     }
 
     /// Xyce's own raw file (names in upper case, `V1#branch`), when there is a Xyce.

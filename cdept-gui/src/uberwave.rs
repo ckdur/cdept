@@ -1,15 +1,11 @@
-//! UberWave in the Simulation tab: the waveform viewer is a separate program
-//! (`libcdept::wave`). The Results area has "Open family in UberWave" (all points in one
-//! viewer, with a viewer that has IPC) and an expression line: the calculator evaluates
-//! the expression on the selected point or on each point and the waveforms go to the
-//! viewer as traces; scalars and errors are shown under the line.
+//! UberWave in the Simulation tab (`libcdept::wave`): "Open in UberWave" on a point,
+//! "Open family in UberWave" (all points in one viewer), and the script commands `wave
+//! ...`. The calculator panel is `views/simulation/calc.rs`.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
-use egui::{Id, Ui};
+use egui::Ui;
 use libcdept::Project;
-use libcdept::calc::funcs;
 use libcdept::wave::{self, PointRaw, calc as wcalc};
 
 /// Start UberWave on the `out.raw` of a run point folder: the action of the button. The
@@ -152,148 +148,34 @@ pub(crate) fn calc_lines(
     (lines, bad)
 }
 
-/// The result of a send in its thread: the lines to show and whether it went wrong.
-type Slot = Arc<Mutex<Option<(Vec<String>, bool)>>>;
-
-/// What the expression line remembers between frames (in egui's memory, per testbench).
-#[derive(Clone, Default)]
-struct State {
-    expr: String,
-    /// `None`: every point.
-    point: Option<String>,
-    lines: Vec<String>,
-    bad: bool,
-    /// The send in progress, in its thread.
-    pending: Option<Slot>,
-}
-
-/// The widgets in the Results area, for the testbench `run` (library, cell, view) and
-/// the names of the points that left a raw file.
+/// The "Open family in UberWave" button of the Results area, for the testbench `run`
+/// (library, cell, view) and the names of the points that left a raw file. The
+/// calculator is the panel of `views/simulation/calc.rs`.
 pub(crate) fn results_ui<'a>(
     ui: &mut Ui,
     project: &Project,
     run: (&str, &str, &str),
     points: impl Iterator<Item = &'a str>,
 ) {
-    let points: Vec<&str> = points.collect();
-    if points.is_empty() {
+    if points.count() == 0 {
         return;
     }
-    let id = Id::new(("uberwave-calc", run.0, run.1, run.2));
-    let mut st: State = ui.data_mut(|d| d.get_temp(id)).unwrap_or_default();
-    if let Some(slot) = st.pending.clone()
-        && let Some((lines, bad)) = slot.lock().unwrap().take()
+    if ui
+        .button("Open family in UberWave")
+        .on_hover_text("All the points of this run in one UberWave window (needs a viewer with IPC; an older one opens the first)")
+        .clicked()
     {
-        st.lines = lines;
-        st.bad = bad;
-        st.pending = None;
-    }
-    let busy = st.pending.is_some();
-    let target = st.point.clone().filter(|p| points.contains(&p.as_str()));
-    ui.horizontal(|ui| {
-        if ui
-            .button("Open family in UberWave")
-            .on_hover_text("All the points of this run in one UberWave window (needs a viewer with IPC; an older one opens the first)")
-            .clicked()
-        {
-            let (project, run) = (
-                project.clone(),
-                (run.0.to_string(), run.1.to_string(), run.2.to_string()),
-            );
-            std::thread::spawn(
-                move || match open_family(&project, (&run.0, &run.1, &run.2), None) {
-                    Ok(line) => tracing::info!(target: "cdept::sim", "UberWave: {line}"),
-                    Err(e) => tracing::warn!(target: "cdept::sim", "Open family in UberWave: {e}"),
-                },
-            );
-        }
-        egui::ComboBox::from_id_salt("uw-calc-point")
-            .selected_text(target.clone().unwrap_or_else(|| "all points".into()))
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut st.point, None, "all points");
-                for p in &points {
-                    ui.selectable_value(&mut st.point, Some(p.to_string()), *p);
-                }
-            });
-    });
-    let mut send = false;
-    ui.horizontal(|ui| {
-        let edit = ui.add(
-            egui::TextEdit::singleline(&mut st.expr)
-                .hint_text("calculator expression, e.g. vdb(v(\"out\"))")
-                .desired_width(ui.available_width() - 70.0),
+        let (project, run) = (
+            project.clone(),
+            (run.0.to_string(), run.1.to_string(), run.2.to_string()),
         );
-        if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            send = true;
-        }
-        if ui
-            .add_enabled(
-                !busy && !st.expr.trim().is_empty(),
-                egui::Button::new("Send"),
-            )
-            .on_hover_text("Evaluate on the point(s) and send the waveforms to UberWave as traces")
-            .clicked()
-        {
-            send = true;
-        }
-    });
-    suggestions(ui, &mut st.expr);
-    if send && !busy && !st.expr.trim().is_empty() {
-        let slot: Slot = Arc::default();
-        st.pending = Some(slot.clone());
-        st.lines = vec!["sending...".into()];
-        let (project, expr, chosen) = (project.clone(), st.expr.clone(), target);
-        let (l, c, v) = (run.0.to_string(), run.1.to_string(), run.2.to_string());
-        let ctx = ui.ctx().clone();
-        std::thread::spawn(move || {
-            let out = calc_lines(&project, (&l, &c, &v), chosen.as_deref(), &expr);
-            *slot.lock().unwrap() = Some(out);
-            ctx.request_repaint();
-        });
+        std::thread::spawn(
+            move || match open_family(&project, (&run.0, &run.1, &run.2), None) {
+                Ok(line) => tracing::info!(target: "cdept::sim", "UberWave: {line}"),
+                Err(e) => tracing::warn!(target: "cdept::sim", "Open family in UberWave: {e}"),
+            },
+        );
     }
-    if busy {
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(100));
-    }
-    for line in &st.lines {
-        if st.bad {
-            ui.colored_label(ui.visuals().error_fg_color, line);
-        } else {
-            ui.label(line);
-        }
-    }
-    ui.data_mut(|d| d.insert_temp(id, st));
-}
-
-/// The function names that start like the word at the end of the expression, as a row
-/// of small buttons; a click completes the word.
-fn suggestions(ui: &mut Ui, expr: &mut String) {
-    let start = expr
-        .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .map_or(0, |i| i + 1);
-    let word = expr[start..].to_lowercase();
-    if word.len() < 2 {
-        return;
-    }
-    let mut names: Vec<&str> = funcs::all()
-        .iter()
-        .flat_map(|f| f.names.iter().copied())
-        .filter(|n| n.starts_with(&word) && *n != word)
-        .collect();
-    names.sort_unstable();
-    names.dedup();
-    if names.is_empty() {
-        return;
-    }
-    ui.horizontal_wrapped(|ui| {
-        for n in names.into_iter().take(10) {
-            if ui.small_button(n).clicked() {
-                expr.truncate(start);
-                expr.push_str(n);
-                expr.push('(');
-            }
-        }
-    });
 }
 
 /// The fake viewer's log: `$FAKE_UBERWAVE_LOG`.
@@ -425,10 +307,14 @@ pub(crate) fn script(project: Option<&Project>, args: &[String]) -> Result<(), S
         }
         [files, tags @ ..] if files == "embedded_files" && !tags.is_empty() => {
             let viewer = embedded_viewer()?;
-            let json = viewer.list_files_json().map_err(|e| format!("{e:#}"))?;
+            let files = viewer.list_files().map_err(|e| format!("{e:#}"))?;
+            let have: Vec<&str> = files.iter().map(|f| f.tag.as_str()).collect();
             for t in tags {
-                if !json.contains(&format!("\"tag\":\"{t}\"")) {
-                    return Err(format!("the embedded viewer has no file '{t}': {json}"));
+                if !have.contains(&t.as_str()) {
+                    return Err(format!(
+                        "the embedded viewer has no file '{t}' (it has {})",
+                        have.join(", ")
+                    ));
                 }
             }
             Ok(())
@@ -436,14 +322,16 @@ pub(crate) fn script(project: Option<&Project>, args: &[String]) -> Result<(), S
         [signal, file, name @ ..] if signal == "embedded_signal" && !name.is_empty() => {
             let viewer = embedded_viewer()?;
             let name = name.join(" ");
-            let json = viewer
-                .list_signals_json(Some(file))
+            let list = viewer
+                .signals(Some(file), None)
                 .map_err(|e| format!("{e:#}"))?;
-            if json.contains(&format!("\"name\":{}", serde_json::json!(name))) {
+            if list.signals.iter().any(|s| s.name == name) {
                 Ok(())
             } else {
+                let have: Vec<&str> = list.signals.iter().map(|s| s.name.as_str()).collect();
                 Err(format!(
-                    "the embedded viewer has no signal '{name}' in '{file}': {json}"
+                    "the embedded viewer has no signal '{name}' in '{file}' (it has {})",
+                    have.join(", ")
                 ))
             }
         }

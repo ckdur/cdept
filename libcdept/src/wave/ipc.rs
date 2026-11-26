@@ -54,8 +54,35 @@ pub struct Trace {
     pub y: Vec<f64>,
     pub unit: Option<String>,
     pub x_unit: Option<String>,
-    /// A pane number, `"new"` or none (the viewer chooses).
-    pub pane: Option<Value>,
+    /// Where it goes.
+    pub pane: PaneSel,
+    /// X on a log scale (a Bode plot).
+    pub x_log: bool,
+    /// An eye diagram: `(period, offset)`.
+    pub fold: Option<(f64, f64)>,
+}
+
+/// The pane a signal or trace goes to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PaneSel {
+    /// The viewer chooses (the active pane; for a trace of that name, its pane).
+    #[default]
+    Default,
+    /// A new pane.
+    New,
+    /// This pane, counting from 0.
+    Index(u32),
+}
+
+impl PaneSel {
+    /// The protocol's form: a number, `"new"`, or nothing.
+    fn json(self) -> Option<Value> {
+        match self {
+            PaneSel::Default => None,
+            PaneSel::New => Some(json!("new")),
+            PaneSel::Index(i) => Some(json!(i)),
+        }
+    }
 }
 
 impl Trace {
@@ -66,7 +93,9 @@ impl Trace {
             y,
             unit: None,
             x_unit: None,
-            pane: None,
+            pane: PaneSel::Default,
+            x_log: false,
+            fold: None,
         }
     }
 }
@@ -311,10 +340,10 @@ impl Client {
 
     /// Show signals (`name` or `tag:name`) in a pane (a number, or `"new"`). Returns the
     /// pane they went to, when the viewer says it.
-    pub fn show(&mut self, signals: &[String], pane: Option<Value>) -> Result<Option<u64>> {
+    pub fn show(&mut self, signals: &[String], pane: PaneSel) -> Result<Option<u64>> {
         let mut args = Map::new();
         args.insert("signals".into(), json!(signals));
-        if let Some(p) = pane {
+        if let Some(p) = pane.json() {
             args.insert("pane".into(), p);
         }
         let v = self.request("show", Value::Object(args))?;
@@ -386,8 +415,15 @@ impl Client {
         if let Some(u) = &trace.x_unit {
             args.insert("x_unit".into(), json!(u));
         }
-        if let Some(p) = &trace.pane {
-            args.insert("pane".into(), p.clone());
+        if let Some(p) = trace.pane.json() {
+            args.insert("pane".into(), p);
+        }
+        if trace.x_log {
+            args.insert("x_log".into(), json!(true));
+        }
+        if let Some((period, offset)) = trace.fold {
+            args.insert("fold_period".into(), json!(period));
+            args.insert("fold_offset".into(), json!(offset));
         }
         self.request("add_trace", Value::Object(args)).map(drop)
     }
@@ -725,8 +761,7 @@ mod tests {
         c.import(Path::new("/b.raw"), None, Some("ff")).unwrap();
         let (sigs, cut) = c.list_signals(Some("tt"), Some("out")).unwrap();
         assert!(cut && sigs[0].name == "v(out)" && !sigs[0].complex);
-        c.show(&["tt:v(out)".to_string()], Some(json!("new")))
-            .unwrap();
+        c.show(&["tt:v(out)".to_string()], PaneSel::New).unwrap();
         c.hide(&["v(out)".to_string()]).unwrap();
         c.set_analysis("tran").unwrap();
         c.set_cursors(Some(1e-9), None).unwrap();

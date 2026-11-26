@@ -1097,7 +1097,46 @@ pub fn netlist_names(netlist: &str) -> (Vec<String>, Vec<String>) {
 }
 
 /// Fail with a clear message when the netlist lacks what the template needs.
+/// The netlist holds the subcircuit of the setup's `dut` (`library/cell`: its cell name).
+pub fn check_dut(setup: &super::Setup, netlist: &str) -> Result<()> {
+    let dut = setup.dut.trim();
+    if dut.is_empty() {
+        return Ok(());
+    }
+    let cell = dut.rsplit('/').next().unwrap_or(dut).to_lowercase();
+    if cell.is_empty() {
+        bail!("dut '{dut}' names no cell");
+    }
+    let found = netlist.lines().any(|l| {
+        let mut w = l.split_whitespace();
+        w.next().is_some_and(|k| k.eq_ignore_ascii_case(".subckt"))
+            && w.next().is_some_and(|n| n.to_lowercase() == cell)
+    });
+    if !found {
+        let have: Vec<&str> = netlist
+            .lines()
+            .filter_map(|l| {
+                let mut w = l.split_whitespace();
+                w.next()
+                    .filter(|k| k.eq_ignore_ascii_case(".subckt"))
+                    .and_then(|_| w.next())
+            })
+            .take(20)
+            .collect();
+        bail!(
+            "the testbench's dut '{dut}' is not in the netlist (it has no .subckt {cell}; subcircuits: {})",
+            if have.is_empty() {
+                "none".to_string()
+            } else {
+                have.join(", ")
+            }
+        );
+    }
+    Ok(())
+}
+
 pub fn check_netlist(setup: &super::Setup, netlist: &str) -> Result<()> {
+    check_dut(setup, netlist)?;
     if setup.requires_nets.is_empty() && setup.requires_elements.is_empty() {
         return Ok(());
     }
@@ -1285,6 +1324,27 @@ pub fn format_show(t: &Template) -> Result<String> {
     }
     let _ = Value::Num(0.0);
     Ok(out)
+}
+
+#[cfg(test)]
+mod dut_tests {
+    use super::*;
+
+    #[test]
+    fn the_dut_must_be_in_the_netlist() {
+        let mut setup = crate::sim::Setup::default();
+        let netlist = "* tb\nx1 a b inv\n.subckt inv A Y\nM1 Y A 0 0 n\n.ends\n";
+        assert!(check_dut(&setup, netlist).is_ok());
+        setup.dut = "cells/inv".into();
+        assert!(check_dut(&setup, netlist).is_ok());
+        setup.dut = "INV".into();
+        assert!(check_dut(&setup, netlist).is_ok());
+        setup.dut = "cells/buf".into();
+        let e = check_dut(&setup, netlist).unwrap_err().to_string();
+        assert!(e.contains("buf") && e.contains("inv"), "{e}");
+        setup.dut = "cells/".into();
+        assert!(check_dut(&setup, netlist).is_err());
+    }
 }
 
 #[cfg(test)]

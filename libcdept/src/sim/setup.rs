@@ -17,6 +17,12 @@ pub struct Setup {
     pub schematic: String,
     /// The schematic view when the cell has several. Empty: the first xschem one.
     pub schematic_view: String,
+    /// The device under test, `library/cell` (or just `cell`): the cell this testbench
+    /// exercises. Optional; when set, the netlist must hold its subcircuit (checked
+    /// before any run point), and post-layout runs swap it for its extracted netlist
+    /// (Phase 7).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub dut: String,
     /// `xschem` or `qucs`: which tool's schematic is netlisted (Qucs-S: `qucs-s -n`, see
     /// docs/QUCS.md). Empty: the named view's own kind, else the cell's xschem
     /// schematic, else its Qucs-S one.

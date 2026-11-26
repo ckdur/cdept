@@ -15,6 +15,7 @@
 //! and the functions: docs/CALC.md.
 
 pub mod funcs;
+pub mod jitter;
 pub mod lang;
 pub mod measure;
 pub mod sim;
@@ -79,6 +80,19 @@ impl Value {
     }
 }
 
+/// A place an evaluation measured at: a crossing, an edge, an extreme. The GUI shows
+/// them as markers in the viewer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mark {
+    pub x: f64,
+    /// `None`: an instant (a vertical line); else a point.
+    pub y: Option<f64>,
+    /// What it is: `cross`, `trigger`, `target`, `10%`, `max`, ...
+    pub what: String,
+    /// The x unit of the waveform it was measured on (`time`, `frequency`, ...).
+    pub x_unit: String,
+}
+
 /// What expressions are evaluated against.
 pub struct Env<'a> {
     raw: Option<&'a RawFile>,
@@ -86,6 +100,7 @@ pub struct Env<'a> {
     plot: Option<String>,
     vars: BTreeMap<String, Value>,
     cache: RefCell<HashMap<(usize, String), Waveform>>,
+    marks: RefCell<Vec<Mark>>,
 }
 
 impl<'a> Env<'a> {
@@ -96,6 +111,7 @@ impl<'a> Env<'a> {
             plot: None,
             vars: Self::builtins(),
             cache: RefCell::default(),
+            marks: RefCell::default(),
         }
     }
 
@@ -105,7 +121,26 @@ impl<'a> Env<'a> {
             plot: None,
             vars: Self::builtins(),
             cache: RefCell::default(),
+            marks: RefCell::default(),
         }
+    }
+
+    /// Note a place the evaluation measured at (finite x only; at most 10000).
+    pub fn mark(&self, x: f64, y: Option<f64>, what: &str, x_unit: &str) {
+        let mut m = self.marks.borrow_mut();
+        if x.is_finite() && m.len() < 10_000 {
+            m.push(Mark {
+                x,
+                y: y.filter(|v| v.is_finite()),
+                what: what.to_string(),
+                x_unit: x_unit.to_string(),
+            });
+        }
+    }
+
+    /// The marks noted since the last call.
+    pub fn take_marks(&self) -> Vec<Mark> {
+        std::mem::take(&mut self.marks.borrow_mut())
     }
 
     fn builtins() -> BTreeMap<String, Value> {
@@ -241,15 +276,31 @@ pub fn eval(expr: &Expr, env: &Env) -> Result<Value, CalcError> {
                 .map_err(|e| CalcError::new(format!("{e:#}"), expr.span))
         }
         ExprKind::Bin(op, a, b) => {
-            let (a, b) = (eval(a, env)?, eval(b, env)?);
-            binary(*op, a, b).map_err(|e| CalcError::new(format!("{e:#}"), expr.span))
+            // `a + b + c + ...` is a long left spine: walk it in a loop, not by recursion,
+            // so a long sum cannot overflow the stack.
+            let mut spine = vec![(*op, b.as_ref(), expr.span)];
+            let mut first = a.as_ref();
+            while let ExprKind::Bin(op, a, b) = &first.kind {
+                spine.push((*op, b.as_ref(), first.span));
+                first = a.as_ref();
+            }
+            let mut acc = eval(first, env)?;
+            for (op, right, span) in spine.into_iter().rev() {
+                let r = eval(right, env)?;
+                acc = binary(op, acc, r).map_err(|e| CalcError::new(format!("{e:#}"), span))?;
+            }
+            Ok(acc)
         }
         ExprKind::Call { name, args } => {
             let def = funcs::lookup(name).ok_or_else(|| {
                 let near: Vec<&str> = funcs::all()
                     .iter()
                     .flat_map(|f| f.names.iter().copied())
-                    .filter(|n| n.starts_with(&name[..1.min(name.len())]))
+                    .filter(|n| {
+                        name.chars()
+                            .next()
+                            .is_some_and(|c| n.starts_with(c.to_ascii_lowercase()))
+                    })
                     .take(6)
                     .collect();
                 CalcError::new(
@@ -444,6 +495,113 @@ mod tests {
             assert!(e.msg.contains(needle), "{src}: {}", e.msg);
             assert_eq!(e.span.unwrap().start, at, "{src}");
         }
+    }
+
+    #[test]
+    fn measures_leave_marks() {
+        let raw = rc_raw();
+        let env = Env::new(&raw);
+        evaluate("max(v(\"out\"))", &env).unwrap();
+        let m = env.take_marks();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].what, "max");
+        assert!(m[0].y.is_some());
+        assert!(env.take_marks().is_empty());
+        let _ = evaluate("cross(v(\"out\"), 0.5)", &env);
+        assert!(env.take_marks().iter().all(|m| m.what == "cross"));
+    }
+
+    /// Hostile expressions: errors, never a panic, a hang or a stack overflow, also on a
+    /// thread with a small stack (the GUI's and the job queue's threads).
+    #[test]
+    fn hostile_expressions() {
+        let run = || {
+            let raw = rc_raw();
+            let env = Env::new(&raw);
+            let bad = |src: &str| {
+                let r = evaluate(src, &env);
+                assert!(
+                    r.is_err()
+                        || r.as_ref().unwrap().as_f64().is_none_or(|v| !v.is_finite())
+                        || src.contains("ok"),
+                    "{src}: {r:?}"
+                );
+            };
+            // nesting and length
+            bad(&format!("{}1{}", "(".repeat(100_000), ")".repeat(100_000)));
+            bad(&format!("{}1", "-".repeat(100_000)));
+            bad(&format!("1{}", "^1".repeat(100_000)));
+            bad(&format!("{}1{}", "abs(".repeat(10_000), ")".repeat(10_000)));
+            bad(&"1+".repeat(100_000));
+            // the longest chain that is accepted evaluates
+            let chain = format!("1{}", "+1".repeat(lang::MAX_TOKENS / 2 - 1));
+            assert_eq!(
+                evaluate(&chain, &env).unwrap().as_f64(),
+                Some((lang::MAX_TOKENS / 2) as f64)
+            );
+            let nest = format!(
+                "{}1{}",
+                "(".repeat(lang::MAX_NESTING / 2 - 2),
+                ")".repeat(lang::MAX_NESTING / 2 - 2)
+            );
+            assert_eq!(evaluate(&nest, &env).unwrap().as_f64(), Some(1.0));
+            // arithmetic that has no finite answer is an error or a non-finite number
+            for src in [
+                "1/0",
+                "0/0",
+                "ln(0)",
+                "sqrt(-1)",
+                "10^1000",
+                "-(10^400)",
+                "1e308*10",
+            ] {
+                let _ = evaluate(src, &env);
+            }
+            // type errors and nonsense
+            for src in [
+                "v(\"out\") + \"text\"",
+                "\"a\" * 2",
+                "abs(\"x\")",
+                "fft(1)",
+                "enob(3)",
+                "cross(v(\"out\"), level=\"high\")",
+                "delay(1, 2, 3)",
+                "v()",
+                "v(1)",
+                "v(\"\")",
+                "unknownfn(1)",
+                "min()",
+                "clip(v(\"out\"), 1, 0)",
+                "resample(v(\"out\"), n=1e12)",
+                "sample(v(\"out\"), 1e-300)",
+                "histogram(v(\"out\"), bins=1e300)",
+                "psd(v(\"out\"), n=3)",
+                "psd(v(\"out\"), segments=-1)",
+                "tie(v(\"out\"), period=-1)",
+                "percentile(v(\"out\"), 200)",
+                "1 +",
+                ")",
+                "\"unterminated",
+                "v(\"out\", analysis=\"nope\")",
+                "x(1)",
+                "pow(2)",
+                "fft(v(\"out\"), n=1e15)",
+                "value_at(v(\"out\"), 1e300)",
+                "integrate(v(\"out\"), from=5, to=1)",
+                "settling_time(v(\"out\"), tol=-1)",
+                "\u{0}",
+                "αβγ(1)",
+                "v(\"ö\")",
+            ] {
+                let _ = evaluate(src, &env);
+            }
+        };
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(run)
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]

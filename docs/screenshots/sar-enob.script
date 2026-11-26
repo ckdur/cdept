@@ -1,0 +1,83 @@
+# Screenshots of the Phase 5 milestone (sar-calc.png, sar-uberwave.png), the same steps as
+# cdept-gui/scripts/sar-enob.script. Run: scripts/gen-doc-screenshots.sh docs/screenshots/sar-enob.script
+#
+# The Phase 5 milestone in the GUI, no Python: the 8-bit SAR ADC of examples/ihp-inv
+# (cells/sar8) is run from the Simulation tab, its ENOB computed by the calculator panel
+# from the transient (sample the code once per conversion, FFT, ENOB), the spectrum sent
+# to the built-in UberWave, the expression added to the testbench as an output with a
+# spec, the setup saved and run again (the output is in the spec table), and the viewer's
+# cursors followed by an output that uses cursor_a. Needs UberWave built in, the PDK (for
+# the project), ngspice and the helper:
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice \
+#   CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=ihp-inv \
+#     cdept-gui/scripts/run.sh cdept-gui/scripts/sar-enob.script
+#
+# `sim calc ...` (views/simulation/calc.rs, docs/GUI-TESTING.md): expr, point, plot,
+# layout, markers, evaluate, send, expect, expect_value, expect_note, add_output, cursors,
+# expect_cursor_output, expect_cursor_signal, functions, signals.
+
+wave backend embedded
+window 1500 1100
+panel Library Manager
+wait 0.3
+open cells tb_sar8 enob
+sim expect_target cells/tb_sar8/enob
+sim run
+sim wait
+sim expect_state finished
+sim expect_rows 2 PASS
+
+# ENOB by hand in the calculator panel: the code once per conversion, FFT, ENOB.
+sim calc functions enob
+sim calc expr enob(sample(v("code"), 1u, from=950n), window="rect")
+sim calc evaluate
+sim calc expect_value tt 7.9 8.2
+sim calc expr sndr(sample(v("code"), 1u, from=950n), window="rect")
+sim calc evaluate
+sim calc expect_value tt 49 51
+
+# The spectrum of the codes to UberWave (in dB: it goes to a pane of its own, its X is
+# frequency), and the sampled codes next to the transient.
+sim calc expr db20(fft(sample(v("code"), 1u, from=950n), window="rect"))
+sim calc send
+sim calc expect_note sent
+wave embedded_signal (external) db20(fft(sample(v("code"), 1u, from=950n), window="rect")) @ tt
+sim calc expr sample(v("code"), 1u, from=950n)
+sim calc send
+wave embedded_signal (external) sample(v("code"), 1u, from=950n) @ tt
+# The panel in view (the Setup section folded), with the ENOB expression on display.
+sim setup_section fold
+sim calc functions enob
+sim calc expr enob(sample(v("code"), 1u, from=950n), window="rect")
+sim calc evaluate
+wait 0.5
+screenshot @SHOTS@/sar-calc.png
+sim setup_section open
+wave embedded_screenshot @SHOTS@/sar-uberwave.png
+# Markers: where a scalar result was measured (the third rising crossing of the input at
+# mid scale; each send replaces the calculator's markers).
+sim calc expr cross(v("in"), 0.6, edge="rise", n=3)
+sim calc send
+wait 0.5
+wave embedded_screenshot @SHOTS@/sar-markers.png
+
+# An output of the testbench from the panel, with a spec; saved and run again.
+sim calc expr sfdr(sample(v("code"), 1u, from=950n), window="rect")
+sim calc add_output sfdr_panel 55
+sim expect_dirty yes
+sim save
+sim run
+sim wait
+sim expect_rows 3 PASS
+
+# Cursors: an output that reads the input at cursor A, evaluated when the cursor moves.
+sim calc expr value_at(v("in"), cursor_a)
+sim calc add_output vin_at_a
+sim save
+sim calc cursors 10u 20u
+sim calc expect_cursor_output vin_at_a 0.0 1.2
+sim calc expect_cursor_signal sample
+wave embedded_close
+log sar-enob: ok
+quit

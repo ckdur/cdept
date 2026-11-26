@@ -21,6 +21,8 @@ pub mod embedded;
 #[cfg(unix)]
 pub mod ipc;
 #[cfg(unix)]
+pub mod other;
+#[cfg(unix)]
 pub mod session;
 #[cfg(unix)]
 pub mod show;

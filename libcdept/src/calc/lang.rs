@@ -352,9 +352,16 @@ fn lex(src: &str) -> Result<Vec<(Tok, Span)>, CalcError> {
     Ok(out)
 }
 
+/// The most tokens an expression may have, and how deep parentheses, calls, signs and
+/// powers may nest: a hostile expression must not overflow the stack of the parser or of
+/// the evaluator (which recurses over the tree), on a thread with a small stack too.
+pub const MAX_TOKENS: usize = 2000;
+pub const MAX_NESTING: usize = 64;
+
 struct Parser {
     toks: Vec<(Tok, Span)>,
     pos: usize,
+    nesting: usize,
 }
 
 impl Parser {
@@ -424,7 +431,26 @@ impl Parser {
         }
     }
 
+    /// One level deeper (a parenthesis, a call, a sign, a power), or an error.
+    fn deeper(&mut self) -> Result<(), CalcError> {
+        self.nesting += 1;
+        if self.nesting > MAX_NESTING {
+            return Err(CalcError::new(
+                format!("the expression nests deeper than {MAX_NESTING} levels"),
+                self.span(),
+            ));
+        }
+        Ok(())
+    }
+
     fn unary(&mut self) -> Result<Expr, CalcError> {
+        self.deeper()?;
+        let r = self.unary_inner();
+        self.nesting -= 1;
+        r
+    }
+
+    fn unary_inner(&mut self) -> Result<Expr, CalcError> {
         match self.peek() {
             Tok::Minus => {
                 let start = self.bump().1.start;
@@ -464,6 +490,13 @@ impl Parser {
     }
 
     fn primary(&mut self) -> Result<Expr, CalcError> {
+        self.deeper()?;
+        let r = self.primary_inner();
+        self.nesting -= 1;
+        r
+    }
+
+    fn primary_inner(&mut self) -> Result<Expr, CalcError> {
         let (tok, span) = self.bump();
         match tok {
             Tok::Num(v) => Ok(Expr {
@@ -551,7 +584,20 @@ impl Parser {
 /// Parse an expression.
 pub fn parse(src: &str) -> Result<Expr, CalcError> {
     let toks = lex(src)?;
-    let mut p = Parser { toks, pos: 0 };
+    if toks.len() > MAX_TOKENS {
+        return Err(CalcError::new(
+            format!(
+                "the expression is too long ({} tokens, at most {MAX_TOKENS})",
+                toks.len()
+            ),
+            toks[MAX_TOKENS].1,
+        ));
+    }
+    let mut p = Parser {
+        toks,
+        pos: 0,
+        nesting: 0,
+    };
     if *p.peek() == Tok::End {
         return Err(CalcError::new("empty expression", p.span()));
     }

@@ -672,6 +672,13 @@ fn probe_version(path: &Path, args: &[&str]) -> Option<String> {
 fn run_with_timeout(path: &Path, args: &[&str], with_stderr: bool) -> Option<String> {
     let mut child = Command::new(path)
         .args(args)
+        // An MPI build of Xyce (OpenLane's) waits forever in `Xyce -v` without these (the
+        // batch adapter sets them too). A probe of a GUI or a test that ends before the
+        // probe's time limit left such processes behind, each holding an inotify instance
+        // until the user's limit (128) was gone.
+        .env("OMPI_MCA_plm", "isolated")
+        .env("OMPI_MCA_btl", "self")
+        .env("PMIX_MCA_gds", "hash")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(if with_stderr {

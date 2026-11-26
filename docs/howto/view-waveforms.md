@@ -3,8 +3,10 @@
 CDePT has no waveform viewer of its own. The viewer is **UberWave**, Symbiotic EDA's program
 (C++ with Dear ImGui and ImPlot, built for very large ngspice raw files and Spectre PSF
 results). It is **part of the `cdept` executable**: its window runs on a thread of the cdept
-process, next to the main window, and CDePT talks to it with plain function calls (no helper
-process, no socket, no JSON for data; the calculator hands over its `f64` arrays as they are).
+process, next to the main window, and CDePT talks to it with plain function calls with typed
+values (no helper process, no socket, no JSON, no files in between: the calculator hands over
+its `f64` arrays as they are, lists come back as C structs, cursor moves arrive through a
+callback).
 When UberWave was not built into your `cdept`, CDePT falls back to starting `UberWaveViewer`
 as a separate process (see [the fallback](#the-fallback-uberwaveviewer-as-a-process)).
 
@@ -38,7 +40,8 @@ Asking for `embedded` in a cdept that does not have it is an error that says how
 
 ## Build UberWave into cdept (Linux)
 
-UberWave lives in its own repository (`uberwave`, branch `ipc-multifile` until it is merged).
+UberWave lives in its own repository (`uberwave`, branch `ipc-multifile` until it is merged;
+CDePT needs that branch from commit 1a162cf on, the typed shim).
 `cdept-uberwave`, a crate of this workspace, builds its library `uberwave_embed` with CMake
 and links it into `cdept`. Point it at the source and build as usual:
 
@@ -185,9 +188,52 @@ cdept wave cells tb_inv --view testbench --family --calc 'max(v("out"))'   # sca
 
 ![The calculator trace vout pushed next to the three corners](../_static/screenshots/uberwave-calc.png)
 
-In the GUI, the Results area of the Simulation tab has an expression line with a choice of
-points (all, or one) and **Send**. Scalars and errors show under the line; typing the start of
-a function name offers matching names as buttons. The evaluation runs in the background.
+In the GUI, the **Calculator** section of the Simulation tab does this and more: a function
+browser with help, a signal browser, a results table, Bode and eye layouts, markers where
+scalars were measured, "Add as output", and the viewer's cursors followed live (see
+[the calculator](../CALC.md#6-the-calculator-panel-gui-and-the-viewer)).
+
+### Bode plots, eye diagrams, markers
+
+```bash
+cdept wave cells ota5t --view ac_open --points tt_27,ss_125 --calc 'v("out")/v("in")' --name gain --bode
+cdept wave cells ota5t --view tran_step --point tt_27 --calc 'v("out")' --eye 20n,0
+```
+
+- `--bode`: a complex (AC) result as magnitude (dB) in one new pane and phase (degrees) in
+  another, both on a log frequency axis; several points overlay in the same two panes.
+- `--eye PERIOD[,OFFSET]`: the waveform folded at PERIOD from OFFSET, every period drawn on
+  top of the others, in a new pane with its own X axis (0 to PERIOD). UberWave folds it
+  (`fold_period` of a trace).
+- A trace whose X unit the active pane cannot show (a spectrum next to a transient) goes to a
+  pane of that unit, or a new one.
+- Markers: a scalar result marks where it was measured (a crossing, the trigger and target of
+  a delay, the edge points of a rise time, an extreme, the settling instant) as a dashed line
+  or a point with a label, only in panes of the same X unit; each send replaces them;
+  `--no-markers` leaves them out. They need the built-in UberWave and start no viewer by
+  themselves.
+
+![A crossing marked in UberWave, the code spectrum in its own pane](../_static/screenshots/sar-markers.png)
+
+## Tables and digital waveforms
+
+UberWave reads SPICE raw files and Spectre PSF, not CSV or VCD. CDePT reads them
+([the calculator](../CALC.md#csv-tables-and-digital-waveforms)) and:
+
+```bash
+cdept wave scope.csv                        # every column (up to 16) to UberWave as traces
+cdept wave scope.csv --show vout,iload      # these columns
+cdept wave dump.vcd                         # opens in Surfer, else GTKWave ($CDEPT_DIGITAL_VIEWER first)
+cdept wave dump.fst --show clk,cnt          # these signals to UberWave as step traces
+cdept wave --list dump.vcd                  # its signal count
+```
+
+A table's columns and named digital signals go to the built-in UberWave as traces in a new
+pane (nothing is written anywhere: CDePT hands the arrays over); without the built-in viewer
+this is refused (the UberWaveViewer process cannot take them without a file). A digital file
+without `--show` opens in a digital viewer, a separate program (GTKWave is GPL: started, never
+linked). Digital signals are also available to the calculator (`frequency(v("clk"),
+level=0.5)`).
 
 ## The fallback: UberWaveViewer as a process
 

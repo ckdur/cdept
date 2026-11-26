@@ -356,6 +356,25 @@ pub fn delay(
     targ_n: i64,
     range: Range,
 ) -> Result<f64> {
+    let (t0, t1) = delay_times(
+        trig, targ, trig_level, targ_level, trig_edge, targ_edge, trig_n, targ_n, range,
+    )?;
+    Ok(t1 - t0)
+}
+
+/// The trigger and target times of [`delay`].
+#[allow(clippy::too_many_arguments)]
+pub fn delay_times(
+    trig: &Waveform,
+    targ: &Waveform,
+    trig_level: f64,
+    targ_level: f64,
+    trig_edge: Edge,
+    targ_edge: Edge,
+    trig_n: i64,
+    targ_n: i64,
+    range: Range,
+) -> Result<(f64, f64)> {
     let tw = range.apply(trig);
     let gw = range.apply(targ);
     let t0 = pick(
@@ -372,7 +391,7 @@ pub fn delay(
             "the target waveform has no crossing number {targ_n} of {targ_level} after the trigger"
         )
     })?;
-    Ok(t1 - t0)
+    Ok((t0, t1))
 }
 
 /// The value the waveform ends at: the mean of its last `tail` fraction of x.

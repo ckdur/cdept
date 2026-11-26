@@ -1,10 +1,13 @@
-# CDePT: the measurement calculator (Phase 5, first slice)
+# CDePT: the measurement calculator (Phase 5)
 
-Status 2026-11-23: a SPICE raw reader, a waveform function library, an expression
-language, `[[output]]` in `setup.toml` and `cdept calc`. Code: `libcdept/src/raw/`
-(reader), `libcdept/src/calc/` (`wave`, `measure`, `spectral`, `funcs`, `lang`, `sim`),
-CLI `cdept calc`. Pure Rust, no new dependencies (own radix-2 FFT, hand-written parser).
-Not built yet: a calculator panel and plots in the GUI, jitter, PSD/Welch, CSV/VCD readers.
+Status 2026-11-27: readers for SPICE raw files, CSV tables and digital waveforms (VCD,
+FST, GHW), a waveform function library (timing, frequency response, spectra, noise,
+converters, jitter, PSD, statistics), an expression language, `[[output]]` in
+`setup.toml`, `cdept calc`, and the calculator panel of the Simulation tab (§7) whose
+waveforms go to the built-in UberWave. Code: `libcdept/src/raw/` (readers),
+`libcdept/src/calc/` (`wave`, `measure`, `spectral`, `jitter`, `funcs`, `lang`, `sim`),
+`cdept-gui/src/views/simulation/calc.rs`. Pure Rust (own radix-2 FFT, hand-written
+parser); the digital reader is the `wellen` crate (BSD-3-Clause).
 
 The idea is the one of a circuit designer's calculator (pick signals, apply functions,
 get numbers); the syntax is our own and small.
@@ -27,6 +30,30 @@ into memory until a vector is asked for, so a 100 MB file costs only the vectors
 
 `Waveform { x: Arc<Vec<f64>>, y: Samples::{Real, Complex}, x_name, x_unit, name, unit }`.
 Waveforms from one plot share `x`. `value_at` interpolates linearly.
+
+### CSV tables and digital waveforms
+
+`RawFile::open` reads more than SPICE raw files, into the same plots and vectors, so
+every function, `cdept calc --raw` and `cdept wave` work on them:
+
+- **CSV** (`.csv`, `.tsv`, `.txt`, `.dat`, `.tab`): the first column is x, the others are
+  signals. The first line that is not a comment (`#`, `%`, `*`, `//`) names the columns
+  when one of its fields is not a number (else `x`, `col1`, ...). Separator: tab, comma,
+  semicolon or spaces (from that line); quoted fields; SPICE suffixes (`1n`). An empty
+  cell, `nan`, an infinity or text is a gap (NaN). x must be finite and must not decrease
+  (equal values are allowed), else the file is refused with the line number. An x
+  column called `time` or `t` makes a transient plot (`analysis="tran"`), `freq...` an AC
+  one.
+- **VCD, FST, GHW** (told by their content; `wellen`): one plot, `Transient (digital,
+  VCD)`, whose vectors are the signals by full hierarchical name (`tb.dut.clk`); a short
+  name finds the signal when only one ends so (`v("clk")`). A signal is a step waveform in
+  seconds (two points per change, so a crossing lands on the edge); a bit or vector is
+  its unsigned value, `x`/`z` in any bit is a gap, a `real` its value, strings and events
+  gaps; the last value is held to the end of the file. Signals load when asked for.
+  A damaged file is an error (the reader runs under `catch_unwind`), never a crash.
+
+`cdept calc 'frequency(v("clk"), level=0.5)' --raw dump.vcd`;
+`cdept calc 'avg(v("vout"))' --raw scope.csv`.
 
 ## 2. The language
 
@@ -58,6 +85,12 @@ pkpk(v("out")) / vdd
   whole expression (`[[output]] plot = "ac"`, `cdept calc --plot ac`). Single-point
   plots (operating point) do not count as a clash.
 - Errors name the position: `cdept calc` and `[[output]]` print the line with a caret.
+- Limits against hostile or mistyped input: at most 2000 tokens, parentheses, calls,
+  signs and powers nested at most 64 deep; a long sum is evaluated in a loop (no stack
+  overflow on any thread); functions that make points (`resample`, the FFT length `n`)
+  stop at 2^24 points, `sample` at 5·10^7, `histogram` at 10^6 bins.
+- In the GUI, `cursor_a` and `cursor_b` are the positions of UberWave's cursors (when
+  they are on): `value_at(v("out"), cursor_a)`.
 
 ## 3. Functions
 
@@ -102,6 +135,26 @@ power-of-two number of points is used as it is; anything else (SPICE's adaptive 
 resampled to `n` points over `from..to` by linear interpolation, giving a whole number of
 signal cycles in that range keeps the figures coherent. Signal power is the tone bin and
 the window's main lobe; harmonic bins likewise; the rest is noise.
+
+Jitter (crossings of `level`, default mid-swing, on `edge`, default rise; `from`/`to`):
+`periods(w)` (a waveform of every period over its start time), `period_jitter(w,
+[stat])`, `cc_periods(w)` (differences of consecutive periods), `cc_jitter(w, [stat])`,
+`tie(w, [period])` (time interval error of every crossing against the ideal clock: the
+least-squares fit of the crossings, or `period` placed at the mean error), `tie_jitter(w,
+[stat], [period])`, `crossings(w)` (the crossing times over their number). `stat` is
+`rms` (the standard deviation, default), `pp` (peak to peak), `mean` or `max` (largest
+magnitude, the JEDEC cycle-to-cycle figure).
+
+Statistics and sampling: `histogram(w, [bins=50], [min], [max], [weight])` (counts over
+the bin centres; `weight="time"` counts the x span each sample stands for),
+`stddev(w)`, `percentile(w, p)`, `median(w)`, `sample(w, period, [from], [n])`
+(zero-order hold: the value at or just before each instant, e.g. an ADC code read once
+per conversion: `enob(sample(v("code"), 1u, from=950n), window="rect")`).
+
+Power spectral density: `psd(w, [window="hann"], [n], [segments=8], [from], [to])`,
+Welch's method (50 % overlapping segments of n points, the mean removed per segment),
+one-sided, unit²/Hz, so its integral is the variance; uniform data is used as it is,
+SPICE steps are resampled. `db10(psd(...))` is dB/Hz, `sqrt(psd(...))` unit/√Hz.
 
 Noise: `integrate_noise(w, [from], [to], [squared])` (density V/√Hz to V rms, trapezoid),
 `spot_noise(w, f)`.
@@ -149,7 +202,7 @@ cdept calc 'v("out", analysis="tran")' --raw out.raw --dump    # x y per line
 `cdept wave <lib> <cell> --view V [--point P | --family | --points a,b] --calc 'EXPR' [--name N]`
 evaluates the expression on the raw file of each chosen point and pushes waveform results
 to [UberWave](howto/view-waveforms.md) as traces (a viewer with IPC is needed). The Simulation
-tab has the same in the Results area. Scalars are printed (a table per point for a family).
+tab has the same in its calculator panel (§6). Scalars are printed (a table per point for a family).
 
 Signals are written with quoted names, `v("out")`: a bare `out` is a variable name of the
 language. In `cdept wave --calc` only, an expression that fails as written is tried once more
@@ -158,14 +211,52 @@ too; an expression that is valid as written is never changed (a variable named l
 node keeps its meaning). When it still fails, the error ends with `hint: write node names
 in quotes: v("out")`. `cdept calc` and `[[output]]` stay strict.
 
-## 6. Tests
+## 6. The calculator panel (GUI) and the viewer
 
-Unit tests use synthetic waveforms: sine with a 1 % third harmonic (THD -40 dB, SFDR 40
+The Simulation tab has a **Calculator** section (under Jobs, above Results) for the open
+testbench, on the run points on disk (also of earlier sessions):
+
+- the point (or all points: a family), the analysis to look in (`plot`);
+- the expression, with completion buttons for function names, the signature and help of
+  the function being typed or called, a **Functions** browser (search in names and
+  help; a click inserts `name(`) and a **Signals** browser of the point's raw file (a
+  click inserts `v("...")`, `i("...")` or `sig("...")`, with `analysis=` when the file
+  has several plots);
+- **Evaluate**: the result per point in a table (numbers; PASS/FAIL when the testbench
+  has an output of the same expression with a spec), errors with their position;
+- **Send to UberWave**: the same, and waveform results go to the built-in UberWave as
+  traces, laid out *plain* (the active pane, or a pane of the same X unit: a spectrum
+  never lands on a time axis), *Bode* (a complex result: magnitudes in one new pane,
+  phases in another, log frequency) or *eye* (every period from an offset drawn on top
+  of the others, X from 0 to the period); with **markers** on, the places scalar results
+  were measured are marked in the viewer (crossings, trigger and target of a delay, the
+  10/90 % points of an edge, the settling time, extremes, `value_at`), labelled with the
+  expression and the value; each send replaces them;
+- **Add as output**: name, min, max: the expression becomes an `[[output]]` of the setup
+  form (and a spec); Save keeps it, the next run has it in the spec table;
+- **Cursors (UberWave)**: follows the built-in viewer's cursors live (UberWave reports
+  each move to CDePT, no polling): A, B, B−A, 1/(B−A), the plotted signals under A and B,
+  and every output whose expression uses `cursor_a`/`cursor_b`, evaluated again on the
+  chosen point when a cursor moves, with its spec verdict.
+
+The same from the shell: `cdept wave <lib> <cell> --view V --point P --calc EXPR
+[--bode | --eye PERIOD[,OFFSET]] [--no-markers]`.
+
+![The calculator panel: ENOB of the SAR ADC](_static/screenshots/sar-calc.png)
+
+## 7. Tests
+
+Unit tests use synthetic waveforms (and for the readers: tables of every kind and
+broken ones, a VCD, an Icarus Verilog FST in `libcdept/src/raw/testdata`, cut files,
+binary noise, headers that lie about their counts): sine with a 1 % third harmonic (THD -40 dB, SFDR 40
 dB, all three windows), quantised sines of 6/8/10 bits (ENOB within 0.3), a noisy sine
 (SNR), an irregular time grid, an RC step (10-90 % rise `tau ln 9`, settling, slew), a
 second-order step (overshoot 16.3 %), a two-pole amplifier (UGBW, phase margin,
 bandwidth), a synthetic ADC (DNL/INL by edges and histogram), ngspice-style binary and
 ascii raws with several plots, truncated files. Real: `libcdept/tests/real_sim.rs`
 (`calculator_outputs_match_the_meas`): the calculator's `delay` on `tb_inv`'s `out.raw`
-equals the `.meas` `tpd`; and `raw::tests::real_xyce_raw_reads_like_ngspice` reads a
+equals the `.meas` `tpd`; jitter (a clock with known edge moves: periods, cycle to cycle,
+TIE), PSD (a tone's power and white noise's variance), histograms, percentiles,
+sample-and-hold; `hostile_expressions` (deep nesting, a 100000-term sum, division by
+zero, type errors, huge `n`, non-ASCII names) on a 2 MB stack; and `raw::tests::real_xyce_raw_reads_like_ngspice` reads a
 Xyce raw (skipped without Xyce; `CDEPT_XYCE`).

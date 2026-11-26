@@ -200,6 +200,25 @@ list of failing and missing specs and calculator errors, and a summary line with
 error, simulator missing) is an ERROR row and does not stop the others. **The exit status
 is non-zero** when a test cannot run, a run fails or errors, or a spec fails or is missing.
 
+**Figures from several tests**: a `[[combine]]` is evaluated after all tests ran, on
+every run point of its `test`, with the measures of all tests at the point of the same
+name (same corner, temperature, sweep values) as `<test>.<measure>` names (`<test>` is the
+view name, or the test's `name`):
+
+```toml
+[[combine]]
+test = "psrr"                         # whose points get the figure (and its spec)
+name = "psrr_point_db"
+expr = "ac_open.gain_db - psrr.xfer_db"   # a calculator expression (docs/CALC.md)
+min = 50                              # optional spec (min / max)
+```
+
+The figure joins the point's measures as a calculator output (`result.json` is written
+again); a point the other test lacks gets no value and a MISSING spec, with the reason in
+`calc_errors`. The OTA suite of `examples/ihp-inv` computes PSRR and CMRR this way from the
+open-loop gain of the same corner and temperature (CMRR is 39.4 dB at sf, 125 C, where the
+gain is 32 dB: the fixed `adm_db` = 36 of the single views hid that).
+
 Stored: each test's runs as usual (`result.json`, `results.db`), the suite as
 `simulations/<lib>/<cell>/<suite view>/suite.json` and as a row of the `suite_runs` table in
 `results.db` (counts and the whole report as JSON). API: `sim::suite::{open, run, latest,
@@ -286,9 +305,9 @@ flash ADC (`cells/flash3/inl_dnl`).
 
 ## 7. Open
 
-- Settling inside `tran_delay` (use `startup_settle`); jitter and PSD are not in the calculator.
-- `psrr_cmrr` takes the differential gain as a number (`adm_db`), not from the
-  `ac_response` test of the same suite.
+- Settling inside `tran_delay` (use `startup_settle`).
+- `psrr_cmrr` alone still takes the differential gain as a number (`adm_db`); in a suite
+  use `[[combine]]` (§4) for the gain of the same run point.
 - Templates for Xyce-only analyses; one template, one analysis set: a family that needs
   two stimuli (PSRR and CMRR) is two testbenches in a suite.
 - The suite panel has no per-test run, and no waveform viewer (Phase 5).
