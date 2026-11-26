@@ -95,7 +95,8 @@ fn listener_markers_eye_and_a_closed_window() {
     let a = fixture(dir.path(), "a.raw", 1.0);
     viewer.open(&a, None, Some("A")).unwrap();
     viewer.show(&["A:v(out)".into()], Pane::New).unwrap();
-    let seen: Arc<Mutex<Vec<(Option<f64>, Option<f64>)>>> = Arc::default();
+    type Seen = Arc<Mutex<Vec<(Option<f64>, Option<f64>)>>>;
+    let seen: Seen = Arc::default();
     let log = seen.clone();
     viewer
         .set_cursor_listener(Some(Box::new(move |a, b| log.lock().unwrap().push((a, b)))))

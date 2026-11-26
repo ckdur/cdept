@@ -135,7 +135,9 @@ fn a_family_opens_in_this_process_is_reused_and_takes_calculator_traces() {
     }
     let ext = viewer.signals(Some("(external)"), None).unwrap();
     assert!(
-        ext.signals.iter().any(|s| s.name.contains("@ tt_27") && s.file == "(external)"),
+        ext.signals
+            .iter()
+            .any(|s| s.name.contains("@ tt_27") && s.file == "(external)"),
         "{ext:?}"
     );
 

@@ -226,7 +226,7 @@ pub fn sample(
     let (first, last) = (w.x[0], w.x[w.len() - 1]);
     let start = offset.unwrap_or(first);
     let count = ((last - start) / period + 1e-9).floor();
-    if !(count >= 0.0) {
+    if count.is_nan() || count < 0.0 {
         bail!("the first sample ({start}) is after the end of the waveform ({last})");
     }
     if count >= 50_000_000.0 && n.is_none_or(|n| n >= 50_000_000) {
@@ -272,7 +272,7 @@ pub fn psd(
         bail!("psd: too few points ({})", c.len());
     }
     let span = c.x[c.len() - 1] - c.x[0];
-    if !(span > 0.0) {
+    if span.is_nan() || span <= 0.0 {
         bail!("psd: the range has no extent");
     }
     let segments = segments.clamp(1, 1024);
@@ -306,7 +306,7 @@ pub fn psd(
             1usize << (usize::BITS - 1 - fit.leading_zeros())
         }
     };
-    if !seg.is_power_of_two() || seg < 16 || seg > 1 << 22 {
+    if !seg.is_power_of_two() || !(16..=1 << 22).contains(&seg) {
         bail!("psd: n must be a power of two between 16 and 4194304 (got {seg})");
     }
     let total = seg / 2 * (segments + 1);

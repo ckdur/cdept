@@ -305,7 +305,7 @@ $var wire 4 \" cnt [3:0] $end\n$var real 64 # vin $end\n$upscope $end\n$enddefin
                 dir.path(),
                 name,
                 &(0..5000u32)
-                    .map(|i| (i * 7919 >> 3) as u8)
+                    .map(|i| ((i * 7919) >> 3) as u8)
                     .collect::<Vec<_>>(),
             );
             assert!(RawFile::open(&p).is_err());
@@ -313,10 +313,10 @@ $var wire 4 \" cnt [3:0] $end\n$var real 64 # vin $end\n$upscope $end\n$enddefin
         assert!(RawFile::open(&write(dir.path(), "e.vcd", b"")).is_err());
         // a VCD whose time goes backwards
         let back = "$timescale 1ps $end\n$var wire 1 ! a $end\n$enddefinitions $end\n#10\n1!\n#5\n0!\n#20\n1!\n";
-        if let Ok(raw) = RawFile::open(&write(dir.path(), "b.vcd", back.as_bytes())) {
-            if let Ok(w) = raw.vector(0, "a") {
-                assert!(w.x.windows(2).all(|p| p[0] <= p[1]), "{:?}", w.x);
-            }
+        if let Ok(raw) = RawFile::open(&write(dir.path(), "b.vcd", back.as_bytes()))
+            && let Ok(w) = raw.vector(0, "a")
+        {
+            assert!(w.x.windows(2).all(|p| p[0] <= p[1]), "{:?}", w.x);
         }
     }
 }

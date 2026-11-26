@@ -638,7 +638,7 @@ static FUNCS: &[Func] = &[
                 (None, Some(s)) if s > 0.0 => (t - f) / s + 1.0,
                 _ => 0.0,
             };
-            if !(count <= MAX_POINTS) {
+            if count.is_nan() || count > MAX_POINTS {
                 bail!("resample would make {count:.0} points (at most {MAX_POINTS})");
             }
             let xs: Vec<f64> = match (b.opt_num("n")?, b.opt_num("step")?) {
@@ -1078,7 +1078,7 @@ static FUNCS: &[Func] = &[
                 other => return Err(eyre!("weight must be samples or time, not '{other}'")),
             };
             let bins = b.num_or("bins", 50.0)?;
-            if !(bins >= 1.0 && bins <= 1e6) {
+            if !(1.0..=1e6).contains(&bins) {
                 bail!("bins must be between 1 and 1000000");
             }
             wave(jitter::histogram(
@@ -1094,9 +1094,7 @@ static FUNCS: &[Func] = &[
         names: &["stddev", "std", "sigma"],
         params: &["w", "?from", "?to"],
         doc: "Sample standard deviation of the y values (every sample counts once; for a time-weighted spread use rms(w - avg(w))).",
-        run: |_, b| {
-            num(jitter::stats(&b.range()?.apply(b.wave("w")?).real_y("stddev")?.to_vec())?.1)
-        },
+        run: |_, b| num(jitter::stats(b.range()?.apply(b.wave("w")?).real_y("stddev")?)?.1),
     },
     Func {
         names: &["percentile"],
@@ -1127,7 +1125,7 @@ static FUNCS: &[Func] = &[
         run: |_, b| {
             let n = b.opt_num("n")?;
             if let Some(n) = n
-                && !(n >= 1.0)
+                && (n.is_nan() || n < 1.0)
             {
                 bail!("n must be at least 1");
             }
@@ -1145,7 +1143,7 @@ static FUNCS: &[Func] = &[
         doc: "Power spectral density (Welch: `segments` 50 % overlapping windowed segments of n points, default 8 segments, hann window), one-sided, in unit^2/Hz; its integral is the variance. Use db10(psd(...)) for dB/Hz, sqrt() for unit/sqrt(Hz).",
         run: |_, b| {
             let seg = b.num_or("segments", 8.0)?;
-            if !(seg >= 1.0 && seg <= 1024.0) {
+            if !(1.0..=1024.0).contains(&seg) {
                 bail!("segments must be between 1 and 1024");
             }
             wave(jitter::psd(

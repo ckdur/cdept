@@ -401,11 +401,9 @@ pub fn combine(suite: &Suite, tests: &mut [TestReport], write: bool) {
     if suite.combines.is_empty() {
         return;
     }
-    // test key -> point -> measures
-    let mut by_test: Vec<(
-        Vec<String>,
-        std::collections::BTreeMap<String, std::collections::BTreeMap<String, f64>>,
-    )> = vec![];
+    // test names -> point -> measures
+    type Measures = std::collections::BTreeMap<String, std::collections::BTreeMap<String, f64>>;
+    let mut by_test: Vec<(Vec<String>, Measures)> = vec![];
     for (t, report) in suite.tests.iter().zip(tests.iter()) {
         let mut names = vec![t.key()];
         if !t.name.is_empty() {

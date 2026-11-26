@@ -942,58 +942,6 @@ fn call_for(name: &str, kind: &str) -> String {
     format!("sig(\"{name}\"{analysis})")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn words_calls_and_signals() {
-        assert_eq!(last_word("db20(v").1, "v");
-        assert_eq!(last_word("enob(").1, "");
-        assert_eq!(last_word("µ+ab").1, "ab");
-        assert_eq!(
-            enclosing_call("enob(sample(v(\"d\"), 1n), "),
-            Some("enob".into())
-        );
-        assert_eq!(enclosing_call("enob(sample("), Some("sample".into()));
-        assert_eq!(enclosing_call("1 + 2"), None);
-        assert_eq!(enclosing_call("(((("), None);
-        assert_eq!(call_for("v(out)", ""), "v(\"out\")");
-        assert_eq!(call_for("i(vdd)", "tran"), "i(\"vdd\", analysis=\"tran\")");
-        assert_eq!(call_for("V1#branch", ""), "i(\"V1\")");
-        assert_eq!(
-            call_for("onoise_spectrum", "noise"),
-            "sig(\"onoise_spectrum\", analysis=\"noise\")"
-        );
-        let mut e = String::from("1 + en");
-        insert_call(&mut e, "enob");
-        assert_eq!(e, "1 + enob(");
-        let mut p = CalcPanel::new();
-        p.expr = "max(v(\"out\"))".into();
-        p.out_name = "vmax".into();
-        p.out_min = "1".into();
-        let o = p.new_output().unwrap();
-        assert_eq!((o.name.as_str(), o.min, o.max), ("vmax", Some(1.0), None));
-        p.out_name = "two words".into();
-        assert!(p.new_output().is_err());
-        p.out_name = "x".into();
-        p.expr = "max(".into();
-        assert!(p.new_output().is_err());
-        p.layout = LayoutChoice::Eye;
-        p.eye_period = "-1".into();
-        assert!(p.layout().is_err());
-        p.eye_period = "1n".into();
-        p.eye_offset = "200p".into();
-        assert_eq!(
-            p.layout().unwrap(),
-            wcalc::Layout::Eye {
-                period: 1e-9,
-                offset: 2e-10
-            }
-        );
-    }
-}
-
 /// `sim calc ...` of a test script (docs/GUI-TESTING.md): what the panel's widgets do.
 pub(crate) fn script(
     view: &mut super::SimulationView,
@@ -1219,5 +1167,57 @@ fn script_calc(
             Ok(())
         }
         _ => Err(USAGE.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn words_calls_and_signals() {
+        assert_eq!(last_word("db20(v").1, "v");
+        assert_eq!(last_word("enob(").1, "");
+        assert_eq!(last_word("µ+ab").1, "ab");
+        assert_eq!(
+            enclosing_call("enob(sample(v(\"d\"), 1n), "),
+            Some("enob".into())
+        );
+        assert_eq!(enclosing_call("enob(sample("), Some("sample".into()));
+        assert_eq!(enclosing_call("1 + 2"), None);
+        assert_eq!(enclosing_call("(((("), None);
+        assert_eq!(call_for("v(out)", ""), "v(\"out\")");
+        assert_eq!(call_for("i(vdd)", "tran"), "i(\"vdd\", analysis=\"tran\")");
+        assert_eq!(call_for("V1#branch", ""), "i(\"V1\")");
+        assert_eq!(
+            call_for("onoise_spectrum", "noise"),
+            "sig(\"onoise_spectrum\", analysis=\"noise\")"
+        );
+        let mut e = String::from("1 + en");
+        insert_call(&mut e, "enob");
+        assert_eq!(e, "1 + enob(");
+        let mut p = CalcPanel::new();
+        p.expr = "max(v(\"out\"))".into();
+        p.out_name = "vmax".into();
+        p.out_min = "1".into();
+        let o = p.new_output().unwrap();
+        assert_eq!((o.name.as_str(), o.min, o.max), ("vmax", Some(1.0), None));
+        p.out_name = "two words".into();
+        assert!(p.new_output().is_err());
+        p.out_name = "x".into();
+        p.expr = "max(".into();
+        assert!(p.new_output().is_err());
+        p.layout = LayoutChoice::Eye;
+        p.eye_period = "-1".into();
+        assert!(p.layout().is_err());
+        p.eye_period = "1n".into();
+        p.eye_offset = "200p".into();
+        assert_eq!(
+            p.layout().unwrap(),
+            wcalc::Layout::Eye {
+                period: 1e-9,
+                offset: 2e-10
+            }
+        );
     }
 }
