@@ -129,13 +129,16 @@ proc cdept::magic::modified {} {
 proc cdept::magic::save {{all 0}} {
   set written {}
   foreach c [modified] {
+    if {[string match *UNNAMED* $c]} continue
     set f {}
     catch {set f [file dirname [magic::cellname list filepath $c]]}
     if {$all || $f eq {} || [string match *UNNAMED* $f] || [is_own $f]} {
-      magic::save $c
       lappend written $c
     }
   }
+  # `save <name>` would write the edit cell under that name: `writeall force <cells>`
+  # writes the cells named, each to its own file.
+  if {[llength $written]} {magic::writeall force {*}$written}
   return $written
 }
 

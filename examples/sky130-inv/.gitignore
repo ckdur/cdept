@@ -1,2 +1,5 @@
 # CDePT: this user's settings for the project (PDK folder of this machine)
 cdept.local.toml
+# made again by `cdept tech refresh` (2.8 MB)
+tech.catalog.json
+magic/
