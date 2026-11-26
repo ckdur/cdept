@@ -42,6 +42,12 @@ const NUDGE: Duration = Duration::from_millis(300);
 #[derive(Debug, Clone, PartialEq)]
 enum Command {
     Open(Selection),
+    /// `open_with <library> <cell> <view> <tool>`: as "Open With" (a tab or a window).
+    OpenWith(Selection, String),
+    /// `open_view <library> <cell> <view>`: what a double click on the view does.
+    OpenView(Selection),
+    /// `expect_open_choice <n>`: the "Open with" question is up with n tools.
+    ExpectOpenChoice(usize),
     Close,
     CloseTab,
     CloseAnswer(CloseChoice),
@@ -243,6 +249,7 @@ impl Command {
                 | Command::DialogType(..)
                 | Command::CloseAnswer(_)
                 | Command::ExpectDialog(_)
+                | Command::ExpectOpenChoice(_)
                 | Command::ExpectPane(_)
                 | Command::ExpectPixel(..)
                 | Command::ExpectDocuments(_)
@@ -612,6 +619,19 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
         "log" => Command::Log(rest.to_string()),
         "tech" => Command::Tech(args.iter().map(|word| word.to_string()).collect()),
         "sim" => Command::Sim(args.iter().map(|word| word.to_string()).collect()),
+        "open_view" => match args.as_slice() {
+            [library, cell, view] => Command::OpenView(Selection::view(library, cell, view)),
+            _ => return Err("usage: open_view <library> <cell> <view>".into()),
+        },
+        "open_with" => match args.as_slice() {
+            [library, cell, view, tool] => {
+                Command::OpenWith(Selection::view(library, cell, view), tool.to_string())
+            }
+            _ => return Err("usage: open_with <library> <cell> <view> <tool>".into()),
+        },
+        "expect_open_choice" => Command::ExpectOpenChoice(
+            text()?.trim().parse().map_err(|_| "usage: expect_open_choice <n>".to_string())?,
+        ),
         "magic" => Command::Magic(args.iter().map(|word| word.to_string()).collect()),
         "wave" => Command::Wave(args.iter().map(|word| word.to_string()).collect()),
         "organise" => Command::Organise(args.iter().map(|word| word.to_string()).collect()),
@@ -1506,7 +1526,20 @@ impl Script {
         };
         let none = Modifiers::NONE;
         match command {
-            Command::Open(selection) => app.script_request(Action::OpenView(selection)),
+            // Scripts open in the first tab that can show the view (KLayout for a GDS),
+            // without the "Open with" question.
+            Command::Open(selection) => app.script_request(app.script_open_action(selection)),
+            Command::OpenView(selection) => app.script_request(Action::OpenView(selection)),
+            Command::OpenWith(selection, tool) => {
+                app.script_request(Action::OpenWith(selection, tool))
+            }
+            Command::ExpectOpenChoice(n) => {
+                let have = app.script_open_choice();
+                if have != Some(n) {
+                    return Err(format!("the Open With question shows {have:?} tools, expected {n}"));
+                }
+                app.script_close_open_choice();
+            }
             Command::Close => {
                 let tab = app.script_document().ok_or("no document is open")?;
                 app.script_request(Action::CloseTab(tab));

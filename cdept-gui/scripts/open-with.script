@@ -1,0 +1,20 @@
+# Opening views with a choice of tools (docs/tools.md): a double click on a GDS layout
+# asks between KLayout and Magic (both can show it in a tab) and the tools' windows;
+# "Open With" Magic shows the GDS read-only in a Magic tab, with the PDK's set-up.
+# Needs Magic, IHP SG13G2 and the Magic helper (cargo build -p cdept-magic); KLayout is
+# not needed:
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_MAGIC=/opt/ext/OpenLane/bin/magic \
+#   CDEPT_EXAMPLE=ihp-inv cdept-gui/scripts/run.sh cdept-gui/scripts/open-with.script
+
+open_view cells inv layout
+expect_open_choice 4
+open_with cells inv layout magic
+wait_frame
+tcl_expect ihp-sg13g2 tech name
+tcl_expect inv lindex [cellname list window] 0
+magic expect_cell inv
+magic expect_modified 0
+check_picture
+screenshot /tmp/cdept-open-with-magic.png
+quit

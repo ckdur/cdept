@@ -11,6 +11,7 @@
 //! - [`lef`]: LEF abstract views, read-only (docs/KLAYOUT.md §9).
 
 mod engine;
+pub mod klive;
 pub mod lef;
 pub mod protocol;
 pub mod reference;

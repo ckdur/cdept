@@ -27,7 +27,16 @@ const LAYOUT_KEY: &str = "cdept.layout.v3";
 const SETTINGS_KEY: &str = "cdept.settings";
 
 const QUIT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, egui::Key::Q);
-const PHASE3: &str = "Launching tools arrives in Phase 3";
+/// The window a launcher button starts (`libcdept::launch::Choice::id`); `None`: the
+/// tool runs inside CDePT only (ngspice runs in testbenches).
+fn launcher_choice(name: &str) -> Option<&'static str> {
+    match name {
+        "xschem" => Some("xschem-window"),
+        "KLayout" => Some("klayout-window"),
+        "Magic" => Some("magic-window"),
+        _ => None,
+    }
+}
 
 /// Global toolbar launchers (tool names from `libcdept::tools::KNOWN_TOOLS`).
 const LAUNCHERS: [&str; 4] = ["xschem", "KLayout", "Magic", "ngspice"];
@@ -51,9 +60,16 @@ fn embedded_format(format: Option<Format>) -> bool {
 }
 
 /// Whether a view opens in a document tab: schematics, symbols and layouts do.
+fn opens_in_tab(entry: &Entry) -> bool {
+    crate::views::simulation::is_testbench(entry)
+        || embedded_format(entry.format) && entry.main_file.is_some()
+}
+
+/// Whether a view opens with a double click: in a tab, or in a tool's window.
 pub(crate) fn has_viewer(entry: &Entry) -> bool {
     crate::views::simulation::is_testbench(entry)
         || embedded_format(entry.format) && entry.main_file.is_some()
+        || !libcdept::launch::choices_for(entry).is_empty()
 }
 
 /// The xschem schematic of a cell: the view named `schematic` if it is one, else the
@@ -116,6 +132,8 @@ pub struct CdeptApp {
     quit_confirmed: bool,
     /// The test script being run, if any.
     script: Option<Script>,
+    /// A tool chosen for a document about to start ("Open with": a GDS in Magic).
+    forced_tool: HashMap<DocId, &'static str>,
 }
 
 impl CdeptApp {
@@ -166,6 +184,7 @@ impl CdeptApp {
             guard: None,
             quit_confirmed: false,
             script,
+            forced_tool: HashMap::new(),
         };
         // With the project still being read, the documents come back once it is there.
         if !app.ctx.background.restoring() {
@@ -187,14 +206,20 @@ impl CdeptApp {
             .library(&doc.library)?
             .cell(&doc.cell)?
             .entry(&doc.view)?;
-        has_viewer(entry).then(|| entry.main_file.clone()).flatten()
+        opens_in_tab(entry).then(|| entry.main_file.clone()).flatten()
     }
 
     fn start_document(&mut self, ctx: &Context, id: DocId, doc: DocRef) -> bool {
         let (Some(file), Some(project)) = (self.document_file(&doc), &self.ctx.project) else {
             return false;
         };
+        let forced = self.forced_tool.remove(&id);
         match Format::of_file(&file) {
+            // A GDS shown by Magic: read into Magic, looked at (it stays a GDS view).
+            Some(Format::Gds) if forced == Some("magic") => {
+                let view = crate::views::MagicView::open(id, doc, file, false, project, ctx);
+                self.views.add_document(id, view);
+            }
             Some(Format::Magic) => {
                 let editable = project
                     .library(&doc.library)
@@ -289,10 +314,183 @@ impl CdeptApp {
                 },
             );
         }
+        // Several tabs can show it (a GDS in KLayout or Magic), or only tool windows
+        // can (a Qucs-S schematic, a netlist): the user's choice for the format, else
+        // ask. The windows of the tools that have a tab are in "Open With".
+        let choices = self.view_entry(&selection).map(libcdept::launch::choices_for);
+        let tabs = choices
+            .as_ref()
+            .map_or(0, |c| c.iter().filter(|c| c.embedded).count());
+        if let Some([only]) = choices.as_deref()
+            && !only.embedded
+        {
+            let tool = only.id;
+            return self.open_with(ctx, selection, tool);
+        }
+        if let (Some(choices), Some(format)) = (choices, self.view_format(&selection))
+            && (tabs > 1 || (tabs == 0 && choices.len() > 1))
+        {
+            let key = format.label().to_string();
+            match self.ctx.settings.open_with.get(&key).cloned() {
+                Some(tool) if choices.iter().any(|c| c.id == tool) => {
+                    return self.open_with(ctx, selection, &tool);
+                }
+                _ => {
+                    self.ctx.open_choice = Some((selection, choices, false));
+                    return;
+                }
+            }
+        }
         if let (Some(library), Some(cell), Some(view)) =
             (selection.library, selection.cell, selection.view)
         {
             self.open_document(ctx, DocRef::view(&library, &cell, &view));
+        }
+    }
+
+    fn view_entry(&self, selection: &Selection) -> Option<&Entry> {
+        let (Some(library), Some(cell), Some(view)) =
+            (&selection.library, &selection.cell, &selection.view)
+        else {
+            return None;
+        };
+        self.ctx
+            .project
+            .as_ref()?
+            .library(library)?
+            .cell(cell)?
+            .entry(view)
+    }
+
+    fn view_format(&self, selection: &Selection) -> Option<Format> {
+        self.view_entry(selection)?.format
+    }
+
+    /// Open a view with one tool: in a tab (embedded), or in the tool's own window.
+    fn open_with(&mut self, ctx: &Context, selection: Selection, tool: &str) {
+        let Some(choice) = libcdept::launch::choice(tool) else {
+            return;
+        };
+        let (Some(library), Some(cell), Some(view)) = (
+            selection.library.clone(),
+            selection.cell.clone(),
+            selection.view.clone(),
+        ) else {
+            return;
+        };
+        if choice.embedded {
+            let doc = DocRef::view(&library, &cell, &view);
+            if self.document_file(&doc).is_none() {
+                return;
+            }
+            let (id, win, new) = self.layout.open_document(doc.clone());
+            if new {
+                self.forced_tool.insert(id, choice.id);
+                self.start_document(ctx, id, doc);
+            }
+            Self::focus(ctx, win);
+            return;
+        }
+        let file = self
+            .view_entry(&selection)
+            .and_then(|e| e.main_file.clone());
+        let launched = self
+            .ctx
+            .launcher
+            .open(self.ctx.project.as_ref(), choice, file.as_deref());
+        match launched {
+            Ok(libcdept::launch::Launched::Started { log, .. }) => tracing::info!(
+                target: "cdept::tools",
+                "{library}/{cell}/{view} opened in {} (log {})",
+                choice.label,
+                log.display()
+            ),
+            Ok(libcdept::launch::Launched::Reused(text)) => {
+                tracing::info!(target: "cdept::tools", "{text}")
+            }
+            Err(e) => self.ctx.error(format!("{}: {e:#}", choice.label)),
+        }
+    }
+
+    /// How many tools the "Open with" question offers, while it is up (test scripts).
+    pub(crate) fn script_open_choice(&self) -> Option<usize> {
+        self.ctx.open_choice.as_ref().map(|(_, c, _)| c.len())
+    }
+
+    pub(crate) fn script_close_open_choice(&mut self) {
+        self.ctx.open_choice = None;
+    }
+
+    /// What a test script's `open` does: the first tab that can show the view.
+    pub(crate) fn script_open_action(&self, selection: Selection) -> Action {
+        let tabs: Vec<libcdept::launch::Choice> = self
+            .view_entry(&selection)
+            .map(libcdept::launch::choices_for)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|c| c.embedded)
+            .collect();
+        match tabs.as_slice() {
+            [first, _, ..] => Action::OpenWith(selection, first.id.to_string()),
+            _ => Action::OpenView(selection),
+        }
+    }
+
+    /// Start a tool's window without a file (tool bar, Tools menu).
+    fn launch(&mut self, choice: libcdept::launch::Choice) {
+        match self.ctx.launcher.open(self.ctx.project.as_ref(), choice, None) {
+            Ok(libcdept::launch::Launched::Started { log, .. }) => {
+                tracing::info!(target: "cdept::tools", "{} started (log {})", choice.label, log.display())
+            }
+            Ok(libcdept::launch::Launched::Reused(text)) => tracing::info!(target: "cdept::tools", "{text}"),
+            Err(e) => self.ctx.error(format!("{}: {e:#}", choice.label)),
+        }
+    }
+
+    /// The question "open with which tool?" after a double click.
+    fn open_choice_ui(&mut self, ctx: &Context) {
+        let Some((selection, choices, mut remember)) = self.ctx.open_choice.clone() else {
+            return;
+        };
+        let mut picked = None;
+        let mut cancel = false;
+        let modal = egui::Modal::new(egui::Id::new("open-with")).show(ctx, |ui| {
+            ui.set_max_width(460.0);
+            ui.heading("Open with");
+            ui.label(format!(
+                "{}/{}/{}",
+                selection.library.as_deref().unwrap_or(""),
+                selection.cell.as_deref().unwrap_or(""),
+                selection.view.as_deref().unwrap_or("")
+            ));
+            ui.add_space(6.0);
+            for c in &choices {
+                if ui.button(c.label).clicked() {
+                    picked = Some(c.id);
+                }
+            }
+            ui.add_space(6.0);
+            ui.checkbox(&mut remember, "Always open this kind of view this way");
+            if ui.button("Cancel").clicked() {
+                cancel = true;
+            }
+        });
+        if modal.should_close() {
+            cancel = true;
+        }
+        if let Some(tool) = picked {
+            if remember && let Some(format) = self.view_format(&selection) {
+                self.ctx
+                    .settings
+                    .open_with
+                    .insert(format.label().to_string(), tool.to_string());
+            }
+            self.ctx.open_choice = None;
+            self.open_with(ctx, selection, tool);
+        } else if cancel {
+            self.ctx.open_choice = None;
+        } else if let Some(state) = self.ctx.open_choice.as_mut() {
+            state.2 = remember;
         }
     }
 
@@ -940,6 +1138,7 @@ impl CdeptApp {
         }
         if win == WindowId::Main {
             self.guard_ui(ui.ctx());
+            self.open_choice_ui(ui.ctx());
         }
         dialogs::show(ui.ctx(), &mut self.ctx);
         // CDePT's own path prompts (and the native dialogs behind them).
@@ -1098,8 +1297,16 @@ impl CdeptApp {
                 crate::import::tools_menu(ui, &mut self.ctx);
                 ui.separator();
                 for name in LAUNCHERS {
-                    ui.add_enabled(false, Button::new(format!("Launch {name}")))
-                        .on_disabled_hover_text(PHASE3);
+                    let choice = launcher_choice(name).and_then(libcdept::launch::choice);
+                    let button = ui
+                        .add_enabled(choice.is_some(), Button::new(format!("Launch {name}")))
+                        .on_disabled_hover_text("Runs inside CDePT (testbenches)");
+                    if button.clicked()
+                        && let Some(choice) = choice
+                    {
+                        self.launch(choice);
+                        ui.close();
+                    }
                 }
                 ui.separator();
                 if ui.button("Detect Tools").clicked() {
@@ -1225,13 +1432,25 @@ impl CdeptApp {
             pdk_label(ui, &self.ctx);
             ui.separator();
             for name in LAUNCHERS {
-                let hover = match self.ctx.tools.find(name) {
-                    Some(t) if t.found() => PHASE3.to_string(),
-                    Some(_) => format!("{name} not found on PATH"),
-                    None => "Detecting…".to_string(),
+                let choice = launcher_choice(name).and_then(libcdept::launch::choice);
+                let found = matches!(self.ctx.tools.find(name), Some(t) if t.found());
+                let hover = match (choice, self.ctx.tools.find(name)) {
+                    (None, _) => "Runs inside CDePT (testbenches)".to_string(),
+                    (Some(_), Some(t)) if t.found() => {
+                        format!("Start a {name} window with the project's set-up")
+                    }
+                    (Some(_), Some(_)) => format!("{name} not found on PATH"),
+                    (Some(_), None) => "Detecting…".to_string(),
                 };
-                ui.add_enabled(false, Button::new(format!("▶ {name}")))
+                let button = ui
+                    .add_enabled(choice.is_some() && found, Button::new(format!("▶ {name}")))
+                    .on_hover_text(&hover)
                     .on_disabled_hover_text(hover);
+                if button.clicked()
+                    && let Some(choice) = choice
+                {
+                    self.launch(choice);
+                }
             }
             if let Some(tab) = self.active_doc(win) {
                 ui.separator();
@@ -1313,6 +1532,7 @@ impl CdeptApp {
             }
             Action::CloseTab(tab) => self.layout.close_tab(tab),
             Action::OpenView(selection) => self.open_view(ctx, selection),
+            Action::OpenWith(selection, tool) => self.open_with(ctx, selection, &tool),
             Action::OpenFile(file) => self.open_file(ctx, &file),
             Action::DetachTab(tab) => {
                 if let Some(id) = self.layout.detach(tab) {

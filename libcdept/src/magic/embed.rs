@@ -65,6 +65,18 @@ pub fn startup_script(project: &Project, file: &Path) -> String {
 /// Load `file` (a `.mag` view) as the edit cell and fit it in the window. A file that
 /// does not exist yet is created as an empty cell by Magic when it is saved.
 pub fn load_script(file: &Path) -> String {
+    if crate::Format::of_file(file) == Some(crate::Format::Gds) {
+        // A GDS view looked at in Magic: read, its (first) top cell shown.
+        let stem = cell_of(file);
+        return format!(
+            "gds read {f}\n\
+             if {{[cellname list exists {c}] ne {{0}}}} {{load {c}}} else {{\n\
+               load [lindex [lsearch -inline -all -not -exact [cellname list topcells] (UNNAMED)] 0]\n\
+             }}\nselect clear\ncatch {{view}}\n",
+            f = word(&file.to_string_lossy()),
+            c = word(&stem)
+        );
+    }
     let base = file.with_extension("");
     format!(
         "load {}\nselect clear\ncatch {{view}}\n",

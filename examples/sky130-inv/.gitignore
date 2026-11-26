@@ -3,3 +3,4 @@ cdept.local.toml
 # made again by `cdept tech refresh` (2.8 MB)
 tech.catalog.json
 magic/
+.cdept/

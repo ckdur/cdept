@@ -637,7 +637,8 @@ impl MagicView {
                 let words = tcl::parse_list(&text).unwrap_or_default();
                 if let [cell, modified, selection, ..] = words.as_slice() {
                     self.cell = cell.clone();
-                    self.modified = modified != "0" && !modified.is_empty();
+                    // A view that cannot be saved (a GDS read into Magic) has nothing to lose.
+                    self.modified = self.editable && modified != "0" && !modified.is_empty();
                     let names: Vec<String> = tcl::parse_list(selection)
                         .unwrap_or_default()
                         .iter()
