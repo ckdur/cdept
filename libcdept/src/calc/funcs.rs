@@ -6,6 +6,7 @@
 
 use eyre::{Result, bail, eyre};
 
+use super::jitter;
 use super::measure::{self, Edge, Range};
 use super::spectral::{self, LinearityMethod, SpectrumOpts, Window};
 use super::wave::{C, Samples, Waveform};
@@ -281,10 +282,20 @@ macro_rules! real_fn {
     };
 }
 
+/// The most points a function makes up (resample, the FFT length): a typo such as
+/// `n=1e12` is an error, not an allocation of terabytes.
+const MAX_POINTS: f64 = 16_777_216.0;
+
 fn spectrum_opts(b: &Bound) -> Result<SpectrumOpts> {
+    let n = b.opt_num("n")?;
+    if let Some(n) = n
+        && !(8.0..=MAX_POINTS).contains(&n)
+    {
+        bail!("n must be between 8 and {MAX_POINTS} (got {n})");
+    }
     Ok(SpectrumOpts {
         window: Window::parse(&b.str_or("window", "hann")?)?,
-        n: b.opt_num("n")?.map(|n| n as usize),
+        n: n.map(|n| n as usize),
         range: b.range()?,
     })
 }
@@ -609,6 +620,14 @@ static FUNCS: &[Func] = &[
                 b.opt_num("from")?.unwrap_or(w.x[0]),
                 b.opt_num("to")?.unwrap_or(w.x[w.len() - 1]),
             );
+            let count = match (b.opt_num("n")?, b.opt_num("step")?) {
+                (Some(n), None) => n,
+                (None, Some(s)) if s > 0.0 => (t - f) / s + 1.0,
+                _ => 0.0,
+            };
+            if !(count <= MAX_POINTS) {
+                bail!("resample would make {count:.0} points (at most {MAX_POINTS})");
+            }
             let xs: Vec<f64> = match (b.opt_num("n")?, b.opt_num("step")?) {
                 (Some(n), None) if n >= 2.0 => (0..n as usize)
                     .map(|k| f + (t - f) * k as f64 / (n - 1.0))
@@ -948,7 +967,166 @@ static FUNCS: &[Func] = &[
             )?)
         },
     },
+    // Jitter, statistics, sampling, power spectral density
+    Func {
+        names: &["periods"],
+        params: &["w", "?level", "?edge", "?from", "?to"],
+        doc: "The length of every period between `edge` crossings (rise by default) of `level` (default mid-swing): a waveform over the time each period starts.",
+        run: |_, b| wave(jitter::periods(&jitter_edges(b, 3)?)),
+    },
+    Func {
+        names: &["period_jitter", "jitter_period"],
+        params: &["w", "?stat", "?level", "?edge", "?from", "?to"],
+        doc: "Period jitter: stat = rms (standard deviation of the periods, default), pp (peak to peak), mean or max.",
+        run: |_, b| {
+            let p = jitter::periods(&jitter_edges(b, 3)?);
+            num(jitter::figure(&p.y.re(), &b.str_or("stat", "rms")?)?)
+        },
+    },
+    Func {
+        names: &["cc_periods"],
+        params: &["w", "?level", "?edge", "?from", "?to"],
+        doc: "Cycle-to-cycle differences of consecutive periods: a waveform over time.",
+        run: |_, b| wave(jitter::cycle_to_cycle(&jitter_edges(b, 3)?)),
+    },
+    Func {
+        names: &["cc_jitter", "jitter_cc", "c2c_jitter"],
+        params: &["w", "?stat", "?level", "?edge", "?from", "?to"],
+        doc: "Cycle-to-cycle jitter: rms (default), pp, mean or max (the largest |difference|, the usual JEDEC figure) of the differences of consecutive periods.",
+        run: |_, b| {
+            let c = jitter::cycle_to_cycle(&jitter_edges(b, 3)?);
+            num(jitter::figure(&c.y.re(), &b.str_or("stat", "rms")?)?)
+        },
+    },
+    Func {
+        names: &["tie"],
+        params: &["w", "?period", "?level", "?edge", "?from", "?to"],
+        doc: "Time interval error of every crossing against the ideal clock: the least-squares fit of the crossings, or `period` with its phase at the mean error. A waveform over time.",
+        run: |_, b| wave(jitter::tie(&jitter_edges(b, 2)?, b.opt_num("period")?)?),
+    },
+    Func {
+        names: &["tie_jitter", "jitter_tie"],
+        params: &["w", "?stat", "?period", "?level", "?edge", "?from", "?to"],
+        doc: "Time interval error jitter: rms (default), pp, mean or max of tie().",
+        run: |_, b| {
+            let t = jitter::tie(&jitter_edges(b, 2)?, b.opt_num("period")?)?;
+            num(jitter::figure(&t.y.re(), &b.str_or("stat", "rms")?)?)
+        },
+    },
+    Func {
+        names: &["crossings", "edges"],
+        params: &["w", "?level", "?edge", "?from", "?to"],
+        doc: "The crossing times as a waveform over the crossing number (1, 2, ...): edge rise (default), fall or either.",
+        run: |_, b| {
+            let t = jitter_edges(b, 1)?;
+            let mut w = Waveform::real((1..=t.len()).map(|k| k as f64).collect(), t);
+            w.x_name = "crossing".into();
+            w.unit = "time".into();
+            wave(w)
+        },
+    },
+    Func {
+        names: &["histogram", "hist"],
+        params: &["w", "?bins", "?min", "?max", "?weight"],
+        doc: "Histogram of the y values: counts over the bin centres (bins default 50, between min and max of the data unless given). weight=\"time\" counts the x span of each sample (time spent in a bin) instead of 1 per sample.",
+        run: |_, b| {
+            let weighted = match b.str_or("weight", "samples")?.to_lowercase().as_str() {
+                "time" | "x" => true,
+                "samples" | "count" | "" => false,
+                other => return Err(eyre!("weight must be samples or time, not '{other}'")),
+            };
+            let bins = b.num_or("bins", 50.0)?;
+            if !(bins >= 1.0 && bins <= 1e6) {
+                bail!("bins must be between 1 and 1000000");
+            }
+            wave(jitter::histogram(
+                b.wave("w")?,
+                bins as usize,
+                b.opt_num("min")?,
+                b.opt_num("max")?,
+                weighted,
+            )?)
+        },
+    },
+    Func {
+        names: &["stddev", "std", "sigma"],
+        params: &["w", "?from", "?to"],
+        doc: "Sample standard deviation of the y values (every sample counts once; for a time-weighted spread use rms(w - avg(w))).",
+        run: |_, b| {
+            num(jitter::stats(&b.range()?.apply(b.wave("w")?).real_y("stddev")?.to_vec())?.1)
+        },
+    },
+    Func {
+        names: &["percentile"],
+        params: &["w", "p", "?from", "?to"],
+        doc: "The p-th percentile (0..100) of the y values, linear interpolation between samples.",
+        run: |_, b| {
+            num(jitter::percentile(
+                b.range()?.apply(b.wave("w")?).real_y("percentile")?,
+                b.num("p")?,
+            )?)
+        },
+    },
+    Func {
+        names: &["median"],
+        params: &["w", "?from", "?to"],
+        doc: "The median of the y values (percentile 50).",
+        run: |_, b| {
+            num(jitter::percentile(
+                b.range()?.apply(b.wave("w")?).real_y("median")?,
+                50.0,
+            )?)
+        },
+    },
+    Func {
+        names: &["sample", "sample_hold"],
+        params: &["w", "period", "?from", "?n"],
+        doc: "Zero-order-hold samples every `period` from `from` (default the start): the value at or just before each instant, as an ADC output read at its clock. At most n samples.",
+        run: |_, b| {
+            let n = b.opt_num("n")?;
+            if let Some(n) = n
+                && !(n >= 1.0)
+            {
+                bail!("n must be at least 1");
+            }
+            wave(jitter::sample(
+                b.wave("w")?,
+                b.num("period")?,
+                b.opt_num("from")?,
+                n.map(|n| n.min(1e9) as usize),
+            )?)
+        },
+    },
+    Func {
+        names: &["psd"],
+        params: &["w", "?window", "?n", "?segments", "?from", "?to"],
+        doc: "Power spectral density (Welch: `segments` 50 % overlapping windowed segments of n points, default 8 segments, hann window), one-sided, in unit^2/Hz; its integral is the variance. Use db10(psd(...)) for dB/Hz, sqrt() for unit/sqrt(Hz).",
+        run: |_, b| {
+            let seg = b.num_or("segments", 8.0)?;
+            if !(seg >= 1.0 && seg <= 1024.0) {
+                bail!("segments must be between 1 and 1024");
+            }
+            wave(jitter::psd(
+                b.wave("w")?,
+                Window::parse(&b.str_or("window", "hann")?)?,
+                b.opt_num("n")?.map(|n| n.clamp(0.0, 1e9) as usize),
+                seg as usize,
+                b.range()?,
+            )?)
+        },
+    },
 ];
+
+/// The crossings a jitter function measures: level, edge, range of its arguments.
+fn jitter_edges(b: &Bound, min: usize) -> Result<Vec<f64>> {
+    jitter::edges(
+        b.wave("w")?,
+        b.opt_num("level")?,
+        b.edge_or("edge", "rise")?,
+        b.range()?,
+        min,
+    )
+}
 
 fn linearity_method(b: &Bound) -> Result<LinearityMethod> {
     match b.str_or("method", "edge")?.to_lowercase().as_str() {

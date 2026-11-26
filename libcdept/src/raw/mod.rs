@@ -157,8 +157,8 @@ impl RawFile {
             .map(|e| e.to_string_lossy().to_lowercase())
             .unwrap_or_default();
         if matches!(ext.as_str(), "csv" | "tsv" | "txt" | "dat" | "tab") {
-            let bytes = std::fs::read(file)
-                .wrap_err_with(|| format!("cannot read {}", file.display()))?;
+            let bytes =
+                std::fs::read(file).wrap_err_with(|| format!("cannot read {}", file.display()))?;
             return Self::from_table(bytes)
                 .wrap_err_with(|| format!("{} is not a waveform table", file.display()));
         }

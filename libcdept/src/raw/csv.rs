@@ -63,7 +63,11 @@ fn number(text: &str) -> Option<f64> {
 
 fn is_comment(line: &str) -> bool {
     let t = line.trim_start();
-    t.is_empty() || t.starts_with('#') || t.starts_with('%') || t.starts_with('*') || t.starts_with("//")
+    t.is_empty()
+        || t.starts_with('#')
+        || t.starts_with('%')
+        || t.starts_with('*')
+        || t.starts_with("//")
 }
 
 /// The plot name a table gets from its x column: `time` -> a transient, `freq...` -> AC.
@@ -97,18 +101,31 @@ pub(super) fn parse(data: &[u8]) -> Result<Vec<Plot>> {
     let delim = delimiter(first);
     let head = fields(first, delim);
     if head.len() < 2 {
-        bail!("line {}: a table needs at least two columns (x and a signal)", first_no + 1);
+        bail!(
+            "line {}: a table needs at least two columns (x and a signal)",
+            first_no + 1
+        );
     }
     if head.len() > MAX_COLUMNS {
-        bail!("line {}: {} columns (at most {MAX_COLUMNS})", first_no + 1, head.len());
+        bail!(
+            "line {}: {} columns (at most {MAX_COLUMNS})",
+            first_no + 1,
+            head.len()
+        );
     }
-    let named = head.iter().any(|f| number(f).is_none() && !f.eq_ignore_ascii_case("nan"));
+    let named = head
+        .iter()
+        .any(|f| number(f).is_none() && !f.eq_ignore_ascii_case("nan"));
     let names: Vec<String> = if named {
         let mut seen = std::collections::HashSet::new();
         head.iter()
             .enumerate()
             .map(|(i, n)| {
-                let base = if n.is_empty() { format!("col{i}") } else { n.clone() };
+                let base = if n.is_empty() {
+                    format!("col{i}")
+                } else {
+                    n.clone()
+                };
                 let mut name = base.clone();
                 let mut k = 2;
                 while !seen.insert(name.to_lowercase()) {
@@ -129,14 +146,25 @@ pub(super) fn parse(data: &[u8]) -> Result<Vec<Plot>> {
     let mut last_x = f64::NEG_INFINITY;
     let mut push_row = |no: usize, cells: Vec<String>| -> Result<()> {
         if cells.len() > nv {
-            bail!("line {}: {} fields, the header has {nv}", no + 1, cells.len());
+            bail!(
+                "line {}: {} fields, the header has {nv}",
+                no + 1,
+                cells.len()
+            );
         }
         let x = cells.first().and_then(|c| number(c));
         let Some(x) = x.filter(|x| x.is_finite()) else {
-            bail!("line {}: the x value '{}' is not a finite number", no + 1, cells.first().map_or("", String::as_str));
+            bail!(
+                "line {}: the x value '{}' is not a finite number",
+                no + 1,
+                cells.first().map_or("", String::as_str)
+            );
         };
         if x < last_x {
-            bail!("line {}: x goes back from {last_x} to {x} (the x column must not decrease)", no + 1);
+            bail!(
+                "line {}: x goes back from {last_x} to {x} (the x column must not decrease)",
+                no + 1
+            );
         }
         last_x = x;
         for i in 0..nv {
@@ -162,7 +190,11 @@ pub(super) fn parse(data: &[u8]) -> Result<Vec<Plot>> {
         .enumerate()
         .map(|(i, n)| Var {
             name: n.clone(),
-            unit: if i == 0 { n.to_lowercase() } else { String::new() },
+            unit: if i == 0 {
+                n.to_lowercase()
+            } else {
+                String::new()
+            },
         })
         .collect();
     Ok(vec![Plot {
@@ -188,7 +220,8 @@ mod tests {
 
     #[test]
     fn reads_tables_of_every_kind() {
-        let raw = table("# made by hand\ntime,v(out),i(vdd)\n0,0,1u\n1n,0.5,\n2n,1,3e-6\n").unwrap();
+        let raw =
+            table("# made by hand\ntime,v(out),i(vdd)\n0,0,1u\n1n,0.5,\n2n,1,3e-6\n").unwrap();
         let p = &raw.plots()[0];
         assert_eq!(p.kind(), "tran");
         assert_eq!(p.points, 3);
@@ -198,13 +231,25 @@ mod tests {
         let i = raw.vector(0, "I(VDD)").unwrap().y.re();
         assert!(i[1].is_nan() && (i[2] - 3e-6).abs() < 1e-18);
         // tabs, semicolons, spaces, no header, quotes, a BOM
-        assert_eq!(table("f\tgain\n1\t2\n10\t3\n").unwrap().plots()[0].kind(), "ac");
-        assert_eq!(table("x;y\n1;2\n").unwrap().vector(0, "y").unwrap().y.re(), vec![2.0]);
+        assert_eq!(
+            table("f\tgain\n1\t2\n10\t3\n").unwrap().plots()[0].kind(),
+            "ac"
+        );
+        assert_eq!(
+            table("x;y\n1;2\n").unwrap().vector(0, "y").unwrap().y.re(),
+            vec![2.0]
+        );
         let raw = table("1 2 3\n2 4 6\n").unwrap();
         assert_eq!(raw.plots()[0].vars[2].name, "col2");
-        assert_eq!(table("\u{feff}\"a,b\",c\n1,2\n").unwrap().plots()[0].vars[0].name, "a,b");
+        assert_eq!(
+            table("\u{feff}\"a,b\",c\n1,2\n").unwrap().plots()[0].vars[0].name,
+            "a,b"
+        );
         // duplicate names get #2
-        assert_eq!(table("t,v,v\n0,1,2\n").unwrap().plots()[0].vars[2].name, "v#2");
+        assert_eq!(
+            table("t,v,v\n0,1,2\n").unwrap().plots()[0].vars[2].name,
+            "v#2"
+        );
     }
 
     #[test]

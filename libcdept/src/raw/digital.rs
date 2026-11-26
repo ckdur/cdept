@@ -77,14 +77,21 @@ pub(crate) fn open(path: &Path, format: &str) -> Result<Plot> {
     f.rewind()?;
     let wave = read(path)?;
     let h = wave.hierarchy();
-    let (mul, div) = match h.timescale().and_then(|ts| Some((ts.factor, ts.unit.to_exponent()?))) {
+    let (mul, div) = match h
+        .timescale()
+        .and_then(|ts| Some((ts.factor, ts.unit.to_exponent()?)))
+    {
         Some((factor, e)) if e < 0 => (factor as f64, 10f64.powi(-(e as i32))),
         Some((factor, e)) => (factor as f64 * 10f64.powi(e as i32), 1.0),
         None => (1.0, 1.0),
     };
     let mut vars = vec![Var {
         name: "time".into(),
-        unit: if h.timescale().is_some() { "time".into() } else { "tick".into() },
+        unit: if h.timescale().is_some() {
+            "time".into()
+        } else {
+            "tick".into()
+        },
     }];
     let mut signals = vec![None];
     let mut seen = std::collections::HashSet::new();
@@ -161,7 +168,12 @@ impl Source {
         let mut wave = self.wave.lock().unwrap_or_else(|e| e.into_inner());
         let sig = *sig;
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| wave.load_signals(&[sig])))
-            .map_err(|_| eyre!("the waveform reader gave up on '{}' (the file is damaged)", plot.vars[col].name))?;
+            .map_err(|_| {
+                eyre!(
+                    "the waveform reader gave up on '{}' (the file is damaged)",
+                    plot.vars[col].name
+                )
+            })?;
         let table: Vec<u64> = wave.time_table().to_vec();
         let signal = wave
             .get_signal(sig)
@@ -270,7 +282,13 @@ $var wire 4 \" cnt [3:0] $end\n$var real 64 # vin $end\n$upscope $end\n$enddefin
         for n in [0, 10, 40, 90, 140, 200, VCD.len() - 3] {
             let p = write(dir.path(), "cut.vcd", &VCD.as_bytes()[..n.min(VCD.len())]);
             if let Ok(raw) = RawFile::open(&p) {
-                for v in raw.plots()[0].vars.iter().skip(1).map(|v| v.name.clone()).collect::<Vec<_>>() {
+                for v in raw.plots()[0]
+                    .vars
+                    .iter()
+                    .skip(1)
+                    .map(|v| v.name.clone())
+                    .collect::<Vec<_>>()
+                {
                     let _ = raw.vector(0, &v);
                 }
             }
@@ -283,7 +301,13 @@ $var wire 4 \" cnt [3:0] $end\n$var real 64 # vin $end\n$upscope $end\n$enddefin
         }
         // an FST / GHW that is only noise
         for name in ["n.fst", "n.ghw"] {
-            let p = write(dir.path(), name, &(0..5000u32).map(|i| (i * 7919 >> 3) as u8).collect::<Vec<_>>());
+            let p = write(
+                dir.path(),
+                name,
+                &(0..5000u32)
+                    .map(|i| (i * 7919 >> 3) as u8)
+                    .collect::<Vec<_>>(),
+            );
             assert!(RawFile::open(&p).is_err());
         }
         assert!(RawFile::open(&write(dir.path(), "e.vcd", b"")).is_err());
