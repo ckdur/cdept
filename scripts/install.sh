@@ -15,7 +15,8 @@
 #                              or `klayout` next to cdept or on PATH
 #   share/cdept/pdk/           device maps of PDKs (schematic symbol -> layout PCell,
 #                              docs/LINKING.md)
-#   share/doc/cdept/           licences
+#   share/doc/cdept/           licences; uberwave/ when UberWave is built in (its licences
+#                              and the notices of what it contains)
 #
 # --prefix   where it will run from (default /usr/local); the files do not depend on it
 # --destdir  staging root for packagers: files go to D/P, nothing is recorded with D
@@ -55,6 +56,28 @@ install -d "$dest/bin"
 install -m 755 "$target/cdept" "$dest/bin/cdept"
 install -d "$dest/share/doc/cdept"
 install -m 644 LICENSE "$dest/share/doc/cdept/LICENSE"
+
+# When cdept has UberWave built in (its viewer or its data engine), its licences and the
+# notices of what it contains go with the program. The source is looked for as the
+# build scripts do.
+rm -rf "$dest/share/doc/cdept/uberwave"
+if "$target/cdept" tools | grep -Eq '^(UberWave .*built in \(embedded\)|Waveform tabs .*data engine built in)'; then
+    uberwave=
+    for candidate in "${UBERWAVE_SRC:-}" "${UBERWAVE_SRC:+$UBERWAVE_SRC/..}" \
+        "$root/cdept-uberwave/uberwave" "$root/../uberwave"; do
+        if [ -n "$candidate" ] && [ -f "$candidate/LICENSE-MIT" ] && [ -d "$candidate/Docs/THIRD_PARTY_LICENSES" ]; then
+            uberwave=$candidate
+            break
+        fi
+    done
+    [ -n "$uberwave" ] || {
+        echo "install.sh: cdept has UberWave built in, but its source (for the licence files) was not found; set UBERWAVE_SRC" >&2
+        exit 1
+    }
+    install -d "$dest/share/doc/cdept/uberwave/third-party"
+    install -m 644 "$uberwave/LICENSE" "$uberwave/LICENSE-MIT" "$uberwave/LICENSE-GPL-2.0" "$dest/share/doc/cdept/uberwave/"
+    install -m 644 "$uberwave"/Docs/THIRD_PARTY_LICENSES/* "$dest/share/doc/cdept/uberwave/third-party/"
+fi
 
 if [ $helper = 1 ]; then
     install -m 755 "$target/cdept-xschem" "$dest/bin/cdept-xschem"

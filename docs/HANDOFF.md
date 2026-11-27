@@ -24,14 +24,19 @@ commit). The only working copy is the submodule `cdept-uberwave/uberwave`
 `AI:` footer when AI wrote them. After pushing, move the pointer in CDePT. The mirror does not update by
 itself: add the original as the remote `upstream`, fetch and merge. CI builds the stub.
 
-## Own waveform viewer (SYMBI-89, steps 1 and 2 done 2026-11-27)
+## Own waveform viewer (SYMBI-89: first fixes and steps 1-4 done 2026-11-27)
 `cdept-wavedata` binds UberWave's data engine (C interface `uwdata`); waveform tabs in
-`cdept-gui/src/views/wave/` (File > Open Waveform File, or "Waveform Tab" at a run point).
-Tests: `cdept-gui/scripts/wave/run.sh`. UberWave's own viewer stays for good as a
-separate-window option (do not remove `cdept-uberwave` or the process fallback). **The user
-reviews the prototype before steps 3-5.** Open: 3.4 s freeze when a waveform tab is
-detached, debug-build stutter with 25 traces, legend over the plot, colours repeat, no
-PSF or ASCII AC yet, monotonic x assumed. CI builds the data engine's stub.
+`cdept-gui/src/views/wave/` (File > Open Waveform File / Open PSF Results Folder, or
+"Waveform Tab" / "(family)" in the Simulation tab). Tests: `cdept-gui/scripts/wave/run.sh`,
+`cdept-gui/scripts/wave-tabs.script`; CI job `uberwave` (`scripts/ci/uberwave.sh`) builds the
+real engine and the built-in viewer (it needs Symbiotic EDA's GitLab to be up).
+UberWave's own viewer stays for good as a separate-window option (do not remove
+`cdept-uberwave` or the process fallback). **Next is step 5** (tabs become the default:
+Open buttons and `cdept wave`, calculator send target, restore tabs after restart); the user
+has not tried the tabs by hand yet. Other open items: NOTES.md (CSV/digital in tabs,
+families with mixed analyses, labels of parametric sweep parts, preview before the min/max
+index, CJK names). Quitting during a simulation suite leaves ngspice running (SYMBI-90).
+`ota.script` times out on a loaded machine; `cdept sim suite cells ota5t` passed 90/90.
 
 ## Tool and test environment
 Tools in `/opt/ext/OpenLane/bin`, PDKs in `/opt/ext/OpenPDKs`. Real-tool tests skip unless

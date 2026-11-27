@@ -450,8 +450,11 @@ runs and tests, used up the inotify instances (the watch tests then failed). Ope
 - [ ] `IpcSocketRoundTrip` (UberWave ctest) failed once when run in parallel with
       `ShimEmbedRoundTrip` on the user's desktop (cursor B read back off), passed 4 times
       alone and paired afterwards; not reproduced.
-- [ ] `AsciiMultiPlotConvert`, `Wp2CompatTests` (UberWave ctest) fail here and at the base
-      commit: their fixtures (`wp2-parser/spicelib/...`) are not in the checkout.
+- [x] `AsciiMultiPlotConvert`, `Wp2CompatTests` (UberWave ctest) failed only without the
+  spicelib submodule's raw files: with `git submodule update --init wp2-parser/spicelib` they
+  pass; without it CMake leaves them out (UberWave 6375c11, which also removes the
+  `[Task Diagnostic]` message and adds the missing third-party notices; `scripts/install.sh`
+  installs them under `share/doc/cdept/uberwave/`).
 - [ ] `layout-checks.script` fails at a45461f too (not looked into, not Phase 4/5).
 - [ ] Versions: the worktree build cannot run vergen's git probe (symlinked submodules), so
       `cdept --version` shows defaults there.

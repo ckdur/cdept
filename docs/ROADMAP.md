@@ -305,6 +305,8 @@ real SLURM cluster (smoke-tested only), the post-layout DUT swap (Phase 7).
   separate window** (decided 2026-11-27): the built-in one (`cdept-uberwave` and its shim)
   and the standalone `UberWaveViewer` process, with calculator traces, cursors and markers.
   Nothing of that integration is removed.
+  Steps 3 and 4 built 2026-11-27 too (panes, signal list, families, calculator results and
+  markers; AC/Bode, eye, noise, operating point, PSF, sweeps that go back). Step 5 is next.
   Steps 1 and 2 built 2026-11-27: `uwdata` (C interface in `wp3-data-engine/capi`),
   `cdept-wavedata`, waveform tabs `cdept-gui/src/views/wave` (docs/NOTES.md). Step 3
   (panes, families, calculator traces, markers) and step 4 (AC forms and Bode with
