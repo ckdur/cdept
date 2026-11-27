@@ -42,7 +42,7 @@ Asking for `embedded` in a cdept that does not have it is an error that says how
 
 UberWave lives in its own **private** repository. `cdept-uberwave`, a crate of this
 workspace, builds its library `uberwave_embed` with CMake and links it into `cdept`. CDePT
-has it as an opt-in submodule, `cdept-uberwave/uberwave`: branch `ipc-multifile` of the
+has it as an opt-in submodule, `cdept-uberwave/uberwave`: branch `main` of the private
 mirror `gitlab.symbioticeda.com/ckdur.iso/uberwave` (the changes CDePT needs are not in the
 original repository yet). With an SSH key that may read the mirror:
 
@@ -56,6 +56,11 @@ cargo run -- tools | grep UberWave       # built in (embedded)
 `git clone --recurse-submodules` leaves it out, so cloning works without access to it.
 After a `git pull` that moves the submodule, run the `git submodule update` line again.
 
+- To work on UberWave, work in the submodule: `git -C cdept-uberwave/uberwave switch main`
+  (`git submodule update` leaves it on a commit, not on a branch), commit, push to `origin`
+  (the mirror), then commit the new submodule pointer in CDePT. Push with
+  `git push -o ci.skip`: UberWave's pipeline publishes a GitLab Pages site from every push to
+  `main`. The original repository can be added as a fetch-only remote `upstream`.
 - `UBERWAVE_SRC` names another checkout (the repository root; the `wp5-viewer` folder is
   accepted too) and wins over the submodule. Without both, the build also looks for a sibling
   `../uberwave` of the CDePT repository. A source is used only when it has
@@ -257,7 +262,7 @@ CDePT finds the program, in this order:
 
 The version shown by `cdept tools` is the first line of `UberWaveViewer --version` (for example
 `UberWaveViewer 0.1.0 ipc 1`); `ipc 1` means the viewer has the control channel. Families, the
-reuse of a running viewer and the calculator traces need it (the branch `ipc-multifile` of the
+reuse of a running viewer and the calculator traces need it (the `main` branch of our mirror of the
 `uberwave` repository, until it is merged). With an older viewer CDePT keeps working as before: it
 opens the first file, says so and lists the other files (**File > Import** adds them);
 calculator traces cannot be sent to it, scalar results are still printed.

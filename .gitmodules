@@ -7,5 +7,5 @@
 [submodule "cdept-uberwave/uberwave"]
 	path = cdept-uberwave/uberwave
 	url = ssh://git@gitlab.symbioticeda.com:20022/ckdur.iso/uberwave.git
-	branch = ipc-multifile
+	branch = main
 	update = none

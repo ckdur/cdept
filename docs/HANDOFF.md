@@ -14,16 +14,14 @@ brought up to date on this day; SYMBI-79 (VACASK on sky130) stays in the backlog
 - Import of design files, LEF abstract views, `tech.toml` as source of truth.
 
 ## UberWave
-The built-in viewer needs the branch `ipc-multifile` (9 commits on the original `main`, tip
-0108e4b). The original repository, `Juan_25/uberwave`, refuses our pushes, so on 2026-11-27 a
-private mirror was made, `gitlab.symbioticeda.com/ckdur.iso/uberwave` (all branches and tags
-of the original plus `ipc-multifile`). CDePT has it as the opt-in submodule
-`cdept-uberwave/uberwave`:
-`git submodule update --init --checkout cdept-uberwave/uberwave`. The mirror does not update
-by itself: fetch from the original and push to it. On the development machine the checkout
-`../uberwave-ipc` tracks `mirror/ipc-multifile`; new UberWave commits go to the mirror, then
-the submodule pointer is moved. Still to do: get the branch into the original. CI builds the
-stub.
+Our UberWave is the private mirror `gitlab.symbioticeda.com/ckdur.iso/uberwave` (made
+2026-11-27 because `Juan_25/uberwave` refuses our pushes). Its `main` is the original `main`
+plus the 9 commits CDePT needs (tip 0108e4b; the branch `ipc-multifile` is at the same
+commit). The only working copy is the opt-in submodule `cdept-uberwave/uberwave`
+(`git submodule update --init --checkout cdept-uberwave/uberwave`, then
+`git switch main` inside it to work). Push there with `-o ci.skip` (the pipeline publishes
+GitLab Pages from `main`), then move the pointer in CDePT. The mirror does not update by
+itself: add the original as the remote `upstream`, fetch and merge. CI builds the stub.
 
 ## Tool and test environment
 Tools in `/opt/ext/OpenLane/bin`, PDKs in `/opt/ext/OpenPDKs`. Real-tool tests skip unless
@@ -51,4 +49,4 @@ in UberWave 50a38c4) and the session died. Run builds, tests and torture inputs 
 
 ## Open from this round
 Per phase in [NOTES.md](NOTES.md). The larger ones: no nets or flylines for Magic;
-ihp-sg13g2 Magic device map not tried with a real generate; UberWave not merged upstream.
+ihp-sg13g2 Magic device map not tried with a real generate; UberWave changes not in the original.
