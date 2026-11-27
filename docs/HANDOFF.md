@@ -27,8 +27,9 @@ itself: add the original as the remote `upstream`, fetch and merge. CI builds th
 ## Own waveform viewer (SYMBI-89, steps 1 and 2 done 2026-11-27)
 `cdept-wavedata` binds UberWave's data engine (C interface `uwdata`); waveform tabs in
 `cdept-gui/src/views/wave/` (File > Open Waveform File, or "Waveform Tab" at a run point).
-Tests: `cdept-gui/scripts/wave/run.sh`. The old embedded viewer stays until step 5. **The
-user reviews the prototype before steps 3-5.** Open: 3.4 s freeze when a waveform tab is
+Tests: `cdept-gui/scripts/wave/run.sh`. UberWave's own viewer stays for good as a
+separate-window option (do not remove `cdept-uberwave` or the process fallback). **The user
+reviews the prototype before steps 3-5.** Open: 3.4 s freeze when a waveform tab is
 detached, debug-build stutter with 25 traces, legend over the plot, colours repeat, no
 PSF or ASCII AC yet, monotonic x assumed. CI builds the data engine's stub.
 

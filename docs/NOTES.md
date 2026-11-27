@@ -482,7 +482,8 @@ What exists:
   query thread per tab (the UI thread never calls the engine); egui_plot 0.37 for axes and
   grid (own 1-2-5 grid spacer); File > Open Waveform File…, "Waveform Tab" per point in
   the Simulation tab, `wv …` script verbs (docs/GUI-TESTING.md), `cdept-gui/scripts/wave/run.sh`.
-- The embedded UberWave (`cdept-uberwave`) is untouched and still built; it is removed at step 5.
+- The embedded UberWave (`cdept-uberwave`) is untouched and still built. It stays: UberWave's viewer remains
+  an option that opens in a separate window (decided 2026-11-27).
 
 Open points / risks (mine):
 - Engine x lookups assume an increasing x (binary search): a reversed DC sweep queries wrong.

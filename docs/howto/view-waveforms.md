@@ -2,7 +2,8 @@
 
 ```{note}
 This is changing (2026-11-27): CDePT is getting its own viewer tabs on UberWave's data engine
-(see the roadmap, Phase 5). This page describes what is in use until then.
+(see the roadmap, Phase 5). UberWave's own viewer, which this page describes, stays as an
+option that opens in a separate window.
 ```
 
 CDePT has no finished waveform viewer of its own yet. The viewer in use is **UberWave**, Symbiotic EDA's program

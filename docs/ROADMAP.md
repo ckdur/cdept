@@ -300,13 +300,16 @@ real SLURM cluster (smoke-tested only), the post-layout DUT swap (Phase 7).
   engine as a library without window or graphics dependencies and a prototype with two
   independent tabs (zoom, two cursors); (2) test it with the large SAR ADC file (load time,
   memory, smoothness, narrow spikes stay visible); (3) signal list, panes, families,
-  calculator results, markers; (4) Bode, eye and the other analyses; (5) switch over and
-  remove the embedded-window shim. The standalone `UberWaveViewer` stays an option.
+  calculator results, markers; (4) Bode, eye and the other analyses; (5) make the waveform
+  tabs the default. **UberWave's own viewer stays, for good, as an option that opens in a
+  separate window** (decided 2026-11-27): the built-in one (`cdept-uberwave` and its shim)
+  and the standalone `UberWaveViewer` process, with calculator traces, cursors and markers.
+  Nothing of that integration is removed.
   Steps 1 and 2 built 2026-11-27: `uwdata` (C interface in `wp3-data-engine/capi`),
   `cdept-wavedata`, waveform tabs `cdept-gui/src/views/wave` (docs/NOTES.md).
   Digital VCD/FST/GHW viewing is Surfer or GTKWave. The numbers (readers, measures,
-  calculator, spec table) stay in CDePT. The list below describes the embedded application
-  that is in use until step 5.
+  calculator, spec table) stay in CDePT. The list below describes UberWave's own viewer in
+  CDePT, which stays as the separate-window option.
 - **UberWave** (Symbiotic EDA's program, repository `uberwave`; same owner as CDePT, so its licence does not limit the integration. **Now a built-in shim** (SYMBI-83): the crate `cdept-uberwave` builds the library `uberwave_embed` of the `uberwave` repository with `UBERWAVE_SRC` and links it into the cdept executable; its window runs on a thread of the process, commands and calculator data are plain calls. Without the source a stub is built and the process + IPC path described below remains as the fallback; the uberWAVE project from
   the proposal): C++20/ImGui/ImPlot analog and mixed-signal viewer built for multi-GB ngspice
   raw files (memory-mapped parser, decimation, `.uwraw` cache), plus Spectre PSF. Binary
