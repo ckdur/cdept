@@ -6,8 +6,8 @@ use std::path::Path;
 use std::ptr::NonNull;
 
 use crate::{
-    Analysis, Error, Mode, OpenOptions, Phase, Prepared, QueryInfo, Result, Segment, Status, Text, Trace,
-    XOrder,
+    Analysis, Error, Mode, OpenOptions, Phase, Prepared, QueryInfo, Result, Segment, Status, Text,
+    Trace, XOrder,
 };
 
 #[repr(C)]
@@ -73,7 +73,11 @@ impl UwdAnalysis {
 }
 
 fn c_text(buf: &[c_char]) -> String {
-    let bytes: Vec<u8> = buf.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
+    let bytes: Vec<u8> = buf
+        .iter()
+        .take_while(|c| **c != 0)
+        .map(|c| *c as u8)
+        .collect();
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
@@ -556,7 +560,10 @@ impl Handle {
 
     pub(crate) fn x_extent(&self) -> Result<(f64, f64)> {
         let (mut a, mut b) = (0.0, 0.0);
-        check(unsafe { uwd_x_extent(self.ptr(), &mut a, &mut b) }, "x extent")?;
+        check(
+            unsafe { uwd_x_extent(self.ptr(), &mut a, &mut b) },
+            "x extent",
+        )?;
         Ok((a, b))
     }
 
@@ -565,13 +572,12 @@ impl Handle {
         (0..n)
             .filter_map(|i| {
                 let (mut first, mut last, mut dir) = (0u64, 0u64, 0 as c_int);
-                (unsafe { uwd_segment(self.ptr(), i, &mut first, &mut last, &mut dir) } == 0).then_some(
-                    Segment {
+                (unsafe { uwd_segment(self.ptr(), i, &mut first, &mut last, &mut dir) } == 0)
+                    .then_some(Segment {
                         first,
                         last,
                         direction: dir,
-                    },
-                )
+                    })
             })
             .collect()
     }

@@ -44,6 +44,15 @@ sim calc point all
 sim calc expr cross(v("out"), 0.6)
 sim calc send_tab
 wv expect_markers 3
+# the eye layout: the waveform folded in a pane of its own
+sim calc point tt_27
+sim calc layout eye 2n 0
+sim calc expr v("out")
+sim calc send_tab
+sim calc expect_note eye layout
+wv expect_note 0 traces
+sim calc layout plain
+sim calc point all
 # not finite where v(in) is 0: those points are breaks, the rest is drawn
 sim calc expr db20(v("in"))
 sim calc send_tab
@@ -81,13 +90,32 @@ sim wait
 sim expect_points 15
 wv open_family cells tb_inv testbench
 wv expect_tabs 2
-# the three points of the first run are still in the folder: 18
+# the three point folders of the first run plan are still there but left out: 15
 wv expect_points loading 0
-wv expect_points ready 18
+wv expect_points ready 15
 wv hide v(in)
-wv expect_lines 18
+wv expect_lines 15
 wv expect_distinct 1
 wait 0.5
 screenshot /tmp/cdept-wave-tabs-family.png
+
+# the calculator's Bode and eye layouts go to a tab as laid out (an AC testbench)
+open cells ota5t ac_open
+sim expect_target cells/ota5t/ac_open
+sim run
+sim wait
+sim expect_state finished
+sim calc point tt_27
+sim calc layout bode
+sim calc expr -v("out")/v("in")
+sim calc send_tab
+sim calc expect_note Bode layout
+wv expect_marker PM
+wv expect_marker 59.4°
+sim calc expr phase_margin(-v("out")/v("in"))
+sim calc evaluate
+sim calc expect_value tt_27 59.0 59.8
+wait 0.5
+screenshot /tmp/cdept-wave-tabs-bode.png
 log wave-tabs: ok
 quit

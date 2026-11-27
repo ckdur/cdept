@@ -980,16 +980,22 @@ impl WaveView {
         };
         let names: Vec<String> = match &self.show_req {
             Some(req) => {
-                let signals: Vec<libcdept::wave::ipc::Signal> = r
-                    .signals
-                    .iter()
-                    .map(|(n, u)| libcdept::wave::ipc::Signal {
-                        name: n.clone(),
-                        file: String::new(),
-                        unit: u.clone(),
-                        complex: false,
-                    })
-                    .collect();
+                // a complex signal once, by its name (not its seven forms)
+                let mut signals: Vec<libcdept::wave::ipc::Signal> = Vec::new();
+                for (n, u) in &r.signals {
+                    let (name, complex) = match model::split_form(n) {
+                        Some((_, base)) => (base.to_string(), true),
+                        None => (n.clone(), false),
+                    };
+                    if !signals.iter().any(|s| s.name == name) {
+                        signals.push(libcdept::wave::ipc::Signal {
+                            name,
+                            file: String::new(),
+                            unit: u.clone(),
+                            complex,
+                        });
+                    }
+                }
                 libcdept::wave::show::pick_default(&signals, req)
             }
             None => {
@@ -1023,10 +1029,11 @@ impl WaveView {
             })
             .collect();
         let x_unit = r.x_unit.clone();
+        // calculator traces (sent before the files opened) keep their pane
         let target = if self
             .panes
             .get(self.panes.active)
-            .is_some_and(|p| !p.signals.is_empty() && p.x_unit != x_unit)
+            .is_some_and(|p| !p.signals.is_empty())
         {
             Target::New
         } else {
@@ -2634,16 +2641,14 @@ impl WaveView {
             let t = self.textures.get(&id)?;
             Some((t.id(), p.u0, p.u1, p.y0, p.y1))
         });
-        let y_unit = {
-            let units: Vec<String> = pane
-                .signals
-                .iter()
-                .filter_map(|s| self.entry(s).map(|e| e.unit.clone()))
-                .collect();
-            match units.first() {
-                Some(u) if units.iter().all(|x| x == u) => u.clone(),
-                _ => String::new(),
-            }
+        let pane_units: Vec<String> = pane
+            .signals
+            .iter()
+            .filter_map(|s| self.entry(s).map(|e| e.unit.clone()))
+            .collect();
+        let y_unit = match pane_units.first() {
+            Some(u) if pane_units.iter().all(|x| x == u) => u.clone(),
+            _ => String::new(),
         };
         let x_name = self
             .sources
@@ -2668,17 +2673,10 @@ impl WaveView {
                 .chain(&self.bode_markers)
                 .filter(|m| m.x_unit.is_empty() || model::norm_unit(&m.x_unit) == g.unit)
                 // a point belongs to panes of its y unit; the line to all
-                .map(|m| {
-                    let mut m = m.clone();
-                    if m.y_unit.as_ref().is_some_and(|u| *u != y_unit) {
-                        m.y = None;
-                    }
-                    m
-                })
-                .filter(|m| {
-                    // Bode markers only in the panes of their kind
-                    m.y.is_some() || m.y_unit.is_none()
-                })
+                // a marker of a y unit (Bode's dB and degrees) only in panes that show a
+                // signal of that unit
+                .filter(|m| m.y_unit.as_ref().is_none_or(|u| pane_units.contains(u)))
+                .cloned()
                 .collect()
         } else {
             vec![]
