@@ -14,11 +14,11 @@ brought up to date on this day; SYMBI-79 (VACASK on sky130) stays in the backlog
 - Import of design files, LEF abstract views, `tech.toml` as source of truth.
 
 ## UberWave
-Our UberWave is the private mirror `gitlab.symbioticeda.com/ckdur.iso/uberwave` (made
+Our UberWave is the public copy (MIT or GPL-2.0 since 2026-11-27, commit ef2497f) `gitlab.symbioticeda.com/ckdur.iso/uberwave` (made
 2026-11-27 because `Juan_25/uberwave` refuses our pushes). Its `main` is the original `main`
-plus the 9 commits CDePT needs (tip 0108e4b; the branch `ipc-multifile` is at the same
-commit). The only working copy is the opt-in submodule `cdept-uberwave/uberwave`
-(`git submodule update --init --checkout cdept-uberwave/uberwave`, then
+plus the 9 commits CDePT needs (0108e4b, then the license commit; the branch `ipc-multifile` is at the same
+commit). The only working copy is the submodule `cdept-uberwave/uberwave`
+(`git submodule update --init cdept-uberwave/uberwave`, then
 `git switch main` inside it to work). Push there with `-o ci.skip` (the pipeline publishes
 GitLab Pages from `main`), then move the pointer in CDePT. The mirror does not update by
 itself: add the original as the remote `upstream`, fetch and merge. CI builds the stub.

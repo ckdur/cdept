@@ -120,7 +120,7 @@ fn find_source(manifest: &Path) -> Result<PathBuf, String> {
             .find(|c| c.join(HEADER).is_file())
             .ok_or_else(|| format!("UBERWAVE_SRC has no {HEADER}"));
     }
-    // The submodule: empty unless asked for (`update = none`, the repository is private).
+    // The submodule: empty until `git submodule update --init`.
     candidates.push(manifest.join("uberwave"));
     // <repo>/cdept-uberwave -> <repo>/../uberwave
     if let Some(repo) = manifest.parent()

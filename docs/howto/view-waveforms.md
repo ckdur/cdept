@@ -40,21 +40,24 @@ Asking for `embedded` in a cdept that does not have it is an error that says how
 
 ## Build UberWave into cdept (Linux)
 
-UberWave lives in its own **private** repository. `cdept-uberwave`, a crate of this
-workspace, builds its library `uberwave_embed` with CMake and links it into `cdept`. CDePT
-has it as an opt-in submodule, `cdept-uberwave/uberwave`: branch `main` of the private
-mirror `gitlab.symbioticeda.com/ckdur.iso/uberwave` (the changes CDePT needs are not in the
-original repository yet). With an SSH key that may read the mirror:
+UberWave lives in its own repository. `cdept-uberwave`, a crate of this workspace, builds
+its library `uberwave_embed` with CMake and links it into `cdept`. CDePT has it as the
+submodule `cdept-uberwave/uberwave`: branch `main` of our public copy
+`gitlab.symbioticeda.com/ckdur.iso/uberwave` (the changes CDePT needs are not in the
+original repository). It is offered under MIT or GPL-2.0, at your option; third-party parts
+keep their own licenses (see its `LICENSE`).
 
 ```bash
 sudo apt install build-essential cmake libgl1-mesa-dev libgtk-3-dev   # compiler, CMake, OpenGL and GTK 3 development files
-git submodule update --init --checkout cdept-uberwave/uberwave        # --checkout: the submodule is opt-in
+git submodule update --init cdept-uberwave/uberwave                   # done already by clone --recurse-submodules
 cargo build                              # or: cargo install --path cdept
 cargo run -- tools | grep UberWave       # built in (embedded)
 ```
 
-`git clone --recurse-submodules` leaves it out, so cloning works without access to it.
-After a `git pull` that moves the submodule, run the `git submodule update` line again.
+No account is needed (HTTPS). The submodule is fetched shallow; the download is still large
+because of data files in the repository. After a `git pull` that moves the submodule, run the
+`git submodule update` line again. To push to the copy, set an SSH push address:
+`git -C cdept-uberwave/uberwave remote set-url --push origin ssh://git@gitlab.symbioticeda.com:20022/ckdur.iso/uberwave.git`.
 
 - To work on UberWave, work in the submodule: `git -C cdept-uberwave/uberwave switch main`
   (`git submodule update` leaves it on a commit, not on a branch), commit, push to `origin`
