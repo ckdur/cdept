@@ -117,7 +117,11 @@ struct Viewer {
 /// Frame times and query times since the last `wv stats`.
 #[derive(Default)]
 struct Stats {
-    last_frame: Option<Instant>,
+    /// When the tab was drawn last, in which window, at which pass of that window. An
+    /// interval counts only between two passes in a row of one window: a tab behind
+    /// another one (or moved to another window) is not drawn meanwhile, and that pause
+    /// is no frame (it was reported as a 3.4 s frame after a detach).
+    last_frame: Option<(Instant, egui::ViewportId, u64)>,
     frames: VecDeque<f32>,
     ui_ms: VecDeque<f32>,
     queries: VecDeque<(f64, Mode, u64)>,
@@ -1034,10 +1038,15 @@ impl View for WaveView {
             }
             State::Ready(v) => {
                 let now = Instant::now();
-                if let Some(last) = v.stats.last_frame {
+                let viewport = ui.ctx().viewport_id();
+                let pass = ui.ctx().cumulative_pass_nr();
+                if let Some((last, vp, n)) = v.stats.last_frame
+                    && vp == viewport
+                    && n + 1 == pass
+                {
                     Stats::push(&mut v.stats.frames, (now - last).as_secs_f32() * 1e3);
                 }
-                v.stats.last_frame = Some(now);
+                v.stats.last_frame = Some((now, viewport, pass));
                 if v.checked.elapsed() > Duration::from_secs(1) {
                     v.checked = Instant::now();
                     // A stat and a small read of the cache's header: cheap enough here.

@@ -138,6 +138,33 @@ pub struct CdeptApp {
     script_wave: Option<u64>,
     /// File › Open Waveform File…: the path being asked for.
     wave_pick: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
+    /// Where the time of the frames goes (slow frames are logged, `cdept::frame`).
+    frame_clock: FrameClock,
+}
+
+/// The time of a frame by part, to find what makes one slow: the main window, each
+/// detached window (inside its viewport's closure, and the whole call, which includes
+/// creating the window), the rest; and the interval since the frame before (painting
+/// and swapping happen between our calls).
+#[derive(Default)]
+struct FrameClock {
+    last: Option<std::time::Instant>,
+    /// (window, inside the closure ms, whole call ms)
+    detached: Vec<(u64, f64, f64)>,
+    inside: f64,
+}
+
+impl FrameClock {
+    /// A frame slower than this is logged (`CDEPT_SLOW_FRAME_MS` changes it).
+    fn slow_ms() -> f64 {
+        static SLOW: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+        *SLOW.get_or_init(|| {
+            std::env::var("CDEPT_SLOW_FRAME_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(250.0)
+        })
+    }
 }
 
 impl CdeptApp {
@@ -191,6 +218,7 @@ impl CdeptApp {
             forced_tool: HashMap::new(),
             script_wave: None,
             wave_pick: None,
+            frame_clock: FrameClock::default(),
         };
         // With the project still being read, the documents come back once it is there.
         if !app.ctx.background.restoring() {
@@ -671,6 +699,18 @@ impl CdeptApp {
                 .eq_ignore_ascii_case(name.trim())
         });
         tab.inspect(|tab| self.ctx.request(Action::OpenTab(*tab)))
+            .is_some()
+    }
+
+    /// `detach_panel <title>`: the panel moves to a window of its own.
+    pub(crate) fn script_detach_panel(&mut self, name: &str) -> bool {
+        let tab = Tab::ALL.into_iter().find(|tab| {
+            self.views
+                .get(*tab)
+                .title(&self.ctx)
+                .eq_ignore_ascii_case(name.trim())
+        });
+        tab.inspect(|tab| self.ctx.request(Action::DetachTab(*tab)))
             .is_some()
     }
 
@@ -1207,8 +1247,12 @@ impl CdeptApp {
             None => builder.with_inner_size(DETACHED_SIZE),
         };
 
+        let started = std::time::Instant::now();
+        self.frame_clock.inside = 0.0;
         ctx.show_viewport_immediate(win.viewport(), builder, |ui, _class| {
+            let inside = std::time::Instant::now();
             self.window_ui(ui, win);
+            self.frame_clock.inside += inside.elapsed().as_secs_f64() * 1e3;
             let (close, geometry) = ui.input(|i| {
                 let vp = i.viewport();
                 let geometry = vp
@@ -1229,6 +1273,9 @@ impl CdeptApp {
                 self.ctx.request(Action::CloseWindow(id));
             }
         });
+        let whole = started.elapsed().as_secs_f64() * 1e3;
+        let inside = self.frame_clock.inside;
+        self.frame_clock.detached.push((id, inside, whole));
     }
 
     fn menu_bar(&mut self, ui: &mut Ui, win: WindowId) {
@@ -1704,8 +1751,14 @@ impl CdeptApp {
 }
 
 impl eframe::App for CdeptApp {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         let ctx = &ui.ctx().clone();
+        let frame_start = std::time::Instant::now();
+        let interval = self
+            .frame_clock
+            .last
+            .map(|t| (frame_start - t).as_secs_f64() * 1e3);
+        self.frame_clock.detached.clear();
         self.refresh_window_names();
         self.publish_schematic();
         // Go to Cell, the categories, Import Project (before the views take the keys).
@@ -1723,7 +1776,9 @@ impl eframe::App for CdeptApp {
             }
         }
 
+        let main_start = std::time::Instant::now();
         self.window_ui(ui, WindowId::Main);
+        let main_ms = main_start.elapsed().as_secs_f64() * 1e3;
         let detached: Vec<u64> = self.layout.windows.iter().map(|w| w.id).collect();
         for id in detached {
             self.show_detached(ctx, id);
@@ -1776,6 +1831,29 @@ impl eframe::App for CdeptApp {
                 self.forget_window(id);
             }
         }
+        let now = std::time::Instant::now();
+        let ui_ms = (now - frame_start).as_secs_f64() * 1e3;
+        // The interval before this frame holds the painting of the one before.
+        let slow = FrameClock::slow_ms();
+        if ui_ms > slow || interval.is_some_and(|i| i > slow) {
+            let windows: Vec<String> = self
+                .frame_clock
+                .detached
+                .iter()
+                .map(|(id, inside, whole)| {
+                    format!("window {id}: {inside:.1} ms drawing, {whole:.1} ms with its viewport")
+                })
+                .collect();
+            tracing::debug!(
+                target: "cdept::frame",
+                "slow frame: {:.1} ms since the frame before (that frame: {:.1} ms of CPU without the buffer swap), {ui_ms:.1} ms in the app (main window {main_ms:.1} ms{}{})",
+                interval.unwrap_or(0.0),
+                frame.info().cpu_usage.unwrap_or(0.0) * 1e3,
+                if windows.is_empty() { "" } else { "; " },
+                windows.join("; ")
+            );
+        }
+        self.frame_clock.last = Some(now);
     }
 
     fn raw_input_hook(&mut self, _ctx: &Context, raw_input: &mut egui::RawInput) {

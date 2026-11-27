@@ -53,6 +53,8 @@ enum Command {
     CloseAnswer(CloseChoice),
     ExpectTitle(String),
     Detach,
+    /// `detach_panel <title>`: move a panel (Console, Library Manager, ...) to a window.
+    DetachPanel(String),
     Wait(f32),
     WaitFrame,
     Sync,
@@ -462,6 +464,7 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
         }),
         "expect_title" => Command::ExpectTitle(text()?),
         "detach" => Command::Detach,
+        "detach_panel" => Command::DetachPanel(text()?),
         "wait" => Command::Wait(number(0)?),
         "wait_frame" => Command::WaitFrame,
         "sync" => Command::Sync,
@@ -1786,6 +1789,11 @@ impl Script {
                 let open = app.script_document_count();
                 if open != wanted {
                     return Err(format!("{open} documents are open, expected {wanted}"));
+                }
+            }
+            Command::DetachPanel(name) => {
+                if !app.script_detach_panel(&name) {
+                    return Err(format!("there is no panel '{name}'"));
                 }
             }
             Command::Panel(name) => {
