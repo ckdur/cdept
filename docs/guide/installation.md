@@ -54,18 +54,19 @@ that need it say so. See [XSCHEM.md](../XSCHEM.md) for what the helper is.
 ### UberWave, the waveform viewer (optional, built in)
 
 `cdept wave` and **Open in UberWave** use UberWave, Symbiotic EDA's waveform viewer. It can be
-built **into the cdept executable**: point `UBERWAVE_SRC` at the `uberwave` repository before
-`cargo build` (the crate `cdept-uberwave` runs CMake on it; it needs `cmake`, a C++20 compiler
+built **into the cdept executable**: check out the opt-in submodule (a private mirror; or point
+`UBERWAVE_SRC` at another checkout of the `uberwave` repository) before `cargo build` (the crate `cdept-uberwave` runs CMake on it; it needs `cmake`, a C++20 compiler
 and the OpenGL and GTK 3 development files, and the network once to fetch GLFW, Dear ImGui and
 ImPlot).
 
 ```sh
 sudo apt install build-essential cmake libgl1-mesa-dev libgtk-3-dev
-UBERWAVE_SRC=~/uberwave cargo build --release
+git submodule update --init --checkout cdept-uberwave/uberwave
+cargo build --release
 cdept tools | grep UberWave        # built in (embedded)
 ```
 
-Without `UBERWAVE_SRC` (or when that build fails: the build prints a warning and goes on) the
+Without the source (or when that build fails: the build prints a warning and goes on) the
 executable has a stub instead and `cdept wave` starts the separate `UberWaveViewer` program, if
 there is one. [View waveforms](../howto/view-waveforms.md) has the details, the offline variables
 and the fallback.

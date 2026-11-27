@@ -40,20 +40,25 @@ Asking for `embedded` in a cdept that does not have it is an error that says how
 
 ## Build UberWave into cdept (Linux)
 
-UberWave lives in its own repository (`uberwave`, branch `ipc-multifile` until it is merged;
-CDePT needs that branch from commit 1a162cf on, the typed shim).
-`cdept-uberwave`, a crate of this workspace, builds its library `uberwave_embed` with CMake
-and links it into `cdept`. Point it at the source and build as usual:
+UberWave lives in its own **private** repository. `cdept-uberwave`, a crate of this
+workspace, builds its library `uberwave_embed` with CMake and links it into `cdept`. CDePT
+has it as an opt-in submodule, `cdept-uberwave/uberwave`: branch `ipc-multifile` of the
+mirror `gitlab.symbioticeda.com/ckdur.iso/uberwave` (the changes CDePT needs are not in the
+original repository yet). With an SSH key that may read the mirror:
 
 ```bash
 sudo apt install build-essential cmake libgl1-mesa-dev libgtk-3-dev   # compiler, CMake, OpenGL and GTK 3 development files
-export UBERWAVE_SRC=~/uberwave          # the root of the uberwave repository
+git submodule update --init --checkout cdept-uberwave/uberwave        # --checkout: the submodule is opt-in
 cargo build                              # or: cargo install --path cdept
-cdept tools | grep UberWave              # built in (embedded)
+cargo run -- tools | grep UberWave       # built in (embedded)
 ```
 
-- `UBERWAVE_SRC` is the root of the repository (the `wp5-viewer` folder is accepted too). Without
-  it the build looks for a sibling `../uberwave` of the CDePT repository that has
+`git clone --recurse-submodules` leaves it out, so cloning works without access to it.
+After a `git pull` that moves the submodule, run the `git submodule update` line again.
+
+- `UBERWAVE_SRC` names another checkout (the repository root; the `wp5-viewer` folder is
+  accepted too) and wins over the submodule. Without both, the build also looks for a sibling
+  `../uberwave` of the CDePT repository. A source is used only when it has
   `wp5-viewer/shim/uberwave_shim.h`.
 - The first build fetches GLFW, Dear ImGui, ImPlot, NFD-Extended and nlohmann/json with CMake
   (it needs the network and `git`) and compiles them under `target/`; it takes about a minute.
@@ -67,7 +72,7 @@ cdept tools | grep UberWave              # built in (embedded)
 
 If anything is missing (no source, no `cmake`, no OpenGL or GTK 3 files, no network) the build does
 **not** fail: it prints a `cargo:warning` that says why and builds a stub; `cdept` then uses the
-process fallback. That is also what a build without `UBERWAVE_SRC` gives, for example the public CI.
+process fallback. That is also what a build without the source gives, for example the public CI.
 
 ### How the window lives next to cdept
 

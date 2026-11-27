@@ -4,3 +4,8 @@
 [submodule "cdept-klayout/klayout"]
 	path = cdept-klayout/klayout
 	url = https://github.com/KLayout/klayout.git
+[submodule "cdept-uberwave/uberwave"]
+	path = cdept-uberwave/uberwave
+	url = ssh://git@gitlab.symbioticeda.com:20022/ckdur.iso/uberwave.git
+	branch = ipc-multifile
+	update = none

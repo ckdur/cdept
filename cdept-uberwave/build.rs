@@ -2,8 +2,9 @@
 //! falls back to a stub with the same Rust API.
 //!
 //! * The source is `$UBERWAVE_SRC` (the root of the uberwave repository, or its
-//!   `wp5-viewer` folder), else a sibling `../uberwave` of the CDePT repository, as long as
-//!   it has `wp5-viewer/shim/uberwave_shim.h`.
+//!   `wp5-viewer` folder), else the submodule `cdept-uberwave/uberwave` when it is checked
+//!   out, else a sibling `../uberwave` of the CDePT repository; each needs
+//!   `wp5-viewer/shim/uberwave_shim.h`.
 //! * `$UBERWAVE_LIB_DIR` names an existing CMake build directory of that source (one that
 //!   built the target `uberwave_embed_probe`): nothing is built, its libraries are linked.
 //! * Otherwise cmake builds the library in `OUT_DIR`. CMake fetches GLFW, Dear ImGui,
@@ -34,6 +35,8 @@ fn main() {
         println!("cargo:rerun-if-env-changed={var}");
     }
     println!("cargo:rerun-if-changed=build.rs");
+    // Checking the submodule out later must rebuild.
+    println!("cargo:rerun-if-changed=uberwave");
     if cfg!(not(target_os = "linux")) {
         println!(
             "cargo:warning=UberWave is not built in: only Linux is supported; cdept starts UberWaveViewer as a process"
@@ -81,6 +84,25 @@ fn build() -> Result<(), String> {
     emit_link(&build_dir)
 }
 
+/// CMake refuses a build folder that was configured for another source folder (the source
+/// moves when `UBERWAVE_SRC` changes or the submodule is checked out).
+fn cache_of_another_source(dir: &Path, src: &Path) -> bool {
+    let Ok(cache) = std::fs::read_to_string(dir.join("CMakeCache.txt")) else {
+        return false;
+    };
+    let Some(home) = cache
+        .lines()
+        .find_map(|line| line.strip_prefix("CMAKE_HOME_DIRECTORY:INTERNAL="))
+    else {
+        return false;
+    };
+    match (Path::new(home).canonicalize(), src.canonicalize()) {
+        (Ok(a), Ok(b)) => a != b,
+        // The old source is gone.
+        _ => true,
+    }
+}
+
 /// The uberwave repository root.
 fn find_source(manifest: &Path) -> Result<PathBuf, String> {
     let mut candidates = vec![];
@@ -98,6 +120,8 @@ fn find_source(manifest: &Path) -> Result<PathBuf, String> {
             .find(|c| c.join(HEADER).is_file())
             .ok_or_else(|| format!("UBERWAVE_SRC has no {HEADER}"));
     }
+    // The submodule: empty unless asked for (`update = none`, the repository is private).
+    candidates.push(manifest.join("uberwave"));
     // <repo>/cdept-uberwave -> <repo>/../uberwave
     if let Some(repo) = manifest.parent()
         && let Some(parent) = repo.parent()
@@ -107,7 +131,10 @@ fn find_source(manifest: &Path) -> Result<PathBuf, String> {
     candidates
         .into_iter()
         .find(|c| c.join(HEADER).is_file())
-        .ok_or_else(|| "no UBERWAVE_SRC and no sibling ../uberwave with the shim".to_string())
+        .ok_or_else(|| {
+            "no UBERWAVE_SRC, no cdept-uberwave/uberwave submodule and no sibling ../uberwave with the shim"
+                .to_string()
+        })
 }
 
 fn cmake_build(src: &Path, dir: &Path) -> Result<PathBuf, String> {
@@ -120,6 +147,10 @@ fn cmake_build(src: &Path, dir: &Path) -> Result<PathBuf, String> {
     };
     if !have("cmake") {
         return Err("cmake not found".into());
+    }
+    if cache_of_another_source(dir, src) {
+        std::fs::remove_dir_all(dir)
+            .map_err(|e| format!("cannot remove the old CMake folder {}: {e}", dir.display()))?;
     }
     let mut configure = Command::new("cmake");
     configure

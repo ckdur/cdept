@@ -14,11 +14,16 @@ brought up to date on this day; SYMBI-79 (VACASK on sky130) stays in the backlog
 - Import of design files, LEF abstract views, `tech.toml` as source of truth.
 
 ## UberWave
-The built-in viewer needs the branch `ipc-multifile` of the `uberwave` repository (4
-commits on top of its `main` on 2026-11-26, 9 on 2026-11-27, tip 0108e4b). **It is only local**: pushing it was refused
-on 2026-11-26 ("You are not allowed to push code to this project"). It is checked out at
-`../uberwave-ipc`; build with `UBERWAVE_SRC=../uberwave-ipc` (absolute path). The sibling
-`../uberwave` is on a branch without the shim. CI builds the stub.
+The built-in viewer needs the branch `ipc-multifile` (9 commits on the original `main`, tip
+0108e4b). The original repository, `Juan_25/uberwave`, refuses our pushes, so on 2026-11-27 a
+private mirror was made, `gitlab.symbioticeda.com/ckdur.iso/uberwave` (all branches and tags
+of the original plus `ipc-multifile`). CDePT has it as the opt-in submodule
+`cdept-uberwave/uberwave`:
+`git submodule update --init --checkout cdept-uberwave/uberwave`. The mirror does not update
+by itself: fetch from the original and push to it. On the development machine the checkout
+`../uberwave-ipc` tracks `mirror/ipc-multifile`; new UberWave commits go to the mirror, then
+the submodule pointer is moved. Still to do: get the branch into the original. CI builds the
+stub.
 
 ## Tool and test environment
 Tools in `/opt/ext/OpenLane/bin`, PDKs in `/opt/ext/OpenPDKs`. Real-tool tests skip unless
@@ -46,4 +51,4 @@ in UberWave 50a38c4) and the session died. Run builds, tests and torture inputs 
 
 ## Open from this round
 Per phase in [NOTES.md](NOTES.md). The larger ones: no nets or flylines for Magic;
-ihp-sg13g2 Magic device map not tried with a real generate; UberWave not pushed.
+ihp-sg13g2 Magic device map not tried with a real generate; UberWave not merged upstream.
