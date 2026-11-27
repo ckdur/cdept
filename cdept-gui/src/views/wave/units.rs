@@ -159,7 +159,11 @@ mod tests {
             .map(|m| (m.value * 1e7).round() / 10.0)
             .collect();
         assert_eq!(major, [25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0]);
-        assert!(marks.iter().any(|m| (m.step_size / 1e-6 - 1.0).abs() < 1e-9));
+        assert!(
+            marks
+                .iter()
+                .any(|m| (m.step_size / 1e-6 - 1.0).abs() < 1e-9)
+        );
         assert!(grid((1.0, 1.0), 8.0).is_empty());
         assert!(grid((0.0, f64::INFINITY), 8.0).is_empty());
     }
