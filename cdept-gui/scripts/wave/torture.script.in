@@ -1,0 +1,115 @@
+window 1400 900
+# --- hostile files: each tab says why, nothing else happens
+wv open @DATA@/empty.raw
+wv expect_failed Binary
+wv open @DATA@/garbage.raw
+wv expect_failed
+wv open @DATA@/nonl.raw
+wv expect_failed longer than 1 MiB
+wv open @DATA@/lying_vars.raw
+wv expect_failed variables but lists
+wv open @DATA@/header_only.raw
+wv expect_failed no data points
+wv open @DATA@/lying_points.raw
+wv wait_loaded
+wv show v(a)
+wv fit
+wv check_extremes v(a)
+wv open @DATA@/neg_points.raw
+wv wait_loaded
+wv open @DATA@/truncated.raw
+wv wait_loaded
+wv show v(a)
+wv fit
+wv expect_drawn max v(a) 49998
+screenshot @SHOTS@/t-truncated.png
+wv expect_tabs 8
+# --- a corrupt cache with fresh stamps is made again; a stale one too
+wv open @DATA@/good.raw
+wv wait_loaded
+wv show v(a)
+wv fit
+wv expect_drawn max v(a) 0.999
+wv open @DATA@/stale.raw
+wv wait_loaded
+wv show v(a)
+wv fit
+wv expect_drawn max v(a) 3
+# --- read-only folder: the cache goes to the user's cache folder
+wv open @DATA@/readonly/ro.raw
+wv wait_loaded
+wv expect_cache home/.cache/cdept/waveforms
+wv expect_files @DATA@/readonly uwraw 0
+# --- non-ASCII path (this run has LC_ALL=C)
+wv open @DATA@/Ωmega été/波形/sortie é.raw
+wv wait_loaded
+wv show v(é)
+wv fit
+wv expect_drawn max v(é) 2
+wv expect_cache sortie é.uwraw
+screenshot @SHOTS@/t-nonascii.png
+# --- the file changes, then goes, while it is open
+wv open @DATA@/change.raw
+wv wait_loaded
+wv show v(a)
+wv fit
+wv expect_changed no
+screenshot @SHOTS@/flag1.png
+wv expect_changed yes
+wait 1.5
+screenshot @SHOTS@/t-changed.png
+wv expect_drawn max v(a) 1
+screenshot @SHOTS@/flag2.png
+wait 1
+wv expect_changed yes
+wv expect_drawn max v(a) 1
+wv reload
+wv expect_failed no such file
+# --- one-sample spike in 10 million samples, at full zoom-out
+wv open @DATA@/spike10m.raw
+wv wait_loaded
+wv show v(out)
+wv hide v(sine)
+wv fit
+wait 1
+wv expect_drawn max v(out) 1
+wv check_extremes v(out)
+screenshot @SHOTS@/t-spike10m.png
+wv stats
+wv wheel 0.76 up 10
+wv drag 0.3 0.6
+wv wheel 0.5 down 5
+wait 1
+wv stats
+# --- two tabs build the same cache at once (no cache yet)
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wait 0.1
+screenshot @SHOTS@/t-two-loading.png
+wv select 15
+wv wait_loaded
+wv select 16
+wv wait_loaded
+wv expect_files @SAR@ .tmp 0
+wv expect_files @SAR@ uwraw 1
+wv expect_tabs 16
+wv select newest
+screenshot @SHOTS@/t-sar-two.png
+# --- a tab closed while it loads, and a cancelled load (the helper deletes the cache first)
+screenshot @SHOTS@/flag3.png
+wait 1
+wv expect_files @SAR@ uwraw 0
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv expect_tabs 17
+wv close
+wv expect_tabs 16
+wait 2
+wv expect_files @SAR@ .tmp 0
+wv expect_files @SAR@ uwraw 0
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv expect_tabs 17
+wv cancel
+wv expect_failed cancelled
+wv expect_files @SAR@ uwraw 0
+wv expect_files @SAR@ .tmp 0
+quit

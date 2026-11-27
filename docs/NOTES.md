@@ -462,6 +462,48 @@ runs and tests, used up the inotify instances (the watch tests then failed). Ope
 
 ---
 
+### Own waveform viewer, steps 1 and 2 (2026-11-27, ROADMAP Phase 5 decision)
+What exists:
+- UberWave repository (`cdept-uberwave/uberwave`, branch main): the data engine
+  `wp3-data-engine` builds alone (`cmake -S wp3-data-engine -DWP3_BUILD_TOOLS=OFF`, or the
+  top level with `-DUBERWAVE_BUILD_VIEWER=OFF`); a configure of either touches no OpenGL,
+  GTK, GLFW, ImGui, ImPlot or FetchContent (checked in CMakeCache/configure log). Target
+  `uwdata`: C interface `wp3-data-engine/capi/include/uwdata.h` (opaque `uwd_dataset`,
+  a mutex per dataset, no process-wide state, no exceptions across it, flock on the source
+  while its cache is written so concurrent openers wait and reuse it, cache beside the file
+  or in a fallback folder, `uwd_source_changed`). Tests: `UwdataTest` (C smoke + torture),
+  `NumberParseTest` (decimal-comma locale `en_DK.utf8` is installed here and used).
+  No `setlocale` any more; numbers parsed by `wp3/util/NumberParse.hpp` (from_chars).
+- `cdept-wavedata`: Rust binding (`build.rs` builds only `uwdata` with cmake + a C++20
+  compiler; stub otherwise or with `CDEPT_WAVEDATA_STUB=1`); `examples/wavebench.rs`
+  measures a file.
+- `cdept-gui/src/views/wave/`: `Tab::Wave(id)`, any number of tabs (also on one file),
+  dockable/detachable like the others, not restored after a restart; open thread +
+  query thread per tab (the UI thread never calls the engine); egui_plot 0.37 for axes and
+  grid (own 1-2-5 grid spacer); File > Open Waveform File…, "Waveform Tab" per point in
+  the Simulation tab, `wv …` script verbs (docs/GUI-TESTING.md), `cdept-gui/scripts/wave/run.sh`.
+- The embedded UberWave (`cdept-uberwave`) is untouched and still built; it is removed at step 5.
+
+Open points / risks (mine):
+- Engine x lookups assume an increasing x (binary search): a reversed DC sweep queries wrong.
+- PSF result folders are refused by `uwd_open` (the engine can read them; not wired).
+- ascii AC (complex) raw files are refused by the engine's ascii converter.
+- No checksum in `.uwraw`: flipped data bytes in a cache with fresh stamps are not detected
+  (table corruption and truncation are, and the cache is rebuilt).
+- A `.uwraw` truncated in place while mapped would SIGBUS; the engine's own writer only
+  renames, so only another program doing that triggers it.
+- Every pyramid build maps the cache again: RSS (not memory) jumps transiently (1.5-1.8 GB
+  RSS for 58 pyramids of the SAR file, cgroup peak stays ~0.6 GB); malloc keeps ~60-130 MB
+  anon after closing (arenas of the build threads).
+- `UwRawWriter::finalize` sleeps 50 ms (a Windows workaround): every conversion >= 50 ms.
+- Drawing: in a debug build 25 traces stutter (55 ms frames); release is fine (p50 1.8 ms,
+  p95 10-12 ms, max 31-36 ms). A detached second window: frames 25 ms (vsync of the second
+  viewport, I think) and one 3.4 s frame when the window is created (not investigated;
+  maybe general to detaching).
+- The legend of egui_plot covers the plot with many traces; CJK names show as boxes
+  (egui's default fonts).
+- `wv` mouse commands assume no schematic/layout is the script's document.
+
 ## 2. Things that may cause trouble
 
 ### 2.1 Most likely to bite soon

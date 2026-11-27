@@ -134,6 +134,10 @@ pub struct CdeptApp {
     script: Option<Script>,
     /// A tool chosen for a document about to start ("Open with": a GDS in Magic).
     forced_tool: HashMap<DocId, &'static str>,
+    /// The waveform tab `wv ...` script commands act on (`None`: the newest).
+    script_wave: Option<u64>,
+    /// File › Open Waveform File…: the path being asked for.
+    wave_pick: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
 }
 
 impl CdeptApp {
@@ -185,6 +189,8 @@ impl CdeptApp {
             quit_confirmed: false,
             script,
             forced_tool: HashMap::new(),
+            script_wave: None,
+            wave_pick: None,
         };
         // With the project still being read, the documents come back once it is there.
         if !app.ctx.background.restoring() {
@@ -759,6 +765,34 @@ impl CdeptApp {
         &mut self.ctx
     }
 
+    /// The waveform tab of `wv ...` commands: the one chosen with `wv select`, else
+    /// the newest.
+    pub(crate) fn script_wave(&mut self) -> Result<&mut crate::views::wave::WaveView, String> {
+        let ids = self.views.wave_ids();
+        let id = match self.script_wave {
+            Some(id) if ids.contains(&id) => id,
+            Some(id) => return Err(format!("waveform tab {id} is closed")),
+            None => *ids.last().ok_or("no waveform tab is open")?,
+        };
+        self.views
+            .wave_mut(id)
+            .ok_or_else(|| "no waveform tab".into())
+    }
+
+    /// The ids of the waveform tabs, oldest first, and the one `wv` acts on.
+    pub(crate) fn script_wave_ids(&self) -> (Vec<u64>, Option<u64>) {
+        let ids = self.views.wave_ids();
+        let current = self
+            .script_wave
+            .filter(|id| ids.contains(id))
+            .or(ids.last().copied());
+        (ids, current)
+    }
+
+    pub(crate) fn script_select_wave(&mut self, id: Option<u64>) {
+        self.script_wave = id;
+    }
+
     pub(crate) fn script_project(&self) -> Option<&Project> {
         self.ctx.project.as_ref()
     }
@@ -1041,6 +1075,7 @@ impl CdeptApp {
         let documents = &self.layout.documents;
         self.views
             .retain_documents(|id| documents.get(id).is_some());
+        self.views.retain_waves(&self.layout.wave_tabs());
     }
 
     fn active_doc(&self, win: WindowId) -> Option<Tab> {
@@ -1206,6 +1241,25 @@ impl CdeptApp {
                     self.ctx.request(Action::PickFolder(PickFor::OpenProject));
                 }
                 crate::import::file_menu(ui);
+                if ui
+                    .button("Open Waveform File…")
+                    .on_hover_text("A raw file (ngspice, Xyce, VACASK) or .uwraw in a waveform tab of CDePT's own viewer")
+                    .clicked()
+                {
+                    let directory = self.ctx.project.as_ref().map(|p| p.root.join("simulations"));
+                    self.wave_pick = Some(crate::pathfield::ask(
+                        ui.ctx(),
+                        win,
+                        crate::pathfield::Request {
+                            kind: crate::pathfield::Kind::File,
+                            title: "Open Waveform File".into(),
+                            directory: directory.filter(|d| d.is_dir()),
+                            filters: vec![("Waveforms".into(), vec!["raw".into(), "uwraw".into()])],
+                            must_exist: true,
+                            ..Default::default()
+                        },
+                    ));
+                }
                 ui.menu_button("Recent Projects", |ui| {
                     if self.ctx.settings.recent_projects.is_empty() {
                         ui.weak("None");
@@ -1544,6 +1598,11 @@ impl CdeptApp {
             Action::OpenView(selection) => self.open_view(ctx, selection),
             Action::OpenWith(selection, tool) => self.open_with(ctx, selection, &tool),
             Action::OpenFile(file) => self.open_file(ctx, &file),
+            Action::OpenWave(file, title) => {
+                let tab = self.views.add_wave(ctx, file, title);
+                let win = self.layout.open_tab(tab);
+                Self::focus(ctx, win);
+            }
             Action::DetachTab(tab) => {
                 if let Some(id) = self.layout.detach(tab) {
                     Self::focus(ctx, WindowId::Detached(id));
@@ -1677,12 +1736,25 @@ impl eframe::App for CdeptApp {
         if let Some((purpose, path)) = self.ctx.take_picked() {
             self.picked(ctx, purpose, path);
         }
+        if let Some(rx) = &self.wave_pick {
+            match rx.try_recv() {
+                Ok(Some(path)) => {
+                    self.wave_pick = None;
+                    self.apply(ctx, Action::OpenWave(path, None));
+                }
+                Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.wave_pick = None
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
         self.finish_netlists();
         // What changed on disk, and what the worker threads finished.
         if crate::background::tick(&mut self.ctx, &mut self.views, ctx).restore {
             self.restore_documents(ctx);
         }
         self.views.coordinate_layouts();
+        self.views.tick_waves(ctx);
         self.views.coordinate_links(&mut self.ctx);
         // A detached window whose last tab was closed or dragged away disappears.
         let before: Vec<u64> = self.layout.windows.iter().map(|w| w.id).collect();

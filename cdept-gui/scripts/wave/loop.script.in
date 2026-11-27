@@ -1,0 +1,375 @@
+wv open @DATA@/good.raw
+wv wait_loaded
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp)
+wait 1
+wv close
+wv expect_tabs 1
+wait 1
+wv select 1
+wv stats
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wv open @DATA@/loop.raw
+wv wait_loaded
+wv show v(c)
+wv wheel 0.5 up 3
+wv close
+wv expect_tabs 1
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv show v(out) v(clks) v(vinp) v(ck1) v(ck2)
+wv wheel 0.4 up 2
+wv close
+wv expect_tabs 1
+wait 2
+wv select 1
+wv stats
+quit

@@ -302,6 +302,8 @@ real SLURM cluster (smoke-tested only), the post-layout DUT swap (Phase 7).
   memory, smoothness, narrow spikes stay visible); (3) signal list, panes, families,
   calculator results, markers; (4) Bode, eye and the other analyses; (5) switch over and
   remove the embedded-window shim. The standalone `UberWaveViewer` stays an option.
+  Steps 1 and 2 built 2026-11-27: `uwdata` (C interface in `wp3-data-engine/capi`),
+  `cdept-wavedata`, waveform tabs `cdept-gui/src/views/wave` (docs/NOTES.md).
   Digital VCD/FST/GHW viewing is Surfer or GTKWave. The numbers (readers, measures,
   calculator, spec table) stay in CDePT. The list below describes the embedded application
   that is in use until step 5.

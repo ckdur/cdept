@@ -10,6 +10,7 @@ repository.workspace = true
 
 [dependencies]
 libcdept.workspace = true
+cdept-wavedata.workspace = true
 # the desktop's clipboard and primary selection for xschem (egui reads only what is
 # pasted); the same crate egui-winit uses, so nothing new is built
 arboard = { version = "3.6", default-features = false }
@@ -17,6 +18,9 @@ chrono.workspace = true
 eframe.workspace = true
 egui.workspace = true
 egui_dock.workspace = true
+# Axes, grid and navigation of the waveform tabs (MIT OR Apache-2.0); the data is the
+# engine's (cdept-wavedata).
+egui_plot = "0.37"
 eyre.workspace = true
 image.workspace = true
 rfd.workspace = true

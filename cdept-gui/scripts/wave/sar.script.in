@@ -1,0 +1,186 @@
+window 1600 1000
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv stats
+wv show v(vinp) v(vinn) v(clks) v(out)
+wait 2
+screenshot @SHOTS@/sar-1-fit.png
+wv check_extremes v(out)
+wv check_extremes v(vinp)
+wv stats
+wv wheel 0.78 up 1
+wv wheel 0.50 up 4
+wv wheel 0.40 down 2
+wv wheel 0.12 up 4
+wv wheel 0.71 down 1
+wv drag 0.31 0.74
+wv wheel 0.18 down 3
+wv wheel 0.12 up 1
+wv drag 0.40 0.27
+wv wheel 0.12 down 2
+wv drag 0.85 0.54
+wv wheel 0.64 up 4
+wv drag 0.84 0.43
+wv drag 0.84 0.18
+wv drag 0.68 0.34
+wv drag 0.82 0.88
+wv wheel 0.87 down 2
+wv wheel 0.57 up 4
+wv drag 0.50 0.57
+wv wheel 0.29 up 4
+wv wheel 0.24 down 3
+wv wheel 0.63 up 1
+wv drag 0.52 0.41
+wv wheel 0.12 down 1
+wv wheel 0.78 up 4
+wv drag 0.23 0.28
+wv wheel 0.26 up 2
+wv wheel 0.38 down 3
+wv wheel 0.32 down 1
+wv wheel 0.79 down 2
+wv wheel 0.55 down 4
+wv drag 0.48 0.39
+wv wheel 0.85 down 4
+wv wheel 0.39 down 3
+wv wheel 0.53 up 3
+wv wheel 0.12 down 2
+wv drag 0.54 0.24
+wv wheel 0.54 up 3
+wv wheel 0.85 up 1
+wv wheel 0.11 up 1
+wait 1
+wv stats
+wv check_extremes v(out)
+wv check_extremes v(clks)
+wv click 0.3
+wv click 0.65 right
+wait 1
+screenshot @SHOTS@/sar-2-zoom.png
+wv show v(bit_1) v(bit_2) v(bit_3) v(bit_4) v(bit_5) v(bit_6) v(bit_7) v(bit_8) v(bit_9) v(bit_10) v(ck1) v(ck2) v(ck3) v(ck4) v(ck5) v(ck6) v(ck7) v(ck8) v(ck9) v(ck10) v(ck11)
+wait 2
+wv stats
+wv drag 0.32 0.31
+wv drag 0.25 0.33
+wv wheel 0.30 up 2
+wv drag 0.62 0.34
+wv drag 0.50 0.19
+wv wheel 0.37 up 2
+wv wheel 0.30 up 2
+wv drag 0.45 0.88
+wv wheel 0.42 up 1
+wv drag 0.23 0.66
+wv drag 0.54 0.28
+wv drag 0.74 0.51
+wv wheel 0.62 up 4
+wv drag 0.74 0.63
+wv wheel 0.69 down 2
+wv drag 0.80 0.35
+wv drag 0.35 0.85
+wv drag 0.43 0.30
+wv wheel 0.80 up 1
+wv wheel 0.27 down 4
+wv wheel 0.79 up 1
+wv wheel 0.38 down 2
+wv wheel 0.82 down 2
+wv wheel 0.85 down 4
+wv wheel 0.50 up 3
+wv drag 0.42 0.33
+wv wheel 0.79 up 2
+wv wheel 0.27 up 1
+wv drag 0.85 0.38
+wv drag 0.65 0.49
+wv drag 0.29 0.68
+wv wheel 0.24 up 2
+wv wheel 0.37 up 3
+wv wheel 0.37 down 3
+wv wheel 0.86 up 4
+wv wheel 0.54 up 1
+wv wheel 0.43 up 4
+wv drag 0.73 0.76
+wv wheel 0.59 up 4
+wv wheel 0.54 up 1
+wait 1
+wv stats
+wv check_extremes v(ck5)
+screenshot @SHOTS@/sar-3-many.png
+wv fit
+wait 1
+wv check_extremes v(bit_3)
+screenshot @SHOTS@/sar-3b-many-fit.png
+wv open @SAR@/SAR_top_1GB_tb_tran.raw
+wv wait_loaded
+wv expect_tabs 2
+wv show v(vocp) v(vocn) v(x3.dn)
+wait 2
+wv stats
+wv drag 0.39 0.34
+wv wheel 0.19 down 3
+wv wheel 0.14 up 3
+wv wheel 0.64 up 1
+wv wheel 0.76 down 1
+wv wheel 0.73 up 4
+wv wheel 0.46 up 2
+wv wheel 0.78 up 4
+wv drag 0.40 0.88
+wv drag 0.34 0.30
+wv wheel 0.18 down 3
+wv wheel 0.11 up 3
+wv drag 0.36 0.41
+wv wheel 0.15 down 3
+wv drag 0.88 0.19
+wv wheel 0.59 up 4
+wv drag 0.31 0.53
+wv wheel 0.30 up 1
+wv drag 0.17 0.70
+wv wheel 0.56 up 3
+wv drag 0.41 0.35
+wv wheel 0.35 up 3
+wv wheel 0.18 up 1
+wv wheel 0.12 up 2
+wv wheel 0.31 down 1
+wv drag 0.12 0.11
+wv drag 0.39 0.48
+wv drag 0.18 0.72
+wv wheel 0.51 up 2
+wv wheel 0.22 up 2
+wv drag 0.36 0.19
+wv wheel 0.84 down 3
+wv wheel 0.27 up 1
+wv drag 0.76 0.60
+wv drag 0.54 0.85
+wv drag 0.26 0.34
+wv wheel 0.14 down 2
+wv wheel 0.15 up 4
+wv drag 0.54 0.53
+wv drag 0.46 0.42
+wait 1
+wv stats
+screenshot @SHOTS@/sar-4-second-tab.png
+wv detach
+wait 2
+wv select 1
+wv stats
+wv wheel 0.31 up 1
+wv drag 0.85 0.88
+wv wheel 0.65 up 2
+wv wheel 0.21 down 3
+wv wheel 0.42 down 1
+wv wheel 0.11 up 3
+wv wheel 0.62 down 4
+wv drag 0.61 0.28
+wv wheel 0.65 up 2
+wv drag 0.37 0.59
+wv drag 0.62 0.88
+wv wheel 0.84 up 3
+wv wheel 0.71 up 2
+wv wheel 0.65 up 3
+wv wheel 0.66 up 4
+wv wheel 0.79 down 4
+wv wheel 0.30 up 2
+wv drag 0.68 0.73
+wv wheel 0.41 down 3
+wv wheel 0.78 down 1
+wait 1
+wv stats
+screenshot @SHOTS@/sar-5-first-tab-after-detach.png
+quit

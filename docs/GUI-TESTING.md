@@ -69,6 +69,7 @@ folder of examples/):
 | `cdept-gui/scripts/sar-enob.script` | The Phase 5 milestone on examples/ihp-inv (needs UberWave built in, the PDK, ngspice, the helper): tb_sar8/enob run from the Simulation tab, ENOB and SNDR by the calculator panel (`sim calc expr/evaluate/expect_value`), the code spectrum and the sampled codes sent to the built-in UberWave, an SFDR output added with a spec from the panel, saved and run again (3 PASS), an output reading `cursor_a` evaluated when the viewer's cursors move (`sim calc cursors`). The `sim calc` verbs are listed at the top of the script (`views/simulation/calc.rs`); `sim setup_section open|fold` opens or folds the Setup section | `setup.toml` and `simulations/` of the copy |
 | `cdept-gui/scripts/tests.script` | test templates and suites in the Simulation tab on examples/ihp-inv: a templated testbench (parameters, wrong values as the tab's problem, re-expansion, the saved file keeping only the template and own fields), switching template, the suite view running four tests into one table (needs the PDK, ngspice and the helper, like simulation.script; `sim template_*` / `sim suite_*` commands are listed at the top of the script) | `setup.toml` and `simulations/` of the copy |
 
+| `cdept-gui/scripts/wave/run.sh` | CDePT's own waveform tabs (`wv …`, below): hostile raw files, a corrupt and a stale `.uwraw` cache, a file that changes and is deleted while open, a read-only folder, a non-ASCII path under `LC_ALL=C`, a one-sample spike in 10 million samples at full zoom-out, two tabs indexing one file at once, a tab closed while it loads, a cancelled load, 60 opens and closes, and the 845 MB SAR ADC file (zoom/pan by wheel and drag, cursors, 25 traces, a second tab, a detached tab, frame and query statistics). It generates its inputs into `target/wave-test` (`gen.py`), unzips the SAR file into `target/sar` and runs a release build under a 6 GB cap: `cdept-gui/scripts/wave/run.sh [torture\|loop\|sar]` | `target/wave-test`, `target/sar` |
 
 `$PROJECT` in a script stands for the folder of the project being opened.
 
@@ -348,6 +349,33 @@ next command while the project is being read or a library scanned.
 | `reload_project` | Project ▸ Reload |
 | `load_project <folder>` | Open another project |
 | `setting <watch\|auto_reload> <on\|off>` | Project ▸ Follow Changes on Disk / Reload Unchanged Documents |
+
+## Waveform tabs (`wv`)
+
+CDePT's own waveform viewer (`cdept-gui/src/views/wave`, docs/NOTES.md). The script
+acts on the newest waveform tab unless `wv select` chose another. Mouse commands are
+real input on the plot at a fraction `fx` of its width; they use window coordinates, so
+no schematic or layout may be the script's document meanwhile. Numbers take SI
+suffixes (`2.5u`, `10n`, `1meg`).
+
+| Command | Does |
+|---|---|
+| `wv open <file>` | A new waveform tab on the file (one more tab each time, also for the same file) |
+| `wv open_point <lib> <cell> <view> <point>` | The same for a run point's raw file (`out.raw`, else the first `*.raw`) |
+| `wv select <n>\|newest` | Act on the n-th waveform tab (oldest is 1) |
+| `wv expect_tabs <n>` | n waveform tabs are open |
+| `wv wait_loaded` | Wait (up to 10 minutes) until the file is open; fails at once when it failed |
+| `wv expect_failed <text>` / `wv expect_loading` | The tab failed with this text / still loads |
+| `wv cancel`, `wv close`, `wv detach`, `wv reload` | Cancel the load; close the tab (its X); move it into a window of its own; open the file again |
+| `wv show <signal>…`, `wv hide <signal>…` | Show or hide signals |
+| `wv fit`, `wv zoom <x0> <x1>`, `wv expect_range <x0> <x1> [tol]` | The whole x range; a given one; check it |
+| `wv cursor <a\|b> <x\|none>`, `wv expect_cursor_x <a\|b> <x> [tol]` | Put, remove, check a cursor |
+| `wv expect_cursor <a\|b> <signal> <value> [tol]`, `wv expect_delta <signal> <value> [tol]` | The readouts (value at a cursor, B−A) |
+| `wv expect_drawn <min\|max> <signal> <value> [tol]` | The extreme of what is drawn in the x range on screen |
+| `wv check_extremes <signal>` | What is drawn has exactly the extremes of every sample in the range (read on the spot) |
+| `wv wheel <fx> <up\|down> [count] [ctrl\|shift]`, `wv drag <fx1> <fx2>`, `wv click <fx> [left\|right]` | Mouse on the plot |
+| `wv expect_cache <text>`, `wv expect_changed <yes\|no>`, `wv expect_files <dir> <text> <n>` | Where the `.uwraw` is; whether the file changed on disk; how many files of a folder have the text in their name |
+| `wv stats` | Log frame intervals, the tab's UI time, query times by mode, RSS, peak RSS and the cgroup's memory since the last `wv stats` |
 
 ## Notes
 

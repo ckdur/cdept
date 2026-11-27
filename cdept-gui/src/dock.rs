@@ -116,6 +116,9 @@ pub enum Tab {
     Search,
     /// An opened view of a cell (see [`Documents`]).
     Document(DocId),
+    /// A waveform viewer on a raw file (`views/wave`). Any number of them, also on the
+    /// same file; they are not kept across restarts.
+    Wave(u64),
 }
 
 /// Default region of a tab, used when (re)opening it.
@@ -150,7 +153,8 @@ impl Tab {
             | Tab::LibraryManager
             | Tab::Technology
             | Tab::Simulation
-            | Tab::Document(_) => Area::Center,
+            | Tab::Document(_)
+            | Tab::Wave(_) => Area::Center,
             Tab::Libraries | Tab::Hierarchy => Area::Left,
             Tab::Inspector | Tab::Tools => Area::Right,
             Tab::Console | Tab::Jobs | Tab::Problems | Tab::Search => Area::Bottom,
@@ -246,6 +250,11 @@ impl Layout {
         for w in &mut self.windows {
             let dock = std::mem::replace(&mut w.dock, DockState::new(Vec::new()));
             w.dock = labelled(dock);
+        }
+        // Waveform tabs are not restored: their data is not part of the layout.
+        self.main.retain_tabs(|tab| !matches!(tab, Tab::Wave(_)));
+        for w in &mut self.windows {
+            w.dock.retain_tabs(|tab| !matches!(tab, Tab::Wave(_)));
         }
         self.prune();
         self.next_id = self
@@ -384,6 +393,20 @@ impl Layout {
         }
         self.prune();
         closed
+    }
+
+    /// The waveform tabs open in any window.
+    pub fn wave_tabs(&self) -> Vec<u64> {
+        let mut open = Vec::new();
+        for win in self.window_ids() {
+            if let Some(dock) = self.dock(win) {
+                open.extend(dock.iter_all_tabs().filter_map(|(_, tab)| match tab {
+                    Tab::Wave(id) => Some(*id),
+                    _ => None,
+                }));
+            }
+        }
+        open
     }
 
     /// Move `tab` into a new native window and return its id.
@@ -533,9 +556,12 @@ impl TabViewer for Viewer<'_> {
     fn scroll_bars(&self, tab: &Tab) -> [bool; 2] {
         // Views with their own scroll areas (tables, console) handle scrolling themselves.
         match tab {
-            Tab::Console | Tab::Tools | Tab::LibraryManager | Tab::Search | Tab::Document(_) => {
-                [false, false]
-            }
+            Tab::Console
+            | Tab::Tools
+            | Tab::LibraryManager
+            | Tab::Search
+            | Tab::Document(_)
+            | Tab::Wave(_) => [false, false],
             _ => [true, true],
         }
     }
@@ -673,6 +699,21 @@ mod tests {
         layout.main.push_to_focused_leaf(Tab::Document(DocId(99)));
         assert_eq!(layout.sync_documents(), []);
         assert_eq!(layout.find(Tab::Document(DocId(99))), None);
+    }
+
+    #[test]
+    fn wave_tabs_are_not_restored() {
+        let mut layout = Layout::default();
+        layout.open_tab(Tab::Wave(1));
+        layout.open_tab(Tab::Wave(2));
+        layout.detach(Tab::Wave(2)).unwrap();
+        assert_eq!(layout.wave_tabs(), [1, 2]);
+        assert_eq!(layout.find(Tab::Wave(1)), Some(WindowId::Main));
+        let text = ron::to_string(&layout).unwrap();
+        let back = ron::from_str::<Layout>(&text).unwrap().restored();
+        assert!(back.wave_tabs().is_empty());
+        // The window that only held a waveform tab is gone too.
+        assert!(back.windows.is_empty());
     }
 
     #[test]

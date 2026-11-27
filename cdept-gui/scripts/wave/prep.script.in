@@ -1,0 +1,5 @@
+wv open @DATA@/good.raw
+wv wait_loaded
+wv open @DATA@/stale.raw
+wv wait_loaded
+quit

@@ -528,6 +528,8 @@ pub struct SimulationView {
     pub(crate) calc: calc::CalcPanel,
     /// Open or fold the Setup section at the next frame (a script's `sim setup_section`).
     setup_open: Option<bool>,
+    /// "Waveform Tab" of a point: the raw file and the tab's title, for the next frame.
+    open_wave: Option<(std::path::PathBuf, String)>,
 }
 
 impl SimulationView {
@@ -1485,6 +1487,12 @@ impl SimulationView {
             crate::uberwave::results_ui(ui, project, (&t.library, &t.cell, &t.view), ok);
         }
         let many = self.results.len() > 6;
+        let mut open_wave = None;
+        let cell = self
+            .target
+            .as_ref()
+            .map(|t| t.cell.clone())
+            .unwrap_or_default();
         egui::CollapsingHeader::new(format!("Points ({})", self.results.len()))
             .default_open(!many)
             .show(ui, |ui| {
@@ -1503,6 +1511,19 @@ impl SimulationView {
                                 .clicked()
                         {
                             crate::uberwave::open_run_dir(project, &row.dir);
+                        }
+                        if row.error.is_none()
+                            && ui
+                                .small_button("Waveform Tab")
+                                .on_hover_text(
+                                    "Open this point's out.raw in a waveform tab of CDePT's own viewer (dockable; one tab per click)",
+                                )
+                                .clicked()
+                        {
+                            open_wave = Some((
+                                crate::views::wave::script::point_raw(&row.dir),
+                                format!("{cell} {}", row.name),
+                            ));
                         }
                         if ui.small_button("Open log").clicked() {
                             let log = ["out.log", "job.log"]
@@ -1557,6 +1578,9 @@ impl SimulationView {
                         });
                 }
             });
+        if open_wave.is_some() {
+            self.open_wave = open_wave;
+        }
     }
 }
 
@@ -1575,6 +1599,9 @@ impl View for SimulationView {
             return;
         };
         self.poll();
+        if let Some((file, title)) = self.open_wave.take() {
+            ctx.request(Action::OpenWave(file, Some(title)));
+        }
         self.after_load(&project);
         let Some(target) = self.target.clone() else {
             empty_state(

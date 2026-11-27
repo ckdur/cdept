@@ -116,6 +116,8 @@ enum Command {
     Sim(Vec<String>),
     /// `wave open <lib> <cell> <view> <point>`: start UberWave on a run point.
     Wave(Vec<String>),
+    /// `wv ...`: CDePT's own waveform tabs (`views/wave`).
+    Wv(Vec<String>),
     /// `organise <verb> …`: Go to Cell, Search, categories, Import Project (import.rs).
     Organise(Vec<String>),
     /// Changes on disk, git marks, the trash (background/script.rs).
@@ -242,6 +244,9 @@ impl Command {
         if let Command::Magic(args) = self {
             return crate::views::magic_patient(args);
         }
+        if let Command::Wv(args) = self {
+            return crate::views::wave::script::patient(args);
+        }
         matches!(
             self,
             Command::Menu(_)
@@ -300,6 +305,7 @@ impl Command {
         match self {
             Command::Sim(args) if args.first().map(String::as_str) == Some("wait") => SIM_PATIENCE,
             Command::Magic(_) => SIM_PATIENCE,
+            Command::Wv(args) => crate::views::wave::script::patience(args),
             Command::Sim(args) if args.first().map(String::as_str) == Some("suite_wait") => {
                 SUITE_PATIENCE
             }
@@ -637,6 +643,7 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
         ),
         "magic" => Command::Magic(args.iter().map(|word| word.to_string()).collect()),
         "wave" => Command::Wave(args.iter().map(|word| word.to_string()).collect()),
+        "wv" => Command::Wv(args.iter().map(|word| word.to_string()).collect()),
         "organise" => Command::Organise(args.iter().map(|word| word.to_string()).collect()),
         "quit" => Command::Quit,
         "mode" => Command::Layout(LayoutCommand::Mode(text()?)),
@@ -1944,6 +1951,53 @@ impl Script {
                 crate::views::magic_script(view, &args)?;
             }
             Command::Wave(args) => crate::uberwave::script(app.script_project(), &args)?,
+            Command::Wv(args) => {
+                use crate::views::wave::script::{Input, run};
+                match run(app, ctx, &args)? {
+                    None => {}
+                    // Mouse input on the plot: through egui like a hand's (window points:
+                    // no schematic or layout may be the script's document meanwhile).
+                    Some(Input::Wheel(at, notches, count, modifiers)) => {
+                        self.events(vec![Event::PointerMoved(at)], Modifiers::NONE);
+                        for _ in 0..count {
+                            let wheel = Event::MouseWheel {
+                                unit: MouseWheelUnit::Line,
+                                delta: Vec2::new(0.0, notches),
+                                phase: TouchPhase::Move,
+                                modifiers,
+                            };
+                            self.events(vec![wheel], modifiers);
+                        }
+                        self.events(Vec::new(), Modifiers::NONE);
+                    }
+                    Some(Input::Drag(from, to)) => {
+                        self.events(vec![Event::PointerMoved(from)], Modifiers::NONE);
+                        self.events(
+                            vec![Event::PointerButton {
+                                pos: from,
+                                button: PointerButton::Primary,
+                                pressed: true,
+                                modifiers: Modifiers::NONE,
+                            }],
+                            Modifiers::NONE,
+                        );
+                        for i in 1..=10 {
+                            let at = from + (to - from) * (i as f32 / 10.0);
+                            self.events(vec![Event::PointerMoved(at)], Modifiers::NONE);
+                        }
+                        self.events(
+                            vec![Event::PointerButton {
+                                pos: to,
+                                button: PointerButton::Primary,
+                                pressed: false,
+                                modifiers: Modifiers::NONE,
+                            }],
+                            Modifiers::NONE,
+                        );
+                    }
+                    Some(Input::Click(at, button)) => self.click(at.x, at.y, button),
+                }
+            }
             Command::Organise(args) => app.script_organise(ctx, &args)?,
             Command::Disk(command) => {
                 let mut requests = Vec::new();

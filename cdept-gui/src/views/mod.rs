@@ -22,6 +22,7 @@ pub(crate) mod technology;
 mod testlib;
 mod tools;
 pub(crate) mod vcs;
+pub(crate) mod wave;
 
 use std::collections::HashMap;
 
@@ -99,6 +100,9 @@ pub struct Views {
     documents: HashMap<DocId, Document>,
     /// Stands in for a document tab that has no view (any more).
     missing: placeholder::Placeholder,
+    /// The waveform tabs, by the id of their tab (`Tab::Wave`).
+    waves: std::collections::BTreeMap<u64, wave::WaveView>,
+    next_wave: u64,
     /// Layout files to generate from their schematic once their tab is ready
     /// (docs/LINKING.md §6).
     generate: Vec<std::path::PathBuf>,
@@ -123,6 +127,8 @@ impl Default for Views {
             generate: Vec::new(),
             documents: HashMap::new(),
             missing: Placeholder::new("Document", "This document is closed.", "a later step"),
+            waves: Default::default(),
+            next_wave: 1,
         }
     }
 }
@@ -146,7 +152,47 @@ impl Views {
                 Some(view) => view,
                 None => &mut self.missing,
             },
+            Tab::Wave(id) => match self.waves.get_mut(&id) {
+                Some(view) => view,
+                None => &mut self.missing,
+            },
         }
+    }
+
+    /// A new waveform tab on `file` (it starts loading at once); returns its tab.
+    pub(crate) fn add_wave(
+        &mut self,
+        ctx: &egui::Context,
+        file: std::path::PathBuf,
+        title: Option<String>,
+    ) -> Tab {
+        let id = self.next_wave;
+        self.next_wave += 1;
+        self.waves
+            .insert(id, wave::WaveView::open(ctx, id, file, title));
+        Tab::Wave(id)
+    }
+
+    /// Drop the waveform views whose tab was closed (their loading is cancelled, their
+    /// worker stops).
+    pub(crate) fn retain_waves(&mut self, open: &[u64]) {
+        self.waves.retain(|id, _| open.contains(id));
+    }
+
+    pub(crate) fn wave_mut(&mut self, id: u64) -> Option<&mut wave::WaveView> {
+        self.waves.get_mut(&id)
+    }
+
+    /// Let every waveform tab take what its threads finished (hidden tabs included).
+    pub(crate) fn tick_waves(&mut self, ctx: &egui::Context) {
+        for view in self.waves.values_mut() {
+            view.tick(ctx);
+        }
+    }
+
+    /// The waveform tabs, oldest first.
+    pub(crate) fn wave_ids(&self) -> Vec<u64> {
+        self.waves.keys().copied().collect()
     }
 
     /// The Simulation tab.

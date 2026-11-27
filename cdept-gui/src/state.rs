@@ -115,6 +115,9 @@ pub enum Action {
     OpenWith(Selection, String),
     /// Open a file in its embedded tool: as the library view it is, if it is one.
     OpenFile(PathBuf),
+    /// A new waveform tab on a raw file (`views/wave`), with a title (else the file's
+    /// name).
+    OpenWave(PathBuf, Option<String>),
     /// Move a tab into a new native window.
     DetachTab(Tab),
     /// Move a tab into an existing window.
