@@ -112,6 +112,8 @@ enum Command {
     CheckPicture,
     Log(String),
     Layout(LayoutCommand),
+    /// `guide <verb> …`: the tutorial guide (docs/GUI-TESTING.md).
+    Guide(Vec<String>),
     /// `tech <verb> …`: the New Project wizard and the technology (newproject.rs).
     Tech(Vec<String>),
     /// `sim <verb> …`: the Simulation tab (views/simulation.rs).
@@ -280,6 +282,7 @@ impl Command {
                 | Command::Picker(_)
                 | Command::PickerFile(_)
                 | Command::Tech(_)
+                | Command::Guide(_)
                 | Command::Organise(_)
                 | Command::Layout(
                     LayoutCommand::Place(_)
@@ -332,6 +335,8 @@ enum Step {
     /// Events, with the modifier keys held meanwhile. Positions are in frame pixels of
     /// the active schematic until they are sent.
     Events(Vec<Event>, Modifiers),
+    /// Events at positions of the main window, as they are.
+    Window(Vec<Event>),
 }
 
 enum Waiting {
@@ -636,6 +641,7 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
         "screenshot" => Command::Screenshot(PathBuf::from(text()?)),
         "check_picture" => Command::CheckPicture,
         "log" => Command::Log(rest.to_string()),
+        "guide" => Command::Guide(args.iter().map(|word| word.to_string()).collect()),
         "tech" => Command::Tech(args.iter().map(|word| word.to_string()).collect()),
         "sim" => Command::Sim(args.iter().map(|word| word.to_string()).collect()),
         "open_view" => match args.as_slice() {
@@ -1008,9 +1014,18 @@ impl Script {
             Waiting::Nothing => self.steps.pop_front(),
             _ => None,
         };
-        let Some(Step::Events(events, modifiers)) = step else {
-            input.events.push(Event::ModifiersChanged(Modifiers::NONE));
-            return;
+        let (events, modifiers) = match step {
+            Some(Step::Events(events, modifiers)) => (events, modifiers),
+            Some(Step::Window(events)) => {
+                self.settle = true;
+                input.events.push(Event::ModifiersChanged(Modifiers::NONE));
+                input.events.extend(events);
+                return;
+            }
+            None => {
+                input.events.push(Event::ModifiersChanged(Modifiers::NONE));
+                return;
+            }
         };
         // One step at a time, as slowly as a hand: xschem answers before the next.
         self.settle = true;
@@ -1255,6 +1270,69 @@ impl Script {
         if modifiers != Modifiers::NONE {
             self.events(Vec::new(), Modifiers::NONE);
         }
+    }
+
+    /// `guide <verb> …`. Like the `tech` verbs, one either does its thing or fails
+    /// without having done anything.
+    fn guide_command(
+        &mut self,
+        app: &mut CdeptApp,
+        ctx: &Context,
+        args: &[String],
+    ) -> Result<(), String> {
+        let (verb, rest) = args.split_first().ok_or("usage: guide <verb> …")?;
+        let word = rest.first().map(String::as_str);
+        if verb == "start" {
+            let name = word.ok_or("usage: guide start <tutorial>")?;
+            app.start_tutorial(crate::guide::Tutorial::find(name)?);
+            return Ok(());
+        }
+        let guide = app.script_guide().ok_or("no tutorial is running")?;
+        let step = guide.step().map_or("finished", |s| s.id.as_str());
+        let pointing = crate::guide::pointing(ctx, guide).map(|(at, _)| at);
+        // A click in the middle of what is marked: the same way a user gets there,
+        // so a mark in the wrong place fails the script.
+        let target = match verb.as_str() {
+            "expect_step" => {
+                return if word == Some(step) {
+                    Ok(())
+                } else {
+                    Err(format!("the tutorial is at '{step}'"))
+                };
+            }
+            "expect_pointing" => {
+                return if word == pointing.as_deref() {
+                    Ok(())
+                } else {
+                    Err(format!("at '{step}' the guide points at {pointing:?}"))
+                };
+            }
+            "click" => pointing.ok_or(format!("at '{step}' the guide points at nothing"))?,
+            "press" => word.ok_or("usage: guide press <anchor>")?.to_string(),
+            "continue" => {
+                if !guide.can_continue() {
+                    return Err(format!("'{step}' cannot be continued"));
+                }
+                "guide.continue".to_string()
+            }
+            other => return Err(format!("unknown: guide {other}")),
+        };
+        let (viewport, rect) = crate::guide::find_anchor(ctx, &target)
+            .ok_or(format!("'{target}' is not on screen"))?;
+        if viewport != egui::ViewportId::ROOT {
+            return Err(format!("'{target}' is in another window"));
+        }
+        let pos = rect.center();
+        let press = |pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        for event in [Event::PointerMoved(pos), press(true), press(false)] {
+            self.steps.push_back(Step::Window(vec![event]));
+        }
+        Ok(())
     }
 
     /// The commands for a layout document.
@@ -1959,6 +2037,7 @@ impl Script {
             }
             Command::Layout(command) => self.layout_command(app, command)?,
             Command::Log(text) => tracing::info!(target: "cdept::script", "{text}"),
+            Command::Guide(args) => self.guide_command(app, ctx, &args)?,
             Command::Tech(args) => app.script_tech(ctx, &args)?,
             Command::Sim(args) => app.script_sim(&args)?,
             Command::Magic(args) => {

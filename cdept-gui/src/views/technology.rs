@@ -18,6 +18,7 @@ use libcdept::tech::{self, Catalog, Tech, TechLibrary, TechPath};
 use serde_json::Value;
 
 use super::{View, empty_state};
+use crate::guide;
 use crate::pdkscan;
 use crate::state::{Action, AppCtx};
 
@@ -1476,6 +1477,7 @@ impl View for TechnologyView {
             );
             return;
         }
+        guide::fact(ui.ctx(), "technology.tab");
         self.refresh(ctx);
         ctx.tech.files_only = self.files_only;
         // A test script asked for a page.
@@ -1503,7 +1505,13 @@ impl View for TechnologyView {
         } else {
             ui.horizontal_wrapped(|ui| {
                 for page in Page::ALL {
-                    ui.selectable_value(&mut self.page, page, page.label());
+                    let chosen = ui.selectable_value(&mut self.page, page, page.label());
+                    let name = page.label().to_lowercase().replace(' ', "_");
+                    let name = format!("technology.page.{name}");
+                    guide::anchor(ui, &name, &chosen);
+                    if self.page == page {
+                        guide::fact(ui.ctx(), &name);
+                    }
                 }
                 ui.separator();
                 ui.add(

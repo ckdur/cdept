@@ -6,6 +6,7 @@ mod cace;
 mod dialogs;
 mod dock;
 mod engines;
+mod guide;
 mod import;
 mod import_files;
 mod library_dialog;
@@ -23,6 +24,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+pub use guide::{Tutorial, builtin as builtin_tutorial, builtins as builtin_tutorials};
 pub use log::LogBuffer;
 
 /// Whether the waveform tabs have UberWave's data engine (not its stub), for `cdept tools`.
@@ -40,6 +42,8 @@ pub struct GuiOptions {
     pub project: Option<PathBuf>,
     /// A script of commands to run in the GUI, for testing (see `docs/GUI-TESTING.md`).
     pub script: Option<PathBuf>,
+    /// A tutorial to be guided through (docs/tutorials/).
+    pub tutorial: Option<Tutorial>,
 }
 
 fn egui_glow_configuration(vsync: bool) -> eframe::egui_glow::GlowConfiguration {

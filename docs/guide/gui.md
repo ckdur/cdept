@@ -42,7 +42,7 @@ under `$XDG_DATA_HOME` ([Environment variables](../reference/environment.md)).
 | Project | Reload, Copy Project File Path, Project Settings, Technology, background tasks |
 | Tools | Library Manager, import tools, Detect Tools |
 | Window | Show or hide each panel, the open documents, Open Document in New Window, Reset Layout |
-| Help | About |
+| Help | [Tutorials](../tutorials/index.md), About |
 
 Project Settings edits the name, description, technology (PDK) and PDK folder; they are
 written to [`cdept.toml`](../reference/files/cdept-toml.md) and

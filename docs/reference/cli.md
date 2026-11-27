@@ -14,6 +14,7 @@ Usage: cdept [OPTIONS] [COMMAND]
 
 Commands:
   gui           Open the main window (default)
+  tutorial      Follow a tutorial in the GUI: a step list that points at what to use next (docs/tutorials/). Without a name, list the tutorials
   init          Create a project (a cdept.toml file) in a folder
   info          Show the project: its file, the PDK in use ($PDK, $PDK_ROOT) and where each value comes from, the libraries
   ls            List the libraries, cells and views of the project
@@ -68,6 +69,20 @@ Usage: cdept gui [OPTIONS]
 
 Options:
       --script <SCRIPT>    Run a script of GUI commands, for testing (see docs/GUI-TESTING.md)
+```
+
+### cdept tutorial
+
+```text
+Follow a tutorial in the GUI: a step list that points at what to use next (docs/tutorials/). Without a name, list the tutorials
+
+Usage: cdept tutorial [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]  A tutorial's name (e.g. pdk-setup), or a tutorial file
+
+Options:
+      --print              Print the tutorial as Markdown instead of opening the GUI
 ```
 
 ### cdept init

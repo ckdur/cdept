@@ -1,0 +1,99 @@
+# Replays the pdk-setup tutorial the way a user does it: `guide click` clicks the middle
+# of what the guide outlines, `guide continue` the card's button, so a mark in the
+# wrong place or a card that cannot be clicked over a dialog fails here. The PDK is
+# added and chosen with `tech` commands.
+#
+# Run by cdept-gui/scripts/tutorial.sh (scratch HOME and settings, no PDK_ROOT):
+#   @SCRATCH@ the work folder, @PDKS@ the folder that holds the PDKs.
+guide expect_step welcome
+screenshot @SCRATCH@/01-welcome.png
+guide continue
+
+guide expect_step open-wizard
+guide expect_pointing menu.file
+screenshot @SCRATCH@/02-file-menu.png
+guide click
+guide expect_pointing menu.file.new_project
+wait 0.6
+screenshot @SCRATCH@/03-new-project.png
+guide click
+
+# Closing the wizard takes the guide back.
+guide expect_step folder
+key Escape
+guide expect_step open-wizard
+guide expect_pointing menu.file
+guide click
+guide expect_pointing menu.file.new_project
+guide click
+
+# The folder as a user types it: click the field the guide outlines, select what is
+# there, type the line of the tutorial.
+guide expect_step folder
+guide expect_pointing wizard.folder
+guide click
+key a ctrl
+text ~/cdept-tutorial/my-first-chip
+wait 0.5
+screenshot @SCRATCH@/04-folder.png
+guide continue
+
+guide expect_step choose-pdk
+tech root @PDKS@
+tech pdk ihp-sg13g2
+wait 0.5
+screenshot @SCRATCH@/05-choose-pdk.png
+guide continue
+
+guide expect_step scan
+guide expect_pointing wizard.next
+screenshot @SCRATCH@/06-scan.png
+guide click
+
+guide expect_step summary
+tech expect_scanned
+wait 0.5
+screenshot @SCRATCH@/07-summary.png
+guide continue
+guide expect_step libraries
+screenshot @SCRATCH@/08-libraries.png
+guide continue
+
+guide expect_step create
+guide expect_pointing wizard.create
+guide click
+
+guide expect_step open-technology
+expect_project my-first-chip
+guide expect_pointing menu.project
+screenshot @SCRATCH@/09-created.png
+guide click
+guide expect_pointing menu.project.technology
+guide click
+
+guide expect_step models
+guide expect_pointing technology.page.models
+guide click
+wait 0.5
+screenshot @SCRATCH@/10-models.png
+guide continue
+guide expect_step notes
+guide click
+wait 0.5
+screenshot @SCRATCH@/11-notes.png
+guide continue
+
+guide expect_step pdk-library
+guide expect_pointing libraries.panel
+wait 0.5
+screenshot @SCRATCH@/12-library.png
+select sg13g2_pr sg13_lv_nmos
+
+guide expect_step files
+wait 0.5
+screenshot @SCRATCH@/13-files.png
+guide continue
+guide expect_step finished
+wait 0.5
+screenshot @SCRATCH@/14-finished.png
+quit

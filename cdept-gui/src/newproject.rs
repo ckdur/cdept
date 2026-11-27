@@ -14,6 +14,7 @@ use libcdept::tech::{self, Catalog, PdkDir, Tech, TechLibrary, TechPath};
 use libcdept::{PROJECT_FILE, Project};
 
 use crate::dock::WindowId;
+use crate::guide;
 use crate::pathfield::PathField;
 use crate::pdkscan::{self, Job, PdkEntry, ScanJob};
 use crate::state::{Action, AppCtx};
@@ -246,6 +247,27 @@ impl Wizard {
         self.scan = Some(ScanJob::start(ctx, pdk, !self.files_only, Vec::new()));
     }
 
+    /// What a tutorial may ask about the wizard.
+    fn tell_guide(&self, ctx: &egui::Context) {
+        guide::fact(ctx, "wizard.open");
+        guide::fact(
+            ctx,
+            match self.page {
+                Page::Project => "wizard.page.project",
+                Page::Technology => "wizard.page.technology",
+            },
+        );
+        if self.folder_problem().is_none() && !self.holds_project() {
+            guide::fact(ctx, "wizard.folder_ok");
+        }
+        if self.finding.is_none() && self.choice.is_some() {
+            guide::fact(ctx, "wizard.pdk_chosen");
+        }
+        if self.scanned().is_some() {
+            guide::fact(ctx, "wizard.scanned");
+        }
+    }
+
     /// What is wrong with the folder, if anything stops the wizard.
     fn folder_problem(&self) -> Option<String> {
         if self.folder.trim().is_empty() {
@@ -309,11 +331,12 @@ impl Wizard {
                 let focus = std::mem::take(&mut self.focus);
                 // Completion and "Browse…" come with the field (pathfield.rs).
                 ui.vertical(|ui| {
-                    PathField::folder("wizard-folder", &mut self.folder)
+                    let folder = PathField::folder("wizard-folder", &mut self.folder)
                         .title("Folder for the new project")
                         .width(420.0)
                         .focus(focus)
-                        .show(ui)
+                        .show(ui);
+                    guide::anchor(ui, "wizard.folder", &folder.response);
                 });
                 ui.end_row();
                 ui.label("Name");
@@ -350,7 +373,7 @@ impl Wizard {
                 ui.weak("Looking for PDKs…");
             });
         }
-        ScrollArea::vertical()
+        let pdks = ScrollArea::vertical()
             .max_height(220.0)
             .auto_shrink([false, true])
             .show(ui, |ui| {
@@ -373,13 +396,16 @@ impl Wizard {
                         ui.end_row();
                     });
             });
+        let mut listed = pdks.inner_rect;
+        listed.set_height(listed.height().min(pdks.content_size.y));
+        guide::anchor_rect(ui, "wizard.pdks", listed);
         if self.finding.is_none() && self.pdks.is_empty() {
             ui.small(
                 "No PDK was found. Looked at: $PDK_ROOT, $CDEPT_PDK_PATH, ~/.ciel, ~/.volare, \
                  /usr/share/pdk, /usr/local/share/pdk, ~/share/pdk. Name the folder below.",
             );
         }
-        ui.horizontal(|ui| {
+        let other = ui.horizontal(|ui| {
             ui.label("Other folder")
                 .on_hover_text("A PDK folder, or the folder that holds PDKs");
             let field = ui
@@ -410,6 +436,7 @@ impl Wizard {
                 ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter));
             }
         });
+        guide::anchor(ui, "wizard.pdk_folder", &other.response);
         if self.choice.is_some() {
             ui.checkbox(&mut self.files_only, "Scan files only")
                 .on_hover_text(
@@ -426,12 +453,14 @@ impl Wizard {
                 if ui.add_enabled(ready, egui::Button::new(label)).clicked() {
                     outcome = Outcome::Create;
                 }
-            } else if ui
-                .add_enabled(ready, egui::Button::new("Next ›"))
-                .on_hover_text("Scan the PDK and show what was found")
-                .clicked()
-            {
-                outcome = Outcome::Next;
+            } else {
+                let next = ui
+                    .add_enabled(ready, egui::Button::new("Next ›"))
+                    .on_hover_text("Scan the PDK and show what was found");
+                guide::anchor(ui, "wizard.next", &next);
+                if next.clicked() {
+                    outcome = Outcome::Next;
+                }
             }
             if ui.button("Cancel").clicked() {
                 outcome = Outcome::Cancel;
@@ -472,7 +501,7 @@ impl Wizard {
             };
             let resolve: techview::Resolve = &resolve_path;
             let mut asks: Vec<Ask> = Vec::new();
-            Grid::new("wizard-summary")
+            let summary = Grid::new("wizard-summary")
                 .num_columns(2)
                 .spacing([16.0, 3.0])
                 .show(ui, |ui| {
@@ -489,11 +518,12 @@ impl Wizard {
                         ui.end_row();
                     }
                 });
+            guide::anchor(ui, "wizard.summary", &summary.response);
             let libraries = scanned.tech.libraries();
             if !libraries.is_empty() {
                 ui.add_space(8.0);
                 ui.strong("Libraries of the PDK to list in the project");
-                ScrollArea::vertical()
+                let list = ScrollArea::vertical()
                     .max_height(150.0)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
@@ -512,6 +542,9 @@ impl Wizard {
                                 }
                             });
                     });
+                let mut listed = list.inner_rect;
+                listed.set_height(listed.height().min(list.content_size.y));
+                guide::anchor_rect(ui, "wizard.libraries", listed);
             }
             if !scanned.tech.notes.is_empty() {
                 ui.add_space(6.0);
@@ -549,7 +582,9 @@ impl Wizard {
             if ui.button("‹ Back").clicked() {
                 outcome = Outcome::Back;
             }
-            if ui.add_enabled(ready, egui::Button::new("Create")).clicked() {
+            let create = ui.add_enabled(ready, egui::Button::new("Create"));
+            guide::anchor(ui, "wizard.create", &create);
+            if create.clicked() {
                 outcome = Outcome::Create;
             }
             if ui.button("Cancel").clicked() {
@@ -619,6 +654,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut AppCtx) {
         return;
     };
     wizard.poll();
+    wizard.tell_guide(ctx);
     let mut outcome = Outcome::Open;
     let response = egui::Modal::new(egui::Id::new("cdept-new-project")).show(ctx, |ui| {
         ui.set_width(640.0);

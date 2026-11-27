@@ -7,7 +7,10 @@ open-source tools that work on them: xschem, KLayout, Magic, netgen, ngspice, Xy
 VACASK, Qucs-S, Yosys and OpenROAD. The tools run as helper processes or in batch; CDePT
 itself is MIT licensed and never links GPL code.
 
-This manual has four parts. Start with the **User guide**; the **Concepts** pages say how
+New to CDePT? Follow the [Tutorials](tutorials/index.md): CDePT guides you through them in
+its own window.
+
+The rest of the manual has four parts. Start with the **User guide**; the **Concepts** pages say how
 CDePT thinks about a design; the **How-to** pages are short recipes; the **Reference** is
 where the file formats, the command line and the environment variables are defined.
 
@@ -23,6 +26,13 @@ guide/installation
 guide/quickstart
 guide/gui
 guide/cli
+```
+
+```{toctree}
+:caption: Tutorials
+:maxdepth: 2
+
+tutorials/index
 ```
 
 ```{toctree}

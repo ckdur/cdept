@@ -16,6 +16,7 @@ use libcdept::{Cell, Entry, Format, Project};
 
 use crate::dialogs::{self, Dialog};
 use crate::dock::{DocId, DocRef, Geometry, Layout, Tab, Viewer, WindowId};
+use crate::guide;
 use crate::log::LogBuffer;
 use crate::script::Script;
 use crate::state::{Action, ActiveSchematic, AppCtx, PickFor, Selection, Settings};
@@ -132,6 +133,8 @@ pub struct CdeptApp {
     quit_confirmed: bool,
     /// The test script being run, if any.
     script: Option<Script>,
+    /// The tutorial being followed, with its card and highlight.
+    guide: Option<crate::guide::Guide>,
     /// A tool chosen for a document about to start ("Open with": a GDS in Magic).
     forced_tool: HashMap<DocId, &'static str>,
     /// The waveform tab `wv ...` script commands act on (`None`: the newest).
@@ -206,6 +209,7 @@ impl CdeptApp {
             crate::background::load_at_start(&mut ctx, egui_ctx, &path);
         }
         ctx.tools.start_detection(egui_ctx);
+        let tutorial = options.tutorial;
 
         let mut app = Self {
             layout,
@@ -218,6 +222,7 @@ impl CdeptApp {
             guard: None,
             quit_confirmed: false,
             script,
+            guide: None,
             forced_tool: HashMap::new(),
             script_wave: None,
             wave_pick: None,
@@ -225,6 +230,9 @@ impl CdeptApp {
             uberwave_opens: Vec::new(),
             frame_clock: FrameClock::default(),
         };
+        if let Some(tutorial) = tutorial {
+            app.start_tutorial(tutorial);
+        }
         // With the project still being read, the documents come back once it is there.
         if !app.ctx.background.restoring() {
             app.restore_documents(egui_ctx);
@@ -1403,6 +1411,85 @@ impl CdeptApp {
         // CDePT's own path prompts (and the native dialogs behind them).
         crate::pathfield::show(ui.ctx(), win);
         crate::newproject::show(ui.ctx(), &mut self.ctx);
+        // Last: over the dialogs, and after every widget has said where it is.
+        if let Some(guide) = &mut self.guide {
+            if win == WindowId::Main {
+                let project = self.ctx.project.as_ref();
+                let project = project.map(|p| p.root.display().to_string());
+                crate::guide::show_card(ui.ctx(), guide, project.as_deref());
+            }
+            crate::guide::highlight(ui.ctx(), guide);
+        }
+    }
+
+    /// Follow a tutorial from its first step.
+    pub(crate) fn start_tutorial(&mut self, tutorial: crate::guide::Tutorial) {
+        tracing::info!(target: "cdept::guide", "tutorial '{}' started", tutorial.id);
+        let baseline = self.ctx.project.as_ref().map(|p| p.root.clone());
+        self.guide = Some(crate::guide::Guide::new(tutorial, baseline));
+    }
+
+    /// Whether the guide's `fact` holds: what the widgets said in the frame before,
+    /// or what the guide works out from the project.
+    fn guide_fact(&self, ctx: &Context, baseline: Option<&std::path::Path>, fact: &str) -> bool {
+        let project = self.ctx.project.as_ref();
+        match fact {
+            // A project with a technology, other than the one the tutorial began with.
+            "project.created" => {
+                project.is_some_and(|p| p.tech_in_use && Some(p.root.as_path()) != baseline)
+            }
+            // A library, cell or view of the PDK is selected.
+            "library.pdk_selected" => project.is_some_and(|p| {
+                let selection = &self.ctx.selection;
+                selection.cell.is_some()
+                    && selection.library.as_ref().is_some_and(|name| {
+                        let tech = libcdept::tech::file::tech_file(&p.root);
+                        p.libraries
+                            .iter()
+                            .any(|l| l.name == *name && l.defined_in == tech)
+                    })
+            }),
+            _ => crate::guide::has_fact(ctx, fact),
+        }
+    }
+
+    /// At the start of a frame: move the tutorial on as the frame before showed, and
+    /// collect anew.
+    fn guide_frame(&mut self, ctx: &Context) {
+        if self.guide.as_ref().is_some_and(|g| g.closed) {
+            self.guide = None;
+        }
+        // Not while a project is being read: it is gone for a moment.
+        if !self.ctx.background.busy()
+            && let Some(mut guide) = self.guide.take()
+        {
+            let facts: Vec<String> = guide
+                .step()
+                .map(|step| {
+                    step.done_when
+                        .iter()
+                        .chain(&step.continue_needs)
+                        .chain(&step.lost_without)
+                        .filter(|f| self.guide_fact(ctx, guide.baseline.as_deref(), f))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+            if guide.update(facts) {
+                let step = guide.step().map_or("finished", |s| s.id.as_str());
+                tracing::info!(target: "cdept::guide", "tutorial step: {step}");
+                ctx.request_repaint();
+            }
+            self.guide = Some(guide);
+        }
+        if self.guide.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        }
+        crate::guide::next_frame(ctx, self.guide.is_some());
+    }
+
+    pub(crate) fn script_guide(&self) -> Option<&crate::guide::Guide> {
+        self.guide.as_ref()
     }
 
     /// A detached window, as an immediate viewport (a real OS window where supported).
@@ -1454,8 +1541,10 @@ impl CdeptApp {
 
     fn menu_bar(&mut self, ui: &mut Ui, win: WindowId) {
         egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button("File", |ui| {
-                if ui.button("New Project…").clicked() {
+            let file = ui.menu_button("File", |ui| {
+                let new_project = ui.button("New Project…");
+                guide::anchor(ui, "menu.file.new_project", &new_project);
+                if new_project.clicked() {
                     crate::newproject::open(&mut self.ctx, ui.ctx());
                 }
                 if ui.button("Open Project…").clicked() {
@@ -1571,6 +1660,7 @@ impl CdeptApp {
                     self.ctx.request(Action::Quit);
                 }
             });
+            guide::anchor(ui, "menu.file", &file.response);
 
             self.edit_menu(ui, win);
 
@@ -1586,7 +1676,7 @@ impl CdeptApp {
                 self.views.get(tab).menus(ui, &mut self.ctx);
             }
 
-            ui.menu_button("Project", |ui| {
+            let project_menu = ui.menu_button("Project", |ui| {
                 let open = self.ctx.project.is_some();
                 if ui
                     .add_enabled(open, Button::new("Reload"))
@@ -1615,17 +1705,18 @@ impl CdeptApp {
                     let dialog = Dialog::project_settings(project);
                     self.ctx.open_dialog(dialog);
                 }
-                if ui
+                let technology = ui
                     .add_enabled(open, Button::new("Technology…"))
                     .on_hover_text(
                         "What CDePT read out of the PDK: layers, decks, corners, libraries",
-                    )
-                    .clicked()
-                {
+                    );
+                guide::anchor(ui, "menu.project.technology", &technology);
+                if technology.clicked() {
                     self.ctx.request(Action::OpenTab(Tab::Technology));
                 }
                 crate::background::menu_ui(ui, &mut self.ctx);
             });
+            guide::anchor(ui, "menu.project", &project_menu.response);
 
             ui.menu_button("Tools", |ui| {
                 if ui.button("Library Manager").clicked() {
@@ -1654,6 +1745,18 @@ impl CdeptApp {
             ui.menu_button("Window", |ui| self.window_menu(ui, win));
 
             ui.menu_button("Help", |ui| {
+                ui.menu_button("Tutorials", |ui| {
+                    for tutorial in crate::guide::builtins() {
+                        if ui
+                            .button(&tutorial.title)
+                            .on_hover_text(&tutorial.goal)
+                            .clicked()
+                        {
+                            self.start_tutorial(tutorial);
+                            ui.close();
+                        }
+                    }
+                });
                 if ui.button("About CDePT").clicked() {
                     self.ctx.request(Action::ShowAbout(win));
                 }
@@ -1990,6 +2093,7 @@ impl eframe::App for CdeptApp {
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         let ctx = &ui.ctx().clone();
         let frame_start = std::time::Instant::now();
+        self.guide_frame(ctx);
         let interval = self
             .frame_clock
             .last
@@ -2243,6 +2347,7 @@ mod tests {
         let options = GuiOptions {
             project: Some(root.to_path_buf()),
             script: None,
+            tutorial: None,
         };
         CdeptApp::start(
             ctx,

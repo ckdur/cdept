@@ -428,3 +428,19 @@ before without its buffer swap.
 - A script is fast. Two clicks on the same spot within about half a second are a double
   click for xschem (which opens the attribute dialog of an instance): put a `wait 0.7`
   between them when two single clicks are meant.
+
+## Tutorials
+
+`cdept-gui/scripts/tutorial.sh [FOLDER]` replays the `pdk-setup` tutorial
+(docs/tutorials/) with `PDK_ROOT` unset and scratch HOME and settings, writes the
+screenshots into FOLDER, and then runs the terminal commands the tutorial gives. It needs a
+display and the IHP PDK (`PDKS`, default `/opt/ext/OpenPDKs`).
+
+| Command | Does |
+|---|---|
+| `guide start <tutorial>` | Start a tutorial (an id or a file) |
+| `guide expect_step <id\|finished>` | The tutorial is at this step |
+| `guide expect_pointing <anchor>` | The guide outlines this |
+| `guide click` | Click the middle of what is outlined, in the main window |
+| `guide press <anchor>` | Click the middle of a named widget |
+| `guide continue` | Click the card's Continue button |

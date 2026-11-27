@@ -52,6 +52,15 @@ KLayout is built from a submodule (`cdept-klayout/build.sh`); ngspice, Xyce, VAC
 and the other tools are found on `PATH` or through `CDEPT_*` variables
 (`docs/reference/environment.md`, `cdept tools`).
 
+## Tutorials
+
+```sh
+target/debug/cdept tutorial pdk-setup   # CDePT guides you through setting up a PDK
+```
+
+The list of tutorials, and of the analog design tasks they are to cover, is in
+[docs/tutorials/](docs/tutorials/index.md).
+
 ## Documentation
 
 The manual is in `docs/` (Sphinx, Read the Docs style):

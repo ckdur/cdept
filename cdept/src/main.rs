@@ -59,6 +59,15 @@ enum Command {
         #[arg(long)]
         script: Option<PathBuf>,
     },
+    /// Follow a tutorial in the GUI: a step list that points at what to use next
+    /// (docs/tutorials/). Without a name, list the tutorials.
+    Tutorial {
+        /// A tutorial's name (e.g. pdk-setup), or a tutorial file.
+        name: Option<String>,
+        /// Print the tutorial as Markdown instead of opening the GUI.
+        #[arg(long, requires = "name")]
+        print: bool,
+    },
     /// Create a project (a cdept.toml file) in a folder.
     Init {
         /// Folder of the new project.
@@ -1202,6 +1211,39 @@ fn main() -> Result<()> {
                 GuiOptions {
                     project: project_root(cli.project),
                     script,
+                    tutorial: None,
+                },
+                log,
+            )
+        }
+        Command::Tutorial { name: None, .. } => {
+            for tutorial in cdept_gui::builtin_tutorials() {
+                println!(
+                    "{:<16} {} (about {} min)",
+                    tutorial.id, tutorial.title, tutorial.minutes
+                );
+            }
+            println!("\nFollow one with: cdept tutorial <name>");
+            Ok(())
+        }
+        Command::Tutorial {
+            name: Some(name),
+            print,
+        } => {
+            let tutorial = cdept_gui::Tutorial::find(&name).map_err(|e| eyre!(e))?;
+            if print {
+                print!("{}", tutorial.markdown());
+                return Ok(());
+            }
+            let log = LogBuffer::new();
+            init_tracing(cli.verbose, Some(&log));
+            // No project of the current folder: a tutorial starts from where it
+            // says it does. `-p` still opens one.
+            cdept_gui::run(
+                GuiOptions {
+                    project: cli.project,
+                    script: None,
+                    tutorial: Some(tutorial),
                 },
                 log,
             )

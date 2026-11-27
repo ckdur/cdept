@@ -517,6 +517,9 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
+        if *tab == Tab::Libraries {
+            crate::guide::anchor_rect(ui, "libraries.panel", ui.max_rect());
+        }
         self.views.get(*tab).ui(ui, self.ctx);
     }
 

@@ -9,6 +9,25 @@ completion round started).
 
 ---
 
+## Tutorials (2026-11-27)
+
+Built: the in-GUI guide (`cdept-gui/src/guide/`, tutorial files in
+`cdept-gui/tutorials/`), the first tutorial `pdk-setup`, its replay
+(`cdept-gui/scripts/tutorial.sh`) and the task list `docs/tutorials/index.md`.
+
+- [ ] A person follows `pdk-setup` (`cdept tutorial pdk-setup`); only the replay has.
+      The next tutorial waits for that.
+- [ ] The PDK list and "Other folder" are chosen by `tech` script commands in the replay,
+      not by clicks.
+- [ ] Highlights in a detached window are drawn but not replayed (`guide click` works in
+      the main window only).
+- [ ] Schematic and layout tutorials need anchors inside the pictures of xschem and
+      KLayout: the helpers would have to report where things are.
+- [ ] The marks in the task list come from docs, `--help` and the roadmap; each is
+      proven only when its tutorial exists.
+
+---
+
 ## 1. To do
 
 ### Before building further on Phase 1
