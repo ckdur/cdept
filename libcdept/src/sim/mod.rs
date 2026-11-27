@@ -45,9 +45,9 @@ pub fn runs_dir(project: &Project, library: &str, cell: &str, view: &str) -> Pat
 
 /// The lock of a testbench's run folder (`.run.lock`, an advisory file lock): taken by a
 /// run for its whole length; a second run of the same testbench, in this process or
-/// another, is refused while it is held. Released when the file is dropped (or the
+/// another, is refused while it is held. Released when the guard is dropped (or the
 /// process ends).
-pub fn lock_runs(base: &Path) -> Result<std::fs::File> {
+pub fn lock_runs(base: &Path) -> Result<RunLock> {
     std::fs::create_dir_all(base).wrap_err_with(|| format!("cannot create {}", base.display()))?;
     let file = std::fs::OpenOptions::new()
         .create(true)
@@ -56,13 +56,28 @@ pub fn lock_runs(base: &Path) -> Result<std::fs::File> {
         .open(base.join(".run.lock"))
         .wrap_err_with(|| format!("cannot open the run lock in {}", base.display()))?;
     match file.try_lock() {
-        Ok(()) => Ok(file),
+        Ok(()) => Ok(RunLock(file)),
         Err(std::fs::TryLockError::WouldBlock) => Err(eyre!(
             "this testbench is being run already ({} is locked): wait for that run or cancel it",
             base.display()
         )),
         Err(std::fs::TryLockError::Error(e)) => {
             Err(e).wrap_err_with(|| format!("cannot lock {}", base.display()))
+        }
+    }
+}
+
+/// Holds the lock of [`lock_runs`].
+#[derive(Debug)]
+pub struct RunLock(std::fs::File);
+
+impl Drop for RunLock {
+    fn drop(&mut self) {
+        // Closing alone is not enough: a program being started by another thread holds a
+        // copy of the descriptor until its exec, and the lock lasts as long as any copy.
+        // Unlocking releases it for all of them.
+        if let Err(error) = self.0.unlock() {
+            tracing::warn!("cannot release a run lock: {error}");
         }
     }
 }
@@ -570,6 +585,16 @@ mod lock_tests {
 
     /// Two runs of one testbench at once wrote into the same point folders (a torture run
     /// left a raw file with another simulator's data in its middle): the second is refused.
+    #[test]
+    fn a_copy_of_the_descriptor_does_not_keep_the_run_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = lock_runs(dir.path()).unwrap();
+        // What a child process has between fork and exec.
+        let _copy = first.0.try_clone().unwrap();
+        drop(first);
+        lock_runs(dir.path()).expect("released with the guard");
+    }
+
     #[test]
     fn a_second_run_of_a_testbench_is_refused() {
         let dir = tempfile::tempdir().unwrap();
