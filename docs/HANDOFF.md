@@ -19,8 +19,9 @@ Our UberWave is the public copy (MIT or GPL-2.0 since 2026-11-27, commit ef2497f
 plus the 9 commits CDePT needs (0108e4b, then the license commit; the branch `ipc-multifile` is at the same
 commit). The only working copy is the submodule `cdept-uberwave/uberwave`
 (`git submodule update --init cdept-uberwave/uberwave`, then
-`git switch main` inside it to work). Push there with `-o ci.skip` (the pipeline publishes
-GitLab Pages from `main`), then move the pointer in CDePT. The mirror does not update by
+`git switch main` inside it to work). Its GitLab Pages job is disabled for now
+(`.gitlab-ci.yml.disabled`; keep it so after merging from the original). Commits there need an
+`AI:` footer when AI wrote them. After pushing, move the pointer in CDePT. The mirror does not update by
 itself: add the original as the remote `upstream`, fetch and merge. CI builds the stub.
 
 ## Tool and test environment

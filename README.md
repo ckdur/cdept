@@ -78,6 +78,23 @@ the manual.
 | `demo/` | replayable GUI demos |
 | `docs/` | the manual and the design notes |
 
+## Use of generative AI
+
+CDePT is developed with [Claude Code](https://claude.com/claude-code) and Anthropic's Claude
+models, the latest of the Opus, Sonnet and Fable families at the time of the work (so far Claude
+Opus 5.5, Sonnet 5.5 and Fable 5.2), and no other AI models. They write code, tests and
+documentation.
+
+**The developer's role:** giving the AI its orders, testing the code and reviewing the code;
+guiding the AI with prior knowledge of the main programs; and the test cases that use the PDKs.
+
+Commits made with the AI carry a `Co-Authored-By` line that names the model. Not every commit
+has one (most of those without it are merge commits), so a missing line does not show that no
+AI was used.
+
+The AI use in the changes made to UberWave for CDePT is listed in the README of
+[our copy of UberWave](https://gitlab.symbioticeda.com/ckdur.iso/uberwave).
+
 ## Licence
 
 CDePT is released under the [MIT licence](LICENSE). xschem, KLayout, Magic, ngspice and the

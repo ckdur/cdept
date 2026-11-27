@@ -61,9 +61,11 @@ because of data files in the repository. After a `git pull` that moves the submo
 
 - To work on UberWave, work in the submodule: `git -C cdept-uberwave/uberwave switch main`
   (`git submodule update` leaves it on a commit, not on a branch), commit, push to `origin`
-  (the mirror), then commit the new submodule pointer in CDePT. Push with
-  `git push -o ci.skip`: UberWave's pipeline publishes a GitLab Pages site from every push to
-  `main`. The original repository can be added as a fetch-only remote `upstream`.
+  (our copy), then commit the new submodule pointer in CDePT. The copy publishes no GitLab
+  Pages: its pipeline file is renamed to `.gitlab-ci.yml.disabled` (merging from the original
+  may bring `.gitlab-ci.yml` back). UberWave commits made with AI carry an `AI:` footer (its
+  README, "Use of Generative AI"). The original repository can be added as a fetch-only remote
+  `upstream`.
 - `UBERWAVE_SRC` names another checkout (the repository root; the `wp5-viewer` folder is
   accepted too) and wins over the submodule. Without both, the build also looks for a sibling
   `../uberwave` of the CDePT repository. A source is used only when it has
