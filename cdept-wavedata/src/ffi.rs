@@ -5,7 +5,10 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr::NonNull;
 
-use crate::{Error, Mode, OpenOptions, Phase, Prepared, QueryInfo, Result, Status, Text, Trace};
+use crate::{
+    Analysis, Error, Mode, OpenOptions, Phase, Prepared, QueryInfo, Result, Segment, Status, Text, Trace,
+    XOrder,
+};
 
 #[repr(C)]
 struct UwdDataset {
@@ -38,7 +41,41 @@ struct UwdQueryInfo {
 
 const OPEN_REBUILD: u32 = 1;
 const OPEN_CACHE_DIR_ONLY: u32 = 2;
-const API_VERSION: u32 = 1;
+const API_VERSION: u32 = 2;
+
+#[repr(C)]
+struct UwdAnalysis {
+    size: u32,
+    plottable: i32,
+    preferred: i32,
+    complex: i32,
+    points: u64,
+    signals: u32,
+    name: [c_char; 256],
+    kind: [c_char; 64],
+    reason: [c_char; 256],
+}
+
+impl UwdAnalysis {
+    fn empty() -> UwdAnalysis {
+        UwdAnalysis {
+            size: std::mem::size_of::<UwdAnalysis>() as u32,
+            plottable: 0,
+            preferred: 0,
+            complex: 0,
+            points: 0,
+            signals: 0,
+            name: [0; 256],
+            kind: [0; 64],
+            reason: [0; 256],
+        }
+    }
+}
+
+fn c_text(buf: &[c_char]) -> String {
+    let bytes: Vec<u8> = buf.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
 
 unsafe extern "C" {
     fn uwd_open_options_init(options: *mut UwdOpenOptions);
@@ -107,6 +144,133 @@ unsafe extern "C" {
         out: *mut f64,
     ) -> c_int;
     fn uwd_source_changed(dataset: *mut UwdDataset) -> c_int;
+    fn uwd_list_analyses(
+        path: *const c_char,
+        out: *mut UwdAnalysis,
+        capacity: usize,
+        count: *mut usize,
+        error: *mut c_char,
+        error_size: usize,
+    ) -> c_int;
+    fn uwd_x_order(dataset: *mut UwdDataset) -> c_int;
+    fn uwd_x_extent(dataset: *mut UwdDataset, min: *mut f64, max: *mut f64) -> c_int;
+    fn uwd_segment_count(dataset: *mut UwdDataset) -> u32;
+    fn uwd_segment(
+        dataset: *mut UwdDataset,
+        segment: u32,
+        first: *mut u64,
+        last: *mut u64,
+        direction: *mut c_int,
+    ) -> c_int;
+    fn uwd_query_segment(
+        dataset: *mut UwdDataset,
+        signal: u32,
+        segment: u32,
+        x_min: f64,
+        x_max: f64,
+        pixels: u32,
+        xs: *mut f64,
+        ys: *mut f64,
+        capacity: usize,
+        n: *mut usize,
+        info: *mut UwdQueryInfo,
+    ) -> c_int;
+    fn uwd_value_at_segment(
+        dataset: *mut UwdDataset,
+        signal: u32,
+        segment: u32,
+        x: f64,
+        y: *mut f64,
+        index: *mut u64,
+    ) -> c_int;
+    fn uwd_exact_minmax_segment(
+        dataset: *mut UwdDataset,
+        signal: u32,
+        segment: u32,
+        x_min: f64,
+        x_max: f64,
+        min: *mut f64,
+        max: *mut f64,
+        count: *mut u64,
+    ) -> c_int;
+}
+
+/// The analyses of a file or PSF folder.
+pub(crate) fn list_analyses(path: &Path) -> Result<Vec<Analysis>> {
+    if unsafe { uwd_api_version() } != API_VERSION {
+        return Err(Error {
+            status: Status::Internal,
+            message: "the data engine's interface has another version".into(),
+        });
+    }
+    let c_path = CString::new(path.as_os_str().as_bytes()).map_err(|_| Error {
+        status: Status::Argument,
+        message: "the path holds a NUL byte".into(),
+    })?;
+    let mut cap = 16usize;
+    loop {
+        let mut out: Vec<UwdAnalysis> = (0..cap).map(|_| UwdAnalysis::empty()).collect();
+        let mut n = 0usize;
+        let mut error = vec![0u8; 1024];
+        let code = unsafe {
+            uwd_list_analyses(
+                c_path.as_ptr(),
+                out.as_mut_ptr(),
+                cap,
+                &mut n,
+                error.as_mut_ptr().cast(),
+                error.len(),
+            )
+        };
+        if Status::from_code(code) == Some(Status::Buffer) && n > cap && n <= 1 << 20 {
+            cap = n;
+            continue;
+        }
+        if let Some(status) = Status::from_code(code) {
+            let end = error.iter().position(|b| *b == 0).unwrap_or(error.len());
+            let message = String::from_utf8_lossy(&error[..end]).into_owned();
+            return Err(Error {
+                status,
+                message: if message.is_empty() {
+                    status_text(status).into()
+                } else {
+                    message
+                },
+            });
+        }
+        return Ok(out
+            .iter()
+            .take(n.min(cap))
+            .enumerate()
+            .map(|(i, a)| Analysis {
+                index: i as u32,
+                name: c_text(&a.name),
+                kind: c_text(&a.kind),
+                points: a.points,
+                signals: a.signals,
+                complex: a.complex != 0,
+                plottable: a.plottable != 0,
+                preferred: a.preferred != 0,
+                reason: c_text(&a.reason),
+            })
+            .collect());
+    }
+}
+
+fn info_of(info: &UwdQueryInfo) -> QueryInfo {
+    QueryInfo {
+        first_index: info.first_index,
+        last_index: info.last_index,
+        source_points: info.source_points,
+        bucket: info.bucket,
+        mode: match info.mode {
+            1 => Mode::MinMax,
+            2 => Mode::Pyramid,
+            _ => Mode::Direct,
+        },
+        level: info.level,
+        ms: info.ms,
+    }
 }
 
 fn check(code: c_int, what: &str) -> Result<()> {
@@ -343,19 +507,7 @@ impl Handle {
                 out.y.clear();
                 return Err(e);
             }
-            return Ok(QueryInfo {
-                first_index: info.first_index,
-                last_index: info.last_index,
-                source_points: info.source_points,
-                bucket: info.bucket,
-                mode: match info.mode {
-                    1 => Mode::MinMax,
-                    2 => Mode::Pyramid,
-                    _ => Mode::Direct,
-                },
-                level: info.level,
-                ms: info.ms,
-            });
+            return Ok(info_of(&info));
         }
     }
 
@@ -391,5 +543,116 @@ impl Handle {
 
     pub(crate) fn source_changed(&self) -> bool {
         unsafe { uwd_source_changed(self.ptr()) == 1 }
+    }
+
+    pub(crate) fn x_order(&self) -> XOrder {
+        match unsafe { uwd_x_order(self.ptr()) } {
+            2 => XOrder::Decreasing,
+            3 => XOrder::Segmented,
+            4 => XOrder::Unordered,
+            _ => XOrder::Increasing,
+        }
+    }
+
+    pub(crate) fn x_extent(&self) -> Result<(f64, f64)> {
+        let (mut a, mut b) = (0.0, 0.0);
+        check(unsafe { uwd_x_extent(self.ptr(), &mut a, &mut b) }, "x extent")?;
+        Ok((a, b))
+    }
+
+    pub(crate) fn segments(&self) -> Vec<Segment> {
+        let n = unsafe { uwd_segment_count(self.ptr()) };
+        (0..n)
+            .filter_map(|i| {
+                let (mut first, mut last, mut dir) = (0u64, 0u64, 0 as c_int);
+                (unsafe { uwd_segment(self.ptr(), i, &mut first, &mut last, &mut dir) } == 0).then_some(
+                    Segment {
+                        first,
+                        last,
+                        direction: dir,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    pub(crate) fn query_segment(
+        &self,
+        signal: u32,
+        segment: u32,
+        x_min: f64,
+        x_max: f64,
+        pixels: u32,
+        out: &mut Trace,
+    ) -> Result<QueryInfo> {
+        let mut cap = crate::query_capacity(pixels);
+        loop {
+            out.x.resize(cap, 0.0);
+            out.y.resize(cap, 0.0);
+            let mut n = 0usize;
+            let mut info = UwdQueryInfo::default();
+            let code = unsafe {
+                uwd_query_segment(
+                    self.ptr(),
+                    signal,
+                    segment,
+                    x_min,
+                    x_max,
+                    pixels,
+                    out.x.as_mut_ptr(),
+                    out.y.as_mut_ptr(),
+                    cap,
+                    &mut n,
+                    &mut info,
+                )
+            };
+            if Status::from_code(code) == Some(Status::Buffer) && n > cap {
+                cap = n;
+                continue;
+            }
+            out.x.truncate(n.min(cap));
+            out.y.truncate(n.min(cap));
+            if let Err(e) = check(code, "query") {
+                out.x.clear();
+                out.y.clear();
+                return Err(e);
+            }
+            return Ok(info_of(&info));
+        }
+    }
+
+    pub(crate) fn value_at_segment(&self, signal: u32, segment: u32, x: f64) -> Result<(f64, u64)> {
+        let (mut y, mut i) = (0.0, 0u64);
+        check(
+            unsafe { uwd_value_at_segment(self.ptr(), signal, segment, x, &mut y, &mut i) },
+            "value",
+        )?;
+        Ok((y, i))
+    }
+
+    pub(crate) fn exact_minmax_segment(
+        &self,
+        signal: u32,
+        segment: u32,
+        x_min: f64,
+        x_max: f64,
+    ) -> Result<Option<(f64, f64, u64)>> {
+        let (mut lo, mut hi, mut n) = (0.0, 0.0, 0u64);
+        check(
+            unsafe {
+                uwd_exact_minmax_segment(
+                    self.ptr(),
+                    signal,
+                    segment,
+                    x_min,
+                    x_max,
+                    &mut lo,
+                    &mut hi,
+                    &mut n,
+                )
+            },
+            "extremes",
+        )?;
+        Ok((n > 0).then_some((lo, hi, n)))
     }
 }

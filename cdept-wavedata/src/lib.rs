@@ -1,7 +1,8 @@
 //! Waveform data for CDePT's own viewer: UberWave's data engine (`wp3-data-engine` of
 //! the uberwave repository) through its C interface `uwdata.h`.
 //!
-//! The engine reads ngspice and Xyce raw files (binary and ascii) and `.uwraw` files,
+//! The engine reads ngspice, Xyce and VACASK raw files (binary and ascii, real and
+//! complex), Spectre PSF result folders and `.uwraw` files,
 //! keeps a `.uwraw` cache beside a raw file (or in a cache folder when that folder is not
 //! writable), and answers queries decimated to a pixel width with the minimum and
 //! maximum of every bucket kept, so a one-sample spike is never lost. It draws nothing:
@@ -95,7 +96,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// How to open a file.
 #[derive(Debug, Clone, Default)]
 pub struct OpenOptions {
-    /// The plot of a raw file with several, 0 = the first.
+    /// The plot of a raw file with several, or the analysis of a PSF folder: the
+    /// index of [`list_analyses`] (0 = the first).
     pub plot: u32,
     /// Where caches go when the folder of the file is not writable.
     pub cache_dir: Option<PathBuf>,
@@ -139,6 +141,64 @@ pub enum Text {
     Source = 5,
     Cache = 6,
     Reader = 7,
+}
+
+/// One analysis of a file: a plot of a raw file (ngspice writes several with `-r`), an
+/// analysis of a Spectre PSF folder. [`OpenOptions::plot`] takes its `index`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Analysis {
+    pub index: u32,
+    /// The plot name ("AC Analysis") or the PSF analysis ("ac1").
+    pub name: String,
+    /// tran, ac, dc, noise, op, ... (may be empty).
+    pub kind: String,
+    pub points: u64,
+    /// Variables, x included (a complex one counted once).
+    pub signals: u32,
+    pub complex: bool,
+    pub plottable: bool,
+    /// The one to show first (the PSF file that was named).
+    pub preferred: bool,
+    /// Why it cannot be opened.
+    pub reason: String,
+}
+
+/// The analyses of a raw file or a PSF folder (an ascii raw file is read to its end).
+#[cfg(wavedata_engine)]
+pub fn list_analyses(path: &Path) -> Result<Vec<Analysis>> {
+    ffi::list_analyses(path)
+}
+
+#[cfg(not(wavedata_engine))]
+pub fn list_analyses(_path: &Path) -> Result<Vec<Analysis>> {
+    Err(Error::unavailable())
+}
+
+/// The forms a complex signal `NAME` comes in, each a signal of its own named
+/// `prefix(NAME)`.
+pub const COMPLEX_FORMS: [&str; 7] = ["re", "im", "mag", "phase", "uphase", "dB20", "dB10"];
+
+/// The order of a dataset's x axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XOrder {
+    /// One part, x never decreases.
+    Increasing,
+    /// One part, x never increases (a sweep run backwards).
+    Decreasing,
+    /// Several monotonic parts ([`Dataset::segments`]): a parametric sweep, a sweep
+    /// there and back.
+    Segmented,
+    /// x goes back and forth too often to split: queries give the samples in order.
+    Unordered,
+}
+
+/// A monotonic part of the x axis: samples `first..=last`, `direction` 1, -1, or 0
+/// (constant or unordered).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Segment {
+    pub first: u64,
+    pub last: u64,
+    pub direction: i32,
 }
 
 /// The min/max pyramid of a signal.
@@ -294,6 +354,51 @@ impl Dataset {
     pub fn source_changed(&self) -> bool {
         self.inner.source_changed()
     }
+
+    pub fn x_order(&self) -> XOrder {
+        self.inner.x_order()
+    }
+
+    /// The smallest and largest finite x.
+    pub fn x_extent(&self) -> Result<(f64, f64)> {
+        self.inner.x_extent()
+    }
+
+    /// The monotonic parts of x (one for an ordered axis).
+    pub fn segments(&self) -> Vec<Segment> {
+        self.inner.segments()
+    }
+
+    /// [`Dataset::query`] on one part of x.
+    pub fn query_segment(
+        &self,
+        signal: u32,
+        segment: u32,
+        x_min: f64,
+        x_max: f64,
+        pixels: u32,
+        out: &mut Trace,
+    ) -> Result<QueryInfo> {
+        self.inner
+            .query_segment(signal, segment, x_min, x_max, pixels, out)
+    }
+
+    /// [`Dataset::value_at`] on one part of x (fails on an unordered axis).
+    pub fn value_at_segment(&self, signal: u32, segment: u32, x: f64) -> Result<(f64, u64)> {
+        self.inner.value_at_segment(signal, segment, x)
+    }
+
+    /// [`Dataset::exact_minmax`] on one part of x.
+    pub fn exact_minmax_segment(
+        &self,
+        signal: u32,
+        segment: u32,
+        x_min: f64,
+        x_max: f64,
+    ) -> Result<Option<(f64, f64, u64)>> {
+        self.inner
+            .exact_minmax_segment(signal, segment, x_min, x_max)
+    }
 }
 
 // The real dataset closes its file on drop; the stub has the same shape.
@@ -381,6 +486,44 @@ impl Dataset {
     }
 
     pub fn source_changed(&self) -> bool {
+        match self._never {}
+    }
+
+    pub fn x_order(&self) -> XOrder {
+        match self._never {}
+    }
+
+    pub fn x_extent(&self) -> Result<(f64, f64)> {
+        match self._never {}
+    }
+
+    pub fn segments(&self) -> Vec<Segment> {
+        match self._never {}
+    }
+
+    pub fn query_segment(
+        &self,
+        _signal: u32,
+        _segment: u32,
+        _x_min: f64,
+        _x_max: f64,
+        _pixels: u32,
+        _out: &mut Trace,
+    ) -> Result<QueryInfo> {
+        match self._never {}
+    }
+
+    pub fn value_at_segment(&self, _signal: u32, _segment: u32, _x: f64) -> Result<(f64, u64)> {
+        match self._never {}
+    }
+
+    pub fn exact_minmax_segment(
+        &self,
+        _signal: u32,
+        _segment: u32,
+        _x_min: f64,
+        _x_max: f64,
+    ) -> Result<Option<(f64, f64, u64)>> {
         match self._never {}
     }
 }
