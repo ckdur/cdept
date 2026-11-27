@@ -9,4 +9,15 @@ wv expect_range 0 1.999u
 wv cursor a 500n
 wv expect_cursor_x a 500n
 wv check_extremes v(a)
+wv show_in new i(vdd)
+wv expect_panes 2
+wv test_trace spectrum ramp 500 Hz
+wv expect_x_unit 3 Hz
+wv open_files @DATA@/family/p000/out.raw @DATA@/family/p001/out.raw @DATA@/family/p005/out.raw
+wv expect_points loading 0
+wv expect_points ready 2
+wv expect_point p005 failed
+wv hide v(in)
+wv expect_lines 2
+wv expect_distinct 1
 quit

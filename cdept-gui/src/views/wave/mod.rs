@@ -217,6 +217,7 @@ pub struct WaveView {
     defaults_pending: bool,
     dark: bool,
     published: Option<Published>,
+    published_key: Option<(Option<f64>, Option<f64>, u64)>,
     stats: Stats,
     watched: Vec<SourceId>,
 }
@@ -316,6 +317,7 @@ impl WaveView {
             defaults_pending: true,
             dark: ctx.global_style().visuals.dark_mode,
             published: None,
+            published_key: None,
             stats: Stats::default(),
             watched: Vec::new(),
         };
@@ -863,6 +865,13 @@ impl WaveView {
         };
         let g = &self.groups[gi];
         let [a, b] = g.cursors;
+        // nothing moved and no new answer: nothing to tell (and no strings to build)
+        let key = (a, b, self.reply.as_ref().map_or(0, |r| r.request.seq));
+        if self.published_key == Some(key) {
+            return;
+        }
+        self.published_key = Some(key);
+        let g = &self.groups[gi];
         let mut values = Vec::new();
         if let Some(r) = &self.reply {
             for p in &r.panes {
