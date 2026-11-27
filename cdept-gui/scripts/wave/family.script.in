@@ -1,0 +1,40 @@
+# Several files overlaid in one tab, as a family of run points: different x grids,
+# a garbage point (p005), a missing one (p007), a cut one (p009), per-point show/hide,
+# distinct styles, hostile names. Inputs from small.py.
+window 1500 950
+wv open_files @DATA@/family/p000/out.raw @DATA@/family/p001/out.raw @DATA@/family/p002/out.raw @DATA@/family/p003/out.raw @DATA@/family/p004/out.raw @DATA@/family/p005/out.raw @DATA@/family/p006/out.raw @DATA@/family/p007/out.raw @DATA@/family/p008/out.raw @DATA@/family/p009/out.raw @DATA@/family/p010/out.raw @DATA@/family/p011/out.raw
+wv expect_points loading 0
+wv expect_points all 12
+wv expect_point p005 failed
+wv expect_point p007 failed
+wv expect_point p000 ready
+wv expect_points ready 10
+wv show v(out)
+wv hide v(in)
+wv expect_lines >8
+wv expect_distinct 1
+wv cursor a 1u
+wv expect_cursor_at a v(out) p000 0 0.01
+wait 0.5
+screenshot @SHOTS@/family-1.png
+wv point p000 off
+wv expect_lines 9
+wv points none
+wv expect_lines 0
+wv points all
+wv style v(out) color #ffffff p003
+wv expect_style 1 p003 color #ffffff
+# hostile names
+wv open_files @DATA@/odd/fam_ünïcødé_日本語.raw @DATA@/odd/LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL.raw
+wv expect_points ready 2
+wv show v(ñodo_μ)
+wv list tree
+wv expect_row # x1 (1)
+wv expect_row deep
+wv list flat xxxxxxxx
+wv expect_rows 1
+wv list kind
+wv expect_lines 3
+wait 0.5
+screenshot @SHOTS@/family-2-names.png
+quit

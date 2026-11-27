@@ -28,6 +28,27 @@
 //! | `wv reload` | Open the file again (what Reload does) |
 //! | `wv expect_files <dir> <text> <n>` | The folder has n files whose name contains the text (caches, temporary files) |
 //! | `wv stats` | Log frame times, query times and memory since the last `wv stats` |
+//! | `wv open_files <file>…` | One tab on several files overlaid (tags = file names) |
+//! | `wv open_family <lib> <cell> <view> [point…]` | What "Waveform Tab (family)" does: every run point (or these) in one tab |
+//! | `wv add_file <file> [tag]` | Add a file to the tab |
+//! | `wv expect_points <loading\|ready\|failed\|memory\|all> <n>` | How many sources of the tab are in that state |
+//! | `wv expect_point <tag> <state> [text]` | A source's state (and its message) |
+//! | `wv point <tag> on\|off`, `wv points all\|none` | Show or hide a point (source) |
+//! | `wv show_in <n\|new> <signal>…` | Show signals in pane n or a new pane |
+//! | `wv pane new\|remove\|up\|down\|select\|fit_y [n]` | Add, remove, move, activate a pane, fit its y |
+//! | `wv expect_panes <n>`, `wv expect_pane <n> <signal>…` | Pane count; the signals of pane n, in order |
+//! | `wv expect_x_unit <n> <unit>` | The x unit of pane n |
+//! | `wv expect_lines <n\|>n>` | Lines drawn now |
+//! | `wv y <n> <y0> <y1>\|fit`, `wv expect_y <n> <y0> <y1> [tol]` | Pane n's y range |
+//! | `wv list <flat\|kind\|tree> [search…]`, `wv expect_rows <n>`, `wv expect_row <text>`, `wv fold <header>` | The signal list: grouping, search, rows |
+//! | `wv pick <signal>…`, `wv pick_add <signal>…`, `wv picked show\|new\|hide` | Select in the list; what its buttons do with the selection |
+//! | `wv drag_signal <signal> <n>` | Drag a signal from the list onto pane n (real input) |
+//! | `wv style <signal> <color #rrggbb\|dash solid\|dashed\|dotted\|dashdot\|width w> [tag]` | Change a line's style |
+//! | `wv expect_style <n> <label> <color\|dash\|width> <value>` | The style of a line of pane n (label contains the text) |
+//! | `wv expect_distinct <n>` | No two lines of pane n look alike |
+//! | `wv expect_markers <n>` | The calculator's markers in the tab |
+//! | `wv expect_cursor_at <a\|b> <signal> <tag> <value> [tol]` | The readout of one point's line at a cursor |
+//! | `wv test_trace <name> <empty\|nan\|inf\|nonmono\|ramp\|sine\|big> [n] [x unit] [tag]` | Hand a series to the tab as the calculator does (hostile ones too) |
 //!
 //! Numbers take SI suffixes: `2.5u`, `10n`, `1meg`. Mouse commands use window
 //! coordinates: no schematic or layout should be the script's document meanwhile.
@@ -68,6 +89,13 @@ pub fn patient(args: &[String]) -> bool {
                 | "wheel"
                 | "drag"
                 | "click"
+                | "expect_points"
+                | "expect_point"
+                | "expect_lines"
+                | "expect_y"
+                | "expect_cursor_at"
+                | "drag_signal"
+                | "expect_markers"
         )
     )
 }
@@ -76,6 +104,7 @@ pub fn patience(args: &[String]) -> Duration {
     match args.first().map(String::as_str) {
         // A 1 GB raw file is converted once: that takes a while.
         Some("wait_loaded" | "expect_failed") => Duration::from_secs(600),
+        Some("expect_points" | "expect_point") => Duration::from_secs(120),
         _ => Duration::from_secs(20),
     }
 }
@@ -123,6 +152,103 @@ pub fn number(text: &str) -> Result<f64, String> {
         .map_err(|_| format!("'{text}' is not a number"))
 }
 
+/// Tags for files opened together: the file name; files of one name (`out.raw` of every
+/// run point) are told apart by their folder (`p000`); still equal ones get a number.
+pub fn tag_files(paths: Vec<PathBuf>) -> Vec<(String, PathBuf)> {
+    let name = |p: &PathBuf| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.display().to_string())
+    };
+    let dir = |p: &PathBuf| {
+        p.parent()
+            .and_then(|d| d.file_name())
+            .map(|d| d.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let mut out: Vec<(String, PathBuf)> = Vec::new();
+    for p in &paths {
+        let n = name(p);
+        let twins = paths.iter().filter(|q| name(q) == n).count() > 1;
+        let tag = if twins { dir(p) } else { n };
+        let mut unique = tag.clone();
+        let mut k = 2;
+        while out.iter().any(|(t, _)| *t == unique) {
+            unique = format!("{tag} ({k})");
+            k += 1;
+        }
+        out.push((unique, p.clone()));
+    }
+    out
+}
+
+fn on_off(text: &str) -> Result<bool, String> {
+    match text {
+        "on" | "yes" | "show" => Ok(true),
+        "off" | "no" | "hide" => Ok(false),
+        _ => Err(format!("'{text}' is not on or off")),
+    }
+}
+
+/// `#rrggbb`.
+fn hex_color(text: &str) -> Result<[u8; 3], String> {
+    let h = text.trim_start_matches('#');
+    let bad = || format!("'{text}' is not a colour (#rrggbb)");
+    if h.len() != 6 {
+        return Err(bad());
+    }
+    let v = u32::from_str_radix(h, 16).map_err(|_| bad())?;
+    Ok([(v >> 16) as u8, (v >> 8) as u8, v as u8])
+}
+
+/// A series for `wv test_trace`: what the calculator could hand over, hostile ones too.
+fn test_series(
+    name: &str,
+    kind: &str,
+    n: usize,
+    x_unit: &str,
+) -> Result<cdept_wavedata::Series, String> {
+    let x: Vec<f64> = (0..n).map(|i| i as f64 * 1e-9).collect();
+    let (x, y): (Vec<f64>, Vec<f64>) = match kind {
+        "empty" => (vec![], vec![]),
+        "ramp" => (x, (0..n).map(|i| i as f64 / n.max(1) as f64).collect()),
+        "sine" => (x, (0..n).map(|i| (i as f64 * 0.01).sin()).collect()),
+        "big" => (
+            x,
+            (0..n).map(|i| ((i % 1000) as f64 * 1e-3) - 0.5).collect(),
+        ),
+        "nan" => (
+            x,
+            (0..n)
+                .map(|i| if i % 3 == 0 { f64::NAN } else { i as f64 })
+                .collect(),
+        ),
+        "inf" => (
+            x.iter()
+                .enumerate()
+                .map(|(i, v)| if i % 7 == 3 { f64::INFINITY } else { *v })
+                .collect(),
+            (0..n)
+                .map(|i| match i % 5 {
+                    1 => f64::INFINITY,
+                    2 => f64::NEG_INFINITY,
+                    _ => (i as f64).sqrt(),
+                })
+                .collect(),
+        ),
+        "nonmono" => (
+            (0..n).map(|i| (i as f64 * 0.05).sin()).collect(),
+            (0..n).map(|i| (i as f64 * 0.07).cos()).collect(),
+        ),
+        _ => {
+            return Err(format!(
+                "'{kind}' is not empty, nan, inf, nonmono, ramp, sine or big"
+            ));
+        }
+    };
+    Ok(cdept_wavedata::Series::new(name, "V", x_unit, x, y))
+}
+
 fn close_to(got: f64, want: f64, tol: f64) -> bool {
     got == want || (got - want).abs() <= tol * want.abs().max(1e-300) || (got - want).abs() <= tol
 }
@@ -151,7 +277,15 @@ pub fn run(
         cursor <a|b> <x|none> | expect_cursor_x <a|b> <x> [tol] | expect_cursor <a|b> <signal> <value> [tol] | \
         expect_delta <signal> <value> [tol] | expect_drawn <min|max> <signal> <value> [tol] | \
         check_extremes <signal> | wheel <fx> <up|down> [count] [ctrl|shift] | drag <fx1> <fx2> | \
-        click <fx> [left|right] | expect_cache <text> | expect_changed <yes|no> | reload | expect_files <dir> <text> <n> | stats";
+        click <fx> [left|right] | expect_cache <text> | expect_changed <yes|no> | reload | expect_files <dir> <text> <n> | stats | \
+        open_files <file>... | open_family <lib> <cell> <view> [point...] | add_file <file> [tag] | expect_points <state> <n> | \
+        expect_point <tag> <state> [text] | point <tag> on|off | points all|none | show_in <n|new> <signal>... | \
+        pane new|remove|up|down|select|fit_y [n] | expect_panes <n> | expect_pane <n> <signal>... | expect_x_unit <n> <unit> | \
+        expect_lines <n|>n> | y <n> <y0> <y1>|fit | expect_y <n> <y0> <y1> [tol] | list <flat|kind|tree> [search] | \
+        expect_rows <n> | expect_row <text> | fold <header> | pick <signal>... | pick_add <signal>... | expect_picked <signal>... | \
+        picked show|new|hide | drag_signal <signal> <n> | style <signal> color|dash|width <value> [tag] | \
+        expect_style <n> <label> color|dash|width <value> | expect_distinct <n> | expect_markers <n> | \
+        expect_cursor_at <a|b> <signal> <tag> <value> [tol] | test_trace <name> <kind> [n] [x unit] [tag]";
     let verb = args.first().map(String::as_str).unwrap_or("");
     let rest = args.get(1..).unwrap_or_default();
     match (verb, rest) {
@@ -260,7 +394,7 @@ pub fn run(
             let i = cursor_index(which)?;
             let want = number(value)?;
             let tol = tolerance(tol, 0, 1e-9)?;
-            let got = app.script_wave()?.script_cursor_value(i, signal)?;
+            let got = app.script_wave()?.script_cursor_value(i, signal, None)?;
             if !close_to(got, want, tol) {
                 return Err(format!(
                     "{signal} at cursor {which} is {got:e}, expected {want:e}"
@@ -272,8 +406,8 @@ pub fn run(
             let want = number(value)?;
             let tol = tolerance(tol, 0, 1e-9)?;
             let w = app.script_wave()?;
-            let a = w.script_cursor_value(0, signal)?;
-            let b = w.script_cursor_value(1, signal)?;
+            let a = w.script_cursor_value(0, signal, None)?;
+            let b = w.script_cursor_value(1, signal, None)?;
             if !close_to(b - a, want, tol) {
                 return Err(format!("{signal}: B−A is {:e}, expected {want:e}", b - a));
             }
@@ -389,6 +523,286 @@ pub fn run(
             let line = app.script_wave()?.script_stats()?;
             tracing::info!(target: "cdept::script", "wv stats: {line}");
         }
+        ("open_files", files) if !files.is_empty() => {
+            let paths: Vec<PathBuf> = files
+                .iter()
+                .map(std::path::absolute)
+                .collect::<Result<_, _>>()
+                .map_err(|e| e.to_string())?;
+            let tagged = tag_files(paths);
+            let title = format!("{} files", tagged.len());
+            app.script_select_wave(None);
+            app.script_request(Action::OpenWaveFiles(tagged, title));
+        }
+        ("open_family", [lib, cell, view, points @ ..]) => {
+            app.script_select_wave(None);
+            app.script_request(Action::OpenWaveFamily(
+                lib.clone(),
+                cell.clone(),
+                view.clone(),
+                points.to_vec(),
+            ));
+        }
+        ("add_file", [file, tag @ ..]) if tag.len() <= 1 => {
+            let path = std::path::absolute(file).map_err(|e| e.to_string())?;
+            let tag = tag.first().cloned().unwrap_or_else(|| {
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            });
+            app.script_wave()?.script_add_file(tag, path);
+        }
+        ("expect_points", [state, n]) => {
+            let want: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let w = app.script_wave()?;
+            let sources = w.script_sources();
+            let got = sources
+                .iter()
+                .filter(|(_, s, _, _)| state == "all" || s == state)
+                .count();
+            if got != want {
+                let summary: Vec<String> = sources
+                    .iter()
+                    .take(12)
+                    .map(|(t, s, _, _)| format!("{t}:{s}"))
+                    .collect();
+                return Err(format!(
+                    "{got} sources {state}, expected {want} ({} of {}: {})",
+                    summary.len(),
+                    sources.len(),
+                    summary.join(" ")
+                ));
+            }
+        }
+        ("expect_point", [tag, state, text @ ..]) => {
+            let w = app.script_wave()?;
+            let sources = w.script_sources();
+            let (_, got, message, _) = sources
+                .iter()
+                .find(|(t, _, _, _)| t == tag)
+                .ok_or_else(|| format!("no point '{tag}'"))?;
+            let text = text.join(" ");
+            if got != state || !message.contains(&text) {
+                return Err(format!(
+                    "point {tag} is {got} ({message}), expected {state} with '{text}'"
+                ));
+            }
+            tracing::info!(target: "cdept::script", "wv: point {tag} {got}: {message}");
+        }
+        ("point", [tag, on]) => {
+            let on = on_off(on)?;
+            app.script_wave()?.script_point(tag, on)?;
+        }
+        ("points", [all]) => match all.as_str() {
+            "all" => app.script_wave()?.script_points(true),
+            "none" => app.script_wave()?.script_points(false),
+            _ => return Err(USAGE.into()),
+        },
+        ("show_in", [pane, names @ ..]) if !names.is_empty() => {
+            app.script_wave()?.script_show_in(pane, names)?;
+        }
+        ("pane", [verb, n @ ..]) if n.len() <= 1 => {
+            app.script_wave()?
+                .script_pane(verb, n.first().map(String::as_str))?;
+        }
+        ("expect_panes", [n]) => {
+            let want: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let panes = app.script_wave()?.script_panes();
+            if panes.len() != want {
+                return Err(format!("{} panes, expected {want}: {panes:?}", panes.len()));
+            }
+        }
+        ("expect_pane", [n, names @ ..]) => {
+            let n: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let panes = app.script_wave()?.script_panes();
+            let (signals, _) = panes
+                .get(n.wrapping_sub(1))
+                .ok_or_else(|| format!("there are {} panes", panes.len()))?;
+            if signals != names {
+                return Err(format!("pane {n} has {signals:?}, expected {names:?}"));
+            }
+        }
+        ("expect_x_unit", [n, unit]) => {
+            let n: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let got = app.script_wave()?.script_x_unit(n)?;
+            if &got != unit {
+                return Err(format!("pane {n} has x in '{got}', expected '{unit}'"));
+            }
+        }
+        ("expect_lines", [n]) => {
+            let (more, digits) = n
+                .strip_prefix('>')
+                .map_or((false, n.as_str()), |d| (true, d));
+            let want: usize = digits
+                .parse()
+                .map_err(|_| format!("'{n}' is not a number"))?;
+            let got = app.script_wave()?.script_lines()?;
+            if (more && got <= want) || (!more && got != want) {
+                return Err(format!("{got} lines drawn, expected {n}"));
+            }
+            tracing::info!(target: "cdept::script", "wv: {got} lines drawn");
+        }
+        ("y", [n, rest @ ..]) => {
+            let n: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let y = match rest {
+                [fit] if fit == "fit" => None,
+                [a, b] => Some((number(a)?, number(b)?)),
+                _ => return Err(USAGE.into()),
+            };
+            app.script_wave()?.script_set_y(n, y)?;
+        }
+        ("expect_y", [n, y0, y1, tol @ ..]) if tol.len() <= 1 => {
+            let n: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let tol = tolerance(tol, 0, 1e-6)?;
+            let (a, b) = app.script_wave()?.script_y(n)?;
+            let (w0, w1) = (number(y0)?, number(y1)?);
+            let span = (w1 - w0).abs().max(f64::MIN_POSITIVE);
+            if (a - w0).abs() > tol * span || (b - w1).abs() > tol * span {
+                return Err(format!(
+                    "pane {n}: y is {a:e} .. {b:e}, expected {w0:e} .. {w1:e}"
+                ));
+            }
+        }
+        ("list", [grouping, filter @ ..]) => {
+            let g = super::model::Grouping::parse(grouping)
+                .ok_or_else(|| format!("'{grouping}' is not flat, kind or tree"))?;
+            let rows = app
+                .script_wave()?
+                .script_list(Some(&filter.join(" ")), Some(g));
+            tracing::info!(target: "cdept::script", "wv list: {} rows: {}", rows.len(), rows.iter().take(30).cloned().collect::<Vec<_>>().join(" | "));
+        }
+        ("expect_rows", [n]) => {
+            let want: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let rows = app.script_wave()?.script_list(None, None);
+            if rows.len() != want {
+                return Err(format!(
+                    "{} rows, expected {want}: {:?}",
+                    rows.len(),
+                    rows.iter().take(20).collect::<Vec<_>>()
+                ));
+            }
+        }
+        ("expect_row", text) if !text.is_empty() => {
+            let text = text.join(" ");
+            let rows = app.script_wave()?.script_list(None, None);
+            if !rows.iter().any(|r| r.contains(&text)) {
+                return Err(format!(
+                    "no row has '{text}': {:?}",
+                    rows.iter().take(20).collect::<Vec<_>>()
+                ));
+            }
+        }
+        ("fold", key) if !key.is_empty() => {
+            app.script_wave()?.script_fold(&key.join(" "));
+        }
+        ("pick" | "pick_add", names) if !names.is_empty() => {
+            app.script_wave()?
+                .script_select(names, verb == "pick_add")?;
+        }
+        ("expect_picked", names) => {
+            let got = app.script_wave()?.script_selected();
+            let mut want: Vec<String> = names.to_vec();
+            want.sort();
+            if got != want {
+                return Err(format!("selected {got:?}, expected {want:?}"));
+            }
+        }
+        ("picked", [how]) => {
+            app.script_wave()?.script_send_selected(how)?;
+        }
+        ("drag_signal", [signal, pane]) => {
+            let n: usize = pane
+                .parse()
+                .map_err(|_| format!("'{pane}' is not a number"))?;
+            let w = app.script_wave()?;
+            let from = w.script_row_rect(signal)?.center();
+            let to = w.script_pane_rect(n)?.center();
+            return Ok(Some(Input::Drag(from, to)));
+        }
+        ("style", [signal, key, value, tag @ ..]) if tag.len() <= 1 => {
+            let (mut color, mut dash, mut width) = (None, None, None);
+            match key.as_str() {
+                "color" | "colour" => color = Some(hex_color(value)?),
+                "dash" => {
+                    dash = Some(super::raster::Dash::parse(value).ok_or_else(|| {
+                        format!("'{value}' is not solid, dashed, dotted or dashdot")
+                    })?)
+                }
+                "width" => width = Some(number(value)? as f32),
+                _ => return Err(USAGE.into()),
+            }
+            app.script_wave()?.script_style(
+                signal,
+                tag.first().map(String::as_str),
+                color,
+                dash,
+                width,
+            )?;
+        }
+        ("expect_style", [n, label, key, value]) => {
+            let n: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let styles = app.script_wave()?.script_styles(n)?;
+            let (l, st) = styles
+                .iter()
+                .find(|(l, _)| l.contains(label.as_str()))
+                .ok_or_else(|| format!("no line '{label}' in pane {n}"))?;
+            let ok = match key.as_str() {
+                "color" | "colour" => st.color == hex_color(value)?,
+                "dash" => Some(st.dash) == super::raster::Dash::parse(value),
+                "width" => (st.width - number(value)? as f32).abs() < 1e-3,
+                _ => return Err(USAGE.into()),
+            };
+            if !ok {
+                return Err(format!("{l}: {st:?}, expected {key} {value}"));
+            }
+        }
+        ("expect_distinct", [n]) => {
+            let n: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let styles = app.script_wave()?.script_styles(n)?;
+            for (i, (a, sa)) in styles.iter().enumerate() {
+                if let Some((b, _)) = styles[i + 1..].iter().find(|(_, sb)| sb == sa) {
+                    return Err(format!("'{a}' and '{b}' look alike: {sa:?}"));
+                }
+            }
+            tracing::info!(target: "cdept::script", "wv: the {} lines of pane {n} all look different", styles.len());
+        }
+        ("expect_markers", [n]) => {
+            let want: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let w = app.script_wave()?;
+            let markers = w.script_markers();
+            if markers.len() != want {
+                return Err(format!(
+                    "{} markers, expected {want}: {markers:?}",
+                    markers.len()
+                ));
+            }
+            for m in markers.iter().take(5) {
+                tracing::info!(target: "cdept::script", "wv: marker {} at {:e} {}", m.label, m.x, m.x_unit);
+            }
+        }
+        ("expect_cursor_at", [which, signal, tag, value, tol @ ..]) if tol.len() <= 1 => {
+            let i = cursor_index(which)?;
+            let want = number(value)?;
+            let tol = tolerance(tol, 0, 1e-9)?;
+            let got = app
+                .script_wave()?
+                .script_cursor_value(i, signal, Some(tag))?;
+            if !close_to(got, want, tol) {
+                return Err(format!(
+                    "{signal} @ {tag} at cursor {which} is {got:e}, expected {want:e}"
+                ));
+            }
+        }
+        ("test_trace", [name, kind, rest @ ..]) if rest.len() <= 3 => {
+            let n: usize = match rest.first() {
+                Some(t) => number(t)? as usize,
+                None => 1000,
+            };
+            let x_unit = rest.get(1).cloned().unwrap_or_else(|| "s".into());
+            let tag = rest.get(2).cloned().unwrap_or_else(|| "calc".into());
+            let series = test_series(name, kind, n.min(200_000_000), &x_unit)?;
+            app.script_wave()?.add_series(&tag, series);
+        }
         _ => return Err(USAGE.into()),
     }
     Ok(None)
@@ -406,6 +820,18 @@ mod tests {
         assert_eq!(number("-3").unwrap(), -3.0);
         assert_eq!(number("1e-9").unwrap(), 1e-9);
         assert!(number("abc").is_err());
+    }
+
+    #[test]
+    fn files_of_one_name_are_tagged_by_folder() {
+        let t = tag_files(vec![
+            "/a/p000/out.raw".into(),
+            "/a/p001/out.raw".into(),
+            "/b/x.raw".into(),
+            "/c/p000/out.raw".into(),
+        ]);
+        let tags: Vec<&str> = t.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(tags, ["p000", "p001", "x.raw", "p000 (2)"]);
     }
 
     #[test]

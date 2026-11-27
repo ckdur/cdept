@@ -707,6 +707,91 @@ impl CdeptApp {
             .is_some()
     }
 
+    /// A waveform tab on the run points of a testbench view (all, or the ones named):
+    /// every point folder, also one without a raw file (it shows as failed). Returns the
+    /// tab's id.
+    fn open_wave_family(
+        &mut self,
+        ctx: &Context,
+        run: (String, String, String),
+        only: Option<&[String]>,
+    ) -> Option<u64> {
+        let Some(project) = self.ctx.project.clone() else {
+            self.ctx
+                .error("Waveform Tab (family): no project is open".into());
+            return None;
+        };
+        let (library, cell, view) = &run;
+        let dir = libcdept::sim::runs_dir(&project, library, cell, view);
+        let mut files: Vec<(String, std::path::PathBuf)> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| {
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    crate::views::wave::script::point_raw(&e.path()),
+                )
+            })
+            .filter(|(p, _)| only.is_none_or(|o| o.contains(p)))
+            .collect();
+        files.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+        if files.is_empty() {
+            self.ctx.error(format!(
+                "Waveform Tab (family): {library}/{cell}/{view} has no run point (run the testbench first)"
+            ));
+            return None;
+        }
+        let show = libcdept::wave::default_show(&project, library, cell, view);
+        let title = if files.len() == 1 {
+            format!("{cell} {}", files[0].0)
+        } else {
+            format!("{cell} {view} ({} points)", files.len())
+        };
+        let tab = self
+            .views
+            .add_wave_files(ctx, title, files, Some(run.clone()), Some(show));
+        let win = self.layout.open_tab(tab);
+        Self::focus(ctx, win);
+        match tab {
+            Tab::Wave(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// "Send to tab" of the calculator: into the newest waveform tab of that testbench
+    /// view, else a new tab on the points evaluated.
+    fn wave_send(&mut self, ctx: &Context, send: crate::views::simulation::TabSend) {
+        let id = match self.views.wave_for_run(&send.run) {
+            Some(id) => {
+                let win = self.layout.open_tab(Tab::Wave(id));
+                Self::focus(ctx, win);
+                Some(id)
+            }
+            None => {
+                let names: Vec<String> = send.points.iter().map(|p| p.point.clone()).collect();
+                self.open_wave_family(ctx, send.run.clone(), Some(&names))
+            }
+        };
+        let Some(view) = id.and_then(|id| self.views.wave_mut(id)) else {
+            return;
+        };
+        for (point, t) in send.traces {
+            view.add_series(
+                &point,
+                cdept_wavedata::Series::new(
+                    t.name,
+                    t.unit.unwrap_or_default(),
+                    t.x_unit.unwrap_or_default(),
+                    t.x,
+                    t.y,
+                ),
+            );
+        }
+        view.set_markers(send.markers);
+    }
+
     /// File › Open in UberWave…: a picked path starts an open in a thread; a failure
     /// goes to the log and to a dialog.
     fn poll_uberwave_opens(&mut self, ctx: &Context) {
@@ -1740,6 +1825,16 @@ impl CdeptApp {
                 let win = self.layout.open_tab(tab);
                 Self::focus(ctx, win);
             }
+            Action::OpenWaveFiles(files, title) => {
+                let tab = self.views.add_wave_files(ctx, title, files, None, None);
+                let win = self.layout.open_tab(tab);
+                Self::focus(ctx, win);
+            }
+            Action::OpenWaveFamily(library, cell, view, points) => {
+                let only = (!points.is_empty()).then_some(points.as_slice());
+                self.open_wave_family(ctx, (library, cell, view), only);
+            }
+            Action::WaveSend(send) => self.wave_send(ctx, *send),
             Action::DetachTab(tab) => {
                 if let Some(id) = self.layout.detach(tab) {
                     Self::focus(ctx, WindowId::Detached(id));
@@ -1894,6 +1989,9 @@ impl eframe::App for CdeptApp {
             }
         }
         self.poll_uberwave_opens(ctx);
+        if let Some(send) = self.views.simulation_mut().calc.take_tab_send() {
+            self.apply(ctx, Action::WaveSend(Box::new(send)));
+        }
         self.finish_netlists();
         // What changed on disk, and what the worker threads finished.
         if crate::background::tick(&mut self.ctx, &mut self.views, ctx).restore {
@@ -1957,6 +2055,42 @@ impl eframe::App for CdeptApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, LAYOUT_KEY, &self.layout);
         eframe::set_value(storage, SETTINGS_KEY, &self.ctx.settings);
+    }
+}
+
+/// Point names in a human order: `mc_r2` before `mc_r10`.
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
+    loop {
+        match (x.peek().copied(), y.peek().copied()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, _) => return std::cmp::Ordering::Less,
+            (_, None) => return std::cmp::Ordering::Greater,
+            (Some(c), Some(d)) if c.is_ascii_digit() && d.is_ascii_digit() => {
+                let mut n = String::new();
+                while let Some(c) = x.peek().copied().filter(char::is_ascii_digit) {
+                    n.push(c);
+                    x.next();
+                }
+                let mut m = String::new();
+                while let Some(d) = y.peek().copied().filter(char::is_ascii_digit) {
+                    m.push(d);
+                    y.next();
+                }
+                let (n, m) = (n.trim_start_matches('0'), m.trim_start_matches('0'));
+                let o = n.len().cmp(&m.len()).then_with(|| n.cmp(m));
+                if o != std::cmp::Ordering::Equal {
+                    return o;
+                }
+            }
+            (Some(c), Some(d)) => {
+                if c != d {
+                    return c.cmp(&d);
+                }
+                x.next();
+                y.next();
+            }
+        }
     }
 }
 

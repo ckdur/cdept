@@ -41,6 +41,34 @@ pub(crate) struct ResultRow {
 struct Finished {
     rows: Vec<ResultRow>,
     notes: Vec<String>,
+    /// "Send to tab": what goes to a waveform tab.
+    to_tab: Option<TabSend>,
+}
+
+/// Calculator results for a waveform tab of CDePT's own viewer ("Send to tab"): the
+/// waveforms of each point as arrays (no file in between) and the markers.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct TabSend {
+    /// The testbench view: library, cell, view.
+    pub run: (String, String, String),
+    /// The points evaluated (their raw files, for a new tab).
+    pub points: Vec<PointRaw>,
+    /// Point, trace (named without the point: one signal of every point).
+    pub traces: Vec<(String, wave::ipc::Trace)>,
+    pub markers: Vec<crate::views::wave::Marker>,
+    /// Nothing to send: why (said in the panel instead).
+    pub nothing: bool,
+}
+
+/// How an evaluation ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SendTo {
+    /// Only the numbers.
+    No,
+    /// Waveforms and markers to the built-in UberWave (or its process).
+    UberWave,
+    /// Waveforms and markers to a waveform tab.
+    Tab,
 }
 
 /// The values under the viewer's cursors.
@@ -54,10 +82,29 @@ pub(crate) struct CursorView {
     pub outputs: Vec<(String, Result<f64, String>)>,
 }
 
-/// Cursor moves reported by the viewer (from its thread): a, b, generation.
+/// Cursor moves reported by the viewer (from its thread) or a waveform tab: a, b,
+/// generation.
 static CURSORS: Mutex<(Option<f64>, Option<f64>)> = Mutex::new((None, None));
 static CURSOR_GEN: AtomicU64 = AtomicU64::new(0);
 static LISTENING: Mutex<bool> = Mutex::new(false);
+/// The values under the cursors when a waveform tab reported them last (the built-in
+/// UberWave is asked for its own); `None` when UberWave reported last.
+static TAB_SIGNALS: Mutex<Option<Vec<(String, Option<f64>, Option<f64>)>>> = Mutex::new(None);
+/// A waveform tab has reported cursors (the cursor section works without UberWave).
+static TAB_CURSORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A waveform tab's cursors moved (or the values under them changed): the spec table
+/// follows them as it follows the built-in UberWave's.
+pub(crate) fn publish_tab_cursors(
+    a: Option<f64>,
+    b: Option<f64>,
+    signals: Vec<(String, Option<f64>, Option<f64>)>,
+) {
+    *CURSORS.lock().unwrap_or_else(|e| e.into_inner()) = (a, b);
+    *TAB_SIGNALS.lock().unwrap_or_else(|e| e.into_inner()) = Some(signals);
+    TAB_CURSORS.store(true, Ordering::SeqCst);
+    CURSOR_GEN.fetch_add(1, Ordering::SeqCst);
+}
 
 /// Ask the built-in viewer to report cursor moves (once per process).
 fn listen(ctx: &egui::Context) {
@@ -69,6 +116,7 @@ fn listen(ctx: &egui::Context) {
     let ctx = ctx.clone();
     wave::embedded::set_cursor_listener(Some(Arc::new(move |a, b| {
         *CURSORS.lock().unwrap_or_else(|e| e.into_inner()) = (a, b);
+        *TAB_SIGNALS.lock().unwrap_or_else(|e| e.into_inner()) = None;
         CURSOR_GEN.fetch_add(1, Ordering::SeqCst);
         ctx.request_repaint();
     })));
@@ -115,6 +163,8 @@ pub(crate) struct CalcPanel {
     /// Something to say under the buttons (an added output, a bad eye period).
     pub status: Option<(String, bool)>,
     started: bool,
+    /// "Send to tab" results not yet handed to a waveform tab.
+    to_tab: Option<TabSend>,
 }
 
 impl CalcPanel {
@@ -130,6 +180,12 @@ impl CalcPanel {
         self.pending.is_some()
     }
 
+    /// "Send to tab" results that are ready, once (the app hands them to a tab).
+    pub(crate) fn take_tab_send(&mut self) -> Option<TabSend> {
+        self.take_finished();
+        self.to_tab.take()
+    }
+
     fn take_finished(&mut self) {
         let done = self
             .pending
@@ -138,6 +194,9 @@ impl CalcPanel {
         if let Some(done) = done {
             self.rows = done.rows;
             self.notes = done.notes;
+            if done.to_tab.is_some() {
+                self.to_tab = done.to_tab;
+            }
             self.pending = None;
         }
         let view = self
@@ -190,12 +249,13 @@ impl CalcPanel {
         })
     }
 
-    /// Evaluate (and, with `send`, push waveforms and markers to UberWave) in a thread.
+    /// Evaluate (and send waveforms and markers to UberWave or to a waveform tab) in a
+    /// thread.
     pub(crate) fn start(
         &mut self,
         project: &Project,
         run: (&str, &str, &str),
-        send: bool,
+        send: SendTo,
         ctx: Option<&egui::Context>,
     ) -> Result<(), String> {
         if self.busy() {
@@ -210,7 +270,14 @@ impl CalcPanel {
         let slot: Slot<Finished> = Arc::default();
         self.pending = Some(slot.clone());
         self.rows.clear();
-        self.notes = vec![if send { "sending..." } else { "evaluating..." }.into()];
+        self.notes = vec![
+            match send {
+                SendTo::No => "evaluating...",
+                SendTo::UberWave => "sending...",
+                SendTo::Tab => "evaluating for the waveform tab...",
+            }
+            .into(),
+        ];
         let (project, l, c, v) = (
             project.clone(),
             run.0.to_string(),
@@ -221,8 +288,38 @@ impl CalcPanel {
         let markers = self.markers;
         let extra = cursor_names();
         let ctx = ctx.cloned();
+        let layout_name = self.layout;
         spawn(move || {
-            let finished = if send {
+            let finished = if send == SendTo::Tab {
+                let outcomes =
+                    wcalc::evaluate_points_with(&points, &expr, None, plot.as_deref(), &extra);
+                let mut f = rows_of(&outcomes);
+                let tab = tab_send((&l, &c, &v), &points, &outcomes, &expr, markers);
+                let sent: usize = tab.traces.len();
+                if sent > 0 {
+                    f.notes.push(format!(
+                        "{sent} waveform(s) to a waveform tab{}",
+                        if tab.markers.is_empty() {
+                            String::new()
+                        } else {
+                            format!(", {} marker(s)", tab.markers.len())
+                        }
+                    ));
+                }
+                if layout_name != LayoutChoice::Plain {
+                    f.notes.push(
+                        "the Bode and eye layouts are UberWave's for now: the tab gets the plain traces"
+                            .into(),
+                    );
+                }
+                if !tab.nothing {
+                    f.to_tab = Some(tab);
+                } else {
+                    f.notes
+                        .push("nothing to send to a tab (no waveform result, no marker)".into());
+                }
+                f
+            } else if send == SendTo::UberWave {
                 let req = wcalc::Request {
                     expr: expr.clone(),
                     plot,
@@ -417,13 +514,14 @@ impl CalcPanel {
         });
         let mut evaluate = false;
         let mut send = false;
+        let mut send_tab = false;
         ui.horizontal(|ui| {
             let edit = ui.add(
                 TextEdit::singleline(&mut self.expr)
                     .id(egui::Id::new("calc-expr"))
                     .code_editor()
                     .hint_text("expression, e.g. enob(sample(v(\"dout\"), 100n), window=\"rect\")")
-                    .desired_width((ui.available_width() - 190.0).max(120.0)),
+                    .desired_width((ui.available_width() - 290.0).max(120.0)),
             );
             if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 send = true;
@@ -443,6 +541,13 @@ impl CalcPanel {
             {
                 send = true;
             }
+            if ui
+                .add_enabled(ready, egui::Button::new("Send to tab"))
+                .on_hover_text("Evaluate and put the waveforms (and markers) into a waveform tab of CDePT's own viewer: the newest tab of this testbench, else a new one")
+                .clicked()
+            {
+                send_tab = true;
+            }
         });
         help_line(ui, &self.expr);
         suggestions(ui, &mut self.expr);
@@ -452,9 +557,16 @@ impl CalcPanel {
         if self.show_signals {
             self.signal_browser(ui, points);
         }
-        if evaluate || send {
+        if evaluate || send || send_tab {
             let ctx = ui.ctx().clone();
-            if let Err(e) = self.start(project, run, send, Some(&ctx)) {
+            let how = if send_tab {
+                SendTo::Tab
+            } else if send {
+                SendTo::UberWave
+            } else {
+                SendTo::No
+            };
+            if let Err(e) = self.start(project, run, how, Some(&ctx)) {
                 self.status = Some((e, true));
             } else {
                 self.status = None;
@@ -550,20 +662,24 @@ impl CalcPanel {
         outputs: &[(String, String, String)],
         specs: &[libcdept::sim::Spec],
     ) {
-        egui::CollapsingHeader::new("Cursors (UberWave)")
+        egui::CollapsingHeader::new("Cursors (UberWave or a waveform tab)")
             .id_salt("calc-cursors")
             .default_open(false)
             .show(ui, |ui| {
                 ui.checkbox(&mut self.follow, "follow the viewer's cursors")
-                    .on_hover_text("The values under cursors A and B of the built-in UberWave, and the outputs that use cursor_a / cursor_b, evaluated again when a cursor moves");
+                    .on_hover_text("The values under cursors A and B of the built-in UberWave or of a waveform tab (whichever moved last), and the outputs that use cursor_a / cursor_b, evaluated again when a cursor moves");
                 if !self.follow {
                     return;
                 }
-                if !libcdept::wave::backend::embedded_available() {
-                    ui.weak("needs the built-in UberWave");
+                if !libcdept::wave::backend::embedded_available()
+                    && !TAB_CURSORS.load(Ordering::SeqCst)
+                {
+                    ui.weak("needs the built-in UberWave, or cursors in a waveform tab");
                     return;
                 }
-                listen(ui.ctx());
+                if libcdept::wave::backend::embedded_available() {
+                    listen(ui.ctx());
+                }
                 let ctx = ui.ctx().clone();
                 self.refresh_cursors(project, run, outputs, &ctx);
                 let c = &self.cursor;
@@ -739,7 +855,13 @@ fn cursor_view(
         b,
         ..Default::default()
     };
-    if let Some(v) = wave::embedded::running()
+    let from_tab = TAB_SIGNALS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    if let Some(values) = from_tab {
+        view.signals = values;
+    } else if let Some(v) = wave::embedded::running()
         && let Ok(c) = v.cursors()
     {
         view.signals = c.values.into_iter().map(|v| (v.signal, v.a, v.b)).collect();
@@ -778,6 +900,48 @@ fn cursor_names_of(a: Option<f64>, b: Option<f64>) -> Vec<(String, f64)> {
         out.push(("cursor_b".to_string(), b));
     }
     out
+}
+
+/// What "Send to tab" hands over: the waveforms of the points named as the signal
+/// (the name, else the expression; a complex result as `(mag dB)` and `(phase)`), tagged
+/// with their point, and the markers of the scalars.
+fn tab_send(
+    run: (&str, &str, &str),
+    points: &[PointRaw],
+    outcomes: &[wcalc::PointOutcome],
+    expr: &str,
+    markers: bool,
+) -> TabSend {
+    let mut traces = Vec::new();
+    for o in outcomes {
+        if let Ok(wcalc::Evaluated::Traces(ts)) = &o.result {
+            for t in ts {
+                let mut t = t.clone();
+                // one signal of every point: the point is the source's tag, not the name
+                let suffix = format!(" @ {}", o.point);
+                if let Some(i) = t.name.find(&suffix) {
+                    t.name = format!("{}{}", &t.name[..i], &t.name[i + suffix.len()..]);
+                }
+                traces.push((o.point.clone(), t));
+            }
+        }
+    }
+    let markers: Vec<crate::views::wave::Marker> = wcalc::markers_of(outcomes, expr, None, markers)
+        .into_iter()
+        .map(|m| crate::views::wave::Marker {
+            label: m.label,
+            x: m.x,
+            y: m.y,
+            x_unit: m.x_unit,
+        })
+        .collect();
+    TabSend {
+        run: (run.0.to_string(), run.1.to_string(), run.2.to_string()),
+        points: points.to_vec(),
+        nothing: traces.is_empty() && markers.is_empty(),
+        traces,
+        markers,
+    }
 }
 
 fn spawn(f: impl FnOnce() + Send + 'static) {
@@ -960,7 +1124,7 @@ fn script_calc(
     args: &[String],
 ) -> Result<(), String> {
     const USAGE: &str = "usage: sim calc expr <text> | point <name|all> | plot <kind|any> | layout plain|bode|eye <period> [offset] | \
-        markers on|off | evaluate | send | expect <point|*> <text> | expect_value <point> <min> <max> | expect_note <text> | \
+        markers on|off | evaluate | send | send_tab | follow | expect <point|*> <text> | expect_value <point> <min> <max> | expect_note <text> | \
         add_output <name> [min] [max] | cursors <a> <b> | expect_cursor_output <name> <min> <max> | expect_cursor_signal <name> | \
         functions <filter> | signals <filter>";
     let run = view.target_run().ok_or("no testbench is open")?;
@@ -1013,8 +1177,13 @@ fn script_calc(
             }
             Ok(())
         }
-        Some(verb @ ("evaluate" | "send")) => {
-            p.start(project, run_ref, verb == "send", None)?;
+        Some(verb @ ("evaluate" | "send" | "send_tab")) => {
+            let how = match verb {
+                "send" => SendTo::UberWave,
+                "send_tab" => SendTo::Tab,
+                _ => SendTo::No,
+            };
+            p.start(project, run_ref, how, None)?;
             p.wait(300)?;
             for r in &p.rows {
                 tracing::info!(target: "cdept::script", "calc {}: {}", r.point, r.text.lines().next().unwrap_or(""));
@@ -1120,6 +1289,41 @@ fn script_calc(
             let (ca, cb) = *CURSORS.lock().unwrap_or_else(|e| e.into_inner());
             p.cursor = cursor_view(ca, cb, raw.as_deref(), &uses);
             p.cursor_seen = CURSOR_GEN.load(Ordering::SeqCst);
+            for (s, a, b) in &p.cursor.signals {
+                tracing::info!(target: "cdept::script", "cursor {s}: A {a:?} B {b:?}");
+            }
+            for (n, v) in &p.cursor.outputs {
+                tracing::info!(target: "cdept::script", "cursor output {n}: {v:?}");
+            }
+            Ok(())
+        }
+        Some("follow") => {
+            // What the Cursors section does when a cursor moved (in a waveform tab or
+            // UberWave): the values and the outputs that use cursor_a / cursor_b, now.
+            let outputs = view
+                .form
+                .as_ref()
+                .map(|f| f.outputs.clone())
+                .unwrap_or_default();
+            let uses: Vec<_> = outputs
+                .into_iter()
+                .filter(|(_, e, _)| e.to_lowercase().contains("cursor_"))
+                .collect();
+            let p = &mut view.calc;
+            let point = p.point.clone().or_else(|| {
+                wave::points(project, run_ref.0, run_ref.1, run_ref.2)
+                    .first()
+                    .map(|x| x.point.clone())
+            });
+            let raw = point.map(|x| {
+                libcdept::sim::runs_dir(project, run_ref.0, run_ref.1, run_ref.2)
+                    .join(x)
+                    .join("out.raw")
+            });
+            let (ca, cb) = *CURSORS.lock().unwrap_or_else(|e| e.into_inner());
+            p.cursor = cursor_view(ca, cb, raw.as_deref(), &uses);
+            p.cursor_seen = CURSOR_GEN.load(Ordering::SeqCst);
+            tracing::info!(target: "cdept::script", "cursors A {ca:?} B {cb:?}");
             for (s, a, b) in &p.cursor.signals {
                 tracing::info!(target: "cdept::script", "cursor {s}: A {a:?} B {b:?}");
             }

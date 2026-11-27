@@ -14,12 +14,18 @@
 //!
 //! Without the engine (see `build.rs`) the crate is a stub with the same API:
 //! [`available`] is false and [`Dataset::open`] fails with a message.
+//!
+//! [`Series`] is a waveform held in memory (a calculator result) with the same queries,
+//! answered in Rust (also in the stub build).
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 #[cfg(wavedata_engine)]
 mod ffi;
+mod series;
+
+pub use series::Series;
 
 /// Whether the engine is built in.
 pub fn available() -> bool {

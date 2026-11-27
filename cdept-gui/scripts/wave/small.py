@@ -57,3 +57,15 @@ with open(os.path.join(out, "table.csv"), "w") as fh:
 os.makedirs(os.path.join(out, "proc"), exist_ok=True)
 with open(os.path.join(out, "proc", "p.raw"), "wb") as fh, open(os.path.join(out, "small.raw"), "rb") as src:
     fh.write(src.read())
+# hostile names: unicode, a very long one, signal names too
+odd = os.path.join(out, "odd")
+os.makedirs(odd, exist_ok=True)
+long_sig = "v(" + "x" * 300 + ".out)"
+raw(os.path.join(odd, "fam_ünïcødé_日本語.raw"), [i * 1e-9 for i in range(300)], {
+    "v(ñodo_μ)": lambda k, x: math.sin(k * 0.1),
+    long_sig: lambda k, x: math.cos(k * 0.1),
+    "v(x1.x2.deep)": lambda k, x: k * 1e-3,
+})
+raw(os.path.join(odd, ("L" * 200) + ".raw"), [i * 1e-9 for i in range(300)], {
+    "v(ñodo_μ)": lambda k, x: 0.5 * math.sin(k * 0.1),
+})

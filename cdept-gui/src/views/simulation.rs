@@ -24,6 +24,7 @@ use crate::state::{Action, AppCtx, Selection};
 
 mod avail;
 pub(crate) mod calc;
+pub(crate) use calc::{TabSend, publish_tab_cursors};
 mod keep;
 mod remote;
 mod sweeps;
@@ -530,6 +531,8 @@ pub struct SimulationView {
     setup_open: Option<bool>,
     /// "Waveform Tab" of a point: the raw file and the tab's title, for the next frame.
     open_wave: Option<(std::path::PathBuf, String)>,
+    /// "Waveform Tab (family)" was pressed: the testbench view to open.
+    open_family_tab: Option<(String, String, String)>,
 }
 
 impl SimulationView {
@@ -1484,7 +1487,17 @@ impl SimulationView {
                 .iter()
                 .filter(|r| r.error.is_none())
                 .map(|r| r.name.as_str());
+            let any = self.results.iter().any(|r| r.error.is_none());
             crate::uberwave::results_ui(ui, project, (&t.library, &t.cell, &t.view), ok);
+            if any
+                && ui
+                    .button("Waveform Tab (family)")
+                    .on_hover_text("All the run points of this testbench view in one waveform tab of CDePT's own viewer, tagged with their point names (per-point show and hide in its Points list)")
+                    .clicked()
+            {
+                self.open_family_tab =
+                    Some((t.library.clone(), t.cell.clone(), t.view.clone()));
+            }
         }
         let many = self.results.len() > 6;
         let mut open_wave = None;
@@ -1601,6 +1614,9 @@ impl View for SimulationView {
         self.poll();
         if let Some((file, title)) = self.open_wave.take() {
             ctx.request(Action::OpenWave(file, Some(title)));
+        }
+        if let Some((l, c, v)) = self.open_family_tab.take() {
+            ctx.request(Action::OpenWaveFamily(l, c, v, Vec::new()));
         }
         self.after_load(&project);
         let Some(target) = self.target.clone() else {

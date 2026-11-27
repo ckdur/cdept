@@ -173,6 +173,24 @@ impl Views {
         Tab::Wave(id)
     }
 
+    /// A new waveform tab on several files, a family when `run` is given.
+    pub(crate) fn add_wave_files(
+        &mut self,
+        ctx: &egui::Context,
+        title: String,
+        files: Vec<(String, std::path::PathBuf)>,
+        run: Option<wave::Run>,
+        show: Option<libcdept::wave::show::ShowRequest>,
+    ) -> Tab {
+        let id = self.next_wave;
+        self.next_wave += 1;
+        self.waves.insert(
+            id,
+            wave::WaveView::open_files(ctx, id, title, files, run, show),
+        );
+        Tab::Wave(id)
+    }
+
     /// Drop the waveform views whose tab was closed (their loading is cancelled, their
     /// worker stops).
     pub(crate) fn retain_waves(&mut self, open: &[u64]) {
@@ -181,6 +199,15 @@ impl Views {
 
     pub(crate) fn wave_mut(&mut self, id: u64) -> Option<&mut wave::WaveView> {
         self.waves.get_mut(&id)
+    }
+
+    /// The newest waveform tab of a testbench view.
+    pub(crate) fn wave_for_run(&self, run: &(String, String, String)) -> Option<u64> {
+        self.waves
+            .iter()
+            .rev()
+            .find(|(_, v)| v.run() == Some(run))
+            .map(|(id, _)| *id)
     }
 
     /// Let every waveform tab take what its threads finished (hidden tabs included).

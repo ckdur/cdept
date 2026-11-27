@@ -124,6 +124,44 @@ pub fn grid(bounds: (f64, f64), divisions: f64) -> Vec<egui_plot::GridMark> {
     marks
 }
 
+/// Grid marks of a logarithmic axis whose plot coordinate is log10(x): a labelled
+/// mark per decade, minor ones at 2..9 (every few decades when the range is wide).
+pub fn log_grid(bounds: (f64, f64)) -> Vec<egui_plot::GridMark> {
+    let (lo, hi) = bounds;
+    if !(lo.is_finite() && hi.is_finite() && hi > lo) {
+        return Vec::new();
+    }
+    let decades = hi - lo;
+    if decades < 1.0 {
+        // less than a decade: a linear grid in the plot coordinate
+        return grid(bounds, 5.0);
+    }
+    let step = (decades / 10.0).ceil().max(1.0);
+    let mut marks = Vec::new();
+    let mut d = (lo / step).floor() * step;
+    while d <= hi + 1e-9 && marks.len() < 400 {
+        if d >= lo - 1e-9 {
+            marks.push(egui_plot::GridMark {
+                value: d,
+                step_size: step,
+            });
+        }
+        if step == 1.0 && decades < 6.0 {
+            for k in 2..10 {
+                let v = d + (k as f64).log10();
+                if v >= lo && v <= hi {
+                    marks.push(egui_plot::GridMark {
+                        value: v,
+                        step_size: 0.1,
+                    });
+                }
+            }
+        }
+        d += step;
+    }
+    marks
+}
+
 /// The label of the x axis: `Time (s)`, `Frequency (Hz)` or `name (unit)` (as
 /// UberWave's viewer words it).
 pub fn x_label(name: &str, unit: &str) -> String {

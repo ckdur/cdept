@@ -118,6 +118,13 @@ pub enum Action {
     /// A new waveform tab on a raw file (`views/wave`), with a title (else the file's
     /// name).
     OpenWave(PathBuf, Option<String>),
+    /// A new waveform tab on several files (tag, file) overlaid, with a title.
+    OpenWaveFiles(Vec<(String, PathBuf)>, String),
+    /// A new waveform tab on the run points of a testbench view (library, cell, view,
+    /// the points; none: all): a family.
+    OpenWaveFamily(String, String, String, Vec<String>),
+    /// Calculator results for a waveform tab ("Send to tab").
+    WaveSend(Box<crate::views::simulation::TabSend>),
     /// Move a tab into a new native window.
     DetachTab(Tab),
     /// Move a tab into an existing window.

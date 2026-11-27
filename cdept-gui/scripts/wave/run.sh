@@ -5,8 +5,8 @@
 # load, repeated open/close, and the large SAR ADC file (docs/NOTES.md, own waveform
 # viewer).
 #
-#   cdept-gui/scripts/wave/run.sh [smoke|menu|torture|loop|sar ...]
-#       (default: smoke menu torture loop sar)
+#   cdept-gui/scripts/wave/run.sh [smoke|menu|features|family|torture|loop|sar ...]
+#       (default: smoke menu features family torture loop sar)
 #
 # smoke: small inputs (small.py), what CI runs; menu: File > Open in UberWave... with
 # the built-in viewer and the process (fake-uberwave.sh stands in for UberWaveViewer).
@@ -38,7 +38,7 @@ gui() { # script [env...]
     script=$1
     shift
     data=$DATA
-    case $script in smoke | menu) data=$SMALL ;; esac
+    case $script in smoke | menu | features | family) data=$SMALL ;; esac
     sed "s|@DATA@|$data|g; s|@SHOTS@|$SHOTS|g; s|@SAR@|$SAR|g" "$HERE/$script.script.in" >"$W/$script.script"
     env "$@" DISPLAY="${DISPLAY:-:0}" XDG_DATA_HOME="$W/xdg" HOME="$W/home" \
         timeout 900 systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 \
@@ -59,11 +59,15 @@ fresh_data() {
 }
 
 status=0
-for what in ${*:-smoke menu torture loop sar}; do
+for what in ${*:-smoke menu features family torture loop sar}; do
     case $what in
     smoke)
         fresh_small
         gui smoke || status=1
+        ;;
+    features | family)
+        fresh_small
+        gui "$what" || status=1
         ;;
     menu)
         fresh_small

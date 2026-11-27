@@ -1,0 +1,63 @@
+# Step 3 of the waveform tabs on small inputs (small.py): panes, the signal list,
+# several files overlaid, calculator series (hostile ones too), styles, cursors.
+window 1500 950
+wv open @DATA@/small.raw
+wv wait_loaded
+wv expect_pane 1 v(a) v(b)
+wv expect_x_unit 1 s
+wv show_in new i(vdd)
+wv expect_panes 2
+wv expect_pane 2 i(vdd)
+wv cursor a 500n
+wv cursor b 1u
+wv expect_cursor a v(b) 0.25 1e-3
+wv expect_lines 3
+wait 0.5
+screenshot @SHOTS@/feat-1-panes.png
+# the list: groups, search, selection
+wv list kind
+wv expect_row # Voltages (2)
+wv expect_row # Currents (1)
+wv list flat v(
+wv expect_rows 2
+wv list kind
+wv pick v(a)
+wv pick_add i(vdd)
+wv expect_picked v(a) i(vdd)
+wv picked new
+wv expect_panes 3
+wv expect_pane 3 i(vdd) v(a)
+wv pane remove 3
+wv expect_panes 2
+# drag from the list onto pane 2
+wv drag_signal v(a) 2
+wv expect_pane 2 i(vdd) v(a)
+wv pane up 2
+wv expect_pane 1 i(vdd) v(a)
+wv pane down 1
+# a spectrum (x in Hz) does not land on a time pane
+wv pane select 1
+wv test_trace spectrum ramp 500 Hz
+wv expect_panes 3
+wv expect_pane 3 spectrum
+wv expect_x_unit 3 Hz
+# hostile series
+wv test_trace empty_one empty
+wv test_trace nan_one nan 1000
+wv test_trace inf_one inf 1000
+wv test_trace lissajous nonmono 5000 V
+wv expect_x_unit 4 V
+wv expect_lines >6
+wait 0.5
+screenshot @SHOTS@/feat-2-hostile.png
+# styles
+wv style v(b) color #ff0000
+wv style v(b) dash dotted
+wv style v(b) width 3
+wv expect_style 1 v(b) color #ff0000
+wv expect_style 1 v(b) dash dotted
+wv expect_distinct 1
+wv y 1 -2 2
+wv expect_y 1 -2 2
+wv y 1 fit
+quit
