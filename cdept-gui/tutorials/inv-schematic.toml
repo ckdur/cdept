@@ -1,0 +1,316 @@
+schema = "cdept-tutorial"
+version = 1
+id = "inv-schematic"
+title = "Inverter 2: draw the schematic"
+series = "inverter"
+order = 2
+start = ["base", "inv-lib"]
+pdk = "ihp-sg13g2"
+goal = """
+You draw a CMOS inverter in the embedded xschem with the PDK's transistors, size
+them, add its pins, wire it up and write its netlist. The guide checks the circuit
+itself, so you may arrange the drawing as you like.
+"""
+minutes = 20
+before = """
+- [Inverter 1](inv-library.md), or let the guide make the starting project.
+- CDePT built with the xschem helper (`cargo build -p cdept-xschem`).
+"""
+
+[[circuit]]
+id = "pmos"
+view = "work/inv/schematic"
+[[circuit.part]]
+what = "the PMOS"
+symbol = "sg13_lv_pmos"
+
+[[circuit]]
+id = "both"
+view = "work/inv/schematic"
+[[circuit.part]]
+what = "the PMOS"
+symbol = "sg13_lv_pmos"
+[[circuit.part]]
+what = "the NMOS"
+symbol = "sg13_lv_nmos"
+
+[[circuit]]
+id = "sizes"
+view = "work/inv/schematic"
+[[circuit.part]]
+what = "the PMOS"
+symbol = "sg13_lv_pmos"
+with = { w = "1.5u", l = "0.13u" }
+[[circuit.part]]
+what = "the NMOS"
+symbol = "sg13_lv_nmos"
+with = { w = "0.74u", l = "0.13u" }
+
+[[circuit]]
+id = "pins"
+view = "work/inv/schematic"
+[[circuit.part]]
+what = "the input pin A"
+symbol = "ipin"
+with = { lab = "A" }
+[[circuit.part]]
+what = "the output pin Y"
+symbol = "opin"
+with = { lab = "Y" }
+[[circuit.part]]
+what = "the supply pin VDD"
+symbol = "iopin"
+with = { lab = "VDD" }
+[[circuit.part]]
+what = "the ground pin VSS"
+symbol = "iopin"
+with = { lab = "VSS" }
+
+[[circuit]]
+id = "inverter"
+view = "work/inv/schematic"
+[[circuit.part]]
+what = "the PMOS"
+symbol = "sg13_lv_pmos"
+with = { w = "1.5u", l = "0.13u" }
+pins = { G = "A", D = "Y", S = "VDD", B = "VDD" }
+swap = ["D", "S"]
+[[circuit.part]]
+what = "the NMOS"
+symbol = "sg13_lv_nmos"
+with = { w = "0.74u", l = "0.13u" }
+pins = { G = "A", D = "Y", S = "VSS", B = "VSS" }
+swap = ["D", "S"]
+[[circuit.part]]
+what = "the input pin A"
+symbol = "ipin"
+with = { lab = "A" }
+[[circuit.part]]
+what = "the output pin Y"
+symbol = "opin"
+with = { lab = "Y" }
+[[circuit.part]]
+what = "the supply pin VDD"
+symbol = "iopin"
+with = { lab = "VDD" }
+[[circuit.part]]
+what = "the ground pin VSS"
+symbol = "iopin"
+with = { lab = "VSS" }
+
+[[step]]
+id = "start"
+title = "Get the project"
+text = """
+Either let the guide make the starting project (a library "work" with an empty cell
+"inv"), or open your own project from "Inverter 1" and press Continue.
+"""
+start_button = true
+continue_button = true
+continue_needs = ["view:work/inv/schematic"]
+needs_hint = "Open a project that has work/inv/schematic."
+
+[[step]]
+id = "open"
+title = "Open the schematic of inv"
+text = """
+In the Libraries panel on the left, open "work", then "inv", and double-click
+"schematic".
+"""
+point = [
+    { at = "tree:work/inv/schematic", say = "Double-click schematic" },
+    { at = "tree:work/inv", say = "Open inv" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["open:work/inv/schematic"]
+
+[[step]]
+id = "basics"
+title = "Moving around in xschem"
+text = """
+The drawing, its menus and its keys are xschem's own. Keys go to xschem while the
+pointer is over the drawing.
+
+- Mouse wheel: zoom. f: fit the drawing in the window.
+- Drag with the middle button: pan.
+- Escape: stop what you are doing (placing, wiring).
+- u: undo. Shift+U: redo.
+- Click selects, Delete removes the selection.
+
+This is the circuit you are going to draw:
+"""
+picture = "inv-schematic"
+continue_button = true
+
+[[step]]
+id = "pmos"
+title = "Place the PMOS"
+text = """
+Move the pointer over the drawing and press Insert (or Shift+I, or Tools > Insert
+symbol). CDePT's symbol picker opens.
+
+Choose the library sg13g2_pr, the cell sg13_lv_pmos (the list scrolls), the view
+"symbol", and press "Insert". The symbol follows the pointer: click where it goes,
+above the middle.
+
+sg13_lv_pmos is the PDK's low-voltage (1.2 V) PMOS.
+"""
+point = [
+    { at = "xschem.picker.view:symbol", say = "Select symbol, then press Insert" },
+    { at = "xschem.picker.cell:sg13_lv_pmos", say = "Click sg13_lv_pmos" },
+    { at = "xschem.picker.library:sg13g2_pr", say = "Click sg13g2_pr (then find sg13_lv_pmos in Cell)" },
+]
+done_when = ["circuit:pmos"]
+continue_button = true
+continue_needs = ["circuit:pmos"]
+
+[[step]]
+id = "nmos"
+title = "Place the NMOS"
+text = """
+The same way, place sg13_lv_nmos below the PMOS.
+
+If you placed something wrong: select it and press Delete, or press u to undo. To
+move a symbol, select it and press m. Shift+R rotates and Shift+F mirrors what you
+are moving.
+"""
+point = [
+    { at = "xschem.picker.view:symbol", say = "Select symbol, then press Insert" },
+    { at = "xschem.picker.cell:sg13_lv_nmos", say = "Click sg13_lv_nmos" },
+    { at = "xschem.picker.library:sg13g2_pr", say = "Click sg13g2_pr (then find sg13_lv_nmos in Cell)" },
+]
+done_when = ["circuit:both"]
+continue_button = true
+continue_needs = ["circuit:both"]
+
+[[step]]
+id = "sizes"
+title = "Size the transistors"
+text = """
+A new transistor is 0.15 µm wide. Click one transistor to select it and press q: the
+dialog shows its attributes. Change w, then press OK.
+
+- PMOS: w=1.5u
+- NMOS: w=0.74u
+
+Leave l=0.13u, the shortest channel of this device. The PMOS is about twice as wide
+because holes move more slowly than electrons: with that the two pull about equally
+hard, and the inverter switches near half the supply.
+
+ng is the number of gate fingers and m the number of copies; both stay 1.
+"""
+point = [{ at = "xschem.button:OK", say = "Change w, then press OK" }]
+done_when = ["circuit:sizes"]
+continue_button = true
+continue_needs = ["circuit:sizes"]
+
+[[step]]
+id = "pins"
+title = "Add the four pins"
+text = """
+Pins are how the cell connects to the outside: they become the pins of its symbol and
+of its netlist.
+
+- Ctrl+P places an input pin. Put it left of the transistors.
+- Ctrl+Shift+P places an output pin. Put it on the right.
+- VDD and VSS are in-out pins: press Insert, choose "xschem devices" in the
+  picker's Library column, then iopin. Place one above and one below. Shift+R turns a
+  pin while you place it.
+
+Then give each its name: select a pin, press q, set lab= and press OK. The names are
+A, Y, VDD and VSS, in capitals.
+"""
+point = [
+    { at = "xschem.button:OK", say = "Set lab=, then press OK" },
+    { at = "xschem.picker.cell:iopin", say = "Click iopin, then press Insert" },
+    { at = "xschem.picker.library:devices", say = "Click xschem devices" },
+]
+done_when = ["circuit:pins"]
+continue_button = true
+continue_needs = ["circuit:pins"]
+
+[[step]]
+id = "wire"
+title = "Wire it up"
+text = """
+To draw a wire, put the pointer on the first end, press w, move to the other end and
+click. Wires snap to the grid; their ends must lie on a pin or on another wire. A
+dot marks where wires join.
+
+Connect:
+
+- both gates to the pin A;
+- both drains (the middle, where the two transistors meet) to the pin Y;
+- the PMOS source (top) to VDD, and the NMOS source (bottom) to VSS.
+
+A transistor has a fourth pin, the bulk, on the middle of its right side. Wire the
+PMOS bulk to VDD and the NMOS bulk to VSS. An unconnected bulk is a common mistake
+that simulation does not always show.
+
+The list below says what is still missing. A net takes its name from the pin on it,
+so "pin G should be on A" means the gate does not reach pin A yet.
+
+Instead of a long wire you may use a label: Alt+L places one, and two labels (or a
+label and a pin) with the same name are connected.
+"""
+picture = "inv-schematic"
+done_when = ["circuit:inverter"]
+continue_button = true
+continue_needs = ["circuit:inverter"]
+
+[[step]]
+id = "save"
+title = "Save"
+text = """
+Press Ctrl+S with the pointer over the drawing. xschem asks "save file?": answer
+Yes. The star after the tab's name goes away.
+
+CDePT never saves behind your back: closing a changed tab asks first.
+"""
+point = [{ at = "xschem.button:Yes", say = "Click Yes" }]
+continue_button = true
+continue_needs = ["circuit:inverter", "saved:work/inv/schematic"]
+needs_hint = "The circuit must be complete and saved (Ctrl+S)."
+
+[[step]]
+id = "netlist"
+title = "Write the netlist"
+text = """
+A netlist is the circuit as text: what the simulator and the layout checks read.
+
+In the menu bar, open Cell > Netlist to View > SPICE.
+"""
+point = [
+    { at = "menu.cell.netlist.SPICE", say = "Click SPICE" },
+    { at = "menu.cell.netlist", say = "Netlist to View" },
+    { at = "menu.cell", say = "Open the Cell menu" },
+]
+done_when = ["view:work/inv/netlist"]
+lost_without = ["open:work/inv/schematic"]
+back_to = "open"
+lost_says = "The schematic of inv is not in front. Open it again."
+
+[[step]]
+id = "read"
+title = "Read the netlist"
+text = """
+The cell inv has a new view, "netlist". Open it from the Libraries panel, or read the
+file libs/work/inv/netlist/.
+
+You should find .subckt inv A Y VDD VSS and two lines starting with XM:
+
+    XM2 Y A VDD VDD sg13_lv_pmos w=1.5u l=0.13u ng=1 m=1
+
+Each line is a device: its name, the nets on its pins in the order drain, gate,
+source, bulk, then the model and the sizes. Your instance names may differ, and drain
+and source may be the other way round: a MOSFET is symmetrical.
+
+If a line has a net called net1 or similar, a wire is not where you think it is.
+
+Next: "Inverter 3: the symbol and a testbench".
+"""
+point = [
+    { at = "tree:work/inv/netlist", say = "Double-click netlist" },
+    { at = "tree:work/inv", say = "Open inv" },
+]
+continue_button = true

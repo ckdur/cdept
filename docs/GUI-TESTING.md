@@ -188,6 +188,7 @@ with spaces that is not the last one is written in braces: `{Instance name}`.
 | `screenshot <file.png>` | Save the main window as a PNG |
 | `check_picture` | Fail unless the drawing on screen is the frame, pixel for pixel (nothing scaled or shifted) |
 | `frame` | Log the size of the frame |
+| `move_middle` / `click_middle` | The pointer to the middle of the active picture (with a click), whatever its size: zoom on a point first (`layout_call zoom`) |
 | `pixel <x> <y>` | Log the colour of a frame pixel |
 | `expect_pixel <x> <y> <rrggbb>` | Fail unless the pixel has this colour |
 
@@ -431,16 +432,32 @@ before without its buffer swap.
 
 ## Tutorials
 
-`cdept-gui/scripts/tutorial.sh [FOLDER]` replays the `pdk-setup` tutorial
-(docs/tutorials/) with `PDK_ROOT` unset and scratch HOME and settings, writes the
-screenshots into FOLDER, and then runs the terminal commands the tutorial gives. It needs a
-display and the IHP PDK (`PDKS`, default `/opt/ext/OpenPDKs`).
+`cdept-gui/scripts/tutorial.sh [-o FOLDER] [ID ...]` replays tutorials (all without
+names; the scripts are in `cdept-gui/scripts/tutorials/`) with scratch HOME and settings
+and writes a folder per tutorial with its log, screenshots and projects. `pdk-setup`
+runs with `PDK_ROOT` unset. It needs a display, the IHP PDK (`PDKS`, default
+`/opt/ext/OpenPDKs`), the xschem helper, ngspice and KLayout.
 
 | Command | Does |
 |---|---|
 | `guide start <tutorial>` | Start a tutorial (an id or a file) |
 | `guide expect_step <id\|finished>` | The tutorial is at this step |
 | `guide expect_pointing <anchor>` | The guide outlines this |
+| `guide expect_marked` | The guide outlines something of the step's list |
 | `guide click` | Click the middle of what is outlined, in the main window |
 | `guide press <anchor>` | Click the middle of a named widget |
 | `guide continue` | Click the card's Continue button |
+
+## New testbenches and suites
+
+`cdept-gui/scripts/new-testbench.script` (`CDEPT_EXAMPLE=ihp-inv`; needs the IHP PDK,
+ngspice and the xschem helper) makes testbenches and a suite through the dialogs and runs
+them.
+
+| Command | Does |
+|---|---|
+| `sim new_testbench`, `sim new_suite` | Open the dialog for the selection |
+| `sim new_set <field> <value>` | Fill a field of the open dialog (`cell`, `view`, `template`, `source dut\|other\|empty\|none`, `dut`, `other`, `param.<name>`; suite: `description`, `corners`, `temperatures`, `test <cell/view> on\|off`) |
+| `sim new_expect <field> <value>` | What the dialog has (`tests`: how many are ticked) |
+| `sim new_expect_error <text>` | The dialog stayed open with this error |
+

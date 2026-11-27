@@ -13,6 +13,7 @@ mod inspector;
 mod layout;
 mod library;
 mod magic;
+pub(crate) mod newtest;
 mod placeholder;
 mod schematic;
 pub(crate) mod search;

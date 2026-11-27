@@ -225,6 +225,98 @@ fn warn_color(ui: &Ui) -> Color32 {
     }
 }
 
+/// A row per parameter of `template`, editing `args` (an empty field is the default).
+/// Returns whether one changed. `anchor` names the fields for the guide
+/// (`<anchor>.<parameter>`).
+pub(super) fn param_grid(
+    ui: &mut Ui,
+    template: &libcdept::sim::template::Template,
+    args: &mut BTreeMap<String, String>,
+    anchor: &str,
+) -> bool {
+    let mut edited = false;
+    Grid::new(("test-template-params", anchor))
+        .num_columns(3)
+        .spacing([8.0, 4.0])
+        .striped(true)
+        .show(ui, |ui| {
+            for p in &template.params {
+                let name = RichText::new(&p.name).strong();
+                ui.label(name).on_hover_text(&p.doc);
+                let mut value = args.get(&p.name).cloned().unwrap_or_default();
+                let before = value.clone();
+                let hint = p.default.clone().unwrap_or_else(|| {
+                    if p.optional {
+                        "(unset)".into()
+                    } else {
+                        "required".into()
+                    }
+                });
+                let field = match p.kind.as_str() {
+                    "choice" | "bool" => {
+                        let options: Vec<String> = if p.kind == "bool" {
+                            vec!["true".into(), "false".into()]
+                        } else {
+                            p.choices.clone()
+                        };
+                        let shown = if value.is_empty() {
+                            format!("{hint} (default)")
+                        } else {
+                            value.clone()
+                        };
+                        ComboBox::from_id_salt(("tp", anchor, &p.name))
+                            .selected_text(shown)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut value,
+                                    String::new(),
+                                    format!("{hint} (default)"),
+                                );
+                                for o in &options {
+                                    ui.selectable_value(&mut value, o.clone(), o);
+                                }
+                            })
+                            .response
+                    }
+                    _ => ui.add(
+                        TextEdit::singleline(&mut value)
+                            .desired_width(150.0)
+                            .hint_text(hint),
+                    ),
+                };
+                crate::guide::anchor(ui, &format!("{anchor}.{}", p.name), &field);
+                // Kept as typed while the field is in use (trimming each keystroke would
+                // eat the spaces of a list), tidied when it is left.
+                if field.lost_focus() {
+                    value = value.trim().to_string();
+                }
+                if value != before {
+                    if value.trim().is_empty() {
+                        args.remove(&p.name);
+                    } else {
+                        args.insert(p.name.clone(), value);
+                    }
+                    edited = true;
+                }
+                match template.validate_param(&p.name, args) {
+                    Ok(()) => {
+                        let unit = if p.unit.is_empty() {
+                            String::new()
+                        } else {
+                            format!("[{}]", p.unit)
+                        };
+                        ui.label(RichText::new(unit).weak());
+                    }
+                    Err(e) => {
+                        ui.colored_label(fail_color(ui), e.to_string());
+                    }
+                }
+                ui.end_row();
+            }
+        });
+    edited
+}
+
 impl TestsUi {
     /// The picker and the parameter editor. `current` is what the form's setup has.
     pub(super) fn template_ui(
@@ -243,7 +335,7 @@ impl TestsUi {
         let mut chosen = cur_name.to_string();
         ui.horizontal(|ui| {
             ui.label("Template");
-            ComboBox::from_id_salt("test-template")
+            let picker = ComboBox::from_id_salt("test-template")
                 .selected_text(if chosen.is_empty() {
                     "(none)".to_string()
                 } else {
@@ -257,6 +349,7 @@ impl TestsUi {
                             .on_hover_text(&t.description);
                     }
                 });
+            crate::guide::anchor(ui, "sim.template.picker", &picker.response);
         });
         if chosen != cur_name {
             self.args.clear();
@@ -273,81 +366,9 @@ impl TestsUi {
             return None;
         };
         ui.label(RichText::new(&template.description).weak());
-        let mut edited = false;
-        Grid::new("test-template-params")
-            .num_columns(3)
-            .spacing([8.0, 4.0])
-            .striped(true)
-            .show(ui, |ui| {
-                for p in &template.params {
-                    let name = RichText::new(&p.name).strong();
-                    ui.label(name).on_hover_text(&p.doc);
-                    let mut value = self.args.get(&p.name).cloned().unwrap_or_default();
-                    let before = value.clone();
-                    let hint = p.default.clone().unwrap_or_else(|| {
-                        if p.optional {
-                            "(unset)".into()
-                        } else {
-                            "required".into()
-                        }
-                    });
-                    match p.kind.as_str() {
-                        "choice" | "bool" => {
-                            let options: Vec<String> = if p.kind == "bool" {
-                                vec!["true".into(), "false".into()]
-                            } else {
-                                p.choices.clone()
-                            };
-                            let shown = if value.is_empty() {
-                                format!("{hint} (default)")
-                            } else {
-                                value.clone()
-                            };
-                            ComboBox::from_id_salt(("tp", &p.name))
-                                .selected_text(shown)
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(
-                                        &mut value,
-                                        String::new(),
-                                        format!("{hint} (default)"),
-                                    );
-                                    for o in &options {
-                                        ui.selectable_value(&mut value, o.clone(), o);
-                                    }
-                                });
-                        }
-                        _ => {
-                            ui.add(
-                                TextEdit::singleline(&mut value)
-                                    .desired_width(150.0)
-                                    .hint_text(hint),
-                            );
-                        }
-                    }
-                    if value != before {
-                        if value.trim().is_empty() {
-                            self.args.remove(&p.name);
-                        } else {
-                            self.args.insert(p.name.clone(), value.trim().to_string());
-                        }
-                        edited = true;
-                    }
-                    match template.validate_param(&p.name, &self.args) {
-                        Ok(()) => {
-                            let unit = if p.unit.is_empty() {
-                                String::new()
-                            } else {
-                                format!("[{}]", p.unit)
-                            };
-                            ui.label(RichText::new(unit).weak());
-                        }
-                        Err(e) => {
-                            ui.colored_label(fail_color(ui), e.to_string());
-                        }
-                    }
-                    ui.end_row();
-                }
-            });
+        let params = ui.scope(|ui| param_grid(ui, template, &mut self.args, "sim.template.param"));
+        crate::guide::anchor(ui, "sim.template.params", &params.response);
+        let edited = params.inner;
         if edited && template.bind(&self.args).is_ok() {
             change = Some(Change {
                 template: cur_name.to_string(),
@@ -561,11 +582,11 @@ impl SuiteState {
             ui.label(RichText::new(&self.description).weak());
         }
         ui.horizontal(|ui| {
-            if ui
+            let run = ui
                 .add_enabled(!running, egui::Button::new("▶ Run suite"))
-                .on_hover_text("Runs every test of the suite on one job queue")
-                .clicked()
-            {
+                .on_hover_text("Runs every test of the suite on one job queue");
+            crate::guide::anchor(ui, "sim.suite.run", &run);
+            if run.clicked() {
                 let ctx = egui.clone().or_else(|| Some(ui.ctx().clone()));
                 if let Err(e) = self.start(project, ctx) {
                     self.problem = Some(e);
@@ -606,7 +627,7 @@ impl SuiteState {
                 ui.add_space(6.0);
                 let s = report.summary();
                 let (word, color) = if s.ok() { ("SUITE PASS", pass_color(ui)) } else { ("SUITE FAIL", fail_color(ui)) };
-                ui.horizontal(|ui| {
+                let verdict = ui.horizontal(|ui| {
                     ui.label(RichText::new(word).strong().color(color));
                     ui.label(format!(
                         "{} test(s), {} run(s): {} pass, {} fail, {} error; specs: {} failing, {} missing{}",
@@ -620,8 +641,11 @@ impl SuiteState {
                         if s.test_errors > 0 { format!("; {} test(s) did not run", s.test_errors) } else { String::new() }
                     ));
                 });
+                crate::guide::anchor(ui, "sim.suite.verdict", &verdict.response);
+                crate::guide::fact(ui.ctx(), "sim.suite.done");
+                crate::guide::fact(ui.ctx(), if s.ok() { "sim.suite.pass" } else { "sim.suite.fail" });
                 let cols = suite::columns(report, self.all_columns);
-                Grid::new("suite-table").num_columns(3 + cols.len()).striped(true).spacing([10.0, 3.0]).show(ui, |ui| {
+                let table = Grid::new("suite-table").num_columns(3 + cols.len()).striped(true).spacing([10.0, 3.0]).show(ui, |ui| {
                     ui.label(RichText::new("test").strong());
                     ui.label(RichText::new("point").strong());
                     ui.label(RichText::new("result").strong());
@@ -664,6 +688,7 @@ impl SuiteState {
                         }
                     }
                 });
+                crate::guide::anchor(ui, "sim.suite.table", &table.response);
                 // what did not pass
                 let mut bad = vec![];
                 for t in &report.tests {
@@ -707,6 +732,12 @@ impl SimulationView {
     pub(super) fn suite_ui(&mut self, ui: &mut Ui, project: &Project) {
         let mut egui = self.egui_ctx();
         if let Some(s) = &mut self.tests.suite {
+            crate::guide::fact(ui.ctx(), "sim.suite_open");
+            let view = format!("sim.view.{}", s.target.view);
+            crate::guide::fact(ui.ctx(), &view);
+            if s.is_running() {
+                crate::guide::fact(ui.ctx(), "sim.suite.running");
+            }
             s.ui(ui, project, &mut egui);
         }
     }
@@ -729,7 +760,7 @@ pub(crate) fn is_suite_entry(entry: &libcdept::Entry) -> bool {
 
 /// The `sim` commands of this file: `suite_*` and `template_*`.
 pub(crate) fn is_command(word: &str) -> bool {
-    word.starts_with("suite_") || word.starts_with("template_")
+    word.starts_with("suite_") || word.starts_with("template_") || word.starts_with("new_")
 }
 
 pub(super) fn script(
@@ -737,6 +768,9 @@ pub(super) fn script(
     app: &mut AppCtx,
     args: &[String],
 ) -> Result<(), String> {
+    if args.first().is_some_and(|a| a.starts_with("new_")) {
+        return super::newtest::script(app, args);
+    }
     let project = app.project.clone().ok_or("no project is open")?;
     let arg = |i: usize| {
         args.get(i)

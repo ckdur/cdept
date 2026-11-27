@@ -1,0 +1,99 @@
+# Replays the inv-schematic tutorial. The PMOS is placed through the symbol picker the
+# way a user does it; the rest is put down with xschem's commands at the places of the
+# reference drawing, with mistakes on the way that the checklist must name.
+guide expect_step start
+guide press dialog.guide.start
+guide wait open
+wait 0.5
+guide expect_pointing tree:work
+guide click
+wait 0.6
+guide expect_pointing tree:work/inv
+guide click
+wait 0.6
+guide expect_pointing tree:work/inv/schematic
+open_view work inv schematic
+guide expect_step basics
+wait_frame
+wait 0.8
+screenshot @SCRATCH@/01-basics.png
+guide continue
+guide expect_step pmos
+move 400 300
+key Insert
+wait 0.8
+guide expect_pointing xschem.picker.library:sg13g2_pr
+guide click
+wait 0.6
+screenshot @SCRATCH@/02-picker.png
+picker sg13g2_pr sg13_lv_pmos symbol
+wait 0.3
+move 420 260
+click_here
+key Escape
+guide wait nmos
+wait 0.3
+tcl xschem instance sg13g2_pr/sg13_lv_nmos.sym 400 400 0 0 {name=M1 l=0.13u w=0.15u ng=1 m=1 model=sg13_lv_nmos spiceprefix=X}
+guide wait sizes
+tcl xschem delete [xschem select_all]; xschem unselect_all; xschem redraw
+tcl xschem select_all; xschem delete
+tcl xschem instance sg13g2_pr/sg13_lv_pmos.sym 0 -50 0 0 {name=M2 l=0.13u w=1.5u ng=1 m=1 model=sg13_lv_pmos spiceprefix=X}
+tcl xschem instance sg13g2_pr/sg13_lv_nmos.sym 0 50 0 0 {name=M1 l=0.13u w=0.15u ng=1 m=1 model=sg13_lv_nmos spiceprefix=X}
+tcl xschem redraw
+wait 1.5
+guide expect_check sizes ok the PMOS: w = 1.5u
+guide expect_check sizes no the NMOS: w should be 0.74u, is 0.15u
+key f
+wait 0.5
+screenshot @SCRATCH@/03-one-size-wrong.png
+tcl xschem setprop instance M1 w 0.74u
+guide wait pins
+tcl xschem instance ipin.sym -60 0 0 0 {name=p1 lab=A}
+tcl xschem instance opin.sym 80 0 0 0 {name=p2 lab=Y}
+tcl xschem instance iopin.sym 20 -110 3 0 {name=p3 lab=VDD}
+tcl xschem instance iopin.sym 20 110 1 0 {name=p4 lab=VSS}
+tcl xschem redraw
+guide wait wire
+wait 1.2
+guide expect_check inverter no the PMOS: pin G should be on A
+screenshot @SCRATCH@/04-unwired.png
+tcl xschem wire -60 0 -20 0 {lab=A}
+tcl xschem wire -20 -50 -20 50
+tcl xschem wire 20 -20 20 20
+tcl xschem wire 20 0 80 0
+tcl xschem wire 20 -110 20 -80
+tcl xschem wire 20 80 20 110
+tcl xschem redraw
+wait 1.5
+# Everything but the bulks.
+guide expect_check inverter no the PMOS: pin B should be on VDD
+tcl xschem instance lab_pin.sym 20 -50 2 0 {name=l1 sig_type=std_logic lab=VDD}
+tcl xschem instance lab_pin.sym 20 50 2 0 {name=l2 sig_type=std_logic lab=VSS}
+tcl xschem redraw
+guide wait save
+key f
+wait 1
+screenshot @SCRATCH@/05-complete.png
+move 400 300
+key s ctrl
+wait 1.5
+guide expect_pointing xschem.button:Yes
+screenshot @SCRATCH@/05b-save-question.png
+guide click
+wait 1.5
+guide continue
+guide expect_step netlist
+guide expect_pointing menu.cell
+guide click
+wait 0.5
+guide expect_pointing menu.cell.netlist
+guide click
+wait 0.5
+guide expect_pointing menu.cell.netlist.SPICE
+guide click
+guide wait read
+wait 0.5
+screenshot @SCRATCH@/06-netlist.png
+guide continue
+guide expect_step finished
+quit

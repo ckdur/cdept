@@ -82,6 +82,9 @@ enum Command {
     Clipboard(String),
     Primary(String),
     Frame,
+    /// `move_middle` / `click_middle` (`true`): the pointer to the middle of the active
+    /// picture, whatever its size.
+    Middle(bool),
     Pixel(u32, u32),
     ExpectPixel(u32, u32, [u8; 3]),
     ExpectDocuments(usize),
@@ -318,6 +321,7 @@ impl Command {
             Command::Sim(args) if args.first().map(String::as_str) == Some("wait") => SIM_PATIENCE,
             Command::Magic(_) => SIM_PATIENCE,
             Command::Wv(args) => crate::views::wave::script::patience(args),
+            Command::Guide(args) if args.first().is_some_and(|a| a == "wait") => SIM_PATIENCE,
             Command::Wave(args) if args.first().is_some_and(|a| a == "wait_opens") => {
                 Duration::from_secs(120)
             }
@@ -569,6 +573,8 @@ fn parse_line(line: &str) -> Result<Option<Command>, String> {
             }
         }
         "frame" => Command::Frame,
+        "move_middle" => Command::Middle(false),
+        "click_middle" => Command::Middle(true),
         "pixel" => Command::Pixel(whole(0)?, whole(1)?),
         "expect_pixel" => {
             let colour = args.get(2).ok_or("usage: expect_pixel <x> <y> <rrggbb>")?;
@@ -1301,14 +1307,53 @@ impl Script {
                 };
             }
             "expect_pointing" => {
-                return if word == pointing.as_deref() {
+                // A mark may have spaces (a menu entry of xschem).
+                let wanted = rest.join(" ");
+                return if Some(wanted.as_str()) == pointing.as_deref() {
                     Ok(())
                 } else {
                     Err(format!("at '{step}' the guide points at {pointing:?}"))
                 };
             }
+            // `guide wait <step>`: like expect_step, but for what takes a while
+            // (the scan of a PDK, a simulation).
+            "wait" => {
+                return if word == Some(step) {
+                    Ok(())
+                } else {
+                    Err(format!("the tutorial is at '{step}'"))
+                };
+            }
+            // `guide expect_check <circuit> <text>`: a line of its checklist.
+            "expect_check" => {
+                let id = word.ok_or("usage: guide expect_check <circuit> <text>")?;
+                let text = rest[1..].join(" ");
+                let lines = guide
+                    .checks
+                    .iter()
+                    .find(|(known, _)| known == id)
+                    .and_then(|(_, lines)| lines.as_ref())
+                    .ok_or(format!("circuit '{id}' is not being checked"))?;
+                let shown: Vec<String> = lines
+                    .iter()
+                    .map(|l| format!("{} {}", if l.ok { "ok" } else { "no" }, l.text))
+                    .collect();
+                return if shown.iter().any(|l| l.contains(&text)) {
+                    Ok(())
+                } else {
+                    Err(format!("no '{text}' in {shown:?}"))
+                };
+            }
+            // `guide expect_marked`: something of the step's list is outlined.
+            "expect_marked" => {
+                return match pointing {
+                    Some(_) => Ok(()),
+                    None => Err(format!("at '{step}' the guide points at nothing")),
+                };
+            }
             "click" => pointing.ok_or(format!("at '{step}' the guide points at nothing"))?,
-            "press" => word.ok_or("usage: guide press <anchor>")?.to_string(),
+            "press" if !rest.is_empty() => rest.join(" "),
+            "press" => return Err("usage: guide press <anchor>".into()),
             "continue" => {
                 if !guide.can_continue() {
                     return Err(format!("'{step}' cannot be continued"));
@@ -1851,6 +1896,17 @@ impl Script {
                 let titles = view.dialog_titles();
                 if !titles.iter().any(|t| t.contains(&title)) {
                     return Err(format!("no dialog '{title}' is open (open: {titles:?})"));
+                }
+            }
+            Command::Middle(click) => {
+                let view = app.script_view().ok_or("no document is open")?;
+                let [width, height] = view.frame_size().ok_or("there is no frame yet")?;
+                let (x, y) = (width as f32 / 2.0, height as f32 / 2.0);
+                if click {
+                    self.click(x, y, PointerButton::Primary);
+                } else {
+                    let at = Event::PointerMoved(Pos2::new(x, y));
+                    self.events(vec![at], Modifiers::NONE);
                 }
             }
             Command::Frame => {

@@ -1,0 +1,447 @@
+# Replays the inv-layout tutorial: every drawing step through the layout tab, clicking
+# what the guide outlines. Corners are clicked zoomed in, as the tutorial says.
+# Made with the help of a generator; edit by hand as needed.
+guide expect_step start
+wait 1
+guide press dialog.guide.start
+guide wait schematic
+wait 2
+guide expect_pointing tree:work
+guide click
+wait 0.4
+guide expect_pointing tree:work/inv
+guide click
+wait 0.4
+guide expect_pointing tree:work/inv/schematic
+open_view work inv schematic
+guide expect_step generate
+wait_frame
+wait 1
+guide expect_pointing menu.cell
+guide click
+wait 0.4
+guide expect_pointing menu.cell.layout
+guide click
+wait 0.4
+guide wait look
+wait 3
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+screenshot @SCRATCH@/01-generated.png
+guide continue
+guide expect_step align
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+guide expect_pointing layout.picture
+layout_call zoom {"what": "box", "box": [-0.5300, 2.3000, 2.4700, 5.3000]}
+wait 0.2
+move_middle
+click_middle
+wait 0.4
+expect_selection 1
+properties
+expect_property kind instance
+set_property x 0
+set_property y 3.41
+wait 0.3
+guide expect_pointing layout.properties.ok
+guide click
+wait 0.4
+guide wait substrate-tie
+layout_edit clear_selection
+guide expect_pointing menu.layout
+guide click
+wait 0.4
+guide expect_pointing menu.layout.place_library
+guide click
+wait 0.4
+wait 1
+guide expect_pointing layout.picker.library:SG13_dev
+guide click
+wait 0.4
+wait 0.5
+guide expect_pointing layout.picker.filter
+guide click
+wait 0.4
+text via_stack
+wait 0.8
+guide expect_pointing layout.picker.cell:via_stack
+guide click
+wait 0.4
+wait 1
+guide expect_pointing layout.picker.place
+screenshot @SCRATCH@/02-picker.png
+guide press layout.picker.cancel
+wait 0.4
+place_library SG13_dev via_stack {"b_layer": "Activ", "t_layer": "Metal1", "vn_columns": 2, "vn_rows": 2}
+wait 0.5
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+layout_call zoom {"what": "box", "box": [1.4500, -0.8500, 1.7500, -0.5500]}
+wait 0.2
+move_middle
+click_middle
+wait 0.5
+guide press layout.mode.select
+wait 0.4
+layout_call zoom {"what": "box", "box": [0.1000, -2.2000, 3.1000, 0.8000]}
+wait 0.2
+move_middle
+click_middle
+wait 0.4
+expect_selection 1
+properties
+expect_property kind instance
+set_property x 0.15
+set_property y -0.7
+wait 0.3
+guide expect_pointing layout.properties.ok
+guide click
+wait 0.4
+layout_edit clear_selection
+guide wait well-tie
+guide expect_pointing menu.layout
+guide click
+wait 0.4
+guide expect_pointing menu.layout.place_library
+guide click
+wait 0.4
+wait 1
+guide expect_pointing layout.picker.library:SG13_dev
+guide click
+wait 0.4
+wait 0.5
+guide expect_pointing layout.picker.filter
+guide click
+wait 0.4
+text via_stack
+wait 0.8
+guide expect_pointing layout.picker.cell:via_stack
+guide click
+wait 0.4
+wait 1
+guide expect_pointing layout.picker.place
+guide press layout.picker.cancel
+wait 0.4
+place_library SG13_dev via_stack {"b_layer": "Activ", "t_layer": "Metal1", "vn_columns": 2, "vn_rows": 2}
+wait 0.5
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+layout_call zoom {"what": "box", "box": [1.4500, 5.6500, 1.7500, 5.9500]}
+wait 0.2
+move_middle
+click_middle
+wait 0.5
+guide press layout.mode.select
+wait 0.4
+layout_call zoom {"what": "box", "box": [0.1000, 4.3000, 3.1000, 7.3000]}
+wait 0.2
+move_middle
+click_middle
+wait 0.4
+expect_selection 1
+properties
+expect_property kind instance
+set_property x 0.15
+set_property y 5.8
+wait 0.3
+guide expect_pointing layout.properties.ok
+guide click
+wait 0.4
+layout_edit clear_selection
+guide wait gate-contact
+guide expect_pointing menu.layout
+guide click
+wait 0.4
+guide expect_pointing menu.layout.place_library
+guide click
+wait 0.4
+wait 1
+guide expect_pointing layout.picker.library:SG13_dev
+guide click
+wait 0.4
+wait 0.5
+guide expect_pointing layout.picker.filter
+guide click
+wait 0.4
+text via_stack
+wait 0.8
+guide expect_pointing layout.picker.cell:via_stack
+guide click
+wait 0.4
+wait 1
+guide expect_pointing layout.picker.place
+guide press layout.picker.cancel
+wait 0.4
+place_library SG13_dev via_stack {"b_layer": "GatPoly", "t_layer": "Metal1", "vn_columns": 1, "vn_rows": 1}
+wait 0.5
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+layout_call zoom {"what": "box", "box": [-1.1500, 1.9500, -0.8500, 2.2500]}
+wait 0.2
+move_middle
+click_middle
+wait 0.5
+guide press layout.mode.select
+wait 0.4
+layout_call zoom {"what": "box", "box": [-2.5000, 0.6000, 0.5000, 3.6000]}
+wait 0.2
+move_middle
+click_middle
+wait 0.4
+expect_selection 1
+properties
+expect_property kind instance
+set_property x 0
+set_property y 2.1
+wait 0.3
+guide expect_pointing layout.properties.ok
+guide click
+wait 0.4
+layout_edit clear_selection
+guide wait drawing
+guide continue
+guide expect_step gates
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+guide expect_pointing layout.find:GatPoly.drawing
+guide click
+key a ctrl
+text GatPoly.drawing
+wait 0.5
+guide expect_pointing layout.layer:GatPoly.drawing
+guide click
+wait 0.4
+guide expect_pointing layout.mode.box
+guide click
+wait 0.4
+guide expect_pointing layout.picture
+screenshot @SCRATCH@/03-box-mode.png
+layout_call zoom {"what": "box", "box": [0.1900, 0.9500, 0.4900, 1.2500]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [0.3200, 3.0800, 0.6200, 3.3800]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+layout_call zoom {"what": "box", "box": [0.0000, 1.8000, 0.3000, 2.1000]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [0.1900, 2.1000, 0.4900, 2.4000]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+wait 3
+guide continue
+guide expect_step wells
+guide expect_pointing layout.find:pSD.drawing
+guide click
+key a ctrl
+text pSD.drawing
+wait 0.5
+guide expect_pointing layout.layer:pSD.drawing
+guide click
+wait 0.4
+guide press layout.mode.select
+wait 0.3
+guide expect_pointing layout.mode.box
+guide click
+wait 0.4
+layout_call zoom {"what": "box", "box": [-0.4200, -1.2700, -0.1200, -0.9700]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [0.4200, -0.4300, 0.7200, -0.1300]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+current_layer NWell.drawing
+wait 0.4
+mode box
+wait 0.3
+layout_call zoom {"what": "box", "box": [-0.6000, 2.9500, -0.3000, 3.2500]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [0.9700, 6.2500, 1.2700, 6.5500]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+wait 3
+guide continue
+guide expect_step metal
+guide expect_pointing layout.find:Metal1.drawing
+guide click
+key a ctrl
+text Metal1.drawing
+wait 0.5
+guide expect_pointing layout.layer:Metal1.drawing
+guide click
+wait 0.4
+layout_call zoom {"what": "box", "box": [-0.3500, 1.8000, -0.0500, 2.1000]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [0.0000, 2.1000, 0.3000, 2.4000]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+layout_call zoom {"what": "box", "box": [0.4300, 0.7700, 0.7300, 1.0700]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [0.5900, 3.2600, 0.8900, 3.5600]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+layout_call zoom {"what": "box", "box": [-0.0800, -0.7500, 0.2200, -0.4500]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [0.0800, 0.0300, 0.3800, 0.3300]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+layout_call zoom {"what": "box", "box": [-0.0800, 4.7600, 0.2200, 5.0600]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [0.0800, 5.5000, 0.3800, 5.8000]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+wait 3
+screenshot @SCRATCH@/04-routed.png
+guide continue
+guide expect_step pins
+guide press layout.mode.select
+wait 0.3
+guide expect_pointing menu.layout
+guide click
+wait 0.4
+guide expect_pointing menu.layout.pins_panel
+guide click
+wait 0.4
+wait 1.5
+guide expect_pointing layout.pins.delete:A
+guide click
+wait 0.4
+wait 0.8
+guide expect_pointing layout.pins.delete:Y
+guide click
+wait 0.4
+wait 0.8
+guide expect_pointing layout.pins.delete:VSS
+guide click
+wait 0.4
+wait 0.8
+guide expect_pointing layout.pins.delete:VDD
+guide click
+wait 0.4
+wait 0.8
+guide expect_pointing layout.pins.draw
+pin_draw A input
+expect_mode box
+wait 0.3
+layout_call zoom {"what": "box", "box": [-0.3000, 1.8500, 0.0000, 2.1500]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-0.0500, 2.0500, 0.2500, 2.3500]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+expect_pin A placed
+pin_draw Y output
+expect_mode box
+wait 0.3
+layout_call zoom {"what": "box", "box": [0.4300, 1.8500, 0.7300, 2.1500]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [0.5900, 2.1500, 0.8900, 2.4500]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+expect_pin Y placed
+pin_draw VSS inout
+expect_mode box
+wait 0.3
+layout_call zoom {"what": "box", "box": [-0.1500, -0.9500, 0.1500, -0.6500]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [0.1500, -0.7000, 0.4500, -0.4000]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+expect_pin VSS placed
+pin_draw VDD inout
+expect_mode box
+wait 0.3
+layout_call zoom {"what": "box", "box": [-0.1500, 5.5500, 0.1500, 5.8500]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [0.1500, 5.8000, 0.4500, 6.1000]}
+wait 0.2
+move_middle
+click_middle
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 7.0000]}
+wait 0.2
+expect_pin VDD placed
+wait 3
+wait 0.2
+wait 0.5
+layout_zoom fit
+wait 0.5
+screenshot @SCRATCH@/05-pins.png
+guide continue
+guide expect_step save
+move_middle
+key s ctrl
+guide wait nets
+expect_modified no
+guide expect_pointing menu.layout
+guide click
+wait 0.4
+guide expect_pointing menu.layout.update_connectivity
+guide click
+wait 0.4
+expect_nets 4 ok, 0 open, 0 shorted
+guide wait end
+wait 1
+screenshot @SCRATCH@/06-nets-clean.png
+layout_check drc
+expect_check DRC clean
+layout_check lvs
+expect_check netlists match
+wait 1
+screenshot @SCRATCH@/07-checked.png
+guide continue
+guide expect_step finished
+quit

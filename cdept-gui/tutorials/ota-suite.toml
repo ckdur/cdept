@@ -1,0 +1,293 @@
+schema = "cdept-tutorial"
+version = 1
+id = "ota-suite"
+title = "OTA 7: every test over every corner"
+series = "ota"
+order = 7
+start = ["base", "ota-sch", "ota-sym", "ota-tb", "ota-dc", "ota-ac", "ota-step", "ota-rej"]
+pdk = "ihp-sg13g2"
+goal = """
+You run all six tests over five process corners and three temperatures (90
+simulations) as one suite, find a real weakness of this design at 125 °C, understand
+it and fix it.
+"""
+minutes = 30
+before = """
+- [OTA 2](ota-bias.md) to [OTA 6](ota-rejection.md); the starting project has all their testbenches.
+"""
+
+[[circuit]]
+id = "mirror-m2"
+view = "work/ota5t/schematic"
+[[circuit.part]]
+what = "M5, the tail current source"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4", m = "1" }
+pins = { D = "?tail", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M6, the diode that sets the bias"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4", m = "1" }
+pins = { D = "ibias", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M1, the input transistor on inp"
+symbol = "sg13_lv_pmos"
+with = { w = "30u", l = "0.5u", ng = "4", m = "1" }
+pins = { G = "inp", S = "?tail", B = "?tail", D = "?mirror" }
+[[circuit.part]]
+what = "M2, the input transistor on inn"
+symbol = "sg13_lv_pmos"
+with = { w = "30u", l = "0.5u", ng = "4", m = "1" }
+pins = { G = "inn", S = "?tail", B = "?tail", D = "out" }
+[[circuit.part]]
+what = "M3, the mirror's diode"
+symbol = "sg13_lv_nmos"
+with = { w = "2u", l = "4u", m = "2" }
+pins = { D = "?mirror", G = "?mirror", S = "vss", B = "vss" }
+[[circuit.part]]
+what = "M4, the mirror's output"
+symbol = "sg13_lv_nmos"
+with = { w = "2u", l = "4u", m = "2" }
+pins = { D = "out", G = "?mirror", S = "vss", B = "vss" }
+[[circuit.part]]
+what = "the input pin inp"
+symbol = "ipin"
+with = { lab = "inp" }
+[[circuit.part]]
+what = "the input pin inn"
+symbol = "ipin"
+with = { lab = "inn" }
+[[circuit.part]]
+what = "the bias input pin ibias"
+symbol = "ipin"
+with = { lab = "ibias" }
+[[circuit.part]]
+what = "the output pin out"
+symbol = "opin"
+with = { lab = "out" }
+[[circuit.part]]
+what = "the supply pin vdd"
+symbol = "iopin"
+with = { lab = "vdd" }
+[[circuit.part]]
+what = "the ground pin vss"
+symbol = "iopin"
+with = { lab = "vss" }
+
+[[step]]
+id = "start"
+title = "Get the project"
+text = """
+Make the starting project.
+"""
+start_button = true
+continue_button = true
+continue_needs = [
+    "view:work/tb_ota5t/cmrr",
+]
+needs_hint = "Open a project that has work/tb_ota5t/cmrr."
+
+[[step]]
+id = "corners"
+title = "Corners"
+text = """
+Transistors vary from wafer to wafer, and every chip works over a temperature range.
+The PDK's corner sets bound the process: tt typical, ff both fast, ss both slow, fs
+and sf one fast and one slow. Temperatures: -40, 27 and 125 °C. Five times three is
+15 points per test, six tests: 90 runs.
+
+A suite is a view that lists testbenches and runs them together into one table.
+"""
+continue_button = true
+
+[[step]]
+id = "select"
+title = "Select ota5t"
+text = """
+In the Libraries panel click the cell "ota5t": the suite will live with the design it tests.
+"""
+point = [
+    { at = "tree:work/ota5t", say = "Click ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["selected:work/ota5t", "view:work/ota5t/suite"]
+
+[[step]]
+id = "new"
+title = "New suite"
+text = """
+Open Tools > New Suite….
+"""
+point = [
+    { at = "menu.tools.new_suite", say = 'Click "New Suite…"' },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["dialog.new_suite", "view:work/ota5t/suite"]
+
+[[step]]
+id = "fill"
+title = "Choose the tests and corners"
+text = """
+The view name is suite. Tick all six testbenches: tb_ota5t/ac_response, cmrr, ota_op
+and psrr, tb_ota5t_step/ota_step and power.
+
+Under "For every test", type the corners and temperatures. They replace each test's
+own:
+
+    tt ff ss fs sf
+
+    -40 27 125
+
+Press "Create".
+"""
+point = [
+    { at = "dialog.new_suite.tests", say = "Tick all six; then corners and temperatures" },
+]
+done_when = ["view:work/ota5t/suite"]
+lost_without = ["dialog.new_suite"]
+back_to = "new"
+lost_says = "The New Suite window was closed. Open it again."
+
+[[step]]
+id = "run"
+title = "Run the suite"
+text = """
+Press "Run suite". The runs go in parallel; wait for the verdict.
+"""
+point = [
+    { at = "sim.suite.run", say = 'Click "Run suite"' },
+]
+done_when = ["sim.suite.done"]
+
+[[step]]
+id = "read"
+title = "Read the verdict"
+text = """
+SUITE FAIL. Find the red rows in the table:
+
+- ota_op: sat_margin is negative at 125 °C in tt, ff, ss and sf (down to -53 mV): a
+  transistor has left saturation.
+- cmrr: at 125 °C the rejection falls below 40 dB, down to 22 dB at sf.
+
+Everything else passes: the gain falls to 30.5 dB at 125 °C but stays above its 30 dB
+limit, the phase margin stays above 58°, and the step settles within 10.1 ns.
+
+Every test passed at 27 °C when you ran it alone.
+"""
+point = [
+    { at = "sim.suite.table", say = "The combined table" },
+]
+continue_button = true
+
+[[step]]
+id = "why"
+title = "Why"
+text = """
+Both failures have one cause. M1's drain-source voltage is the tail node minus the
+mirror node: vds1 = tail - x.
+
+- When hot, the PMOS pair needs less |VGS|, so the tail comes down.
+- The NMOS mirror's diode M3, long and narrow, needs a high gate voltage, and it
+  rises when hot.
+
+At tt, 27 °C: tail 0.815 V, x 0.557 V, so M1 has 0.26 V and needs 0.12 V. At sf,
+125 °C: tail 0.726 V, x 0.621 V, so M1 has 0.105 V and needs 0.158 V: it is in the
+triode region. Its gds shoots up, and by OTA 6's reasoning so does the common-mode
+gain.
+
+The fix: lower x. Give the mirror twice the width: each unit then carries half the
+current and needs less gate voltage.
+"""
+continue_button = true
+
+[[step]]
+id = "open-sch"
+title = "Open the OTA"
+text = """
+Open the schematic of ota5t.
+"""
+point = [
+    { at = "tree:work/ota5t/schematic", say = "Double-click schematic" },
+    { at = "tree:work/ota5t", say = "Open ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["open:work/ota5t/schematic"]
+
+[[step]]
+id = "fix"
+title = "Set m=2 on M3 and M4"
+text = """
+Select M3, press q, set m=2, OK. The same for M4: a mirror needs two identical units.
+"""
+point = [
+    { at = "xschem.button:OK", say = "Set m=2, then OK" },
+]
+done_when = ["circuit:mirror-m2"]
+continue_button = true
+continue_needs = [
+    "circuit:mirror-m2",
+]
+
+[[step]]
+id = "save"
+title = "Save the schematic"
+text = """
+The suite simulates the saved schematic.
+
+Save with Ctrl+S (answer Yes).
+"""
+point = [
+    { at = "xschem.button:Yes", say = "Click Yes" },
+]
+continue_button = true
+continue_needs = [
+    "circuit:mirror-m2",
+    "saved:work/ota5t/schematic",
+]
+needs_hint = "Make the change, then save."
+
+[[step]]
+id = "back"
+title = "Back to the suite"
+text = """
+Open the view suite of ota5t.
+"""
+point = [
+    { at = "tree:work/ota5t/suite", say = "Double-click suite" },
+    { at = "tree:work/ota5t", say = "Open ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["sim.view.suite"]
+
+[[step]]
+id = "rerun"
+title = "Run the suite again"
+text = """
+Press "Run suite".
+"""
+point = [
+    { at = "sim.suite.run", say = 'Click "Run suite"' },
+]
+done_when = ["sim.suite.pass"]
+
+[[step]]
+id = "after"
+title = "What the fix cost and bought"
+text = """
+SUITE PASS: all 90 runs.
+
+- sat_margin: at least 81 mV everywhere (it was -53 mV).
+- CMRR: at least 48.7 dB (it was 22 dB); at tt, 27 °C it rose from 45 to 59 dB,
+  because M1 and M2 now see more equal voltages.
+- The price: 0.75 dB less gain (34.4 dB at tt, 27 °C) and a little less bandwidth
+  (147 instead of 159 MHz).
+
+A design is checked when its suite passes, not when one corner does.
+
+Next: "OTA 8: mismatch".
+"""
+point = [
+    { at = "sim.suite.table", say = "The combined table" },
+]
+continue_button = true
+

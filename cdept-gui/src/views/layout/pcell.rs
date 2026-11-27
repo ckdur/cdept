@@ -311,6 +311,8 @@ pub struct LibraryPicker {
     libraries: Vec<KLibrary>,
     library: Option<String>,
     cell: Option<String>,
+    /// Only cells whose name holds this are listed.
+    filter: String,
     /// The `pcell_form` call for the chosen PCell.
     form_asked: Option<u64>,
     form: Option<PcellForm>,
@@ -441,89 +443,118 @@ impl LayoutView {
                 if picker.libraries.is_empty() {
                     ui.weak("KLayout has no libraries");
                 }
-                ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
-                        ui.strong("Library");
-                        ScrollArea::vertical()
-                            .id_salt("libraries")
-                            .max_height(260.0)
-                            .show(ui, |ui| {
-                                ui.set_min_width(140.0);
-                                for lib in &picker.libraries {
-                                    let on = picker.library.as_ref() == Some(&lib.name);
-                                    let label = if lib.project {
-                                        format!("{} (project)", lib.name)
-                                    } else {
-                                        lib.name.clone()
-                                    };
-                                    let r = ui.selectable_label(on, label);
-                                    let r = if lib.description.is_empty() {
-                                        r
-                                    } else {
-                                        r.on_hover_text(&lib.description)
-                                    };
-                                    if r.clicked() && !on {
-                                        picker.library = Some(lib.name.clone());
-                                        picker.cell = None;
-                                        picker.form = None;
-                                    }
-                                }
-                            });
-                    });
-                    ui.separator();
-                    ui.vertical(|ui| {
-                        ui.strong("Cell");
-                        ScrollArea::vertical()
-                            .id_salt("cells")
-                            .max_height(260.0)
-                            .show(ui, |ui| {
-                                ui.set_min_width(160.0);
-                                let Some(lib) = picker
-                                    .libraries
-                                    .iter()
-                                    .find(|l| picker.library.as_ref() == Some(&l.name))
-                                else {
-                                    ui.weak("Select a library");
-                                    return;
-                                };
-                                for cell in &lib.cells {
-                                    let on = picker.cell.as_ref() == Some(&cell.name);
-                                    let label = if cell.pcell {
-                                        format!("{} (PCell)", cell.name)
-                                    } else {
-                                        cell.name.clone()
-                                    };
-                                    if ui.selectable_label(on, label).clicked() && !on {
-                                        picker.cell = Some(cell.name.clone());
-                                        picker.form = None;
-                                        if cell.pcell {
-                                            ask_form = Some((lib.name.clone(), cell.name.clone()));
+                // The lines between the columns take all the height they are given:
+                // without this the window grew past the screen, Place and Cancel with it.
+                ui.allocate_ui(egui::vec2(ui.available_width(), 330.0), |ui| {
+                    ui.horizontal_top(|ui| {
+                        ui.set_max_height(330.0);
+                        ui.vertical(|ui| {
+                            ui.strong("Library");
+                            ScrollArea::vertical()
+                                .id_salt("libraries")
+                                .max_height(260.0)
+                                .show(ui, |ui| {
+                                    ui.set_min_width(140.0);
+                                    for lib in &picker.libraries {
+                                        let on = picker.library.as_ref() == Some(&lib.name);
+                                        let label = if lib.project {
+                                            format!("{} (project)", lib.name)
+                                        } else {
+                                            lib.name.clone()
+                                        };
+                                        let r = ui.selectable_label(on, label);
+                                        let r = if lib.description.is_empty() {
+                                            r
+                                        } else {
+                                            r.on_hover_text(&lib.description)
+                                        };
+                                        if !on {
+                                            let mark =
+                                                format!("layout.picker.library:{}", lib.name);
+                                            crate::guide::anchor(ui, &mark, &r);
+                                        }
+                                        if r.clicked() && !on {
+                                            picker.library = Some(lib.name.clone());
+                                            picker.cell = None;
+                                            picker.form = None;
                                         }
                                     }
-                                }
-                            });
-                    });
-                    if let Some(form) = &picker.form {
-                        ui.separator();
-                        ui.vertical(|ui| {
-                            ui.strong("Parameters");
-                            ScrollArea::vertical()
-                                .id_salt("parameters")
-                                .max_height(300.0)
-                                .show(ui, |ui| {
-                                    form_ui(
-                                        ui,
-                                        window_id.with("form"),
-                                        form,
-                                        &mut picker.values,
-                                        &layers,
-                                        true,
-                                    );
                                 });
                         });
-                    } else if picker.form_asked.is_some() {
-                        ui.spinner();
-                    }
+                        ui.separator();
+                        ui.vertical(|ui| {
+                            ui.strong("Cell");
+                            let find = ui.add(
+                                egui::TextEdit::singleline(&mut picker.filter)
+                                    .desired_width(150.0)
+                                    .hint_text("Filter cells"),
+                            );
+                            if picker.library.is_some() && picker.cell.is_none() {
+                                crate::guide::anchor(ui, "layout.picker.filter", &find);
+                            }
+                            let filter = picker.filter.trim().to_lowercase();
+                            ScrollArea::vertical()
+                                .id_salt("cells")
+                                .max_height(260.0)
+                                .show(ui, |ui| {
+                                    ui.set_min_width(160.0);
+                                    let Some(lib) = picker
+                                        .libraries
+                                        .iter()
+                                        .find(|l| picker.library.as_ref() == Some(&l.name))
+                                    else {
+                                        ui.weak("Select a library");
+                                        return;
+                                    };
+                                    for cell in lib
+                                        .cells
+                                        .iter()
+                                        .filter(|c| c.name.to_lowercase().contains(&filter))
+                                    {
+                                        let on = picker.cell.as_ref() == Some(&cell.name);
+                                        let label = if cell.pcell {
+                                            format!("{} (PCell)", cell.name)
+                                        } else {
+                                            cell.name.clone()
+                                        };
+                                        let r = ui.selectable_label(on, label);
+                                        if !on {
+                                            let mark = format!("layout.picker.cell:{}", cell.name);
+                                            crate::guide::anchor(ui, &mark, &r);
+                                        }
+                                        if r.clicked() && !on {
+                                            picker.cell = Some(cell.name.clone());
+                                            picker.form = None;
+                                            if cell.pcell {
+                                                ask_form =
+                                                    Some((lib.name.clone(), cell.name.clone()));
+                                            }
+                                        }
+                                    }
+                                });
+                        });
+                        if let Some(form) = &picker.form {
+                            ui.separator();
+                            ui.vertical(|ui| {
+                                ui.strong("Parameters");
+                                ScrollArea::vertical()
+                                    .id_salt("parameters")
+                                    .max_height(300.0)
+                                    .show(ui, |ui| {
+                                        form_ui(
+                                            ui,
+                                            window_id.with("form"),
+                                            form,
+                                            &mut picker.values,
+                                            &layers,
+                                            true,
+                                        );
+                                    });
+                            });
+                        } else if picker.form_asked.is_some() {
+                            ui.spinner();
+                        }
+                    })
                 });
                 if let Some(error) = &picker.error {
                     ui.colored_label(ui.visuals().error_fg_color, error);
@@ -537,7 +568,11 @@ impl LayoutView {
                     } else {
                         "Place"
                     };
-                    if ui.add_enabled(ready, egui::Button::new(verb)).clicked()
+                    let button = ui.add_enabled(ready, egui::Button::new(verb));
+                    if ready {
+                        crate::guide::anchor(ui, "layout.picker.place", &button);
+                    }
+                    if button.clicked()
                         && let Some((lib, cell)) = chosen
                     {
                         let values = if cell.pcell {
@@ -547,7 +582,9 @@ impl LayoutView {
                         };
                         place = Some((lib.name.clone(), cell.name.clone(), values));
                     }
-                    if ui.button("Cancel").clicked() {
+                    let cancel = ui.button("Cancel");
+                    crate::guide::anchor(ui, "layout.picker.cancel", &cancel);
+                    if cancel.clicked() {
                         keep = false;
                     }
                 });

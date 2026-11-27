@@ -31,6 +31,33 @@ pub enum Picked {
     Elsewhere,
 }
 
+/// How the picker lists xschem's own symbols (pins, labels, ground, sources, ...). A
+/// library name cannot hold a space, so it is not one of the project's.
+const DEVICES: &str = "xschem devices";
+
+/// The symbols of xschem's `devices` folder: name and file, by name.
+fn device_symbols(folder: &Path) -> Vec<(String, PathBuf)> {
+    let mut symbols: Vec<(String, PathBuf)> = std::fs::read_dir(folder)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|e| e == "sym"))
+        .filter_map(|path| {
+            let name = path.file_stem()?.to_string_lossy().into_owned();
+            Some((name, path))
+        })
+        .collect();
+    symbols.sort();
+    symbols
+}
+
+/// What the testbenches and schematics of most designs need, listed first.
+const COMMON_DEVICES: [&str; 12] = [
+    "ipin", "opin", "iopin", "lab_pin", "lab_wire", "gnd", "vdd", "vsource", "isource", "capa",
+    "res", "ind",
+];
+
 struct Request<'a> {
     mode: &'a str,
     extensions: Vec<&'a str>,
@@ -143,6 +170,10 @@ pub fn show(
     let Some(project) = project else {
         return Picked::Elsewhere;
     };
+    let devices = Some(option("devices"))
+        .filter(|dir| !dir.is_empty() && request.extensions.contains(&"sym"))
+        .filter(|_| request.mode != "save")
+        .map(Path::new);
     if !std::mem::replace(&mut picker.started, true) {
         preselect(picker, project, option("initialdir"), option("initialfile"));
     }
@@ -154,6 +185,7 @@ pub fn show(
 
     let mut picked = Picked::Nothing;
     let mut open = true;
+    crate::guide::fact(ctx, &format!("dialog.picker.{}", request.mode));
     egui::Window::new(title)
         .id(id)
         .open(&mut open)
@@ -170,14 +202,53 @@ pub fn show(
                         let usable = !saving || !lib.read_only;
                         let selected = library.is_some_and(|l| l.name == lib.name);
                         let label = egui::Button::selectable(selected, lib.name.as_str());
-                        if ui.add_enabled(usable, label).clicked() {
+                        let response = ui.add_enabled(usable, label);
+                        crate::guide::anchor(
+                            ui,
+                            &format!("xschem.picker.library:{}", lib.name),
+                            &response,
+                        );
+                        if response.clicked() {
                             picker.library = Some(lib.name.clone());
+                            picker.cell = None;
+                            picker.file = None;
+                        }
+                    }
+                    if devices.is_some() {
+                        ui.separator();
+                        let selected = picker.library.as_deref() == Some(DEVICES);
+                        let response = ui.selectable_label(selected, DEVICES).on_hover_text(
+                            "Pins, net labels, ground, sources: xschem's own symbols",
+                        );
+                        crate::guide::anchor(ui, "xschem.picker.library:devices", &response);
+                        if response.clicked() {
+                            picker.library = Some(DEVICES.to_string());
                             picker.cell = None;
                             picker.file = None;
                         }
                     }
                 });
                 column(ui, "Cell", |ui| {
+                    if let Some(folder) = devices
+                        && picker.library.as_deref() == Some(DEVICES)
+                    {
+                        let symbols = device_symbols(folder);
+                        let common = |name: &str| COMMON_DEVICES.iter().position(|c| *c == name);
+                        let mut order: Vec<&(String, PathBuf)> = symbols.iter().collect();
+                        order.sort_by_key(|(name, _)| common(name).unwrap_or(usize::MAX));
+                        for (name, file) in order {
+                            let selected = picker.file.as_ref() == Some(file);
+                            let response = ui.selectable_label(selected, name);
+                            let mark = format!("xschem.picker.cell:{name}");
+                            crate::guide::anchor(ui, &mark, &response);
+                            if response.double_clicked() {
+                                picked = Picked::File(file.clone());
+                            } else if response.clicked() {
+                                picker.file = Some(file.clone());
+                            }
+                        }
+                        return;
+                    }
                     let Some(lib) = library else {
                         ui.weak("Select a library");
                         return;
@@ -187,7 +258,13 @@ pub fn show(
                             continue;
                         }
                         let selected = cell.is_some_and(|s| s.name == c.name);
-                        if ui.selectable_label(selected, &c.name).clicked() {
+                        let response = ui.selectable_label(selected, &c.name);
+                        crate::guide::anchor(
+                            ui,
+                            &format!("xschem.picker.cell:{}", c.name),
+                            &response,
+                        );
+                        if response.clicked() {
                             picker.cell = Some(c.name.clone());
                             picker.file = None;
                             picker.name = c.name.clone();
@@ -196,6 +273,13 @@ pub fn show(
                 });
                 if !saving {
                     column(ui, "View", |ui| {
+                        if picker.library.as_deref() == Some(DEVICES) {
+                            ui.weak(match picker.file {
+                                Some(_) => "A symbol of xschem",
+                                None => "Select a symbol",
+                            });
+                            return;
+                        }
                         let Some(cell) = cell else {
                             ui.weak("Select a cell");
                             return;
@@ -205,6 +289,11 @@ pub fn show(
                             let label = format!("{view}  ({})", name.unwrap_or_default());
                             let selected = picker.file.as_ref() == Some(file);
                             let response = ui.selectable_label(selected, label);
+                            crate::guide::anchor(
+                                ui,
+                                &format!("xschem.picker.view:{view}"),
+                                &response,
+                            );
                             if response.double_clicked() {
                                 picked = Picked::File(file.clone());
                             } else if response.clicked() {
@@ -246,7 +335,9 @@ pub fn show(
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let confirm = egui::Button::new(request.verb());
-                if ui.add_enabled(target.is_some(), confirm).clicked()
+                let confirm = ui.add_enabled(target.is_some(), confirm);
+                crate::guide::anchor(ui, "xschem.picker.ok", &confirm);
+                if confirm.clicked()
                     && let Some(file) = target
                 {
                     picked = Picked::File(file);

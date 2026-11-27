@@ -1,0 +1,135 @@
+# Replays the ota-sizing tutorial with real ngspice runs.
+guide expect_step start
+wait 1.5
+guide press dialog.guide.start
+guide wait load-select
+wait 0.8
+guide expect_pointing tree:work
+guide click
+wait 0.8
+guide expect_pointing tree:work/tb_ota5t
+guide click
+guide expect_step load-new
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.new_testbench
+guide click
+guide expect_step load-template
+wait 0.8
+guide expect_pointing dialog.new_testbench.template
+guide click
+wait 0.8
+guide expect_pointing dialog.new_testbench.template.ac_load
+guide click
+wait 0.8
+guide expect_step load-create
+guide expect_pointing dialog.new_testbench.params
+guide press dialog.new_testbench.param.loads
+text 50f 100f 200f 500f 1p
+wait 0.3
+wait 0.8
+screenshot @SCRATCH@/01-load-create.png
+guide press dialog.confirm
+guide expect_step load-run
+wait 0.8
+guide expect_pointing sim.run
+guide click
+guide wait load-read
+wait 0.8
+guide expect_marked
+wait 0.5
+guide press sim.setup
+wait 0.4
+guide press sim.template
+wait 0.8
+screenshot @SCRATCH@/02-load-results.png
+guide continue
+guide expect_step open-ac
+wait 0.8
+guide expect_marked
+open_view work tb_ota5t ac_response
+guide expect_step tighten
+wait 1.5
+guide press sim.setup
+wait 0.4
+guide press sim.template
+wait 0.8
+guide expect_pointing sim.template.param.gain_db_min
+guide press sim.template.param.gain_db_min
+key a ctrl
+text 36.5
+wait 0.3
+wait 0.5
+guide press sim.save
+wait 1.5
+guide press sim.run
+sim wait
+wait 1.0
+wait 0.5
+guide press sim.setup
+wait 0.4
+guide press sim.template
+wait 0.8
+screenshot @SCRATCH@/03-fail.png
+guide continue
+guide expect_step think
+wait 0.6
+guide continue
+guide expect_step open-sch
+wait 0.8
+guide expect_marked
+open_view work ota5t schematic
+guide expect_step double
+wait_frame
+wait 1.0
+# the attribute dialog as a user gets it: select M1, press q; its OK is what is pointed at
+tcl xschem unselect_all; xschem select instance M1; xschem redraw
+move 400 300
+key q
+wait 1.5
+guide expect_pointing xschem.button:OK
+screenshot @SCRATCH@/04-attributes.png
+guide click
+wait 1.0
+tcl xschem setprop instance M1 m 2; xschem setprop instance M2 m 2; xschem redraw
+guide wait save
+wait 0.8
+screenshot @SCRATCH@/05-doubled.png
+move 300 200
+key s ctrl
+wait 1.0
+guide expect_pointing xschem.button:Yes
+guide click
+wait 1.5
+guide continue
+guide expect_step again
+wait 0.8
+guide expect_marked
+open_view work tb_ota5t ac_response
+guide expect_step rerun
+wait 1.0
+guide expect_pointing sim.run
+guide click
+guide wait compare
+wait 0.8
+guide expect_marked
+wait 1.0
+screenshot @SCRATCH@/06-pass.png
+guide continue
+guide expect_step open-op
+wait 0.8
+guide expect_marked
+open_view work tb_ota5t ota_op
+guide expect_step run-op
+wait 1.0
+guide expect_pointing sim.run
+guide click
+guide wait op-read
+wait 0.8
+guide expect_marked
+wait 1.0
+screenshot @SCRATCH@/07-op.png
+guide continue
+guide expect_step finished
+quit

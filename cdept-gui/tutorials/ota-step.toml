@@ -1,0 +1,164 @@
+schema = "cdept-tutorial"
+version = 1
+id = "ota-step"
+title = "OTA 4: the step response as a buffer"
+series = "ota"
+order = 4
+start = ["base", "ota-sch", "ota-sym", "ota-tb", "ota-dc", "ota-ac"]
+pdk = "ihp-sg13g2"
+goal = """
+You connect the OTA as a unity-gain buffer, step its input, and relate settling and
+overshoot to the AC results. Then you see slewing, by comparing a large and a small
+step.
+"""
+minutes = 15
+before = """
+- [OTA 3](ota-ac.md) (its numbers are used here).
+"""
+
+[[step]]
+id = "start"
+title = "Get the project"
+text = """
+Make the starting project.
+"""
+start_button = true
+continue_button = true
+continue_needs = ["view:work/tb_ota5t_step/schematic"]
+needs_hint = "Open a project with work/tb_ota5t_step."
+
+[[step]]
+id = "bench"
+title = "The follower testbench"
+text = """
+tb_ota5t_step ties out to inn: a unity-gain buffer, whose output should follow inp.
+Vin steps inp from {vlo} to {vhi} at 10 ns.
+
+From OTA 3: the loop's unity-gain frequency is 159 MHz. A first-order estimate of the
+small-signal time constant is 1/(2π · 159 MHz) = 1.0 ns, and a phase margin of 60°
+gives a little overshoot, around 9 % for a two-pole system.
+"""
+picture = "ota-tb-step"
+continue_button = true
+
+[[step]]
+id = "select"
+title = "Select tb_ota5t_step"
+text = """
+In the Libraries panel, click the cell "tb_ota5t_step".
+"""
+point = [
+    { at = "tree:work/tb_ota5t_step", say = "Click tb_ota5t_step" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["selected:work/tb_ota5t_step", "view:work/tb_ota5t_step/ota_step"]
+
+[[step]]
+id = "new"
+title = "New testbench"
+text = """
+Open Tools > New Testbench….
+"""
+point = [
+    { at = "menu.tools.new_testbench", say = "Click \"New Testbench…\"" },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["dialog.new_testbench", "view:work/tb_ota5t_step/ota_step"]
+
+[[step]]
+id = "template"
+title = "The template ota_step"
+text = """
+Choose ota_step, the project's version of the built-in startup_settle: the same
+measurements, with this bench's design variables filled in. It measures the settling
+time to 1 % of the step (counted from 10 ns), the overshoot, the rise time and the
+error of the final value.
+"""
+point = [
+    { at = "dialog.new_testbench.template.ota_step", say = "Choose ota_step" },
+    { at = "dialog.new_testbench.template", say = "Open the Template list" },
+]
+done_when = ["dialog.new_testbench.template.ota_step", "view:work/tb_ota5t_step/ota_step"]
+lost_without = ["dialog.new_testbench"]
+back_to = "new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "create"
+title = "Create it"
+text = """
+Keep the view name ota_step and press "Create".
+"""
+point = [{ at = "dialog.confirm", say = "Click \"Create\"" }]
+done_when = ["view:work/tb_ota5t_step/ota_step"]
+lost_without = ["dialog.new_testbench"]
+back_to = "new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "run"
+title = "Run the 200 mV step"
+text = """
+Press "Run": the step goes from 0.32 V to 0.52 V.
+"""
+point = [{ at = "sim.run", say = "Click \"Run\"" }]
+done_when = ["sim.ran:work/tb_ota5t_step/ota_step"]
+
+[[step]]
+id = "read"
+title = "Read it"
+text = """
+Fold "Setup". Write these down; you compare them next:
+
+- settle_time 8.1 ns
+- overshoot_pct 8.5 %: what a phase margin of 60° promised.
+- t_rise 3.2 ns (10 % to 90 %)
+- final_err 0.5 mV
+
+Press "Waveform Tab" to see out step and ring once.
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+
+[[step]]
+id = "small"
+title = "Now a 20 mV step"
+text = """
+A circuit that is linear answers a 20 mV step exactly like a 200 mV step, only ten
+times smaller: the same rise time. Try it. In the Simulation tab:
+
+- in the Variables list set vlo = 0.41 and vhi = 0.43;
+- under Test template set target = 0.43;
+- press "Save", then "Run".
+"""
+point = [{ at = "sim.run", say = "Change vlo, vhi, target; Save; then Run" }]
+continue_button = true
+continue_needs = [
+    "setup:work/tb_ota5t_step/ota_step:variables.vlo~0.41",
+    "setup:work/tb_ota5t_step/ota_step:variables.vhi~0.43",
+    "setup:work/tb_ota5t_step/ota_step:template_args.target~0.43",
+]
+needs_hint = "Set vlo, vhi and target, Save, and Run."
+
+[[step]]
+id = "slew"
+title = "Why they differ"
+text = """
+With 20 mV: t_rise 2.5 ns and settle_time 7.3 ns, overshoot almost unchanged (8.6 %).
+The 200 mV step rises more slowly, 3.2 ns, because it is partly slewing.
+
+When the input difference is larger than about 1.4 times the pair's vdss (here about
+0.17 V), almost all the tail current goes through one side. The output can then
+charge only with the tail current, 19.8 µA, whatever gm is: its slope is limited to
+about I_tail / C. With about 210 fF at the output (OTA 5) that is 95 V/µs: 200 mV
+takes about 2 ns at full slew. The 20 mV step never gets near that.
+
+The final value of the small step is 0.4322 V for a target of 0.43 V: the 2.2 mV is
+the offset of OTA 2 again.
+
+Next: "OTA 5: sizing".
+"""
+continue_button = true

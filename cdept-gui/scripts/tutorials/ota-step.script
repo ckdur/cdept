@@ -1,0 +1,85 @@
+# Replays the ota-step tutorial with real ngspice runs.
+guide expect_step start
+wait 1.5
+guide press dialog.guide.start
+guide wait bench
+wait 0.8
+screenshot @SCRATCH@/01-bench.png
+guide continue
+guide expect_step select
+wait 0.8
+guide expect_pointing tree:work
+guide click
+wait 0.8
+guide expect_pointing tree:work/tb_ota5t_step
+guide click
+guide expect_step new
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.new_testbench
+guide click
+guide expect_step template
+wait 0.8
+guide expect_pointing dialog.new_testbench.template
+guide click
+wait 0.8
+screenshot @SCRATCH@/02-template-list.png
+guide expect_pointing dialog.new_testbench.template.ota_step
+guide click
+guide expect_step create
+wait 0.8
+guide expect_pointing dialog.confirm
+screenshot @SCRATCH@/03-create.png
+guide click
+guide expect_step run
+wait 1.0
+guide expect_pointing sim.run
+guide click
+guide wait read
+wait 0.8
+guide expect_marked
+wait 0.5
+guide press sim.setup
+wait 0.5
+guide press sim.template
+wait 0.8
+screenshot @SCRATCH@/04-results.png
+guide continue
+guide expect_step small
+wait 0.8
+guide expect_marked
+guide press sim.setup
+wait 0.8
+screenshot @SCRATCH@/05-form.png
+guide press sim.var.value.5
+key a ctrl
+text 0.41
+wait 0.4
+guide press sim.var.value.4
+key a ctrl
+text 0.43
+wait 0.4
+guide press sim.setup
+wait 0.5
+guide press sim.template
+wait 0.8
+screenshot @SCRATCH@/06-template.png
+guide press sim.template.param.target
+key a ctrl
+text 0.43
+wait 0.8
+guide press sim.save
+wait 1.5
+guide press sim.run
+sim wait
+wait 1.0
+guide press sim.template
+wait 0.8
+screenshot @SCRATCH@/07-small.png
+guide continue
+guide expect_step slew
+wait 0.6
+guide continue
+guide expect_step finished
+quit

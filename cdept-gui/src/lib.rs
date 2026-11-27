@@ -24,7 +24,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub use guide::{Tutorial, builtin as builtin_tutorial, builtins as builtin_tutorials};
+pub use guide::{
+    SERIES as TUTORIAL_SERIES, Tutorial, builtin as builtin_tutorial, builtins as builtin_tutorials,
+};
 pub use log::LogBuffer;
 
 /// Whether the waveform tabs have UberWave's data engine (not its stub), for `cdept tools`.

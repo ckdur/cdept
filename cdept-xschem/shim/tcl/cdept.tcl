@@ -81,6 +81,22 @@ proc cdept::extensions {pattern} {
   return $out
 }
 
+# The folder of xschem's own device symbols (pins, labels, ground, sources, ...), which
+# belongs to no library of the project: the picker offers it next to them.
+proc cdept::devices_dir {} {
+  global pathlist
+  if {[info exists pathlist]} {
+    foreach dir $pathlist {
+      if {[file tail $dir] eq "devices" && [file exists [file join $dir ipin.sym]]} {
+        # As the search path writes it: xschem shortens a symbol's name only when
+        # it starts with an entry of that path.
+        return $dir
+      }
+    }
+  }
+  return {}
+}
+
 # Show the picker and wait for the answer: the chosen file, or {}.
 proc cdept::pick {mode title extensions initialdir initialfile} {
   variable picker
@@ -88,7 +104,8 @@ proc cdept::pick {mode title extensions initialdir initialfile} {
   if {$picker ne "" && [winfo exists $picker]} {::faketk::special_done $picker {}}
   set w .cdept_pick[incr ::faketk::serial]
   ::faketk::special $w LibraryPicker $title [dict create mode $mode title $title \
-    extensions $extensions initialdir $initialdir initialfile $initialfile]
+    extensions $extensions initialdir $initialdir initialfile $initialfile \
+    devices [::cdept::devices_dir]]
   wm protocol $w WM_DELETE_WINDOW [list ::faketk::special_done $w {}]
   set picker $w
   set result [::faketk::special_wait $w]

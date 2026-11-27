@@ -54,6 +54,8 @@ pub(super) struct Checks {
     job: Option<Job>,
     /// The last check and what came of it.
     last: Option<(Check, Result<Outcome, String>)>,
+    /// (helper epoch, revision) of the layout the running or last check is of.
+    made_at: Option<(u64, u64)>,
     /// What is highlighted: a label for the panel.
     marked: Option<String>,
 }
@@ -109,6 +111,7 @@ impl LayoutView {
             .map_err(|e| format!("{e:#}"))?;
         let out = dir.join(format!("{cell}.gds"));
         let id = self.raw_call(method::EXPORT, json!({ "out": out }));
+        self.checks.made_at = Some((self.epoch, self.revision));
         Ok(Job::Export {
             id,
             check,
@@ -250,11 +253,11 @@ impl LayoutView {
     pub(super) fn checks_toolbar(&mut self, ui: &mut Ui, ready: bool) {
         let idle = ready && self.checks.running().is_none();
         for check in [Check::Drc, Check::Lvs] {
-            if ui
+            let button = ui
                 .add_enabled(idle, egui::Button::new(check.label()))
-                .on_hover_text(format!("Run {}", check.label()))
-                .clicked()
-            {
+                .on_hover_text(format!("Run {}", check.label()));
+            crate::guide::anchor(ui, &format!("layout.{}", check.name()), &button);
+            if button.clicked() {
                 self.run_check(check);
             }
         }
@@ -364,6 +367,37 @@ impl LayoutView {
         Ok(())
     }
 
+    /// For a tutorial (guide.rs): what the last check found, while the layout is the
+    /// one it checked.
+    pub(super) fn check_facts(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self.checks.running().is_some()
+            || self.checks.made_at != Some((self.epoch, self.revision))
+        {
+            return out;
+        }
+        match &self.checks.last {
+            Some((_, Ok(Outcome::Drc(run)))) => {
+                let counts = run.rdb.counts();
+                out.push(if counts.is_empty() {
+                    "layout.drc_clean".into()
+                } else {
+                    "layout.drc_violations".into()
+                });
+                for item in &run.rdb.items {
+                    out.push(format!("layout.drc_rule:{}", item.category.join(".")));
+                }
+            }
+            Some((_, Ok(Outcome::Lvs(run)))) => out.push(if run.summary.matched {
+                "layout.lvs_match".into()
+            } else {
+                "layout.lvs_mismatch".into()
+            }),
+            _ => {}
+        }
+        out
+    }
+
     /// For the test driver: the state of the checks as text.
     pub fn check_status(&self) -> String {
         if let Some(check) = self.checks.running() {
@@ -462,7 +496,9 @@ fn drc_results(ui: &mut Ui, run: &DrcRun, id: crate::dock::DocId, acts: &mut Vec
                 if !category.description.is_empty() {
                     ui.weak(&category.description);
                 }
-                if ui.small_button("Show all").clicked() {
+                let show = ui.small_button("Show all");
+                crate::guide::anchor(ui, "layout.drc.show_all", &show);
+                if show.clicked() {
                     let shapes: Vec<Value> = run
                         .rdb
                         .items_of(&category.path)
@@ -498,6 +534,8 @@ fn drc_results(ui: &mut Ui, run: &DrcRun, id: crate::dock::DocId, acts: &mut Vec
                     }
                 }
             });
+        let mark = format!("layout.drc.rule:{name}");
+        crate::guide::anchor(ui, &mark, &header.header_response);
         header.header_response.on_hover_text(&category.description);
     }
     ui.separator();

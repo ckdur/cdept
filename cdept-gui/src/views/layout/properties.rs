@@ -385,7 +385,11 @@ fn dialog_ui(ui: &mut Ui, id: Id, dialog: &mut PropertiesDialog) -> Option<bool>
     let busy = dialog.asked.is_some();
     ui.horizontal(|ui| {
         let can = editable && edited && !busy;
-        if ui.add_enabled(can, egui::Button::new("OK")).clicked() {
+        let ok = ui.add_enabled(can, egui::Button::new("OK"));
+        if can {
+            crate::guide::anchor(ui, "layout.properties.ok", &ok);
+        }
+        if ok.clicked() {
             apply = Some(true);
         }
         if ui.add_enabled(can, egui::Button::new("Apply")).clicked() {

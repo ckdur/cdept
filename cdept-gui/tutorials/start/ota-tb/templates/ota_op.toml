@@ -1,0 +1,111 @@
+# A project test template (docs/reference/files/test-template.md) for the operating
+# point of the five-transistor OTA in its open-loop testbench: the output voltage, the
+# supply current, the tail node, and the saturation margin of the six transistors, the
+# smallest vds - vdss among them (PSP calls the saturation voltage vdss). It names the
+# transistors M1 to M6 of work/ota5t, instance xdut.
+name = "ota_op"
+description = "Operating point of the 5T OTA: out, tail, supply current, and the smallest saturation margin of its six transistors."
+requires_nets = ["out"]
+requires_elements = ["vdd"]
+plot = ['v("out")']
+
+[[param]]
+name = "sat_min"
+type = "number"
+default = "0.03"
+unit = "V"
+doc = "Spec: smallest allowed vds - vdss of any transistor."
+
+[[param]]
+name = "vout_min"
+type = "number"
+default = "0.40"
+unit = "V"
+doc = "Spec: lowest allowed output voltage."
+
+[[param]]
+name = "vout_max"
+type = "number"
+default = "0.45"
+unit = "V"
+doc = "Spec: highest allowed output voltage."
+
+[[param]]
+name = "isupply_max"
+type = "number"
+default = "60u"
+unit = "A"
+doc = "Spec: highest allowed supply current."
+
+# The values of the testbench's sources. The setup of a testbench adds vcm, ibias and
+# cl, and may change these.
+[setup]
+# the operating point values of the transistors are not saved unless asked for
+save = [
+  "all",
+  "@n.xdut.xm1.nsg13_lv_pmos[vds]",
+  "@n.xdut.xm1.nsg13_lv_pmos[vdss]",
+  "@n.xdut.xm1.nsg13_lv_pmos[gm]",
+  "@n.xdut.xm1.nsg13_lv_pmos[gds]",
+  "@n.xdut.xm2.nsg13_lv_pmos[vds]",
+  "@n.xdut.xm2.nsg13_lv_pmos[vdss]",
+  "@n.xdut.xm2.nsg13_lv_pmos[gm]",
+  "@n.xdut.xm2.nsg13_lv_pmos[gds]",
+  "@n.xdut.xm3.nsg13_lv_nmos[vds]",
+  "@n.xdut.xm3.nsg13_lv_nmos[vdss]",
+  "@n.xdut.xm3.nsg13_lv_nmos[gm]",
+  "@n.xdut.xm3.nsg13_lv_nmos[gds]",
+  "@n.xdut.xm4.nsg13_lv_nmos[vds]",
+  "@n.xdut.xm4.nsg13_lv_nmos[vdss]",
+  "@n.xdut.xm4.nsg13_lv_nmos[gm]",
+  "@n.xdut.xm4.nsg13_lv_nmos[gds]",
+  "@n.xdut.xm5.nsg13_lv_pmos[vds]",
+  "@n.xdut.xm5.nsg13_lv_pmos[vdss]",
+  "@n.xdut.xm5.nsg13_lv_pmos[gm]",
+  "@n.xdut.xm5.nsg13_lv_pmos[gds]",
+  "@n.xdut.xm6.nsg13_lv_pmos[vds]",
+  "@n.xdut.xm6.nsg13_lv_pmos[vdss]",
+  "@n.xdut.xm6.nsg13_lv_pmos[gm]",
+  "@n.xdut.xm6.nsg13_lv_pmos[gds]",
+]
+[setup.variables]
+vdd = "1.2"
+ac_dm = "0"
+ac_cm = "0"
+ac_vdd = "0"
+
+[[setup.analysis]]
+kind = "op"
+
+[[setup.output]]
+name = "vout"
+expr = 'max(v("out"))'
+plot = "op"
+
+[[setup.output]]
+name = "tail"
+expr = 'max(v("xdut.tail"))'
+plot = "op"
+
+[[setup.output]]
+name = "isupply"
+expr = '-max(i("vdd"))'
+plot = "op"
+
+[[setup.output]]
+name = "sat_margin"
+expr = 'min(min(min(min(min(max(v("@n.xdut.xm1.nsg13_lv_pmos[vds]")) - max(v("@n.xdut.xm1.nsg13_lv_pmos[vdss]")), max(v("@n.xdut.xm2.nsg13_lv_pmos[vds]")) - max(v("@n.xdut.xm2.nsg13_lv_pmos[vdss]"))), max(v("@n.xdut.xm3.nsg13_lv_nmos[vds]")) - max(v("@n.xdut.xm3.nsg13_lv_nmos[vdss]"))), max(v("@n.xdut.xm4.nsg13_lv_nmos[vds]")) - max(v("@n.xdut.xm4.nsg13_lv_nmos[vdss]"))), max(v("@n.xdut.xm5.nsg13_lv_pmos[vds]")) - max(v("@n.xdut.xm5.nsg13_lv_pmos[vdss]"))), max(v("@n.xdut.xm6.nsg13_lv_pmos[vds]")) - max(v("@n.xdut.xm6.nsg13_lv_pmos[vdss]")))'
+plot = "op"
+
+[[setup.spec]]
+name = "sat_margin"
+min = "${sat_min}"
+
+[[setup.spec]]
+name = "vout"
+min = "${vout_min}"
+max = "${vout_max}"
+
+[[setup.spec]]
+name = "isupply"
+max = "${isupply_max}"

@@ -12,6 +12,7 @@ pub(crate) mod keys;
 pub(crate) mod mirror;
 pub(crate) mod picker;
 mod picture;
+mod probe;
 mod widgets;
 
 use std::path::{Path, PathBuf};
@@ -229,6 +230,8 @@ pub struct SchematicView {
     clipboard: clipboard::ClipboardSync,
     /// Cross-probing with layouts, Generate Layout (see `linking`).
     link: linking::SchematicLink,
+    /// What a running tutorial asks about the circuit (see `probe`).
+    probing: probe::Probing,
 }
 
 impl SchematicView {
@@ -269,6 +272,7 @@ impl SchematicView {
             saving_as: None,
             clipboard: clipboard::ClipboardSync::default(),
             link: linking::SchematicLink::default(),
+            probing: probe::Probing::default(),
         }
     }
 
@@ -896,6 +900,7 @@ impl View for SchematicView {
             }
         }
         let response = ui.allocate_rect(area, Sense::click_and_drag());
+        crate::guide::anchor(ui, "schematic.canvas", &response);
 
         // Whole pixels inside the area: one frame pixel is one screen pixel.
         let scale = ui.ctx().pixels_per_point();
@@ -1080,16 +1085,19 @@ impl SchematicView {
             return; // not a cell of a library
         }
         let (library, cell) = (&self.doc.library.clone(), &self.doc.cell.clone());
-        ui.menu_button("Cell", |ui| {
+        let menu = ui.menu_button("Cell", |ui| {
             let has_schematic = ctx
                 .project
                 .as_ref()
                 .and_then(|p| p.library(library)?.cell(cell))
                 .is_some_and(|c| crate::app::schematic_file(c).is_some());
             ui.add_enabled_ui(has_schematic, |ui| {
-                ui.menu_button("Netlist to View", |ui| {
+                let netlist = ui.menu_button("Netlist to View", |ui| {
                     for (label, format) in NETLIST_FORMATS {
-                        if ui.button(label).clicked() {
+                        let button = ui.button(label);
+                        let mark = format!("menu.cell.netlist.{label}");
+                        crate::guide::anchor(ui, &mark, &button);
+                        if button.clicked() {
                             ctx.request(Action::NetlistToView {
                                 library: library.clone(),
                                 cell: cell.clone(),
@@ -1097,9 +1105,9 @@ impl SchematicView {
                             });
                         }
                     }
-                })
-                .response
-                .on_hover_text(
+                });
+                crate::guide::anchor(ui, "menu.cell.netlist", &netlist.response);
+                netlist.response.on_hover_text(
                     "Write the netlist of the cell's schematic, as saved, into its netlist view",
                 );
             });
@@ -1109,6 +1117,7 @@ impl SchematicView {
             }
             self.link_menu(ui, ctx);
         });
+        crate::guide::anchor(ui, "menu.cell", &menu.response);
     }
 }
 

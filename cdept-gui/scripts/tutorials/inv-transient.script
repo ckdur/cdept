@@ -1,0 +1,85 @@
+# Replays the inv-transient tutorial with a real ngspice run. Every click is where the
+# guide points; the zoom and both cursors are real mouse input on the plot.
+guide expect_step start
+wait 1
+guide press dialog.guide.start
+guide wait select
+wait 0.8
+guide expect_pointing tree:work
+guide click
+wait 0.6
+guide expect_pointing tree:work/tb_inv
+guide click
+guide wait new-testbench
+wait 0.5
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.new_testbench
+guide click
+guide wait dialog
+wait 0.8
+guide expect_pointing dialog.confirm
+screenshot @SCRATCH@/01-dialog.png
+guide click
+guide wait form
+wait 1.5
+guide expect_pointing sim.template
+screenshot @SCRATCH@/02-form.png
+guide continue
+guide expect_step run
+guide expect_pointing sim.run
+guide click
+guide wait results
+wait 1
+# The results are below the form: the guide points at "Setup" to fold it.
+guide expect_pointing sim.setup
+screenshot @SCRATCH@/03-ran.png
+guide click
+wait 0.8
+screenshot @SCRATCH@/03b-setup-folded.png
+guide press sim.template
+wait 0.8
+guide expect_pointing sim.results
+sim expect_points 1
+screenshot @SCRATCH@/04-results.png
+guide continue
+guide expect_step waveform
+wait 0.5
+guide expect_pointing sim.point.waveform_tab
+screenshot @SCRATCH@/05-wave-button.png
+guide click
+guide wait zoom
+wv wait_loaded
+wait 1.5
+wv expect_pane 1 v(in) v(out)
+guide expect_pointing wave.panes
+wv wheel 0.2 up 6
+wait 1
+screenshot @SCRATCH@/06-zoom.png
+wv zoom 150p 350p
+wait 1
+guide continue
+guide expect_step cursor-a
+# Real clicks on the plot: 225 ps and 270 ps of the 150..350 ps on screen.
+wv click 0.375
+wait 0.8
+wv expect_cursor a v(in) 0.6 0.03
+screenshot @SCRATCH@/07-cursor-a.png
+guide continue
+guide expect_step cursor-b
+wv click 0.6 right
+wait 0.8
+wv expect_cursor_x b 270p 0.01
+wv expect_cursor b v(out) 0.6 0.06
+guide expect_pointing wave.readout
+screenshot @SCRATCH@/08-cursor-b.png
+guide continue
+guide expect_step overshoot
+guide continue
+guide expect_step done
+wait 0.5
+screenshot @SCRATCH@/09-done.png
+guide continue
+guide expect_step finished
+quit

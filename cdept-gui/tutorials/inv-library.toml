@@ -1,0 +1,147 @@
+schema = "cdept-tutorial"
+version = 1
+id = "inv-library"
+title = "Inverter 1: your library and your first cell"
+series = "inverter"
+order = 1
+start = ["base"]
+pdk = "ihp-sg13g2"
+goal = """
+You make a library of your own in a project, and in it a cell "inv" with an empty
+schematic. Designs in CDePT are kept as libraries of cells, and each cell has views
+(schematic, symbol, layout, testbenches).
+"""
+minutes = 5
+before = """
+- The tutorial [Set up a project for a PDK](pdk-setup.md), or a project of your own
+  for IHP SG13G2.
+- CDePT built with the xschem helper (`cargo build -p cdept-xschem`).
+"""
+
+[[step]]
+id = "start"
+title = "Get a project to work in"
+text = """
+Either open the project you made in "Set up a project for a PDK" (File > Open
+Project…) and press Continue, or let the guide make a fresh one with the button
+below. That takes a few seconds: it reads the PDK.
+
+The names used from here on are fixed (a library "work", a cell "inv"), so that the
+guide can follow what you do.
+"""
+start_button = true
+continue_button = true
+
+[[step]]
+id = "manager"
+title = "Open the Library Manager"
+text = """
+The Library Manager shows your design in three columns: libraries, the cells of the
+selected library, and the views of the selected cell. Open it with Tools > Library
+Manager.
+
+The libraries with a lock are the PDK's. You cannot change them.
+"""
+point = [
+    { at = "menu.tools.library_manager", say = "Click \"Library Manager\"" },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["manager.tab"]
+
+[[step]]
+id = "new-library"
+title = "Make a library"
+text = """
+Press "+ Library" in the toolbar.
+"""
+point = [{ at = "manager.new_library", say = "Click \"+ Library\"" }]
+done_when = ["dialog.new_library", "library:work"]
+lost_without = ["manager.tab"]
+back_to = "manager"
+lost_says = "The Library Manager is not in front. Open it again."
+
+[[step]]
+id = "name-library"
+title = "Name it work"
+text = """
+Type this as the name, then press "Create":
+
+    work
+
+The folder follows the name (libs/work, inside your project) and is created.
+"""
+point = [{ at = "dialog.field:Name", say = "Type work, then press Create" }]
+done_when = ["library:work"]
+lost_without = ["dialog.new_library"]
+back_to = "new-library"
+lost_says = "The window was closed without making the library \"work\"."
+
+[[step]]
+id = "select-library"
+title = "Select your library"
+text = """
+In the first column, click "work". New cells go into the selected library.
+"""
+point = [{ at = "manager.library:work", say = "Click work" }]
+done_when = ["selected:work", "view:work/inv/schematic"]
+lost_without = ["manager.tab"]
+back_to = "manager"
+lost_says = "The Library Manager is not in front. Open it again."
+
+[[step]]
+id = "new-cell"
+title = "Make a cell"
+text = """
+Press "+ Cell".
+"""
+point = [{ at = "manager.new_cell", say = "Click \"+ Cell\"" }]
+done_when = ["dialog.new_cell", "view:work/inv/schematic"]
+lost_without = ["manager.tab"]
+back_to = "manager"
+lost_says = "The Library Manager is not in front. Open it again."
+
+[[step]]
+id = "name-cell"
+title = "Name it inv"
+text = """
+Type this as the name:
+
+    inv
+
+Leave "First view" at the xschem schematic, then press "Create".
+"""
+point = [{ at = "dialog.field:Name", say = "Type inv, then press Create" }]
+done_when = ["view:work/inv/schematic"]
+lost_without = ["dialog.new_cell"]
+back_to = "new-cell"
+lost_says = "The window was closed without making the cell \"inv\"."
+
+[[step]]
+id = "open"
+title = "Open the schematic"
+text = """
+Select the cell "inv" in the second column. Then double-click its view "schematic"
+in the third. It opens in the embedded xschem, empty.
+"""
+point = [
+    { at = "manager.view:schematic", say = "Double-click schematic" },
+    { at = "manager.cell:inv", say = "Click inv" },
+    { at = "manager.library:work", say = "Click work" },
+    { at = "tree:work/inv/schematic", say = "Or double-click it here" },
+]
+done_when = ["open:work/inv/schematic"]
+
+[[step]]
+id = "done"
+title = "What you now have"
+text = """
+In your project folder there is now:
+
+    libs/work/inv/schematic/inv.sch
+
+A library is a folder, a cell a folder in it, and each view a folder in the cell.
+cdept.toml lists the library. It is all plain text and files, ready for git.
+
+Next: "Inverter 2: draw the schematic".
+"""
+continue_button = true

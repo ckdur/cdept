@@ -440,11 +440,12 @@ impl Mirror {
                 .filter(|item| item.label.trim() != "-")
                 .partition(|item| OWN_MENUS.contains(&item.label.as_str()));
             if !shared.is_empty() {
-                ui.menu_button("Schematic", |ui| {
+                let menu = ui.menu_button("Schematic", |ui| {
                     for item in shared {
                         menu_item(ui, item, images, &mut events);
                     }
                 });
+                mark(ui, "Schematic", &menu.response);
             }
             for item in own {
                 menu_item(ui, item, images, &mut events);
@@ -474,6 +475,7 @@ impl Mirror {
             };
             let mut response =
                 ui.add_enabled(enabled && item.enabled, button.selected(item.checked));
+            crate::guide::anchor(ui, &format!("xschem.tool:{}", item.tooltip), &response);
             if !item.tooltip.is_empty() {
                 response = response.on_hover_text(&item.tooltip);
             }
@@ -817,11 +819,12 @@ fn menu_item(ui: &mut Ui, item: &MenuItem, images: &mut Images, events: &mut Vec
         }
         MenuKind::Cascade => {
             ui.add_enabled_ui(item.enabled, |ui| {
-                ui.menu_button(label, |ui| {
+                let menu = ui.menu_button(label, |ui| {
                     for child in &item.items {
                         menu_item(ui, child, images, events);
                     }
                 });
+                mark(ui, &item.label, &menu.response);
             });
             false
         }
@@ -831,7 +834,9 @@ fn menu_item(ui: &mut Ui, item: &MenuItem, images: &mut Images, events: &mut Vec
                 None => Button::new(label),
             };
             let button = button.shortcut_text(&item.accelerator);
-            ui.add_enabled(item.enabled, button).clicked()
+            let response = ui.add_enabled(item.enabled, button);
+            mark(ui, &item.label, &response);
+            response.clicked()
         }
         MenuKind::Check => {
             let mut checked = item.checked;
@@ -852,6 +857,11 @@ fn menu_item(ui: &mut Ui, item: &MenuItem, images: &mut Images, events: &mut Vec
     }
 }
 
+/// Mark a menu entry for the tutorial guide, by its label.
+fn mark(ui: &Ui, label: &str, response: &egui::Response) {
+    crate::guide::anchor(ui, &format!("xschem.menu:{label}"), response);
+}
+
 /// An ordinary dialog: a window over the tab, with the widgets inside.
 fn dialog(ctx: &Context, id: Id, area: Rect, window: &Window, top: bool, cx: &mut Draw<'_>) {
     let mut open = true;
@@ -860,6 +870,7 @@ fn dialog(ctx: &Context, id: Id, area: Rect, window: &Window, top: bool, cx: &mu
     } else {
         window.title.as_str()
     };
+    crate::guide::fact(ctx, "dialog.xschem");
     let shown = egui::Window::new(title)
         .id(id)
         .open(&mut open)

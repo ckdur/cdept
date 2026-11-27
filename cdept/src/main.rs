@@ -1217,7 +1217,15 @@ fn main() -> Result<()> {
             )
         }
         Command::Tutorial { name: None, .. } => {
+            let mut series = String::new();
             for tutorial in cdept_gui::builtin_tutorials() {
+                if series != tutorial.series {
+                    series = tutorial.series.clone();
+                    let title = cdept_gui::TUTORIAL_SERIES
+                        .iter()
+                        .find(|(s, _)| *s == series);
+                    println!("\n{}", title.map_or("", |(_, title)| title));
+                }
                 println!(
                     "{:<16} {} (about {} min)",
                     tutorial.id, tutorial.title, tutorial.minutes
@@ -1232,8 +1240,12 @@ fn main() -> Result<()> {
         } => {
             let tutorial = cdept_gui::Tutorial::find(&name).map_err(|e| eyre!(e))?;
             if print {
-                print!("{}", tutorial.markdown());
-                return Ok(());
+                // A reader that stops early (`| head`) is not an error.
+                use std::io::Write;
+                return match std::io::stdout().write_all(tutorial.markdown().as_bytes()) {
+                    Err(e) if e.kind() != std::io::ErrorKind::BrokenPipe => Err(e.into()),
+                    _ => Ok(()),
+                };
             }
             let log = LogBuffer::new();
             init_tracing(cli.verbose, Some(&log));

@@ -54,12 +54,18 @@ and the other tools are found on `PATH` or through `CDEPT_*` variables
 
 ## Tutorials
 
+CDePT teaches itself: a card in the window lists the steps, points at what to use next,
+and ticks each one off when it sees you have done it. There are 17: setting up a PDK, an
+inverter from an empty cell to a layout with clean DRC and LVS, and a five-transistor OTA
+(operating point, AC, step, rejection, corner suite, mismatch, noise).
+
 ```sh
-target/debug/cdept tutorial pdk-setup   # CDePT guides you through setting up a PDK
+target/debug/cdept tutorial             # the list; or Help > Tutorials in CDePT
+target/debug/cdept tutorial pdk-setup   # follow one
 ```
 
-The list of tutorials, and of the analog design tasks they are to cover, is in
-[docs/tutorials/](docs/tutorials/index.md).
+They need IHP SG13G2, the xschem helper, ngspice and, for layout, KLayout. They are
+also pages of the manual: [docs/tutorials/](docs/tutorials/index.md).
 
 ## Documentation
 

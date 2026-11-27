@@ -1429,27 +1429,155 @@ impl CdeptApp {
         self.guide = Some(crate::guide::Guide::new(tutorial, baseline));
     }
 
-    /// Whether the guide's `fact` holds: what the widgets said in the frame before,
-    /// or what the guide works out from the project.
-    fn guide_fact(&self, ctx: &Context, baseline: Option<&std::path::Path>, fact: &str) -> bool {
-        let project = self.ctx.project.as_ref();
-        match fact {
-            // A project with a technology, other than the one the tutorial began with.
-            "project.created" => {
-                project.is_some_and(|p| p.tech_in_use && Some(p.root.as_path()) != baseline)
+    /// The facts of the current step that hold, and the checklists of its circuits.
+    fn guide_facts(&mut self, ctx: &Context, guide: &mut crate::guide::Guide) -> Vec<String> {
+        let Some(step) = guide.step() else {
+            return Vec::new();
+        };
+        let asked: Vec<String> = step.facts().cloned().collect();
+        let mut starts = asked.clone();
+        if step.start_button {
+            starts.push("project.started".into());
+        }
+
+        // The circuits: ask the schematics that are open.
+        let circuits = guide.asked_circuits();
+        let mut checks = Vec::new();
+        if !circuits.is_empty() {
+            let ids: Vec<DocId> = self.views.documents().map(|(id, _)| id).collect();
+            let mut probes = Vec::new();
+            for id in ids {
+                if let Some(view) = self
+                    .views
+                    .document_mut(id)
+                    .and_then(|d| d.as_schematic_mut())
+                    && let Some(probe) = view.probe()
+                {
+                    probes.push(probe.clone());
+                }
             }
-            // A library, cell or view of the PDK is selected.
-            "library.pdk_selected" => project.is_some_and(|p| {
-                let selection = &self.ctx.selection;
-                selection.cell.is_some()
-                    && selection.library.as_ref().is_some_and(|name| {
-                        let tech = libcdept::tech::file::tech_file(&p.root);
-                        p.libraries
-                            .iter()
-                            .any(|l| l.name == *name && l.defined_in == tech)
+            for id in circuits {
+                let Some(spec) = guide.tutorial.circuit(&id) else {
+                    continue;
+                };
+                let file = self
+                    .ctx
+                    .project
+                    .as_ref()
+                    .and_then(|p| crate::guide::view_file(p, &spec.view))
+                    .and_then(|f| f.canonicalize().ok());
+                let lines = probes
+                    .iter()
+                    .find(|p| file.is_some() && p.file.canonicalize().ok() == file)
+                    .map(|p| crate::guide::check(spec, &p.instances));
+                checks.push((id, lines));
+            }
+        }
+
+        let front = match self.active_docs.get(&WindowId::Main) {
+            Some(Tab::Document(id)) => Some(*id),
+            _ => None,
+        };
+        let documents = self
+            .views
+            .documents()
+            .map(|(id, view)| {
+                let name = self.layout.documents.get(id);
+                crate::guide::Open {
+                    name: match name {
+                        Some(doc) if doc.file.is_none() => {
+                            format!("{}/{}/{}", doc.library, doc.cell, doc.view)
+                        }
+                        _ => String::new(),
+                    },
+                    front: front == Some(id),
+                    modified: view.is_modified(),
+                }
+            })
+            .collect();
+        let started = guide.started().map(std::path::Path::to_path_buf);
+        let baseline = guide.baseline.clone();
+        let world = crate::guide::World {
+            project: self.ctx.project.as_ref(),
+            selected: (
+                self.ctx.selection.library.as_deref(),
+                self.ctx.selection.cell.as_deref(),
+            ),
+            documents,
+            baseline: baseline.as_deref(),
+            started: started.as_deref(),
+        };
+        let mut holding: Vec<String> = Vec::new();
+        for fact in starts {
+            let holds = if let Some(id) = fact.strip_prefix("circuit:") {
+                checks
+                    .iter()
+                    .any(|(known, lines): &(String, Option<Vec<_>>)| {
+                        known == id && lines.as_deref().is_some_and(crate::guide::passes)
                     })
-            }),
-            _ => crate::guide::has_fact(ctx, fact),
+            } else {
+                guide
+                    .cache
+                    .derived(&world, &fact)
+                    .unwrap_or_else(|| crate::guide::has_fact(ctx, &fact))
+            };
+            if holds {
+                holding.push(fact);
+            }
+        }
+        guide.checks = checks;
+        holding
+    }
+
+    /// The starting project the card asked for: scan the tutorial's PDK, make the
+    /// project, open it.
+    fn guide_start(&mut self, ctx: &Context, guide: &mut crate::guide::Guide) {
+        use crate::guide::Start;
+        match &mut guide.start {
+            Start::Asked => {
+                let wanted = guide.tutorial.pdk.clone().unwrap_or_default();
+                let search = crate::pdkscan::search(&self.ctx);
+                let found = crate::pdkscan::find_pdks(&search);
+                guide.start = match found.iter().find(|e| e.pdk().name == wanted) {
+                    Some(entry) => Start::Scanning(Box::new(crate::pdkscan::ScanJob::start(
+                        ctx,
+                        entry.pdk().clone(),
+                        true,
+                        Vec::new(),
+                    ))),
+                    None => Start::Failed(format!(
+                        "The PDK {wanted} was not found. Set PDK_ROOT before starting CDePT, or \
+                         add its folder in File > New Project… (\"Other folder\"): see the \
+                         tutorial 'Set up a project for a PDK'."
+                    )),
+                };
+            }
+            Start::Scanning(job) => {
+                if let Some((tech, catalog)) = job.poll() {
+                    let pdk = job.pdk.clone();
+                    let made = crate::guide::base_dir()
+                        .ok_or_else(|| "HOME is not set".to_string())
+                        .and_then(|base| {
+                            crate::guide::make_start(&guide.tutorial, &pdk, &tech, &catalog, &base)
+                        });
+                    guide.start = match made {
+                        Ok(dir) => {
+                            tracing::info!(
+                                target: "cdept::guide",
+                                "made the starting project {}",
+                                dir.display()
+                            );
+                            let dir = dir.canonicalize().unwrap_or(dir);
+                            self.ctx.window = WindowId::Main;
+                            self.ctx.request(Action::LoadProject(dir.clone()));
+                            Start::Made(dir)
+                        }
+                        Err(error) => Start::Failed(error),
+                    };
+                    ctx.request_repaint();
+                }
+            }
+            Start::None | Start::Made(_) | Start::Failed(_) => {}
         }
     }
 
@@ -1463,18 +1591,8 @@ impl CdeptApp {
         if !self.ctx.background.busy()
             && let Some(mut guide) = self.guide.take()
         {
-            let facts: Vec<String> = guide
-                .step()
-                .map(|step| {
-                    step.done_when
-                        .iter()
-                        .chain(&step.continue_needs)
-                        .chain(&step.lost_without)
-                        .filter(|f| self.guide_fact(ctx, guide.baseline.as_deref(), f))
-                        .cloned()
-                        .collect()
-                })
-                .unwrap_or_default();
+            self.guide_start(ctx, &mut guide);
+            let facts = self.guide_facts(ctx, &mut guide);
             if guide.update(facts) {
                 let step = guide.step().map_or("finished", |s| s.id.as_str());
                 tracing::info!(target: "cdept::guide", "tutorial step: {step}");
@@ -1485,6 +1603,16 @@ impl CdeptApp {
         if self.guide.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
+        let wanted = self
+            .guide
+            .as_ref()
+            .and_then(|g| g.step())
+            .map(|s| {
+                let points = s.point.iter().map(|p| p.at.clone());
+                s.facts().cloned().chain(points).collect()
+            })
+            .unwrap_or_default();
+        crate::guide::set_wanted(ctx, wanted);
         crate::guide::next_frame(ctx, self.guide.is_some());
     }
 
@@ -1718,10 +1846,13 @@ impl CdeptApp {
             });
             guide::anchor(ui, "menu.project", &project_menu.response);
 
-            ui.menu_button("Tools", |ui| {
-                if ui.button("Library Manager").clicked() {
+            let tools_menu = ui.menu_button("Tools", |ui| {
+                let manager = ui.button("Library Manager");
+                guide::anchor(ui, "menu.tools.library_manager", &manager);
+                if manager.clicked() {
                     self.ctx.request(Action::OpenTab(Tab::LibraryManager));
                 }
+                crate::views::newtest::menu(ui, &mut self.ctx, "menu.tools");
                 crate::import::tools_menu(ui, &mut self.ctx);
                 ui.separator();
                 for name in LAUNCHERS {
@@ -1741,12 +1872,19 @@ impl CdeptApp {
                     self.ctx.request(Action::DetectTools);
                 }
             });
+            guide::anchor(ui, "menu.tools", &tools_menu.response);
 
             ui.menu_button("Window", |ui| self.window_menu(ui, win));
 
             ui.menu_button("Help", |ui| {
                 ui.menu_button("Tutorials", |ui| {
+                    let mut series = String::new();
                     for tutorial in crate::guide::builtins() {
+                        if series != tutorial.series {
+                            series = tutorial.series.clone();
+                            let title = crate::guide::SERIES.iter().find(|(s, _)| *s == series);
+                            ui.strong(title.map_or("", |(_, title)| title));
+                        }
                         if ui
                             .button(&tutorial.title)
                             .on_hover_text(&tutorial.goal)

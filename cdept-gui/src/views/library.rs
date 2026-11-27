@@ -195,6 +195,8 @@ fn cell_items(ui: &mut Ui, project: &Project, lib: &Library, cell: &Cell, cmds: 
     {
         cmds.push(Cmd::Dialog(Dialog::new_view(&lib.name, cell)));
     }
+    let here = Selection::cell(&lib.name, &cell.name);
+    cmds.extend(super::newtest::menu_items(ui, Some(project), &here, "cell").map(Cmd::Dialog));
     if ui.button("Copy Cell…").clicked() {
         cmds.push(Cmd::Dialog(copy_cell_dialog(project, lib, cell)));
     }
@@ -475,6 +477,7 @@ impl View for LibrariesView {
                     library_hover(lib)
                 });
             let header = super::vcs::library_badge(ui, header, lib);
+            crate::guide::anchor(ui, &format!("tree:{}", lib.name), &header);
             if header.clicked() {
                 cmds.push(Cmd::Select(Selection::library(&lib.name)));
             }
@@ -533,6 +536,8 @@ fn cell_node(
                     None => response.on_hover_text(view_label(entry)),
                 };
                 response = super::vcs::view_badge(ui, response, entry);
+                let mark = format!("tree:{}/{}/{}", lib.name, cell.name, entry.name);
+                crate::guide::anchor(ui, &mark, &response);
                 if response.double_clicked() {
                     cmds.push(Cmd::Open(target));
                 } else if response.clicked() {
@@ -549,6 +554,7 @@ fn cell_node(
         ));
     }
     header = super::vcs::cell_badge(ui, header, cell);
+    crate::guide::anchor(ui, &format!("tree:{}/{}", lib.name, cell.name), &header);
     if header.clicked() {
         cmds.push(Cmd::Select(Selection::cell(&lib.name, &cell.name)));
     }
@@ -596,6 +602,7 @@ impl LibraryManagerView {
                         .selectable_label(selected, library_label(lib))
                         .on_hover_text(library_hover(lib));
                     let response = super::vcs::library_badge(ui, response, lib);
+                    crate::guide::anchor(ui, &format!("manager.library:{}", lib.name), &response);
                     if response.clicked() {
                         cmds.push(Cmd::Select(Selection::library(&lib.name)));
                     }
@@ -655,6 +662,7 @@ impl LibraryManagerView {
                             ));
                         }
                         response = super::vcs::cell_badge(ui, response, c);
+                        crate::guide::anchor(ui, &format!("manager.cell:{}", c.name), &response);
                         if response.clicked() {
                             cmds.push(Cmd::Select(Selection::cell(&lib.name, &c.name)));
                         }
@@ -680,6 +688,7 @@ impl LibraryManagerView {
                         response = response.on_hover_text(link_hover(u));
                     }
                     response = super::vcs::view_badge(ui, response, entry);
+                    crate::guide::anchor(ui, &format!("manager.view:{}", entry.name), &response);
                     if response.double_clicked() {
                         cmds.push(Cmd::Open(target));
                     } else if response.clicked() {
@@ -710,6 +719,7 @@ impl View for LibraryManagerView {
     }
 
     fn ui(&mut self, ui: &mut Ui, ctx: &mut AppCtx) {
+        crate::guide::fact(ui.ctx(), "manager.tab");
         ui.horizontal(|ui| {
             ui.label("Filter cells:");
             ui.text_edit_singleline(&mut self.filter);
@@ -776,27 +786,46 @@ impl View for LibraryManagerView {
         let has_project = ctx.project.is_some();
         let library = ctx.selected_library().filter(|l| writable(l));
         let cell = ctx.selected_cell();
-        if ui
-            .add_enabled(has_project, Button::new("+ Library"))
-            .clicked()
-        {
+        let add = ui.add_enabled(has_project, Button::new("+ Library"));
+        crate::guide::anchor(ui, "manager.new_library", &add);
+        if add.clicked() {
             cmds.push(Cmd::Dialog(Dialog::new_library()));
         }
-        if ui
+        let add = ui
             .add_enabled(library.is_some(), Button::new("+ Cell"))
-            .on_disabled_hover_text("Select a writable library")
-            .clicked()
+            .on_disabled_hover_text("Select a writable library");
+        crate::guide::anchor(ui, "manager.new_cell", &add);
+        if add.clicked()
             && let Some(lib) = library
         {
             cmds.push(Cmd::Dialog(Dialog::new_cell(lib)));
         }
-        if ui
+        let add = ui
             .add_enabled(library.is_some() && cell.is_some(), Button::new("+ View"))
-            .on_disabled_hover_text("Select a cell in a writable library")
-            .clicked()
+            .on_disabled_hover_text("Select a cell in a writable library");
+        crate::guide::anchor(ui, "manager.new_view", &add);
+        if add.clicked()
             && let (Some(lib), Some(cell)) = (library, cell)
         {
             cmds.push(Cmd::Dialog(Dialog::new_view(&lib.name, cell)));
+        }
+        if let Some(project) = &ctx.project {
+            let testbench = ui
+                .button("+ Testbench")
+                .on_hover_text("A testbench view from a test template");
+            crate::guide::anchor(ui, "toolbar.new_testbench", &testbench);
+            if testbench.clicked() {
+                cmds.extend(
+                    super::newtest::testbench_dialog(project, &ctx.selection).map(Cmd::Dialog),
+                );
+            }
+            let suite = ui
+                .button("+ Suite")
+                .on_hover_text("Testbenches run together, one table");
+            crate::guide::anchor(ui, "toolbar.new_suite", &suite);
+            if suite.clicked() {
+                cmds.extend(super::newtest::suite_dialog(project, &ctx.selection).map(Cmd::Dialog));
+            }
         }
         if ui
             .add_enabled(has_project, Button::new("⟳"))

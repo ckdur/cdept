@@ -2,6 +2,8 @@ schema = "cdept-tutorial"
 version = 1
 id = "pdk-setup"
 title = "Set up a project for a PDK"
+series = "setup"
+order = 1
 goal = """
 You make a CDePT project for a process design kit (PDK) and check what CDePT read
 out of it: where the tools' set-up files are, which model corners exist and which

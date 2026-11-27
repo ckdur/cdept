@@ -5,6 +5,14 @@ way to characterise a block (delay, DC transfer, power, AC response) with one co
 
 ## Create a suite
 
+In the GUI, **Tools > New Suite…** (also **+ Suite** in the Library Manager's toolbar and a
+cell's context menu): name the cell and the view, tick the testbenches (those of the cell,
+and of the library's other cells if asked for) and, if every test should run at the same
+ones, give corners and temperatures. **Create** writes the `suite.toml` and opens it in the
+Simulation tab; **Run suite** runs it. To change its tests later, edit the file.
+
+By hand:
+
 Add a view to a cell, for example `libs/cells/tb_inv/suite/suite.toml`:
 
 ```toml

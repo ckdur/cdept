@@ -1,12 +1,26 @@
 //! A tutorial being followed: which step it is at, and when it moves.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use super::circuit::Line;
+use super::facts::Cache;
 use super::tutorial::{Step, Tutorial};
+use crate::pdkscan::ScanJob;
 
 /// How many frames in a row a step's place must be gone before the guide goes back: a
 /// dialog that turns a page is gone for a frame.
 const LOST_FRAMES: u32 = 4;
+
+/// How far the starting project of the tutorial is.
+pub(crate) enum Start {
+    None,
+    /// The card's button was pressed.
+    Asked,
+    /// The PDK is being scanned.
+    Scanning(Box<ScanJob>),
+    Made(PathBuf),
+    Failed(String),
+}
 
 pub(crate) struct Guide {
     pub tutorial: Tutorial,
@@ -27,6 +41,15 @@ pub(crate) struct Guide {
     pub facts: Vec<String>,
     /// The card was closed.
     pub closed: bool,
+    /// The checklists of the circuits the step asks about: the circuit and its lines
+    /// (none while its schematic is not open).
+    pub checks: Vec<(String, Option<Vec<Line>>)>,
+    /// What was read from the disk for facts.
+    pub cache: Cache,
+    /// The starting project: asked for, being made, or made.
+    pub start: Start,
+    /// A picture shown large.
+    pub picture: Option<String>,
 }
 
 impl Guide {
@@ -42,7 +65,31 @@ impl Guide {
             baseline,
             facts: Vec::new(),
             closed: false,
+            checks: Vec::new(),
+            cache: Cache::default(),
+            start: Start::None,
+            picture: None,
         }
+    }
+
+    pub fn started(&self) -> Option<&Path> {
+        match &self.start {
+            Start::Made(dir) => Some(dir),
+            _ => None,
+        }
+    }
+
+    /// The circuits the current step asks about.
+    pub fn asked_circuits(&self) -> Vec<String> {
+        let mut ids: Vec<String> = Vec::new();
+        for fact in self.step().into_iter().flat_map(Step::facts) {
+            if let Some(id) = fact.strip_prefix("circuit:")
+                && !ids.iter().any(|known| known == id)
+            {
+                ids.push(id.to_string());
+            }
+        }
+        ids
     }
 
     pub fn at(&self) -> usize {
@@ -106,7 +153,9 @@ impl Guide {
         let Some(step) = self.step() else {
             return false;
         };
-        let done = step.done_when.iter().any(|f| self.holds(f));
+        // Making the starting project finishes the step that offers it.
+        let made = step.start_button && self.holds("project.started");
+        let done = made || step.done_when.iter().any(|f| self.holds(f));
         if done && !self.reviewing {
             self.advance();
             return true;
@@ -146,7 +195,7 @@ mod tests {
     use super::*;
 
     fn guide() -> Guide {
-        let text = "schema='cdept-tutorial'\nversion=1\nid='x'\ntitle='X'\ngoal='g'\nminutes=1\n\
+        let text = "schema='cdept-tutorial'\nversion=1\nid='x'\ntitle='X'\nseries='setup'\norder=1\ngoal='g'\nminutes=1\n\
             [[step]]\nid='open'\ntitle='Open'\ntext='t'\ndone_when=['wizard.open']\n\
             [[step]]\nid='type'\ntitle='Type'\ntext='t'\ncontinue_button=true\n\
             continue_needs=['wizard.folder_ok']\nlost_without=['wizard.open']\nback_to='open'\n\

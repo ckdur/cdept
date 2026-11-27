@@ -1,0 +1,3 @@
+# Unity-gain step response of the OTA (tutorial "OTA 4"), from the project template
+# templates/ota_step.toml.
+template = "ota_step"

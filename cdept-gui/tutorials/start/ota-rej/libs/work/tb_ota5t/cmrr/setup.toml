@@ -1,0 +1,18 @@
+# CMRR of the OTA (tutorial "OTA 6").
+template = "psrr_cmrr"
+
+[template_args]
+mode = "cmrr"
+stim = "cm"
+f = "1k"
+adm_db = "35.2"
+rejection_min = "40"
+
+[variables]
+vdd = "1.2"
+vcm = "0.42"
+ibias = "20u"
+cl = "100f"
+ac_dm = "0"
+ac_cm = "1"
+ac_vdd = "0"

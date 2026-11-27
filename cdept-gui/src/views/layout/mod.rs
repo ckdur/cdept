@@ -8,6 +8,7 @@
 
 mod checks;
 mod disk;
+mod guide;
 mod inplace;
 mod keys;
 mod linking;
@@ -195,6 +196,8 @@ pub struct LayoutView {
     nudged: Option<Instant>,
     /// DRC and LVS runs and their results.
     checks: checks::Checks,
+    /// What a running tutorial asked about the layout (`guide`).
+    guide: guide::Probe,
     /// Editing in place (see `inplace`): the external cell edited, the external files
     /// with unsaved changes, the locks last sent (with the helper's epoch), and the
     /// files saves wrote that other tabs have not heard of yet.
@@ -286,6 +289,7 @@ impl LayoutView {
             refresh_at: None,
             nudged: None,
             checks: checks::Checks::default(),
+            guide: guide::Probe::default(),
             in_place: None,
             edited: Vec::new(),
             locks_sent: None,
@@ -922,6 +926,7 @@ impl LayoutView {
     fn drawing(&mut self, ui: &mut Ui) {
         let area = ui.available_rect_before_wrap();
         let response = ui.allocate_rect(area, Sense::click_and_drag());
+        crate::guide::anchor(ui, "layout.picture", &response);
 
         // Whole pixels inside the area: one frame pixel is one screen pixel.
         let scale = ui.ctx().pixels_per_point();
@@ -1221,6 +1226,7 @@ impl View for LayoutView {
 
     fn ui(&mut self, ui: &mut Ui, ctx: &mut AppCtx) {
         self.sync();
+        self.tell_guide(ui.ctx());
         if let Some(at) = self.refresh_at {
             if Instant::now() >= at {
                 self.refresh_at = None;
@@ -1306,7 +1312,7 @@ impl View for LayoutView {
     fn menus(&mut self, ui: &mut Ui, ctx: &mut AppCtx) {
         let ready = self.ready();
         let editable = ready && self.editable;
-        ui.menu_button("Layout", |ui| {
+        let layout_menu = ui.menu_button("Layout", |ui| {
             ui.add_enabled_ui(ready, |ui| {
                 if ui
                     .add_enabled(
@@ -1319,11 +1325,11 @@ impl View for LayoutView {
                     self.place = Some(place::PlacePicker::default());
                     ui.close();
                 }
-                if ui
+                let library_cell = ui
                     .add_enabled(editable, egui::Button::new("Place Library Cell…"))
-                    .on_hover_text("Place a cell or PCell of KLayout's libraries (PDK, Basic)")
-                    .clicked()
-                {
+                    .on_hover_text("Place a cell or PCell of KLayout's libraries (PDK, Basic)");
+                crate::guide::anchor(ui, "menu.layout.place_library", &library_cell);
+                if library_cell.clicked() {
                     self.open_library_picker();
                     ui.close();
                 }
@@ -1391,6 +1397,7 @@ impl View for LayoutView {
                 ui.close();
             }
         });
+        crate::guide::anchor(ui, "menu.layout", &layout_menu.response);
     }
 
     fn toolbar(&mut self, ui: &mut Ui, _ctx: &mut AppCtx) {
@@ -1400,11 +1407,13 @@ impl View for LayoutView {
             for (name, label, hover) in MODES {
                 let usable = editable || name == "select" || name == "ruler";
                 let on = self.mode == name;
-                if ui
+                let button = ui
                     .add_enabled(usable, egui::Button::new(label).selected(on))
-                    .on_hover_text(hover)
-                    .clicked()
-                {
+                    .on_hover_text(hover);
+                if !on {
+                    crate::guide::anchor(ui, &format!("layout.mode.{name}"), &button);
+                }
+                if button.clicked() {
                     self.set_mode(name);
                 }
             }

@@ -18,6 +18,7 @@ from . import properties
 from . import lef
 from . import link
 from . import pins
+from . import tutorial
 from . import pcells
 from .editor import Editor, _message
 from .markers import Markers
@@ -499,6 +500,10 @@ class Server:
                                                "zoom": bool(p.get("zoom"))})
 
     # -- pins (pins.py, docs/LINKING.md §9) -------------------------------------------
+
+    def m_tutorial_probe(self, p):
+        self._doc()
+        return tutorial.probe(self.editor, p.get("queries") or [])
 
     def m_pins_list(self, p):
         return pins.listing(self.editor)

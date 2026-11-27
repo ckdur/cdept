@@ -458,7 +458,7 @@ pub(super) fn sweeps_ui(ui: &mut Ui, form: &mut Form) {
     if let Some(i) = remove {
         form.sweeps.remove(i);
     }
-    if ui.small_button("＋ Add sweep").clicked() {
+    if ui.small_button("+ Add sweep").clicked() {
         form.sweeps.push(SweepForm::default());
     }
 }
@@ -487,10 +487,11 @@ pub(super) fn mc_ui(ui: &mut Ui, form: &mut Form, corners: &[String], note: Opti
         }
         (inherited, _) => {
             ui.horizontal(|ui| {
-                ui.checkbox(
+                let enable = ui.checkbox(
                     &mut form.mc,
                     "Monte Carlo  ([montecarlo]: seeded runs instead of the corner grid)",
                 );
+                crate::guide::anchor(ui, "sim.mc.enable", &enable);
                 if inherited.is_some() && form.mc && ui.small_button("Use the template's").clicked()
                 {
                     form.mc = false;
@@ -503,18 +504,21 @@ pub(super) fn mc_ui(ui: &mut Ui, form: &mut Form, corners: &[String], note: Opti
         egui::Grid::new("sim-mc").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
             ui.label("Runs / seed");
             ui.horizontal(|ui| {
-                ui.add(TextEdit::singleline(&mut form.mc_runs).desired_width(60.0));
+                let runs = ui.add(TextEdit::singleline(&mut form.mc_runs).desired_width(60.0));
+                crate::guide::anchor(ui, "sim.mc.runs", &runs);
                 ui.add(TextEdit::singleline(&mut form.mc_seed).desired_width(90.0));
             });
             ui.end_row();
             ui.label("Draws").on_hover_text(
                 "process: global variation (the statistical corner), mismatch: per device, both: together",
             );
-            ComboBox::from_id_salt("sim-mc-mode").selected_text(form.mc_mode.name()).show_ui(ui, |ui| {
+            let draws = ComboBox::from_id_salt("sim-mc-mode").selected_text(form.mc_mode.name()).show_ui(ui, |ui| {
                 for mode in [McMode::Process, McMode::Mismatch, McMode::Both] {
-                    ui.selectable_value(&mut form.mc_mode, mode, mode.name());
+                    let item = ui.selectable_value(&mut form.mc_mode, mode, mode.name());
+                    crate::guide::anchor(ui, &format!("sim.mc.mode.{}", mode.name()), &item);
                 }
             });
+            crate::guide::anchor(ui, "sim.mc.mode", &draws.response);
             ui.end_row();
             let mode = form.mc_mode;
             for (label, hint, value, used) in [

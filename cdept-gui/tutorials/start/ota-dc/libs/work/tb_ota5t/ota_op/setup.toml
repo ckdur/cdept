@@ -1,0 +1,8 @@
+# Operating point of the OTA (tutorial "OTA 2"), from the project template
+# templates/ota_op.toml.
+template = "ota_op"
+
+[variables]
+vcm = "0.42"
+ibias = "20u"
+cl = "100f"

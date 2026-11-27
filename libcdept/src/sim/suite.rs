@@ -172,6 +172,88 @@ pub fn open(project: &Project, library: &str, cell: &str, view: &str) -> Result<
     Suite::load(&file)
 }
 
+/// Create the suite view `library/cell/view` with `suite`'s description, corners,
+/// temperatures and tests. Every test has to be a testbench view that exists. Returns
+/// the `suite.toml`.
+pub fn create(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: &str,
+    suite: &Suite,
+) -> Result<PathBuf> {
+    let lib = project
+        .library(library)
+        .ok_or_else(|| eyre!("no library '{library}'"))?;
+    if lib.read_only {
+        bail!("library '{library}' is read-only");
+    }
+    if lib.layout != crate::library::LibraryLayout::Cells {
+        bail!("library '{library}' is not a cells library (views live in <cell>/<view>/)");
+    }
+    crate::library::validate_name("cell", cell)?;
+    crate::library::validate_name("view", view)?;
+    let dir = lib.path.join(cell).join(view);
+    if dir.exists() {
+        bail!("{library}/{cell} already has a view '{view}'");
+    }
+    if suite.tests.is_empty() {
+        bail!("choose at least one testbench for the suite");
+    }
+    for test in &suite.tests {
+        let (l, c, v) = test.resolve(library, cell);
+        let entry = project
+            .library(&l)
+            .and_then(|l| l.cell(&c))
+            .and_then(|c| c.entry(&v))
+            .ok_or_else(|| eyre!("no view {l}/{c}/{v}"))?;
+        if !entry.path.join(super::setup::SETUP_FILE).is_file() {
+            bail!("{l}/{c}/{v} is not a testbench (no setup.toml)");
+        }
+    }
+    let text = suite_text(suite);
+    // What is written must load.
+    Suite::parse(&text).wrap_err("the new suite.toml does not load")?;
+    std::fs::create_dir_all(&dir).wrap_err_with(|| format!("cannot create {}", dir.display()))?;
+    let file = dir.join(SUITE_FILE);
+    std::fs::write(&file, text).wrap_err_with(|| format!("cannot write {}", file.display()))?;
+    Ok(file)
+}
+
+/// The text of a new `suite.toml`: only what is set.
+fn suite_text(suite: &Suite) -> String {
+    let quoted = |s: &str| toml::Value::String(s.to_string()).to_string();
+    let mut out = String::from("# Testbenches run together, one table (docs/TESTS.md).\n");
+    if !suite.description.is_empty() {
+        out += &format!("description = {}\n", quoted(&suite.description));
+    }
+    if !suite.corners.is_empty() {
+        let list: Vec<String> = suite.corners.iter().map(|c| quoted(c)).collect();
+        out += &format!(
+            "# replaces the corners of every test\ncorners = [{}]\n",
+            list.join(", ")
+        );
+    }
+    if !suite.temperatures.is_empty() {
+        let list: Vec<String> = suite
+            .temperatures
+            .iter()
+            .map(|t| super::setup::fmt_num(*t))
+            .collect();
+        out += &format!(
+            "# replaces the temperatures of every test\ntemperatures = [{}]\n",
+            list.join(", ")
+        );
+    }
+    for test in &suite.tests {
+        out += &format!("\n[[test]]\nview = {}\n", quoted(&test.view));
+        if !test.name.is_empty() {
+            out += &format!("name = {}\n", quoted(&test.name));
+        }
+    }
+    out
+}
+
 /// The suite views of a cell.
 pub fn suites_of(project: &Project, library: &str, cell: &str) -> Vec<String> {
     project
@@ -736,6 +818,24 @@ pub fn format_report(report: &SuiteReport, all_columns: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_suite_file_says_only_what_is_set() {
+        let mut suite = Suite {
+            tests: vec![TestRef {
+                view: "dc_op".into(),
+                name: String::new(),
+            }],
+            ..Default::default()
+        };
+        let text = suite_text(&suite);
+        assert!(!text.contains("corners") && !text.contains("description"));
+        assert_eq!(Suite::parse(&text).unwrap(), suite);
+        suite.description = "a \"quoted\" one".into();
+        suite.corners = vec!["tt".into(), "ss".into()];
+        suite.temperatures = vec![-40.0, 27.0];
+        assert_eq!(Suite::parse(&suite_text(&suite)).unwrap(), suite);
+    }
     use crate::sim::results::{PointRecord, SpecRecord, Status};
     use std::collections::BTreeMap;
 

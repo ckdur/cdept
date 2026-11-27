@@ -1,0 +1,118 @@
+# Making testbenches and suites from the window (views/newtest.rs) on a copy of
+# examples/ihp-inv: a testbench from a template around a device under test (run, so the
+# starter schematic is proven), one with an empty schematic to draw in, one that
+# netlists another cell's schematic, the refusal of a view that exists, and a suite.
+#
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice \
+#   CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=ihp-inv \
+#     cdept-gui/scripts/run.sh cdept-gui/scripts/new-testbench.script
+#
+# A tutorial is started only so that the widgets say where they are: `guide press`
+# clicks the real menu entries and buttons.
+#
+# `sim <verb> …` (views/newtest.rs):
+#   new_testbench | new_suite          open the dialog (as the menu entry does)
+#   new_set <field> <value>            a field of the open dialog
+#   new_expect <field> <value>         what the dialog has
+#   new_expect_error <text>            the dialog stayed open with this error
+
+panel Library Manager
+wait 0.5
+guide start pdk-setup
+wait 0.3
+
+# 1. From the Tools menu, for the selected cell inv: it has a symbol, so tb_inv and inv
+#    as the device under test are proposed.
+select cells inv
+guide press menu.tools
+guide press menu.tools.new_testbench
+sim new_expect cell tb_inv
+sim new_expect dut cells/inv
+sim new_set cell tb_try
+sim new_set template tran_delay
+sim new_set source dut
+sim new_set param.tpd_max 200p
+wait 0.5
+sim new_expect view tran_delay
+screenshot /tmp/cdept-new-testbench-dialog.png
+wait 0.5
+guide press dialog.confirm
+expect_view cells tb_try tran_delay
+expect_view cells tb_try schematic
+sim expect_target cells/tb_try/tran_delay
+sim template_expect tran_delay
+wait 0.5
+screenshot /tmp/cdept-new-testbench-made.png
+guide press sim.run
+wait 0.5
+sim wait
+sim expect_state finished
+sim expect_no_problem
+sim expect_points 1
+sim expect_rows 1 PASS
+wait 0.5
+screenshot /tmp/cdept-new-testbench-run.png
+
+# 2. The same view again is refused, in the dialog.
+select cells tb_try
+sim new_testbench
+sim new_set view tran_delay
+wait 0.5
+guide press dialog.confirm
+sim new_expect_error already has a view
+wait 0.5
+guide press dialog.cancel
+
+# 3. An empty schematic to draw in, and one that netlists another cell's schematic.
+sim new_testbench
+sim new_set cell tb_draw
+sim new_set template ac_response
+sim new_set source empty
+wait 0.5
+guide press dialog.confirm
+expect_view cells tb_draw ac_response
+expect_view cells tb_draw schematic
+
+sim new_testbench
+sim new_set cell tb_reuse
+sim new_set source other
+sim new_set other cells/tb_ota5t
+sim new_set template ac_response
+wait 0.5
+guide press dialog.confirm
+expect_view cells tb_reuse ac_response
+sim template_expect_file schematic = "cells/tb_ota5t"
+
+# 4. A suite of two of the OTA's testbenches at one corner and temperature, from the
+#    Library Manager's toolbar.
+panel Library Manager
+select cells ota5t
+wait 0.3
+guide press toolbar.new_suite
+sim new_expect cell ota5t
+sim new_expect view suite2
+sim new_expect tests 7
+sim new_set test ota5t/ac_cload off
+sim new_set test ota5t/ac_open off
+sim new_set test ota5t/cmrr off
+sim new_set test ota5t/psrr off
+sim new_set test ota5t/tran_step off
+sim new_set view quick
+sim new_set description Operating point and power, one point
+sim new_set corners tt
+sim new_set temperatures 27
+sim new_expect tests 2
+wait 0.5
+screenshot /tmp/cdept-new-suite-dialog.png
+wait 0.5
+guide press dialog.confirm
+expect_view cells ota5t quick
+wait 0.5
+guide press sim.suite.run
+wait 0.5
+sim suite_wait
+sim suite_expect pass
+sim suite_expect_rows 2
+wait 0.5
+screenshot /tmp/cdept-new-suite-run.png
+quit

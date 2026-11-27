@@ -1,0 +1,333 @@
+schema = "cdept-tutorial"
+version = 1
+id = "inv-symbol"
+title = "Inverter 3: the symbol and a testbench"
+series = "inverter"
+order = 3
+start = ["base", "inv-sch"]
+pdk = "ihp-sg13g2"
+goal = """
+You give the inverter a symbol, so that it can be used as a part in another
+schematic, and draw its testbench: the inverter with a supply, an input signal and a
+load. This is how every analog block is simulated: the block alone, in a circuit that
+plays the rest of the chip.
+"""
+minutes = 20
+before = """
+- [Inverter 2](inv-schematic.md), or let the guide make the starting project.
+- CDePT built with the xschem helper (`cargo build -p cdept-xschem`).
+"""
+
+[[circuit]]
+id = "dut"
+view = "work/tb_inv/schematic"
+[[circuit.part]]
+what = "the inverter"
+symbol = "inv"
+
+[[circuit]]
+id = "sources"
+view = "work/tb_inv/schematic"
+[[circuit.part]]
+what = "the inverter"
+symbol = "inv"
+[[circuit.part]]
+what = "the supply source Vdd"
+symbol = "vsource"
+with = { name = "Vdd", value = "{vdd}" }
+[[circuit.part]]
+what = "the input source Vin"
+symbol = "vsource"
+with = { name = "Vin", value = "pulse(0 {vdd} 200p 50p 50p 400p 1n)" }
+[[circuit.part]]
+what = "the load capacitor CL"
+symbol = "capa"
+with = { name = "CL", value = "10f" }
+
+[[circuit]]
+id = "testbench"
+view = "work/tb_inv/schematic"
+[[circuit.part]]
+what = "the inverter"
+symbol = "inv"
+pins = { A = "in", Y = "out", VDD = "VDD", VSS = "0|GND" }
+[[circuit.part]]
+what = "the supply source Vdd"
+symbol = "vsource"
+with = { name = "Vdd", value = "{vdd}" }
+pins = { p = "VDD", m = "0|GND" }
+[[circuit.part]]
+what = "the input source Vin"
+symbol = "vsource"
+with = { name = "Vin", value = "pulse(0 {vdd} 200p 50p 50p 400p 1n)" }
+pins = { p = "in", m = "0|GND" }
+[[circuit.part]]
+what = "the load capacitor CL"
+symbol = "capa"
+with = { name = "CL", value = "10f" }
+pins = { p = "out", m = "0|GND" }
+swap = ["p", "m"]
+
+[[step]]
+id = "start"
+title = "Get the project"
+text = """
+Either let the guide make the starting project (the inverter of "Inverter 2" is drawn
+in it), or open your own project from "Inverter 2" and press Continue.
+"""
+start_button = true
+continue_button = true
+continue_needs = ["view:work/inv/schematic"]
+needs_hint = "Open a project that has work/inv/schematic."
+
+[[step]]
+id = "open"
+title = "Open the schematic of inv"
+text = """
+In the Libraries panel on the left, open "work", then "inv", and double-click
+"schematic".
+"""
+point = [
+    { at = "tree:work/inv/schematic", say = "Double-click schematic" },
+    { at = "tree:work/inv", say = "Open inv" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["open:work/inv/schematic"]
+
+[[step]]
+id = "make-symbol"
+title = "Make the symbol"
+text = """
+A symbol is the small drawing that stands for a cell inside another schematic: a box
+with the cell's pins. xschem can draw it from the pins of the schematic.
+
+With the pointer over the drawing, press a (or open the Symbol menu and click "Make
+symbol from schematic"). xschem asks "do you want to make symbol view?": press OK.
+
+CDePT puts the symbol into the cell's own "symbol" view, and the symbol names the
+schematic it belongs to.
+"""
+point = [
+    { at = "xschem.button:OK", say = "Click OK" },
+    { at = "xschem.menu:Make symbol from schematic", say = "Click \"Make symbol from schematic\"" },
+    { at = "xschem.menu:Symbol", say = "Open the Symbol menu (or press a over the drawing)" },
+]
+done_when = ["pins:work/inv=A,Y,VDD,VSS"]
+lost_without = ["open:work/inv/schematic", "view:work/inv/symbol"]
+back_to = "open"
+lost_says = "The schematic of inv is not in front. Open it again."
+
+[[step]]
+id = "see-symbol"
+title = "Look at the symbol"
+text = """
+In the Libraries panel, double-click "symbol" under inv.
+
+The input A is on the left; the output Y and the supplies VDD and VSS are on the
+right. Their names and directions come from the pins you drew. "@symname" shows the
+cell's name and "@name" the name each copy gets (x1, x2, …) when it is placed.
+
+The order of the pins in the netlist is the symbol's, so netlists use the symbol
+from now on. If you add or rename a pin in the schematic, make the symbol again.
+"""
+picture = "inv-symbol"
+point = [
+    { at = "tree:work/inv/symbol", say = "Double-click symbol" },
+    { at = "tree:work/inv", say = "Open inv" },
+]
+continue_button = true
+continue_needs = ["view:work/inv/symbol"]
+
+[[step]]
+id = "manager"
+title = "A cell for the testbench"
+text = """
+A testbench is a design too: it gets a cell of its own. By convention it is named
+after the cell it tests, with tb_ in front.
+
+Open the Library Manager with Tools > Library Manager.
+"""
+point = [
+    { at = "menu.tools.library_manager", say = "Click \"Library Manager\"" },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["manager.tab", "view:work/tb_inv/schematic"]
+
+[[step]]
+id = "new-cell"
+title = "Make the cell tb_inv"
+text = """
+Click the library "work" in the first column, then press "+ Cell" in the toolbar.
+"""
+point = [{ at = "manager.new_cell", say = "Select work, then click \"+ Cell\"" }]
+done_when = ["dialog.new_cell", "view:work/tb_inv/schematic"]
+lost_without = ["manager.tab"]
+back_to = "manager"
+lost_says = "The Library Manager is not in front. Open it again."
+
+[[step]]
+id = "name-cell"
+title = "Name it tb_inv"
+text = """
+Type this as the name, keep the first view "xschem schematic", and press Create:
+
+    tb_inv
+"""
+point = [{ at = "dialog.field:Name", say = "Type tb_inv, then press Create" }]
+done_when = ["view:work/tb_inv/schematic"]
+lost_without = ["dialog.new_cell"]
+back_to = "new-cell"
+lost_says = "The window was closed without making the cell \"tb_inv\"."
+
+[[step]]
+id = "open-tb"
+title = "Open the testbench schematic"
+text = """
+Double-click the view "schematic" of tb_inv. Then draw the testbench below. This is
+what it will look like:
+"""
+picture = "inv-testbench"
+point = [
+    { at = "manager.view:schematic", say = "Double-click schematic" },
+    { at = "manager.cell:tb_inv", say = "Click tb_inv" },
+    { at = "tree:work/tb_inv/schematic", say = "Or double-click it here" },
+]
+done_when = ["open:work/tb_inv/schematic"]
+
+[[step]]
+id = "dut"
+title = "Place your inverter"
+text = """
+Press Insert over the drawing. In the picker choose the library work, the cell inv
+and the view symbol, then press Insert. Click in the upper middle of the drawing.
+
+You are now using your own cell as a part: this is the hierarchy. The testbench only
+sees the four pins; what is inside comes from the schematic of inv.
+"""
+point = [
+    { at = "xschem.picker.view:symbol", say = "Select symbol, then press Insert" },
+    { at = "xschem.picker.cell:inv", say = "Click inv" },
+    { at = "xschem.picker.library:work", say = "Click work" },
+]
+done_when = ["circuit:dut"]
+continue_button = true
+continue_needs = ["circuit:dut"]
+
+[[step]]
+id = "sources"
+title = "Add the sources and the load"
+text = """
+Press Insert, choose "xschem devices" in the Library column, and place:
+
+- two voltage sources (vsource), below the inverter;
+- one capacitor (capa), below the output.
+
+Then set each one: click it, press q, change the text and press OK.
+
+The supply. Name it Vdd; its voltage is the design variable vdd, which the testbench
+sets (1.2 V for this PDK's low-voltage transistors):
+
+    name=Vdd value={vdd} savecurrent=false
+
+The input. A pulse source: from 0 to vdd after 200 ps, 50 ps to rise and to fall,
+400 ps high, repeated every 1 ns. Keep the quotes, the value has spaces:
+
+    name=Vin value="pulse(0 {vdd} 200p 50p 50p 400p 1n)" savecurrent=false
+
+The load. 10 fF stands for the gates this inverter would drive, a few small
+transistors:
+
+    name=CL value=10f m=1
+
+The names matter: the test templates of the next tutorials drive Vin.
+"""
+point = [
+    { at = "xschem.button:OK", say = "Change the text, then press OK" },
+    { at = "xschem.picker.cell:vsource", say = "vsource (and later capa): click it, then Insert" },
+    { at = "xschem.picker.library:devices", say = "Click xschem devices" },
+]
+done_when = ["circuit:sources"]
+continue_button = true
+continue_needs = ["circuit:sources"]
+
+[[step]]
+id = "connect"
+title = "Connect it with labels and grounds"
+text = """
+Wires with the same name are connected, so you need no long wires: put a label on
+each point that belongs to a net.
+
+- Alt+L places a label (lab_pin) at the pointer. Put it right on a pin (the little
+  square), or draw a short wire from the pin (w) and put the label at its end. Then
+  select it, press q and set lab=. Shift+F mirrors a label while you place it.
+- The nets are: in (input of the inverter and top of Vin), out (output Y and top of
+  CL) and VDD (the inverter's VDD and top of Vdd).
+- Every other pin goes to ground: insert gnd from "xschem devices" under the bottom
+  of each source and of the capacitor, and on the inverter's VSS. Ground is net 0,
+  the reference every voltage is measured from.
+
+The names are in small letters except VDD. The list below shows what is missing.
+"""
+picture = "inv-testbench"
+point = [
+    { at = "xschem.button:OK", say = "Set lab=, then press OK" },
+    { at = "xschem.picker.cell:gnd", say = "Click gnd, then press Insert" },
+    { at = "xschem.picker.library:devices", say = "Click xschem devices" },
+]
+done_when = ["circuit:testbench"]
+continue_button = true
+continue_needs = ["circuit:testbench"]
+
+[[step]]
+id = "save"
+title = "Save"
+text = """
+Press Ctrl+S over the drawing and answer Yes.
+"""
+point = [{ at = "xschem.button:Yes", say = "Click Yes" }]
+continue_button = true
+continue_needs = ["circuit:testbench", "saved:work/tb_inv/schematic"]
+needs_hint = "The testbench must be complete and saved (Ctrl+S)."
+
+[[step]]
+id = "netlist"
+title = "Netlist the hierarchy"
+text = """
+In the menu bar, open Cell > Netlist to View > SPICE.
+"""
+point = [
+    { at = "menu.cell.netlist.SPICE", say = "Click SPICE" },
+    { at = "menu.cell.netlist", say = "Netlist to View" },
+    { at = "menu.cell", say = "Open the Cell menu" },
+]
+done_when = ["view:work/tb_inv/netlist"]
+lost_without = ["open:work/tb_inv/schematic"]
+back_to = "open-tb"
+lost_says = "The testbench schematic is not in front. Open it again."
+
+[[step]]
+id = "read"
+title = "Read it"
+text = """
+Open the new "netlist" view of tb_inv from the Libraries panel. It has the testbench:
+
+    x1 VDD in out 0 inv
+    Vdd VDD 0 {vdd}
+    Vin in 0 pulse(0 {vdd} 200p 50p 50p 400p 1n)
+    CL out 0 10f
+
+and below it the inverter's own netlist, as a subcircuit:
+
+    .subckt inv VDD A Y VSS
+
+The line x1 connects the nets VDD, in, out and 0 to the subcircuit's pins in that
+order. {vdd} stays as it is: the testbench setup gives it a value when you
+simulate.
+
+Next: "Inverter 4: the first simulation".
+"""
+point = [
+    { at = "tree:work/tb_inv/netlist", say = "Double-click netlist" },
+    { at = "tree:work/tb_inv", say = "Open tb_inv" },
+]
+continue_button = true

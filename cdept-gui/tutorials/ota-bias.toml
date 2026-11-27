@@ -1,0 +1,204 @@
+schema = "cdept-tutorial"
+version = 1
+id = "ota-bias"
+title = "OTA 2: the operating point"
+series = "ota"
+order = 2
+start = ["base", "ota-sch", "ota-sym", "ota-tb"]
+pdk = "ihp-sg13g2"
+goal = """
+You make a testbench for the OTA's DC operating point, run it, and check the bias:
+the currents, the node voltages, and that all six transistors are in saturation.
+"""
+minutes = 20
+before = """
+- [OTA 1](ota-schematic.md) to know the circuit (the starting project has it).
+- ngspice and the xschem helper.
+"""
+
+[[step]]
+id = "start"
+title = "Get the project"
+text = """
+Make the starting project. It has the OTA (schematic, and a symbol drawn as the
+amplifier triangle) and two testbench schematics.
+"""
+start_button = true
+continue_button = true
+continue_needs = ["view:work/tb_ota5t/schematic"]
+needs_hint = "Open a project that has work/tb_ota5t/schematic."
+
+[[step]]
+id = "bench"
+title = "The open-loop testbench"
+text = """
+tb_ota5t is the testbench you will use most. Around the OTA (xdut):
+
+- Vdd, the 1.2 V supply, and Ibias, which pulls 20 µA out of ibias.
+- Vcm holds inp at the common-mode voltage.
+- At DC the inductor Lfb (1 TH) is a short: out is tied to inn. This closes the loop,
+  so the output settles by itself at about the input voltage. Without it, a gain of
+  60 would turn a few millivolts of offset into a railed output.
+- For AC, Lfb is open and the capacitor Cin (1 F) a short: inn follows the source
+  Vin. The loop is open exactly when you want to measure the open-loop gain.
+
+Sizes like 1 TH and 1 F exist only in a simulator; they do this job well.
+
+The values in braces, {vdd}, {vcm}, {ibias}, {cl}, {ac_dm}..., are design variables:
+each testbench view gives them values.
+"""
+picture = "ota-tb-open"
+continue_button = true
+
+[[step]]
+id = "select"
+title = "Select the testbench cell"
+text = """
+In the Libraries panel, open "work" and click the cell "tb_ota5t". A testbench view
+made in this cell simulates this cell's schematic.
+"""
+point = [
+    { at = "tree:work/tb_ota5t", say = "Click tb_ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["selected:work/tb_ota5t", "view:work/tb_ota5t/ota_op"]
+
+[[step]]
+id = "new"
+title = "New testbench"
+text = """
+Open Tools > New Testbench…. A testbench view is a setup file: which template, which
+corners, what to measure and which limits (specs) to check.
+"""
+point = [
+    { at = "menu.tools.new_testbench", say = "Click \"New Testbench…\"" },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["dialog.new_testbench", "view:work/tb_ota5t/ota_op"]
+
+[[step]]
+id = "template"
+title = "Pick the template ota_op"
+text = """
+In "Template", choose ota_op (scroll the list). It is a project template, kept in the
+project's templates/ folder: a measurement written once for this circuit. It saves
+the operating point of M1 to M6 and computes sat_margin, the smallest vds - vdss
+over the six (vdss is the saturation voltage of this PDK's model). A transistor with a
+negative margin has left saturation.
+"""
+point = [
+    { at = "dialog.new_testbench.template.ota_op", say = "Choose ota_op" },
+    { at = "dialog.new_testbench.template", say = "Open the Template list" },
+]
+done_when = ["dialog.new_testbench.template.ota_op", "view:work/tb_ota5t/ota_op"]
+lost_without = ["dialog.new_testbench"]
+back_to = "new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "create"
+title = "Create it"
+text = """
+The cell must be tb_ota5t and the view ota_op. The parameters are the limits:
+saturation margin at least 30 mV, output 0.40 to 0.45 V, supply current at most
+60 µA. Press "Create". The new view opens in the Simulation tab.
+"""
+point = [{ at = "dialog.confirm", say = "Click \"Create\"" }]
+done_when = ["view:work/tb_ota5t/ota_op"]
+lost_without = ["dialog.new_testbench"]
+back_to = "new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "variables"
+title = "Add the design variables, and save"
+text = """
+The template gives vdd and the AC sources (all 0 here). Three values are design
+choices and yours to give. In the Simulation tab, click the heading "Test template" to
+fold it away, then under "Variables" press "+ Add" three times and fill in the new
+rows:
+
+- vcm = 0.42  (the input common-mode voltage)
+- ibias = 20u  (the bias current)
+- cl = 100f  (the load capacitance)
+
+Then press "Save".
+"""
+point = [
+    { at = "sim.var.add", say = "+ Add, three times" },
+    { at = "sim.template", say = "Fold the Test template" },
+]
+continue_button = true
+continue_needs = [
+    "setup:work/tb_ota5t/ota_op:variables.vcm~0.42",
+    "setup:work/tb_ota5t/ota_op:variables.ibias~20u",
+    "setup:work/tb_ota5t/ota_op:variables.cl~100f",
+]
+needs_hint = "Add vcm, ibias and cl, then press Save."
+
+[[step]]
+id = "run"
+title = "Run"
+text = """
+Press "Run". CDePT netlists the testbench with xschem, adds the models of the typical
+corner and runs ngspice. It takes a second or two.
+"""
+point = [{ at = "sim.run", say = "Click \"Run\"" }]
+done_when = ["sim.ran:work/tb_ota5t/ota_op"]
+
+[[step]]
+id = "read"
+title = "Read the results"
+text = """
+Fold "Setup" away (click its heading) to see the results; scroll if needed. Expect:
+
+- vout 0.4225 V: the loop holds the output near vcm = 0.42 V. The 2.5 mV left over is
+  the OTA's own (systematic) offset.
+- isupply 39.8 µA: 20 µA in the diode M6 and 19.8 µA of tail current in M5. A mirror
+  copies well when both drains sit at similar voltages; here M5's vds is 0.39 V and
+  M6's 0.46 V.
+- tail 0.815 V: it sits one |VGS| of the PMOS pair above the inputs.
+- sat_margin 127 mV: every transistor is saturated. The smallest is M4's: its vds
+  is 0.42 V and its vdss 0.30 V.
+
+All three specs pass. This is one corner, tt, at 27 °C. "OTA 7" runs all corners, and
+something there is not so good.
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+
+[[step]]
+id = "annotate"
+title = "See the voltages on the schematic (optional)"
+text = """
+xschem can write the operating point onto the testbench schematic. Open
+tb_ota5t's "schematic", then in the menu bar Waves > Op Annotate. A file window
+opens: choose this file in your project:
+
+    simulations/work/tb_ota5t/ota_op/tt/out.raw
+
+The node voltages appear in red next to the pins, and the supply current next to Vdd.
+Select the OTA and press e to descend into it: the tail node and the mirror node show
+their voltages too. Ctrl+E goes back up: if xschem asks "save file?", answer No.
+"""
+point = [
+    { at = "xschem.menu:Op Annotate", say = "Click Op Annotate" },
+    { at = "xschem.menu:Waves", say = "Open the Waves menu" },
+    { at = "tree:work/tb_ota5t/schematic", say = "Open the testbench schematic" },
+]
+continue_button = true
+
+[[step]]
+id = "done"
+title = "What you checked"
+text = """
+Before any AC or transient figure: currents as intended, node voltages with headroom,
+every transistor saturated with some margin. Check this again after every change of a
+size.
+
+Next: "OTA 3: gain and phase margin".
+"""
+continue_button = true

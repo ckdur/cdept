@@ -1,0 +1,372 @@
+schema = "cdept-tutorial"
+version = 1
+id = "ota-mismatch"
+title = "OTA 8: input offset and mismatch"
+series = "ota"
+order = 8
+start = ["base", "ota-sch", "ota-sym", "ota-tb", "ota-dc", "ota-ac", "ota-step"]
+pdk = "ihp-sg13g2"
+goal = """
+You simulate how the input offset scatters from chip to chip because no two
+transistors are exactly alike (Monte Carlo mismatch), and find which transistors
+cause most of it.
+"""
+minutes = 20
+before = """
+- [OTA 4](ota-step.md): the follower testbench.
+"""
+
+[[circuit]]
+id = "pair-m2"
+view = "work/ota5t/schematic"
+[[circuit.part]]
+what = "M5, the tail current source"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4", m = "1" }
+pins = { D = "?tail", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M6, the diode that sets the bias"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4", m = "1" }
+pins = { D = "ibias", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M1, the input transistor on inp"
+symbol = "sg13_lv_pmos"
+with = { w = "30u", l = "0.5u", ng = "4", m = "2" }
+pins = { G = "inp", S = "?tail", B = "?tail", D = "?mirror" }
+[[circuit.part]]
+what = "M2, the input transistor on inn"
+symbol = "sg13_lv_pmos"
+with = { w = "30u", l = "0.5u", ng = "4", m = "2" }
+pins = { G = "inn", S = "?tail", B = "?tail", D = "out" }
+[[circuit.part]]
+what = "M3, the mirror's diode"
+symbol = "sg13_lv_nmos"
+with = { w = "2u", l = "4u", m = "1" }
+pins = { D = "?mirror", G = "?mirror", S = "vss", B = "vss" }
+[[circuit.part]]
+what = "M4, the mirror's output"
+symbol = "sg13_lv_nmos"
+with = { w = "2u", l = "4u", m = "1" }
+pins = { D = "out", G = "?mirror", S = "vss", B = "vss" }
+[[circuit.part]]
+what = "the input pin inp"
+symbol = "ipin"
+with = { lab = "inp" }
+[[circuit.part]]
+what = "the input pin inn"
+symbol = "ipin"
+with = { lab = "inn" }
+[[circuit.part]]
+what = "the bias input pin ibias"
+symbol = "ipin"
+with = { lab = "ibias" }
+[[circuit.part]]
+what = "the output pin out"
+symbol = "opin"
+with = { lab = "out" }
+[[circuit.part]]
+what = "the supply pin vdd"
+symbol = "iopin"
+with = { lab = "vdd" }
+[[circuit.part]]
+what = "the ground pin vss"
+symbol = "iopin"
+with = { lab = "vss" }
+
+[[step]]
+id = "start"
+title = "Get the project"
+text = """
+Make the starting project.
+"""
+start_button = true
+continue_button = true
+continue_needs = [
+    "view:work/tb_ota5t_step/ota_step",
+]
+needs_hint = "Open a project that has work/tb_ota5t_step/ota_step."
+
+[[step]]
+id = "idea"
+title = "Measuring offset"
+text = """
+Two transistors drawn alike differ a little: threshold voltage, mobility, size.
+In the follower, out = inp - offset (times A/(1+A) = 0.98, close enough). So hold
+both levels of the step at the same voltage, 0.42 V, and the offset is out - 0.42 V.
+
+An operating point is enough, so the template is the built-in dc_op, with limits on
+vout: 0.41 to 0.43 V, an offset within 10 mV.
+"""
+picture = "ota-tb-step"
+continue_button = true
+
+[[step]]
+id = "mm-select"
+title = "Select tb_ota5t_step"
+text = """
+In the Libraries panel, click the cell "tb_ota5t_step".
+"""
+point = [
+    { at = "tree:work/tb_ota5t_step", say = "Click tb_ota5t_step" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["selected:work/tb_ota5t_step", "view:work/tb_ota5t_step/offset"]
+
+[[step]]
+id = "mm-new"
+title = "New testbench: offset"
+text = """
+Open Tools > New Testbench….
+"""
+point = [
+    { at = "menu.tools.new_testbench", say = 'Click "New Testbench…"' },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["dialog.new_testbench", "view:work/tb_ota5t_step/offset"]
+
+[[step]]
+id = "mm-template"
+title = "The template dc_op"
+text = """
+Choose dc_op.
+"""
+point = [
+    { at = "dialog.new_testbench.template.dc_op", say = "Choose dc_op" },
+    { at = "dialog.new_testbench.template", say = "Open the Template list" },
+]
+done_when = ["dialog.new_testbench.template.dc_op", "view:work/tb_ota5t_step/offset"]
+lost_without = ["dialog.new_testbench"]
+back_to = "mm-new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "mm-create"
+title = "Fill in, then Create"
+text = """
+Change the view name to
+
+    offset
+
+and set vout_min = 0.41 and vout_max = 0.43. Press "Create".
+"""
+point = [
+    { at = "dialog.new_testbench.view", say = "Name it offset; set vout_min and vout_max" },
+]
+done_when = ["view:work/tb_ota5t_step/offset"]
+lost_without = ["dialog.new_testbench"]
+back_to = "mm-new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "vars"
+title = "Hold the input still"
+text = """
+The variables come from the step testbench. In the Variables list (fold "Test
+template") set
+
+- vlo = 0.42
+- vhi = 0.42
+
+Press "Save".
+"""
+point = [
+    { at = "sim.var.value.5", say = "vlo = 0.42, vhi = 0.42" },
+    { at = "sim.setup", say = "The variables are under Setup (fold Test template)" },
+]
+continue_button = true
+continue_needs = [
+    "setup:work/tb_ota5t_step/offset:variables.vlo~0.42",
+    "setup:work/tb_ota5t_step/offset:variables.vhi~0.42",
+]
+needs_hint = "Set vlo and vhi to 0.42, then Save."
+
+[[step]]
+id = "nominal"
+title = "Run"
+text = """
+Press "Run": first without Monte Carlo.
+"""
+point = [
+    { at = "sim.run", say = 'Click "Run"' },
+]
+done_when = ["sim.ran:work/tb_ota5t_step/offset"]
+
+[[step]]
+id = "nominal-read"
+title = "The systematic offset"
+text = """
+vout = 0.4225 V: an offset of +2.5 mV although every transistor is ideal. This is
+the systematic offset: the two sides of the OTA do not see the same voltages (OTA 6).
+It is the same on every chip, and a design change can remove it.
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+
+[[step]]
+id = "mc"
+title = "Turn Monte Carlo on"
+text = """
+Under "Setup", near the bottom (scroll), tick "Monte Carlo". Then:
+
+- Runs: 200 (the first field), seed 1 (the second);
+- Draws: mismatch. Not "process": that moves all transistors together, which barely
+  changes the offset.
+
+Press "Save". "Mismatch" draws a new random threshold and size for every transistor
+in each run, with a spread that shrinks as the gate area grows. The PDK's tt_mm corner
+does this.
+"""
+point = [
+    { at = "sim.mc.mode.mismatch", say = "Choose mismatch" },
+    { at = "sim.mc.mode", say = "Draws: mismatch" },
+    { at = "sim.mc.enable", say = "Tick Monte Carlo (scroll down)" },
+    { at = "sim.setup", say = "Open Setup" },
+]
+continue_button = true
+continue_needs = [
+    "setup:work/tb_ota5t_step/offset:montecarlo.mode~mismatch",
+    "setup:work/tb_ota5t_step/offset:montecarlo.runs~200",
+]
+needs_hint = "Tick Monte Carlo, runs 200, draws mismatch, then Save."
+
+[[step]]
+id = "run-mc"
+title = "Run the 200 samples"
+text = """
+Press "Run". The line under the toolbar says 200 run points. It takes some seconds.
+Press Continue when the results are there.
+"""
+point = [
+    { at = "sim.run", say = 'Click "Run"' },
+]
+continue_button = true
+continue_needs = [
+    "sim.has_results",
+]
+needs_hint = "Run first."
+
+[[step]]
+id = "stats"
+title = "Read the statistics"
+text = """
+Fold "Setup". The statistics of vout over the 200 runs (seed 1, so you get the same
+numbers):
+
+- mean 0.4226 V: the systematic 2.6 mV.
+- std 0.97 mV: the random offset, sigma.
+- min 0.4195, max 0.4253 V; all 200 within the 10 mV limit.
+
+So an offset of 2.6 mV ± 2.9 mV (3 sigma). With 200 samples sigma itself is only
+known to about 5 %; more runs sharpen it.
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+
+[[step]]
+id = "open-sch"
+title = "Which transistors?"
+text = """
+Mismatch averages out over area: a device of twice the area has 1/√2 of the random
+spread. Double the input pair and see how much sigma falls. Open the OTA's schematic.
+"""
+point = [
+    { at = "tree:work/ota5t/schematic", say = "Double-click schematic" },
+    { at = "tree:work/ota5t", say = "Open ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["open:work/ota5t/schematic"]
+
+[[step]]
+id = "double"
+title = "m=2 on M1 and M2"
+text = """
+Set m=2 on M1 and on M2 (q, then OK).
+"""
+point = [
+    { at = "xschem.button:OK", say = "Set m=2, then OK" },
+]
+done_when = ["circuit:pair-m2"]
+continue_button = true
+continue_needs = [
+    "circuit:pair-m2",
+]
+
+[[step]]
+id = "save"
+title = "Save the schematic"
+text = """
+The Monte Carlo simulates the saved schematic.
+
+Save with Ctrl+S (answer Yes).
+"""
+point = [
+    { at = "xschem.button:Yes", say = "Click Yes" },
+]
+continue_button = true
+continue_needs = [
+    "circuit:pair-m2",
+    "saved:work/ota5t/schematic",
+]
+needs_hint = "Make the change, then save."
+
+[[step]]
+id = "back"
+title = "Back to the offset testbench"
+text = """
+Open the view offset again.
+"""
+point = [
+    { at = "tree:work/tb_ota5t_step/offset", say = "Double-click offset" },
+    { at = "tree:work/tb_ota5t_step", say = "Open tb_ota5t_step" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["sim.view.offset"]
+
+[[step]]
+id = "rerun"
+title = "Run again"
+text = """
+Press "Run", and press Continue when it is done.
+"""
+point = [
+    { at = "sim.run", say = 'Click "Run"' },
+]
+continue_button = true
+continue_needs = [
+    "sim.has_results",
+]
+needs_hint = "Run first."
+
+[[step]]
+id = "after"
+title = "What the pair contributes"
+text = """
+std falls from 0.97 mV to 0.74 mV.
+
+Independent sources add as squares: sigma² = pair² + rest². If doubling the pair's
+area halves pair², the two measurements give pair = 0.89 mV and rest = 0.39 mV (the
+mirror and the rest). With m=4 the same arithmetic predicts 0.59 mV, and that is what
+this circuit simulates.
+
+Doubling the mirror instead barely helps: with m=4 on M3 and M4 sigma is 0.93 mV. The
+pair's mismatch acts directly at the input; the mirror's is divided by gm1/gm3 = 3.5
+on the way back to the input. Spend area on the pair first. In layout, the two
+transistors of a pair must also sit side by side, alike in orientation and
+surroundings: a layout that breaks this adds offset that this simulation does not
+know about.
+
+Next: "OTA 9: noise".
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+

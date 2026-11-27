@@ -248,6 +248,27 @@ pub fn create_testbench(
     args: &BTreeMap<String, String>,
     dut: Option<&str>,
 ) -> Result<Created> {
+    create_testbench_using(project, library, cell, view, template, args, dut, None)
+}
+
+/// [`create_testbench`] for a testbench that netlists another cell's schematic:
+/// `schematic` (`library/cell`, `library/cell/view`) goes into `setup.toml`. It
+/// excludes `dut`, which writes a schematic of the cell's own.
+#[allow(clippy::too_many_arguments)]
+pub fn create_testbench_using(
+    project: &Project,
+    library: &str,
+    cell: &str,
+    view: &str,
+    template: &Template,
+    args: &BTreeMap<String, String>,
+    dut: Option<&str>,
+    schematic: Option<&str>,
+) -> Result<Created> {
+    if dut.is_some() && schematic.is_some() {
+        bail!("a device under test and another cell's schematic exclude each other");
+    }
+    crate::library::validate_name("cell", cell)?;
     let lib = project
         .library(library)
         .ok_or_else(|| eyre!("no library '{library}'"))?;
@@ -365,12 +386,12 @@ pub fn create_testbench(
             ));
             created.schematic = Some(sch);
         }
-    } else if !has_schematic {
+    } else if !has_schematic && schematic.is_none() {
         created.notes.push(format!(
             "{library}/{cell} has no xschem schematic: draw one, or name another with `schematic = \"lib/cell\"` in setup.toml (or use --dut)"
         ));
     }
-    let mut text = starter_setup(template, args, "")?;
+    let mut text = starter_setup(template, args, schematic.unwrap_or(""))?;
     let mut vars = template.starter_variables.clone();
     if !vars.contains_key("vdd") {
         vars.insert("vdd".into(), "1.2".into());

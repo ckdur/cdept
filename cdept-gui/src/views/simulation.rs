@@ -529,8 +529,8 @@ pub struct SimulationView {
     pub(crate) calc: calc::CalcPanel,
     /// Open or fold the Setup section at the next frame (a script's `sim setup_section`).
     setup_open: Option<bool>,
-    /// "Waveform Tab" of a point: the raw file and the tab's title, for the next frame.
-    open_wave: Option<(std::path::PathBuf, String)>,
+    /// A run point whose "Waveform Tab" was pressed, for the next frame.
+    open_wave: Option<String>,
     /// "Waveform Tab (family)" was pressed: the testbench view to open.
     open_family_tab: Option<(String, String, String)>,
 }
@@ -976,25 +976,33 @@ fn outputs_editor(ui: &mut Ui, outputs: &mut Vec<(String, String, String)>) {
     if let Some(i) = remove {
         outputs.remove(i);
     }
-    if ui.small_button("＋ Add output").clicked() {
+    if ui.small_button("+ Add output").clicked() {
         outputs.push(Default::default());
     }
 }
 
 fn list_editor(ui: &mut Ui, id: &str, rows: &mut Vec<(String, String)>, names: (&str, &str)) {
     let mut remove = None;
+    // How tutorials call the rows of this list: `<mark>.name.<i>`, `<mark>.add`.
+    let mark = if id == "sim-vars" {
+        "sim.var"
+    } else {
+        "sim.option"
+    };
     Grid::new(id).num_columns(3).show(ui, |ui| {
         for (i, (n, v)) in rows.iter_mut().enumerate() {
-            ui.add(
+            let name = ui.add(
                 TextEdit::singleline(n)
                     .desired_width(120.0)
                     .hint_text(names.0),
             );
-            ui.add(
+            crate::guide::anchor(ui, &format!("{mark}.name.{i}"), &name);
+            let value = ui.add(
                 TextEdit::singleline(v)
                     .desired_width(160.0)
                     .hint_text(names.1),
             );
+            crate::guide::anchor(ui, &format!("{mark}.value.{i}"), &value);
             if ui.small_button("✖").on_hover_text("Remove").clicked() {
                 remove = Some(i);
             }
@@ -1004,7 +1012,9 @@ fn list_editor(ui: &mut Ui, id: &str, rows: &mut Vec<(String, String)>, names: (
     if let Some(i) = remove {
         rows.remove(i);
     }
-    if ui.small_button("＋ Add").clicked() {
+    let add = ui.small_button("+ Add");
+    crate::guide::anchor(ui, &format!("{mark}.add"), &add);
+    if add.clicked() {
         rows.push((String::new(), String::new()));
     }
 }
@@ -1084,13 +1094,18 @@ impl SimulationView {
                 ui.end_row();
                 ui.label("Corners")
                     .on_hover_text("From the technology snapshot (tech.toml)");
-                ui.horizontal_wrapped(|ui| {
+                let corners = ui.horizontal_wrapped(|ui| {
                     if available.is_empty() {
                         ui.weak("the technology snapshot has no corners for this model set");
                     }
                     for corner in &available {
                         let mut on = form.corners.contains(corner);
-                        if ui.checkbox(&mut on, corner).changed() {
+                        let check = ui.checkbox(&mut on, corner);
+                        crate::guide::anchor(ui, &format!("sim.corner.{corner}"), &check);
+                        if on {
+                            crate::guide::fact(ui.ctx(), &format!("sim.corner.{corner}"));
+                        }
+                        if check.changed() {
                             if on {
                                 form.corners.push(corner.clone());
                                 form.corners.sort_by_key(|c| {
@@ -1121,24 +1136,30 @@ impl SimulationView {
                         }
                     }
                 });
+                crate::guide::anchor(ui, "sim.corners", &corners.response);
                 ui.end_row();
                 ui.label("Temperatures")
                     .on_hover_text("°C, one run each; empty: the simulator's own");
-                ui.add(
+                let temperatures = ui.add(
                     TextEdit::singleline(&mut form.temperatures)
                         .desired_width(200.0)
                         .hint_text("-40, 27, 125"),
                 );
+                crate::guide::anchor(ui, "sim.temperatures", &temperatures);
                 ui.end_row();
             });
 
         ui.add_space(4.0);
+        let variables_top = ui.cursor().min;
         ui.strong("Variables  (.param)");
         list_editor(ui, "sim-vars", &mut form.variables, ("name", "value"));
         ui.strong("Options  (.options)");
         list_editor(ui, "sim-opts", &mut form.options, ("name", "value"));
 
+        mark_section(ui, "sim.variables", variables_top);
+
         ui.add_space(4.0);
+        let analyses_top = ui.cursor().min;
         ui.strong("Analyses");
         let mut remove = None;
         for (i, a) in form.analyses.iter_mut().enumerate() {
@@ -1176,7 +1197,7 @@ impl SimulationView {
         if let Some(i) = remove {
             form.analyses.remove(i);
         }
-        if ui.small_button("＋ Add analysis").clicked() {
+        if ui.small_button("+ Add analysis").clicked() {
             form.analyses.push(AnalysisForm {
                 kind: "tran".into(),
                 fields: analysis_fields("tran")
@@ -1186,7 +1207,10 @@ impl SimulationView {
             });
         }
 
+        mark_section(ui, "sim.analyses", analyses_top);
+
         ui.add_space(4.0);
+        let measures_top = ui.cursor().min;
         ui.strong("Measures  (.meas, one per line, without the .meas)");
         ui.add(
             TextEdit::multiline(&mut form.measures)
@@ -1194,6 +1218,8 @@ impl SimulationView {
                 .desired_width(f32::INFINITY)
                 .code_editor(),
         );
+        mark_section(ui, "sim.measures", measures_top);
+
         ui.strong("Save  (.save, one per line; empty: everything)");
         ui.add(
             TextEdit::multiline(&mut form.save)
@@ -1207,6 +1233,7 @@ impl SimulationView {
         outputs_editor(ui, &mut form.outputs);
 
         ui.add_space(4.0);
+        let specs_top = ui.cursor().min;
         ui.strong("Specs");
         let mut remove = None;
         Grid::new("sim-specs").num_columns(4).show(ui, |ui| {
@@ -1235,21 +1262,35 @@ impl SimulationView {
         if let Some(i) = remove {
             form.specs.remove(i);
         }
-        if ui.small_button("＋ Add spec").clicked() {
+        if ui.small_button("+ Add spec").clicked() {
             form.specs
                 .push((String::new(), String::new(), String::new()));
         }
 
+        mark_section(ui, "sim.specs", specs_top);
+
         ui.add_space(4.0);
+        let sweeps_top = ui.cursor().min;
         sweeps::sweeps_ui(ui, form);
+
+        mark_section(ui, "sim.sweeps", sweeps_top);
 
         ui.add_space(4.0);
         let note = sweeps::mc_note(form, project);
+        let mc_top = ui.cursor().min;
         sweeps::mc_ui(ui, form, &available, note.as_deref());
+        mark_section(ui, "sim.montecarlo", mc_top);
     }
 
     /// Statistics of the run: percentiles, a text histogram per measurement, the yield.
     fn stats_ui(&mut self, ui: &mut Ui) {
+        // Histograms say something about random runs only: for corners and sweeps
+        // they are folded away, so that the points stay near the top.
+        let random = self
+            .form
+            .as_ref()
+            .and_then(|f| f.setup().ok())
+            .is_some_and(|s| s.montecarlo.is_some());
         let Some(report) = &self.stats else { return };
         if report.measures.is_empty() && report.specs.is_empty() {
             return;
@@ -1283,22 +1324,31 @@ impl SimulationView {
                             }
                         });
                 }
-                for (name, d) in &report.measures {
-                    ui.add_space(2.0);
-                    ui.weak(name);
-                    let full = d.histogram.counts.iter().copied().max().unwrap_or(0);
-                    let mut text = String::new();
-                    for (i, n) in d.histogram.counts.iter().enumerate() {
-                        let (lo, hi) = d.histogram.edges(i);
-                        text.push_str(&format!(
-                            "{:>10} .. {:>10} {:>4} {}\n",
-                            engineering(lo),
-                            engineering(hi),
-                            n,
-                            sim::stats::bar(*n, full, 30)
-                        ));
+                let histograms = |ui: &mut Ui| {
+                    for (name, d) in &report.measures {
+                        ui.add_space(2.0);
+                        ui.weak(name);
+                        let full = d.histogram.counts.iter().copied().max().unwrap_or(0);
+                        let mut text = String::new();
+                        for (i, n) in d.histogram.counts.iter().enumerate() {
+                            let (lo, hi) = d.histogram.edges(i);
+                            text.push_str(&format!(
+                                "{:>10} .. {:>10} {:>4} {}\n",
+                                engineering(lo),
+                                engineering(hi),
+                                n,
+                                sim::stats::bar(*n, full, 30)
+                            ));
+                        }
+                        ui.label(RichText::new(text.trim_end()).monospace().small());
                     }
-                    ui.label(RichText::new(text.trim_end()).monospace().small());
+                };
+                if random {
+                    histograms(ui);
+                } else if !report.measures.is_empty() {
+                    egui::CollapsingHeader::new("Histograms")
+                        .default_open(false)
+                        .show(ui, histograms);
                 }
                 if !report.specs.is_empty() {
                     ui.add_space(2.0);
@@ -1359,47 +1409,56 @@ impl SimulationView {
     }
 
     fn jobs_ui(&mut self, ui: &mut Ui) {
+        /// More jobs than this start folded away.
+        const MANY_JOBS: usize = 30;
         let jobs = self.jobs();
         if jobs.is_empty() {
             return;
         }
-        ui.strong("Jobs");
-        Grid::new("sim-jobs")
-            .striped(true)
-            .num_columns(5)
+        // A Monte Carlo run has hundreds of jobs, and what they came to is below them:
+        // a long list starts closed, unless something in it failed.
+        let failed = jobs.iter().any(|j| j.error.is_some());
+        egui::CollapsingHeader::new(format!("Jobs ({})", jobs.len()))
+            .id_salt(("sim-jobs-list", jobs.len() > MANY_JOBS))
+            .default_open(jobs.len() <= MANY_JOBS || failed)
             .show(ui, |ui| {
-                for job in &jobs {
-                    ui.label(&job.name);
-                    ui.colored_label(state_color(ui, job.state), state_word(job.state));
-                    ui.add(
-                        egui::ProgressBar::new(if job.state.is_final() {
-                            1.0
-                        } else {
-                            job.progress
-                        })
-                        .desired_width(90.0),
-                    );
-                    ui.label(format!("{:.1} s", job.elapsed.as_secs_f32()));
-                    let last = job
-                        .log
-                        .as_deref()
-                        .map(|f| tail(f, 1))
-                        .and_then(|l| l.into_iter().next())
-                        .unwrap_or_default();
-                    let label = ui.label(RichText::new(last).weak().small());
-                    if let Some(log) = &job.log {
-                        label.on_hover_text(tail(log, 12).join("\n"));
-                    }
-                    ui.end_row();
-                    if let Some(error) = &job.error {
-                        ui.label("");
-                        ui.colored_label(
-                            verdict_color(ui, Verdict::Fail),
-                            error.lines().next().unwrap_or(""),
-                        );
-                        ui.end_row();
-                    }
-                }
+                Grid::new("sim-jobs")
+                    .striped(true)
+                    .num_columns(5)
+                    .show(ui, |ui| {
+                        for job in &jobs {
+                            ui.label(&job.name);
+                            ui.colored_label(state_color(ui, job.state), state_word(job.state));
+                            ui.add(
+                                egui::ProgressBar::new(if job.state.is_final() {
+                                    1.0
+                                } else {
+                                    job.progress
+                                })
+                                .desired_width(90.0),
+                            );
+                            ui.label(format!("{:.1} s", job.elapsed.as_secs_f32()));
+                            let last = job
+                                .log
+                                .as_deref()
+                                .map(|f| tail(f, 1))
+                                .and_then(|l| l.into_iter().next())
+                                .unwrap_or_default();
+                            let label = ui.label(RichText::new(last).weak().small());
+                            if let Some(log) = &job.log {
+                                label.on_hover_text(tail(log, 12).join("\n"));
+                            }
+                            ui.end_row();
+                            if let Some(error) = &job.error {
+                                ui.label("");
+                                ui.colored_label(
+                                    verdict_color(ui, Verdict::Fail),
+                                    error.lines().next().unwrap_or(""),
+                                );
+                                ui.end_row();
+                            }
+                        }
+                    });
             });
     }
 
@@ -1489,26 +1548,23 @@ impl SimulationView {
                 .map(|r| r.name.as_str());
             let any = self.results.iter().any(|r| r.error.is_none());
             crate::uberwave::results_ui(ui, project, (&t.library, &t.cell, &t.view), ok);
-            if any
-                && ui
-                    .button("Waveform Tab (family)")
+            let family = any.then(|| {
+                ui.button("Waveform Tab (family)")
                     .on_hover_text("All the run points of this testbench view in one waveform tab of CDePT's own viewer, tagged with their point names (per-point show and hide in its Points list)")
-                    .clicked()
-            {
-                self.open_family_tab =
-                    Some((t.library.clone(), t.cell.clone(), t.view.clone()));
+            });
+            if let Some(family) = &family {
+                crate::guide::anchor(ui, "sim.family.waveform_tab", family);
+            }
+            if family.is_some_and(|f| f.clicked()) {
+                self.open_family_tab = Some((t.library.clone(), t.cell.clone(), t.view.clone()));
             }
         }
         let many = self.results.len() > 6;
         let mut open_wave = None;
-        let cell = self
-            .target
-            .as_ref()
-            .map(|t| t.cell.clone())
-            .unwrap_or_default();
-        egui::CollapsingHeader::new(format!("Points ({})", self.results.len()))
+        let points = egui::CollapsingHeader::new(format!("Points ({})", self.results.len()))
             .default_open(!many)
             .show(ui, |ui| {
+                let mut first = true;
                 for row in &self.results {
                     ui.horizontal(|ui| {
                         ui.strong(&row.name);
@@ -1525,18 +1581,21 @@ impl SimulationView {
                         {
                             crate::uberwave::open_run_dir(project, &row.dir);
                         }
-                        if row.error.is_none()
-                            && ui
-                                .small_button("Waveform Tab")
-                                .on_hover_text(
-                                    "Open this point's out.raw in a waveform tab of CDePT's own viewer (dockable; one tab per click)",
-                                )
-                                .clicked()
-                        {
-                            open_wave = Some((
-                                crate::views::wave::script::point_raw(&row.dir),
-                                format!("{cell} {}", row.name),
-                            ));
+                        let wave = row.error.is_none().then(|| {
+                            ui.small_button("Waveform Tab").on_hover_text(
+                                "Open this point's out.raw in a waveform tab of CDePT's own viewer (dockable; one tab per click)",
+                            )
+                        });
+                        if let Some(wave) = &wave {
+                            let name = format!("sim.point.{}.waveform_tab", row.name);
+                            crate::guide::anchor(ui, &name, wave);
+                            if first {
+                                crate::guide::anchor(ui, "sim.point.waveform_tab", wave);
+                                first = false;
+                            }
+                        }
+                        if wave.is_some_and(|w| w.clicked()) {
+                            open_wave = Some(row.name.clone());
                         }
                         if ui.small_button("Open log").clicked() {
                             let log = ["out.log", "job.log"]
@@ -1591,8 +1650,42 @@ impl SimulationView {
                         });
                 }
             });
+        crate::guide::anchor(ui, "sim.points", &points.header_response);
         if open_wave.is_some() {
             self.open_wave = open_wave;
+        }
+    }
+}
+
+impl SimulationView {
+    /// What a tutorial may ask about the testbench in the tab.
+    fn tell_guide(&self, ctx: &egui::Context, target: &Target, dirty: bool, running: bool) {
+        use crate::guide::fact;
+        fact(ctx, "sim.testbench_open");
+        fact(ctx, &format!("sim.view.{}", target.view));
+        if let Some(form) = &self.form {
+            if !form.base.template.is_empty() {
+                fact(ctx, &format!("sim.template.{}", form.base.template));
+            }
+            if !dirty {
+                fact(ctx, "sim.saved");
+            }
+        }
+        if running {
+            fact(ctx, "sim.running");
+        } else if !self.results.is_empty() {
+            fact(ctx, "sim.has_results");
+            if self.results.iter().all(|r| r.error.is_none()) {
+                fact(ctx, "sim.results_ok");
+            }
+            // How many run points the results have, and how the specs went.
+            fact(ctx, &format!("sim.points.{}", self.results.len()));
+            let (pass, bad) = tally(&self.results);
+            if bad > 0 {
+                fact(ctx, "sim.some_fail");
+            } else if pass > 0 {
+                fact(ctx, "sim.all_pass");
+            }
         }
     }
 }
@@ -1612,21 +1705,36 @@ impl View for SimulationView {
             return;
         };
         self.poll();
-        if let Some((file, title)) = self.open_wave.take() {
-            ctx.request(Action::OpenWave(file, Some(title)));
+        // A family of one point: the tab then shows the signals the testbench says
+        // (its plot list), as the family button does, not the first of the file.
+        if let Some(point) = self.open_wave.take()
+            && let Some(t) = &self.target
+        {
+            let (l, c, v) = (t.library.clone(), t.cell.clone(), t.view.clone());
+            ctx.request(Action::OpenWaveFamily(l, c, v, vec![point]));
         }
         if let Some((l, c, v)) = self.open_family_tab.take() {
             ctx.request(Action::OpenWaveFamily(l, c, v, Vec::new()));
         }
         self.after_load(&project);
+        crate::guide::fact(ui.ctx(), "sim.tab");
         let Some(target) = self.target.clone() else {
             empty_state(
                 ui,
                 "No testbench is open.",
                 Some(
-                    "Double-click a testbench view (one with a setup.toml) in the Library Manager.",
+                    "Double-click a testbench view (one with a setup.toml) in the Library Manager, or make one:",
                 ),
             );
+            ui.vertical_centered(|ui| {
+                let new = ui.button("New Testbench…");
+                crate::guide::anchor(ui, "sim.new_testbench", &new);
+                if new.clicked()
+                    && let Some(dialog) = super::newtest::testbench_dialog(&project, &ctx.selection)
+                {
+                    ctx.open_dialog(dialog);
+                }
+            });
             return;
         };
         if self.suite_active() {
@@ -1659,22 +1767,29 @@ impl View for SimulationView {
                 ctx.open_dialog(crate::dialogs::Dialog::CaceExport(e));
             }
         });
+        self.tell_guide(ui.ctx(), &target, dirty, running);
         ui.horizontal(|ui| {
-            if ui.add_enabled(self.form.is_some() && dirty, egui::Button::new("Save")).clicked() {
+            let save = ui.add_enabled(self.form.is_some() && dirty, egui::Button::new("Save"));
+            crate::guide::anchor(ui, "sim.save", &save);
+            if save.clicked() {
                 ask = Some("save");
             }
-            if ui.add_enabled(dirty, egui::Button::new("Revert")).clicked() {
+            let revert = ui.add_enabled(dirty, egui::Button::new("Revert"));
+            crate::guide::anchor(ui, "sim.revert", &revert);
+            if revert.clicked() {
                 ask = Some("revert");
             }
             ui.separator();
-            if ui
+            let run = ui
                 .add_enabled(can_run, egui::Button::new("▶ Run"))
-                .on_hover_text("Saves the setup, netlists the schematic and runs every corner and temperature")
-                .clicked()
-            {
+                .on_hover_text("Saves the setup, netlists the schematic and runs every corner and temperature");
+            crate::guide::anchor(ui, "sim.run", &run);
+            if run.clicked() {
                 ask = Some("run");
             }
-            if ui.add_enabled(running, egui::Button::new("■ Cancel")).clicked() {
+            let cancel = ui.add_enabled(running, egui::Button::new("■ Cancel"));
+            crate::guide::anchor(ui, "sim.cancel", &cancel);
+            if cancel.clicked() {
                 ask = Some("cancel");
             }
             ui.separator();
@@ -1762,7 +1877,10 @@ impl View for SimulationView {
             );
         }
         ui.separator();
+        // A scroll position of its own for every testbench: one opened after another
+        // starts at its top.
         ScrollArea::vertical()
+            .id_salt(("sim-scroll", &target.library, &target.cell, &target.view))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let template = self
@@ -1771,11 +1889,12 @@ impl View for SimulationView {
                     .map(|f| (f.base.template.clone(), f.base.template_args.clone()));
                 if let Some((name, args)) = template {
                     let mut change = None;
-                    egui::CollapsingHeader::new("Test template")
+                    let header = egui::CollapsingHeader::new("Test template")
                         .default_open(!name.is_empty())
                         .show(ui, |ui| {
                             change = self.tests.template_ui(ui, (&name, &args));
                         });
+                    crate::guide::anchor(ui, "sim.template", &header.header_response);
                     if let Some(change) = change
                         && let Err(e) = self.apply_template(change)
                     {
@@ -1783,17 +1902,27 @@ impl View for SimulationView {
                     }
                 }
                 if self.form.is_some() {
-                    egui::CollapsingHeader::new("Setup")
+                    let header = egui::CollapsingHeader::new("Setup")
                         .default_open(true)
                         .open(self.setup_open.take())
                         .show(ui, |ui| self.editor(ui, &project));
+                    crate::guide::anchor(ui, "sim.setup", &header.header_response);
                 }
                 ui.add_space(6.0);
-                self.jobs_ui(ui);
+                let jobs = ui.scope(|ui| self.jobs_ui(ui));
+                crate::guide::anchor(ui, "sim.jobs", &jobs.response);
                 ui.add_space(6.0);
-                self.results_ui(ui, &project);
+                let results = ui.scope(|ui| self.results_ui(ui, &project));
+                crate::guide::anchor(ui, "sim.results", &results.response);
             });
     }
+}
+
+/// Say where a section of the form is: from `top` to where the cursor is now.
+fn mark_section(ui: &Ui, name: &str, top: egui::Pos2) {
+    let bottom = ui.cursor().min.y - ui.spacing().item_spacing.y;
+    let rect = egui::Rect::from_min_max(top, egui::pos2(ui.max_rect().right(), bottom));
+    crate::guide::anchor_rect(ui, name, rect);
 }
 
 /// `sim …` of a test script (docs/GUI-TESTING.md).

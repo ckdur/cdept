@@ -85,6 +85,10 @@ pub enum Dialog {
     CaceImport(crate::cace::CaceImport),
     /// A cell's suite or testbench as a CACE datasheet (cace.rs).
     CaceExport(crate::cace::CaceExport),
+    /// A testbench view from a test template (views/newtest.rs).
+    NewTestbench(crate::views::newtest::NewTestbench),
+    /// A suite view: testbenches run together (views/newtest.rs).
+    NewSuite(crate::views::newtest::NewSuite),
 }
 
 impl Dialog {
@@ -170,6 +174,8 @@ impl Dialog {
             Self::ImportSummary(_) => "Import Finished",
             Self::CaceImport(_) => "Import CACE Datasheet",
             Self::CaceExport(_) => "Export CACE Datasheet",
+            Self::NewTestbench(_) => "New Testbench",
+            Self::NewSuite(_) => "New Suite",
         }
     }
 
@@ -180,7 +186,11 @@ impl Dialog {
             Self::CaceExport(_) => "Export",
             Self::LibraryProperties(_) => "Save",
             Self::Refactor(refactor) => refactor.confirm_label(),
-            Self::NewLibrary { .. } | Self::NewCell { .. } | Self::NewView { .. } => "Create",
+            Self::NewLibrary { .. }
+            | Self::NewCell { .. }
+            | Self::NewView { .. }
+            | Self::NewTestbench(_)
+            | Self::NewSuite(_) => "Create",
             Self::AddLibrary { .. } => "Add",
             Self::RemoveLibrary { .. } => "Remove",
             Self::RenameCell { .. } => "Rename",
@@ -232,8 +242,13 @@ pub(crate) fn show(ctx: &Context, app: &mut AppCtx) {
     };
     let mut outcome = Outcome::Open;
     let response = egui::Modal::new(Id::new("cdept-dialog")).show(ctx, |ui| {
-        ui.set_width(420.0);
-        ui.heading(state.dialog.title());
+        let wide = matches!(state.dialog, Dialog::NewTestbench(_) | Dialog::NewSuite(_));
+        ui.set_width(if wide { 520.0 } else { 420.0 });
+        let title = state.dialog.title();
+        ui.heading(title);
+        // For tutorials: which dialog is up.
+        let word = title.to_lowercase().replace(' ', "_");
+        crate::guide::fact(ui.ctx(), &format!("dialog.{word}"));
         ui.add_space(6.0);
         body(ui, &mut state, app);
         if let Some(error) = &state.error {
@@ -246,11 +261,17 @@ pub(crate) fn show(ctx: &Context, app: &mut AppCtx) {
             Dialog::Error(_) | Dialog::Problems | Dialog::ImportSummary(_)
         );
         ui.horizontal(|ui| {
-            if ui.button(state.dialog.confirm_label()).clicked() {
+            let confirm = ui.button(state.dialog.confirm_label());
+            crate::guide::anchor(ui, "dialog.confirm", &confirm);
+            if confirm.clicked() {
                 outcome = Outcome::Confirm;
             }
-            if !is_error && ui.button("Cancel").clicked() {
-                outcome = Outcome::Cancel;
+            if !is_error {
+                let cancel = ui.button("Cancel");
+                crate::guide::anchor(ui, "dialog.cancel", &cancel);
+                if cancel.clicked() {
+                    outcome = Outcome::Cancel;
+                }
             }
         });
         // Enter confirms, except where that would delete something.
@@ -326,6 +347,8 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
     let mut field = |ui: &mut Ui, label: &str, text: &mut String| {
         ui.label(label);
         let response = ui.add(egui::TextEdit::singleline(text).desired_width(280.0));
+        let mark = format!("dialog.field:{label}");
+        crate::guide::anchor(ui, &mark, &response);
         if std::mem::take(&mut first) {
             response.request_focus();
         }
@@ -337,6 +360,8 @@ fn body(ui: &mut Ui, state: &mut DialogState, app: &AppCtx) {
         .spacing([8.0, 6.0]);
 
     match &mut state.dialog {
+        Dialog::NewTestbench(new) => crate::views::newtest::testbench_body(ui, new, app, focus),
+        Dialog::NewSuite(new) => crate::views::newtest::suite_body(ui, new, app, focus),
         Dialog::FixLinks { library, foreign } => {
             let items = fixable_links(&app.links, library, *foreign);
             let others = app
@@ -620,6 +645,12 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
     if let Dialog::CaceExport(export) = dialog {
         return crate::cace::apply_export(app, export);
     }
+    if let Dialog::NewTestbench(new) = dialog {
+        return crate::views::newtest::create_testbench(app, new);
+    }
+    if let Dialog::NewSuite(new) = dialog {
+        return crate::views::newtest::create_suite(app, new);
+    }
     if let Dialog::ProjectSettings(settings) = dialog {
         return app.change_settings(settings);
     }
@@ -664,6 +695,9 @@ fn apply(dialog: &Dialog, app: &mut AppCtx) -> Result<()> {
         }
         Dialog::CaceImport(_) | Dialog::CaceExport(_) => {
             unreachable!("handled by crate::cace above")
+        }
+        Dialog::NewTestbench(_) | Dialog::NewSuite(_) => {
+            unreachable!("handled by crate::views::newtest above")
         }
         Dialog::RenameCell { .. } | Dialog::CopyCell { .. } | Dialog::Refactor(_) => {
             unreachable!("handled by crate::refactor above")

@@ -19,6 +19,15 @@ pub fn color(text: &str) -> Color32 {
     }
 }
 
+/// Whether the layer list's filter keeps `layer`: a part of its name or of its
+/// source (`8/0`), in either case of letters.
+fn layer_matches(layer: &Layer, filter: &str) -> bool {
+    let filter = filter.trim().to_lowercase();
+    filter.is_empty()
+        || layer.name.to_lowercase().contains(&filter)
+        || layer.source.to_lowercase().contains(&filter)
+}
+
 /// What a click in the panels asks for.
 enum Act {
     Visible(u32, bool),
@@ -58,12 +67,29 @@ impl LayoutView {
                 if self.layers.is_empty() {
                     ui.weak("No layers.");
                 }
+                // A PDK has hundreds of layers: find one by its name or numbers.
+                let id = egui::Id::new(("klayout-layer-filter", self.id));
+                let mut filter: String = ui.data(|d| d.get_temp(id)).unwrap_or_default();
+                let find = ui.add(
+                    egui::TextEdit::singleline(&mut filter)
+                        .desired_width(180.0)
+                        .hint_text("Find a layer: name or 8/0"),
+                );
+                // `layout.find:<layer>`: the box, while that layer is not the current one.
+                for wanted in crate::guide::wanted(ui.ctx()) {
+                    if let Some(name) = wanted.strip_prefix("layout.find:")
+                        && !self.layers.iter().any(|l| l.current && l.name == name)
+                    {
+                        crate::guide::anchor(ui, &wanted, &find);
+                    }
+                }
+                ui.data_mut(|d| d.insert_temp(id, filter.clone()));
                 ScrollArea::vertical()
                     .id_salt(("klayout-layer-list", self.id))
                     .max_height(260.0)
                     .auto_shrink([true, true])
                     .show(ui, |ui| {
-                        for layer in &self.layers {
+                        for layer in self.layers.iter().filter(|l| layer_matches(l, &filter)) {
                             layer_row(ui, layer, acts);
                         }
                     });
@@ -209,6 +235,9 @@ fn layer_row(ui: &mut Ui, layer: &Layer, acts: &mut Vec<Act>) {
             text = text.weak();
         }
         let response = ui.selectable_label(layer.current, text);
+        if !layer.current {
+            crate::guide::anchor(ui, &format!("layout.layer:{}", layer.name), &response);
+        }
         let response = if layer.name.is_empty() || layer.name == layer.source {
             response
         } else {

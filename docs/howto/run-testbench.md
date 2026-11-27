@@ -64,9 +64,33 @@ max = 3e-10
 ```
 
 For a ready-made test, start from a template instead:
-`cdept sim new cells tb_inv mytest --template tran_delay` ([Custom test template](custom-test-template.md)).
+`cdept sim new cells tb_inv mytest --template tran_delay` ([Custom test template](custom-test-template.md)),
+or in the GUI with [New Testbench](#a-new-testbench-from-the-window).
 Errors in the file (unknown key, a spec without bounds, a bad expression) are reported when
 the setup loads, before anything runs.
+
+## A new testbench from the window
+
+**Tools > New Testbench…** (also **+ Testbench** in the Library Manager's toolbar, a cell's
+context menu, and the button of the empty Simulation tab) asks for:
+
+- the library, the cell of the testbench (an existing one or a new name) and the view name
+  (it follows the template until you type one);
+- the test template, with its parameters (an empty field is the default);
+- the schematic to simulate. A cell that has a schematic netlists its own. Otherwise:
+  *a starter schematic around a device under test* (a cell with a symbol; the same as
+  `cdept sim new --dut`), *the schematic of another cell* (`schematic =` in `setup.toml`),
+  *a new empty schematic* to draw the testbench in, or none yet.
+
+With a cell that has a symbol selected, the dialog proposes `tb_<cell>` with that cell as
+the device under test. **Create** writes the view and opens it in the Simulation tab, where
+the template and its parameters can be changed under *Test template*. Read the starter
+schematic before trusting it: pins are matched to the template's nets by name.
+
+A schematic's sources often use design variables (`{vdd}`, `{cl}`). When another testbench
+of the library simulates the same schematic, the new one gets that testbench's variables
+(those it does not set itself); the Console names the source. Check the ones that differ
+between measurements, such as which source carries the AC signal.
 
 ## In the GUI
 

@@ -1,0 +1,154 @@
+# Replays the ota-mismatch tutorial with real ngspice Monte Carlo runs.
+guide expect_step start
+wait 1.5
+guide press dialog.guide.start
+guide wait idea
+wait 0.8
+guide continue
+guide expect_step mm-select
+wait 0.8
+guide expect_pointing tree:work
+guide click
+wait 0.8
+guide expect_pointing tree:work/tb_ota5t_step
+guide click
+guide expect_step mm-new
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.new_testbench
+guide click
+guide expect_step mm-template
+wait 0.8
+guide expect_pointing dialog.new_testbench.template
+guide click
+wait 0.8
+guide expect_pointing dialog.new_testbench.template.dc_op
+guide click
+wait 0.8
+guide expect_step mm-create
+guide expect_pointing dialog.new_testbench.view
+guide click
+key a ctrl
+text offset
+wait 0.3
+guide press dialog.new_testbench.param.vout_min
+text 0.41
+wait 0.3
+guide press dialog.new_testbench.param.vout_max
+text 0.43
+wait 0.3
+wait 0.8
+guide press dialog.confirm
+guide expect_step vars
+wait 1.5
+guide press sim.template
+wait 1.0
+guide expect_pointing sim.var.value.5
+screenshot @SCRATCH@/01-vars.png
+guide press sim.var.value.5
+key a ctrl
+text 0.42
+wait 0.3
+guide press sim.var.value.4
+key a ctrl
+text 0.42
+wait 0.3
+wait 0.5
+guide press sim.save
+wait 1.5
+guide continue
+guide expect_step nominal
+wait 0.8
+guide expect_pointing sim.run
+guide click
+guide wait nominal-read
+wait 0.8
+guide expect_marked
+wait 0.5
+guide press sim.setup
+wait 0.8
+screenshot @SCRATCH@/02-nominal.png
+guide continue
+guide expect_step mc
+wait 0.8
+guide expect_pointing sim.setup
+guide click
+wait 0.8
+wheel 700 500 down 40
+wait 1.0
+screenshot @SCRATCH@/03-before-mc.png
+guide press sim.mc.enable
+wait 0.8
+wheel 700 500 down 40
+wait 0.8
+guide press sim.mc.runs
+key a ctrl
+text 200
+wait 0.3
+wait 0.3
+guide expect_pointing sim.mc.mode
+guide click
+wait 0.8
+guide expect_pointing sim.mc.mode.mismatch
+guide click
+wait 0.8
+screenshot @SCRATCH@/04-mc.png
+guide press sim.save
+wait 1.5
+guide continue
+guide expect_step run-mc
+wait 0.8
+guide expect_pointing sim.run
+guide click
+sim wait
+wait 1.0
+sim expect_points 200
+guide continue
+guide expect_step stats
+wait 0.8
+guide expect_marked
+wait 0.8
+wheel 700 500 up 80
+wait 0.8
+guide press sim.setup
+wait 0.8
+wait 0.8
+screenshot @SCRATCH@/05-stats.png
+guide continue
+guide expect_step open-sch
+wait 0.8
+guide expect_marked
+open_view work ota5t schematic
+guide expect_step double
+wait_frame
+wait 1.0
+tcl xschem setprop instance M1 m 2; xschem setprop instance M2 m 2; xschem redraw
+guide wait save
+wait 0.8
+move 300 200
+key s ctrl
+wait 1.0
+guide expect_pointing xschem.button:Yes
+guide click
+wait 1.5
+guide continue
+guide expect_step back
+wait 0.8
+guide expect_marked
+open_view work tb_ota5t_step offset
+guide expect_step rerun
+wait 0.8
+guide expect_pointing sim.run
+guide click
+sim wait
+wait 1.0
+guide continue
+guide expect_step after
+wait 0.8
+guide expect_marked
+wait 0.8
+screenshot @SCRATCH@/06-m2.png
+guide continue
+guide expect_step finished
+quit

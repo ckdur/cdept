@@ -1,0 +1,315 @@
+schema = "cdept-tutorial"
+version = 1
+id = "ota-schematic"
+title = "OTA 1: draw the five-transistor OTA"
+series = "ota"
+order = 1
+start = ["base", "ota-lib"]
+pdk = "ihp-sg13g2"
+goal = """
+You draw a five-transistor operational transconductance amplifier (OTA) in IHP
+SG13G2, understand what each pair of transistors does, and make its symbol. The other
+OTA tutorials analyse this circuit.
+"""
+minutes = 30
+before = """
+- The schematic skills of [Inverter 2](inv-schematic.md): placing, sizing, pins,
+  wires. They are not explained again here.
+- CDePT built with the xschem helper (`cargo build -p cdept-xschem`).
+"""
+
+[[circuit]]
+id = "bias"
+view = "work/ota5t/schematic"
+[[circuit.part]]
+what = "M5, the tail current source"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4", m = "1" }
+pins = { D = "?tail", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M6, the diode that sets the bias"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4", m = "1" }
+pins = { D = "ibias", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "the supply pin vdd"
+symbol = "iopin"
+with = { lab = "vdd" }
+[[circuit.part]]
+what = "the bias input pin ibias"
+symbol = "ipin"
+with = { lab = "ibias" }
+
+[[circuit]]
+id = "pair"
+view = "work/ota5t/schematic"
+[[circuit.part]]
+what = "M5, the tail current source"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4" }
+pins = { D = "?tail", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M6, the diode that sets the bias"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4" }
+pins = { D = "ibias", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M1, the input transistor on inp"
+symbol = "sg13_lv_pmos"
+with = { w = "30u", l = "0.5u", ng = "4", m = "1" }
+pins = { G = "inp", S = "?tail", B = "?tail", D = "?mirror" }
+[[circuit.part]]
+what = "M2, the input transistor on inn"
+symbol = "sg13_lv_pmos"
+with = { w = "30u", l = "0.5u", ng = "4", m = "1" }
+pins = { G = "inn", S = "?tail", B = "?tail", D = "out" }
+[[circuit.part]]
+what = "the input pin inp"
+symbol = "ipin"
+with = { lab = "inp" }
+[[circuit.part]]
+what = "the input pin inn"
+symbol = "ipin"
+with = { lab = "inn" }
+[[circuit.part]]
+what = "the output pin out"
+symbol = "opin"
+with = { lab = "out" }
+
+[[circuit]]
+id = "ota"
+view = "work/ota5t/schematic"
+[[circuit.part]]
+what = "M5, the tail current source"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4", m = "1" }
+pins = { D = "?tail", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M6, the diode that sets the bias"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4", m = "1" }
+pins = { D = "ibias", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M1, the input transistor on inp"
+symbol = "sg13_lv_pmos"
+with = { w = "30u", l = "0.5u", ng = "4", m = "1" }
+pins = { G = "inp", S = "?tail", B = "?tail", D = "?mirror" }
+[[circuit.part]]
+what = "M2, the input transistor on inn"
+symbol = "sg13_lv_pmos"
+with = { w = "30u", l = "0.5u", ng = "4", m = "1" }
+pins = { G = "inn", S = "?tail", B = "?tail", D = "out" }
+[[circuit.part]]
+what = "M3, the mirror's diode"
+symbol = "sg13_lv_nmos"
+with = { w = "2u", l = "4u", m = "1" }
+pins = { D = "?mirror", G = "?mirror", S = "vss", B = "vss" }
+[[circuit.part]]
+what = "M4, the mirror's output"
+symbol = "sg13_lv_nmos"
+with = { w = "2u", l = "4u", m = "1" }
+pins = { D = "out", G = "?mirror", S = "vss", B = "vss" }
+[[circuit.part]]
+what = "the input pin inp"
+symbol = "ipin"
+with = { lab = "inp" }
+[[circuit.part]]
+what = "the input pin inn"
+symbol = "ipin"
+with = { lab = "inn" }
+[[circuit.part]]
+what = "the bias input pin ibias"
+symbol = "ipin"
+with = { lab = "ibias" }
+[[circuit.part]]
+what = "the output pin out"
+symbol = "opin"
+with = { lab = "out" }
+[[circuit.part]]
+what = "the supply pin vdd"
+symbol = "iopin"
+with = { lab = "vdd" }
+[[circuit.part]]
+what = "the ground pin vss"
+symbol = "iopin"
+with = { lab = "vss" }
+
+[[step]]
+id = "start"
+title = "Get the project"
+text = """
+Let the guide make the starting project: a library "work" with an empty cell
+"ota5t". Or use a project of your own that has an empty work/ota5t/schematic.
+"""
+start_button = true
+continue_button = true
+continue_needs = ["view:work/ota5t/schematic"]
+needs_hint = "Open a project that has work/ota5t/schematic."
+
+[[step]]
+id = "open"
+title = "Open the schematic of ota5t"
+text = """
+In the Libraries panel, open "work", then "ota5t", and double-click "schematic".
+"""
+point = [
+    { at = "tree:work/ota5t/schematic", say = "Double-click schematic" },
+    { at = "tree:work/ota5t", say = "Open ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["open:work/ota5t/schematic"]
+
+[[step]]
+id = "circuit"
+title = "What the circuit does"
+text = """
+An OTA turns a voltage difference into a current. Six transistors do it here, in
+three pairs:
+
+- M6 and M5, a PMOS current mirror: 20 µA pulled out of the pin ibias flows through
+  M6, and M5 copies it. M5 is the "tail" current source.
+- M1 and M2, the PMOS input pair: they share the tail current. Equal inputs split it
+  in half; a difference shifts current from one side to the other.
+- M3 and M4, an NMOS mirror as load: it copies M1's current to the output side, so
+  the output gets M1's current in and M2's current out. Their difference charges
+  the output.
+
+The PDK's low-voltage devices (sg13_lv_pmos, sg13_lv_nmos), 1.2 V supply. The input
+pair is PMOS, so the inputs work near the lower rail (about 0.4 V here).
+"""
+picture = "ota-schematic"
+continue_button = true
+
+[[step]]
+id = "bias"
+title = "The bias mirror: M6 and M5"
+text = """
+Place two sg13_lv_pmos at the top (Insert, library sg13g2_pr). Select each, press q,
+and set w=32u, l=1u and ng=4. The names in the picture (M5, M6) matter in these
+tutorials: set name= in the same dialog.
+
+ng is the number of gate fingers: 32 µm is drawn as four fingers of 8 µm. The PDK's
+checker wants less than 10 µm per finger, and its models are only meant for that: it
+complains in the Console about a single wider finger.
+
+Wire both sources (top) and both bulks to vdd, and the two gates together. M6 is a
+diode: its gate also goes to its drain, and that node is the pin ibias.
+
+Pins: vdd is an in-out pin (Insert, "xschem devices", iopin), ibias an input pin
+(Ctrl+P). M5's drain is the tail: leave it for the next step.
+
+Labels save wires: Alt+L places a label; the same lab= name means the same net. You
+may label M5's drain "tail" now.
+
+An mm_ok=1 attribute on each device is what lets Monte Carlo draw mismatch later; the
+symbol sets it by itself.
+"""
+point = [
+    { at = "xschem.button:OK", say = "Set the attributes, then OK" },
+    { at = "xschem.picker.cell:sg13_lv_pmos", say = "Click sg13_lv_pmos" },
+    { at = "xschem.picker.library:sg13g2_pr", say = "Click sg13g2_pr" },
+]
+done_when = ["circuit:bias"]
+continue_button = true
+continue_needs = ["circuit:bias"]
+
+[[step]]
+id = "pair"
+title = "The input pair: M1 and M2"
+text = """
+Two more PMOS below, w=30u l=0.5u ng=4, named M1 and M2. Their sources and their
+bulks all go to M5's
+drain, the tail node. The bulks go to the tail and not to vdd: then the bulk follows
+the source and there is no body effect on the pair.
+
+M1's gate is the input pin inp, M2's gate the input pin inn. M2's drain is the output
+pin out (Ctrl+Shift+P). M1's drain goes to the mirror of the next step.
+
+The pair is large for two reasons you will measure: a wide device gives more gm for
+the same current, and a large gate area matches better (OTA 8) and has less flicker
+noise (OTA 9).
+"""
+picture = "ota-schematic"
+done_when = ["circuit:pair"]
+continue_button = true
+continue_needs = ["circuit:pair"]
+
+[[step]]
+id = "mirror"
+title = "The mirror load: M3 and M4"
+text = """
+Two sg13_lv_nmos at the bottom, w=2u l=4u (one finger), named M3 and M4. Sources and bulks to vss (an in-out pin
+vss). M3's gate and drain together, on M1's drain; M4's gate on the same node; M4's
+drain on out.
+
+These are long devices (4 µm): a long channel gives a small output conductance, and
+the gain of this OTA is the pair's gm over the output conductances.
+
+The list below names what is still wrong, whatever shape your drawing has.
+"""
+picture = "ota-schematic"
+point = [
+    { at = "xschem.picker.cell:sg13_lv_nmos", say = "Click sg13_lv_nmos" },
+    { at = "xschem.picker.library:sg13g2_pr", say = "Click sg13g2_pr" },
+]
+done_when = ["circuit:ota"]
+continue_button = true
+continue_needs = ["circuit:ota"]
+
+[[step]]
+id = "save"
+title = "Save"
+text = """
+Press Ctrl+S with the pointer over the drawing, and answer Yes to xschem's
+"save file?".
+"""
+point = [{ at = "xschem.button:Yes", say = "Click Yes" }]
+continue_button = true
+continue_needs = ["circuit:ota", "saved:work/ota5t/schematic"]
+needs_hint = "The circuit must be complete and saved (Ctrl+S)."
+
+[[step]]
+id = "symbol"
+title = "Make the symbol"
+text = """
+A symbol is how other schematics use this cell. In xschem's menu bar, open Symbol >
+Make symbol from schematic, and answer OK. It becomes the view "symbol" of the cell,
+with a pin for every pin of the schematic.
+"""
+point = [
+    { at = "xschem.button:OK", say = "Click OK" },
+    { at = "xschem.menu:Make symbol from schematic", say = "Click it" },
+    { at = "xschem.menu:Symbol", say = "Open the Symbol menu" },
+]
+done_when = ["view:work/ota5t/symbol"]
+
+[[step]]
+id = "check-symbol"
+title = "Check the symbol's pins"
+text = """
+Open the new view "symbol" from the Libraries panel. It must have the six pins inp,
+inn, out, ibias, vdd and vss.
+
+The next tutorials start from a project where the symbol is drawn as the usual
+amplifier triangle, with the same pins: testbench schematics are drawn to fit it.
+That is why they offer their own starting project.
+"""
+point = [
+    { at = "tree:work/ota5t/symbol", say = "Double-click symbol" },
+    { at = "tree:work/ota5t", say = "Open ota5t" },
+]
+picture = "ota-symbol"
+continue_button = true
+continue_needs = ["pins:work/ota5t=inp,inn,out,ibias,vdd,vss"]
+needs_hint = "The symbol needs all six pins."
+
+[[step]]
+id = "done"
+title = "What you have"
+text = """
+The OTA as a cell with a schematic and a symbol.
+
+Next: "OTA 2: the operating point". Every analysis starts from the DC operating
+point: if a transistor is not biased right, nothing else means anything.
+"""
+continue_button = true

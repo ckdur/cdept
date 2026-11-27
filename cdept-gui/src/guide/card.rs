@@ -3,10 +3,11 @@
 
 use egui::{
     Align, Align2, Color32, Context, CornerRadius, FontId, Id, LayerId, Order, Pos2, Rect,
-    RichText, ScrollArea, Shape, Stroke, StrokeKind, Ui, Vec2,
+    RichText, ScrollArea, Shape, Stroke, StrokeKind, TextureHandle, Ui, Vec2,
 };
 
-use super::Guide;
+use super::circuit::Line;
+use super::{Guide, Start};
 
 const WIDTH: f32 = 380.0;
 const ACCENT: Color32 = Color32::from_rgb(0xff, 0x9f, 0x1c);
@@ -20,6 +21,7 @@ pub(crate) fn pointing(ctx: &Context, guide: &Guide) -> Option<(String, String)>
         // A mark named like a fact that Continue waits for is a place to get to:
         // once there, there is nothing to point at.
         .filter(|point| !(step.continue_needs.contains(&point.at) && guide.holds(&point.at)))
+        .filter(|point| !point.unless.as_ref().is_some_and(|fact| guide.holds(fact)))
         .find(|point| super::find_anchor(ctx, &point.at).is_some())
         .map(|point| (point.at.clone(), point.say.clone()))
 }
@@ -73,11 +75,18 @@ pub(crate) fn highlight(ctx: &Context, guide: &Guide) {
 /// above and below it), left of a dialog's widgets (outside the dialog, when there is
 /// room), else below the widget, or above it.
 fn place(name: &str, frame: Rect, size: Vec2, screen: Rect, gap: f32) -> (Rect, Pos2, Pos2) {
+    // The layout picture is what the user works in: the label stays in its corner,
+    // not over the layer list beside it.
+    if name == "layout.picture" {
+        let label = Rect::from_min_size(frame.min + Vec2::new(12.0, 12.0), size);
+        let from = Pos2::new(label.center().x, label.bottom());
+        return (label, from, from + Vec2::new(0.0, gap));
+    }
     let menu_entry = name.starts_with("menu.") && name.matches('.').count() > 1;
     let tall = frame.height() > screen.height() * 0.4;
     let right = frame.right() + gap + size.x < screen.right();
     let left = frame.left() - gap - size.x > screen.left();
-    let at_left = name.starts_with("wizard.") && left;
+    let at_left = (name.starts_with("wizard.") || name.starts_with("dialog.")) && left;
     if (menu_entry || tall) && right || at_left {
         let y = if tall {
             frame.top() + 40.0
@@ -179,6 +188,93 @@ fn body(ui: &mut Ui, text: &str) {
     flush(ui, &mut paragraph);
 }
 
+/// A picture of the tutorial, at most `width` points wide.
+fn picture_ui(ui: &mut Ui, name: &str, width: f32) -> egui::Response {
+    let id = Id::new(("cdept-guide-picture", name));
+    let texture = ui.data(|d| d.get_temp::<TextureHandle>(id)).or_else(|| {
+        let bytes = super::tutorial::picture(name)?;
+        let image = image::load_from_memory(bytes).ok()?.to_rgba8();
+        let size = [image.width() as usize, image.height() as usize];
+        let image = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+        let texture = ui
+            .ctx()
+            .load_texture(name, image, egui::TextureOptions::LINEAR);
+        ui.data_mut(|d| d.insert_temp(id, texture.clone()));
+        Some(texture)
+    });
+    let Some(texture) = texture else {
+        return ui.weak(format!("(no picture '{name}')"));
+    };
+    let size = texture.size_vec2();
+    let scale = (width / size.x).min(1.0);
+    let sized = egui::load::SizedTexture::new(texture.id(), size * scale);
+    ui.add(egui::Image::new(sized).sense(egui::Sense::click()))
+}
+
+/// The button that makes the starting project, and how that goes.
+fn start_ui(ui: &mut Ui, start: &Start, id: &str) -> bool {
+    let place = super::base_dir()
+        .map(|base| base.join(id).display().to_string())
+        .unwrap_or_default();
+    match start {
+        Start::Scanning(job) => {
+            ui.label("Reading the PDK…");
+            crate::pdkscan::progress_ui(ui, job);
+            false
+        }
+        Start::Made(dir) => {
+            ui.label(format!("✔ Made in {}", dir.display()));
+            false
+        }
+        other => {
+            if let Start::Failed(error) = other {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+            }
+            let button = ui
+                .button("📦 Make the starting project")
+                .on_hover_text(format!(
+                    "A new folder, {place} (or with a number): nothing is written over"
+                ));
+            super::anchor(ui, "dialog.guide.start", &button);
+            button.clicked()
+        }
+    }
+}
+
+/// What the circuits of the step still lack.
+fn checklists(ui: &mut Ui, checks: &[(String, Option<Vec<Line>>)], tutorial: &super::Tutorial) {
+    for (id, lines) in checks {
+        let view = tutorial.circuit(id).map_or("", |c| c.view.as_str());
+        ui.add_space(4.0);
+        let Some(lines) = lines else {
+            ui.weak(format!("To have it checked, open the schematic {view}."));
+            continue;
+        };
+        let right = lines.iter().filter(|l| l.ok).count();
+        ui.strong(format!(
+            "Your schematic: {right} of {} checks pass",
+            lines.len()
+        ));
+        // What is wrong first: that is what to work on.
+        for line in lines.iter().filter(|l| !l.ok) {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("✖").color(ui.visuals().warn_fg_color));
+                ui.add(egui::Label::new(&line.text).wrap());
+            });
+        }
+        egui::CollapsingHeader::new(format!("What is right ({right})"))
+            .id_salt(("cdept-guide-right", id))
+            .show(ui, |ui| {
+                for line in lines.iter().filter(|l| l.ok) {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new("✔").color(Color32::from_rgb(0x4c, 0xaf, 0x50)));
+                        ui.add(egui::Label::new(&line.text).wrap());
+                    });
+                }
+            });
+    }
+}
+
 /// The card: the list of steps with the current one open. It floats above dialogs, so
 /// that it can be read and used while the wizard is open.
 pub(crate) fn show(ctx: &Context, guide: &mut Guide, project: Option<&str>) {
@@ -204,6 +300,26 @@ pub(crate) fn show(ctx: &Context, guide: &mut Guide, project: Option<&str>) {
         ctx.move_to_top(shown.response.layer_id);
     }
     guide.closed = !open;
+    if let Some(name) = guide.picture.clone() {
+        let mut open = true;
+        let large = egui::Window::new("Tutorial picture")
+            .id(Id::new("cdept-guide-large"))
+            .order(Order::Foreground)
+            .collapsible(false)
+            .open(&mut open)
+            .pivot(Align2::CENTER_CENTER)
+            .default_pos(screen.center())
+            .show(ctx, |ui| {
+                picture_ui(ui, &name, screen.width() * 0.6).clicked()
+            });
+        let clicked = large.as_ref().and_then(|l| l.inner).unwrap_or(false);
+        if let Some(large) = large {
+            ctx.move_to_top(large.response.layer_id);
+        }
+        if clicked || !open {
+            guide.picture = None;
+        }
+    }
 }
 
 fn contents(ui: &mut Ui, guide: &mut Guide, project: Option<&str>, height: f32) {
@@ -216,6 +332,8 @@ fn contents(ui: &mut Ui, guide: &mut Guide, project: Option<&str>, height: f32) 
     let mut jump = None;
     let mut advance = false;
     let mut restart = false;
+    let mut enlarge = None;
+    let mut asked_start = false;
     ScrollArea::vertical()
         .max_height(height.max(200.0))
         .auto_shrink([false, true])
@@ -250,6 +368,17 @@ fn contents(ui: &mut Ui, guide: &mut Guide, project: Option<&str>, height: f32) 
                     for what in &step.status {
                         status_line(ui, what);
                     }
+                    if let Some(name) = &step.picture
+                        && picture_ui(ui, name, WIDTH - 40.0)
+                            .on_hover_text("Click to see it large")
+                            .clicked()
+                    {
+                        enlarge = Some(name.clone());
+                    }
+                    if step.start_button {
+                        asked_start |= start_ui(ui, &guide.start, &guide.tutorial.id);
+                    }
+                    checklists(ui, &guide.checks, &guide.tutorial);
                 });
                 // Bring a new step into view once.
                 let id = Id::new("cdept-guide-shown");
@@ -301,6 +430,12 @@ fn contents(ui: &mut Ui, guide: &mut Guide, project: Option<&str>, height: f32) 
     }
     if advance {
         guide.advance();
+    }
+    if enlarge.is_some() {
+        guide.picture = enlarge;
+    }
+    if asked_start {
+        guide.start = Start::Asked;
     }
     if restart {
         let project = project.map(Into::into);

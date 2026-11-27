@@ -1,0 +1,4 @@
+# Testbench from the test template 'tran_delay' (docs/TESTS.md): Transient pulse response: propagation delay rise/fall, rise/fall time, slew rate and overshoot of out for a pulse on in.
+# `cdept sim templates show tran_delay` lists its parameters and outputs;
+# fields written here override the template's.
+template = "tran_delay"

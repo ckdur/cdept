@@ -85,7 +85,7 @@ Right-click gives the context menus:
 
 - Library: New Cell, Properties (folder, layout, read-only, description), Remove Library,
   Copy Folder Path, Fix all schematic links.
-- Cell: New View, Copy, Rename, Delete (to the trash; it lists what uses the cell first),
+- Cell: New View, New Testbench, New Suite, Copy, Rename, Delete (to the trash; it lists what uses the cell first),
   Netlist to View, Run Simulation.
 - View: Open, Open in Qucs-S for a Qucs schematic, Simulation, Run Simulation, Delete.
 
@@ -203,6 +203,11 @@ list or leave out a PDK library, The data is [`tech.toml`](../reference/files/te
 *The Technology tab, Overview page, for IHP SG13G2.*
 
 ## Simulation tab
+
+**Tools > New Testbench…** and **New Suite…** (also in a cell's context menu and in the
+Library Manager's toolbar) make a testbench view from a test template, or a suite of
+testbenches ([run a testbench](../howto/run-testbench.md#a-new-testbench-from-the-window),
+[suites](../howto/suites.md)).
 
 Opening a testbench view (double click on it, or Simulation in the view's menu) shows
 its [`setup.toml`](../reference/files/setup-toml.md) as a form and, below it, the runs.

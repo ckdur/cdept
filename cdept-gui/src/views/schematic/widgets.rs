@@ -385,6 +385,9 @@ fn button(ui: &mut Ui, widget: &Widget, cx: &mut Draw<'_>) {
         (None, _) => egui::Button::new(widget.text.as_str()),
     };
     let response = ui.add_enabled(widget.enabled, button);
+    if !widget.text.is_empty() {
+        crate::guide::anchor(ui, &format!("xschem.button:{}", widget.text), &response);
+    }
     if cx.focus == Some(widget.path.as_str()) {
         response.request_focus();
     }

@@ -254,6 +254,9 @@ fn run_with(
     }
     let mut cmd = Command::new(&simulator.program);
     cmd.current_dir(dir)
+        .envs(idle_threads_sleep(env, |name| {
+            std::env::var_os(name).is_some()
+        }))
         .envs(env.iter().map(|(k, v)| (k, v)))
         .args(["-b", "-o", "out.log", "deck.sp"]);
     let (status, stderr) = exec(&mut cmd)?;
@@ -364,6 +367,37 @@ pub fn parse_measures(log: &str) -> BTreeMap<String, f64> {
         }
     }
     out
+}
+
+/// A multi-threaded simulator (ngspice built with OpenMP) lets its idle threads spin.
+/// With a run per core, or other work on the machine, the spinning threads keep the
+/// working ones off the processors: 15 runs that take 0.25 s alone did not finish in
+/// 100 s on a loaded 32-core machine, and took 1.5 s with sleeping threads. What the
+/// user or the project sets is left as it is.
+fn idle_threads_sleep(
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+    inherited: impl Fn(&str) -> bool,
+) -> Vec<(&'static str, &'static str)> {
+    [("OMP_WAIT_POLICY", "passive"), ("GOMP_SPINCOUNT", "0")]
+        .into_iter()
+        .filter(|(name, _)| !inherited(name) && !env.iter().any(|(k, _)| k == name))
+        .collect()
+}
+
+#[cfg(test)]
+mod idle_thread_tests {
+    use super::idle_threads_sleep;
+
+    #[test]
+    fn what_is_set_already_stays() {
+        assert_eq!(idle_threads_sleep(&[], |_| false).len(), 2);
+        let env = [("OMP_WAIT_POLICY".into(), "active".into())];
+        assert_eq!(
+            idle_threads_sleep(&env, |_| false),
+            [("GOMP_SPINCOUNT", "0")]
+        );
+        assert!(idle_threads_sleep(&[], |_| true).is_empty());
+    }
 }
 
 #[cfg(test)]

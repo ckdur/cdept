@@ -333,6 +333,29 @@ impl LayoutView {
         })
     }
 
+    /// For a tutorial (guide.rs): `layout.net_ok:<net>` for each net that is whole,
+    /// and `layout.nets_clean`, while the comparison is of the layout as it is.
+    pub(super) fn net_facts(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self.nets_stale() {
+            return out;
+        }
+        let Some(report) = self.nets.report() else {
+            return out;
+        };
+        for net in &report.nets {
+            let name = &net.name;
+            out.push(match net.status {
+                nets::NetStatus::Ok => format!("layout.net_ok:{name}"),
+                _ => format!("layout.net_bad:{name}"),
+            });
+        }
+        if report.clean() {
+            out.push("layout.nets_clean".into());
+        }
+        out
+    }
+
     /// The layout changed since the connectivity was extracted, and live tracing has
     /// not caught up (or cannot: it is off, or instances were added).
     pub fn nets_stale(&self) -> bool {
@@ -803,14 +826,14 @@ impl LayoutView {
     /// The Layout menu entries.
     pub(super) fn nets_menu(&mut self, ui: &mut Ui, ready: bool) {
         let can = ready && self.link.source.is_some() && !self.nets.running();
-        if ui
+        let update = ui
             .add_enabled(can, egui::Button::new("Update Connectivity"))
             .on_hover_text(
                 "Extract the layout as it is now (PDK's LVS deck) and compare its nets with \
                  the schematic's: opens, shorts, flylines",
-            )
-            .clicked()
-        {
+            );
+        crate::guide::anchor(ui, "menu.layout.update_connectivity", &update);
+        if update.clicked() {
             self.update_connectivity();
             ui.close();
         }

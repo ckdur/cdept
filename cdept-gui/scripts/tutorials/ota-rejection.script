@@ -1,0 +1,201 @@
+# Replays the ota-rejection tutorial with real ngspice runs.
+guide expect_step start
+wait 1.5
+guide press dialog.guide.start
+guide wait idea
+wait 0.8
+screenshot @SCRATCH@/00-idea.png
+guide continue
+guide expect_step psrr-select
+wait 0.8
+guide expect_pointing tree:work
+guide click
+wait 0.8
+guide expect_pointing tree:work/tb_ota5t
+guide click
+guide expect_step psrr-new
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.new_testbench
+guide click
+guide expect_step psrr-template
+wait 0.8
+guide expect_pointing dialog.new_testbench.template
+guide click
+wait 0.8
+guide expect_pointing dialog.new_testbench.template.psrr_cmrr
+guide click
+wait 0.8
+guide expect_step psrr-create
+guide expect_pointing dialog.new_testbench.view
+guide click
+key a ctrl
+text psrr
+wait 0.3
+guide press dialog.new_testbench.param.adm_db
+text 35.2
+wait 0.3
+guide press dialog.new_testbench.param.rejection_min
+text 50
+wait 0.3
+wait 0.8
+screenshot @SCRATCH@/01-psrr-create.png
+guide press dialog.confirm
+guide expect_step psrr-vars
+wait 0.8
+guide expect_marked
+wait 1.5
+guide press sim.template
+wait 1.0
+screenshot @SCRATCH@/02-psrr-vars.png
+guide press sim.var.value.1
+key a ctrl
+text 0
+wait 0.3
+guide press sim.var.value.0
+key a ctrl
+text 0
+wait 0.3
+guide press sim.var.value.2
+key a ctrl
+text 1
+wait 0.3
+guide press sim.save
+wait 1.5
+guide continue
+guide expect_step psrr-run
+wait 0.8
+guide expect_pointing sim.run
+guide click
+guide wait psrr-read
+wait 0.8
+guide expect_marked
+wait 0.5
+guide press sim.setup
+wait 0.8
+screenshot @SCRATCH@/03-psrr.png
+guide continue
+guide wait cmrr-new
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.new_testbench
+guide click
+guide expect_step cmrr-template
+wait 0.8
+guide expect_pointing dialog.new_testbench.template
+guide click
+wait 0.8
+guide expect_pointing dialog.new_testbench.template.psrr_cmrr
+guide click
+wait 0.8
+guide expect_step cmrr-create
+guide expect_pointing dialog.new_testbench.view
+guide click
+key a ctrl
+text cmrr
+wait 0.3
+sim new_set param.mode cmrr
+wait 0.3
+guide press dialog.new_testbench.param.stim
+text cm
+wait 0.3
+guide press dialog.new_testbench.param.adm_db
+text 35.2
+wait 0.3
+guide press dialog.new_testbench.param.rejection_min
+text 40
+wait 0.3
+wait 0.8
+screenshot @SCRATCH@/04-cmrr-create.png
+guide press dialog.confirm
+guide expect_step cmrr-vars
+wait 1.5
+guide expect_pointing sim.setup
+guide click
+wait 1.0
+screenshot @SCRATCH@/05-cmrr-vars.png
+guide press sim.var.value.0
+key a ctrl
+text 1
+wait 0.3
+guide press sim.var.value.1
+key a ctrl
+text 0
+wait 0.3
+guide press sim.var.value.2
+key a ctrl
+text 0
+wait 0.3
+guide press sim.save
+wait 1.5
+guide continue
+guide expect_step cmrr-run
+wait 0.8
+guide expect_pointing sim.run
+guide click
+guide wait cmrr-read
+wait 0.8
+guide expect_marked
+wait 0.5
+guide press sim.setup
+wait 0.8
+screenshot @SCRATCH@/06-cmrr.png
+guide continue
+guide expect_step power-select
+wait 0.6
+guide expect_pointing tree:work/tb_ota5t_step
+guide click
+guide expect_step power-new
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.new_testbench
+guide click
+guide expect_step power-template
+wait 0.8
+guide expect_pointing dialog.new_testbench.template
+guide click
+wait 0.8
+guide expect_pointing dialog.new_testbench.template.power
+guide click
+wait 0.8
+guide expect_step power-create
+wait 0.8
+guide expect_marked
+guide press dialog.new_testbench.param.step
+text 200p
+wait 0.3
+guide press dialog.new_testbench.param.stop
+text 1u
+wait 0.3
+guide press dialog.new_testbench.param.period
+text 1u
+wait 0.3
+guide press dialog.new_testbench.param.i_avg_max
+text 50u
+wait 0.3
+guide press dialog.new_testbench.param.p_avg_max
+text 60u
+wait 0.3
+wait 0.8
+screenshot @SCRATCH@/07-power-create.png
+guide press dialog.confirm
+guide expect_step power-run
+wait 1.0
+wait 0.8
+guide expect_pointing sim.run
+guide click
+guide wait power-read
+wait 0.8
+guide expect_marked
+wait 0.5
+guide press sim.setup
+wait 0.4
+guide press sim.template
+wait 0.8
+screenshot @SCRATCH@/08-power.png
+guide continue
+guide expect_step finished
+quit

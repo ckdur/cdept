@@ -1,0 +1,331 @@
+schema = "cdept-tutorial"
+version = 1
+id = "inv-corners"
+title = "Inverter 5: limits, transfer curve and corners"
+series = "inverter"
+order = 5
+start = ["base", "inv-sch", "inv-sym", "inv-tb", "inv-sim"]
+pdk = "ihp-sg13g2"
+goal = """
+A chip must work for every transistor the factory makes and at every temperature it
+meets. You give the inverter's delay a limit, simulate it over process corners and
+temperatures, read which points fail, then measure its DC transfer curve and see how
+its switching point moves with the corners.
+"""
+minutes = 25
+before = """
+- [Inverter 4](inv-transient.md), or let the guide make the starting project.
+- ngspice on this machine: on PATH, or named by `CDEPT_NGSPICE` in the shell that
+  starts CDePT.
+- CDePT built with the xschem helper (`cargo build -p cdept-xschem`).
+"""
+
+[[step]]
+id = "start"
+title = "Get the project"
+text = """
+Either let the guide make the starting project (the testbench with its transient view
+tran_delay), or open your own project from "Inverter 4" and press Continue.
+"""
+start_button = true
+continue_button = true
+continue_needs = ["view:work/tb_inv/tran_delay"]
+needs_hint = "Open a project that has work/tb_inv/tran_delay."
+
+[[step]]
+id = "open"
+title = "Open the transient testbench"
+text = """
+In the Libraries panel, open "work" and "tb_inv", and double-click the view
+"tran_delay". It opens in the Simulation tab.
+"""
+point = [
+    { at = "tree:work/tb_inv/tran_delay", say = "Double-click tran_delay" },
+    { at = "tree:work/tb_inv", say = "Open tb_inv" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["sim.view.tran_delay"]
+
+[[step]]
+id = "limit"
+title = "Set a limit on the delay"
+text = """
+A specification says what the circuit must do. Without one a simulation only gives
+numbers.
+
+Under "Test template", click the field tpd_max and type:
+
+    50p
+
+Every run point now passes only if its average delay is at most 50 ps. In the typical
+corner at 27 °C you measured 43.6 ps. (If the section is folded, click "Test
+template" to open it.)
+"""
+point = [
+    { at = "sim.template.param.tpd_max", say = "Type 50p here" },
+    { at = "sim.template", say = "Open \"Test template\"" },
+]
+continue_button = true
+continue_needs = ["sim.view.tran_delay"]
+needs_hint = "Open the testbench tran_delay."
+lost_without = ["sim.view.tran_delay"]
+back_to = "open"
+lost_says = "The testbench is not open. Open tran_delay again."
+
+[[step]]
+id = "corners"
+title = "Choose the corners"
+text = """
+No two wafers are alike. The foundry gives model sets for the extremes it
+guarantees, the process corners. In IHP SG13G2:
+
+- tt: typical;
+- ff: fast NMOS and fast PMOS;
+- ss: slow NMOS and slow PMOS;
+- sf, fs: one fast, one slow (the first letter is the NMOS).
+
+Under "Setup", tick tt, ff and ss in the Corners row.
+"""
+point = [
+    { at = "sim.corners", say = "Tick tt, ff and ss" },
+    { at = "sim.setup", say = "Open \"Setup\"" },
+]
+continue_button = true
+continue_needs = ["sim.corner.tt", "sim.corner.ff", "sim.corner.ss"]
+needs_hint = "Tick tt, ff and ss."
+lost_without = ["sim.view.tran_delay"]
+back_to = "open"
+lost_says = "The testbench is not open. Open tran_delay again."
+
+[[step]]
+id = "temperatures"
+title = "Choose the temperatures"
+text = """
+Temperature changes the transistors too. In the field Temperatures (in °C) type:
+
+    -40, 27, 125
+
+This is the industrial range with room temperature in between. The line under the
+buttons now says 9 run points: 3 corners × 3 temperatures.
+"""
+point = [
+    { at = "sim.temperatures", say = "Type -40, 27, 125" },
+    { at = "sim.setup", say = "Open \"Setup\"" },
+]
+continue_button = true
+lost_without = ["sim.view.tran_delay"]
+back_to = "open"
+lost_says = "The testbench is not open. Open tran_delay again."
+
+[[step]]
+id = "save"
+title = "Save the testbench"
+text = """
+Press "Save" above the form. The limit, corners and temperatures go into the view's
+setup.toml.
+"""
+point = [{ at = "sim.save", say = "Press Save" }]
+continue_button = true
+continue_needs = [
+    "setup:work/tb_inv/tran_delay:template_args.tpd_max~50p",
+    "setup:work/tb_inv/tran_delay:corners~\"ss\"",
+    "setup:work/tb_inv/tran_delay:corners~\"ff\"",
+    "setup:work/tb_inv/tran_delay:temperatures~125",
+]
+needs_hint = "Save with tpd_max 50p, the corners tt, ff, ss and the temperatures -40, 27, 125."
+lost_without = ["sim.view.tran_delay"]
+back_to = "open"
+lost_says = "The testbench is not open. Open tran_delay again."
+
+[[step]]
+id = "run"
+title = "Run the nine points"
+text = """
+Press "▶ Run". Several simulators run at once; the Jobs list shows each point.
+"""
+point = [{ at = "sim.run", say = "Press Run" }]
+done_when = ["sim.points.9"]
+lost_without = ["sim.view.tran_delay"]
+back_to = "open"
+lost_says = "The testbench is not open. Open tran_delay again."
+
+[[step]]
+id = "read"
+title = "Find what fails"
+text = """
+Fold "Test template" and "Setup" by clicking their titles. Under "Results" the line
+says how many limits pass: 6 pass and 3 fail.
+
+Scroll down to "Points (9)" and open it: each point shows tpd with PASS or FAIL. In
+our run:
+
+- ss: 50.7 ps at -40 °C, 52.0 ps at 27 °C, 53.5 ps at 125 °C. All three fail.
+- tt: 43.0 to 44.6 ps. ff: about 36.5 to 37.6 ps. All pass.
+
+The slow process is the worst case for delay, and heat makes it a little slower. At
+the typical corner alone the design seemed to have room to spare; this is why you
+simulate corners.
+
+What to do about a failing corner is a design decision: wider transistors, a smaller
+load, or a limit that is argued to be too strict. Do not loosen a limit just because
+it fails.
+"""
+point = [
+    { at = "sim.points", say = "Open \"Points\"" },
+    { at = "sim.results", say = "Scroll down to \"Points\"" },
+    { at = "sim.setup", say = "Fold \"Setup\" (and \"Test template\")" },
+]
+continue_button = true
+continue_needs = ["sim.some_fail"]
+needs_hint = "Run the nine points with the limit of 50 ps."
+lost_without = ["sim.view.tran_delay"]
+back_to = "open"
+lost_says = "The testbench is not open. Open tran_delay again."
+
+[[step]]
+id = "new-dc"
+title = "A second testbench: the DC curve"
+text = """
+The transfer curve is the output voltage for every input voltage, with time left
+out. It tells where the inverter switches and how sharply.
+
+The same schematic can have several testbench views. With tb_inv selected, open
+Tools > New Testbench….
+"""
+point = [
+    { at = "menu.tools.new_testbench", say = "Click \"New Testbench…\"" },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["dialog.new_testbench", "view:work/tb_inv/dc_transfer"]
+
+[[step]]
+id = "dc-template"
+title = "Choose the template dc_transfer"
+text = """
+Open the "Template" list and choose dc_transfer. The cell must say tb_inv; the view
+is named dc_transfer by itself.
+"""
+point = [
+    { at = "dialog.new_testbench.template.dc_transfer", say = "Choose dc_transfer" },
+    { at = "dialog.new_testbench.template", say = "Open the Template list" },
+]
+done_when = ["dialog.new_testbench.template.dc_transfer", "view:work/tb_inv/dc_transfer"]
+lost_without = ["dialog.new_testbench"]
+back_to = "new-dc"
+lost_says = "The window was closed. Open Tools > New Testbench… again."
+
+[[step]]
+id = "dc-limits"
+title = "Limits of the transfer curve"
+text = """
+The template sweeps the source named Vin from 0 to the supply in 10 mV steps (this is
+why the name mattered in "Inverter 3"). Fill in three limits among the parameters:
+
+- gain_min = 10: the steepest slope must be at least 10. A logic gate needs gain well
+  above 1 to turn a weak input into a clean output.
+- vtrip_min = 0.5 and vtrip_max = 0.7: the output must cross half the supply while
+  the input is between 0.5 and 0.7 V.
+
+Then press Create.
+"""
+point = [
+    { at = "dialog.new_testbench.param.gain_min", say = "gain_min 10, vtrip_min 0.5, vtrip_max 0.7, then Create" },
+]
+done_when = ["view:work/tb_inv/dc_transfer"]
+lost_without = ["dialog.new_testbench"]
+back_to = "new-dc"
+lost_says = "The window was closed without making dc_transfer."
+
+[[step]]
+id = "dc-corners"
+title = "All five corners"
+text = """
+For the switching point the mixed corners matter most: when the NMOS is fast and the
+PMOS slow, or the other way round, one pulls harder than the other. Under "Setup"
+tick tt, ff, ss, sf and fs. Leave the temperatures empty (27 °C), and press Save.
+"""
+point = [
+    { at = "sim.corners", say = "Tick tt, ff, ss, sf, fs, then Save" },
+    { at = "sim.setup", say = "Open \"Setup\"" },
+]
+continue_button = true
+continue_needs = [
+    "setup:work/tb_inv/dc_transfer:corners~\"sf\"",
+    "setup:work/tb_inv/dc_transfer:corners~\"fs\"",
+    "setup:work/tb_inv/dc_transfer:corners~\"tt\"",
+    "setup:work/tb_inv/dc_transfer:corners~\"ff\"",
+    "setup:work/tb_inv/dc_transfer:corners~\"ss\"",
+]
+needs_hint = "Tick all five corners and press Save."
+lost_without = ["sim.view.dc_transfer"]
+back_to = "new-dc"
+lost_says = "The testbench dc_transfer is not open. Double-click it in the Libraries panel."
+
+[[step]]
+id = "dc-run"
+title = "Run the DC sweep"
+text = """
+Press "▶ Run".
+"""
+point = [{ at = "sim.run", say = "Press Run" }]
+done_when = ["sim.points.5"]
+lost_without = ["sim.view.dc_transfer"]
+back_to = "new-dc"
+lost_says = "The testbench dc_transfer is not open. Double-click it in the Libraries panel."
+
+[[step]]
+id = "dc-read"
+title = "Read the switching points"
+text = """
+All limits pass. For each corner, vtrip is the input voltage at which the output
+crosses 0.6 V; vm is the input voltage where the output equals the input. At 27 °C we
+got these vtrip values:
+
+- fs: 0.587 V (strong NMOS: it pulls the output down earlier);
+- ss: 0.614 V, tt: 0.621 V, ff: 0.625 V;
+- sf: 0.654 V (strong PMOS: the input has to go higher).
+
+ss and ff hardly move it: both transistors changed together. The mixed corners move
+it by about 35 mV each way. gain_max, the steepest slope, is about 16 to 18.
+"""
+point = [
+    { at = "sim.results", say = "The results (Points shows each corner)" },
+    { at = "sim.setup", say = "Fold \"Setup\" (and \"Test template\")" },
+]
+continue_button = true
+continue_needs = ["sim.points.5"]
+needs_hint = "Run the five corners first."
+lost_without = ["sim.view.dc_transfer"]
+back_to = "new-dc"
+lost_says = "The testbench dc_transfer is not open. Double-click it in the Libraries panel."
+
+[[step]]
+id = "family"
+title = "See the curves together"
+text = """
+Below the statistics (scroll down with the wheel), press "Waveform Tab (family)": one tab with the curves of all five corners. Zoom
+around 0.6 V (wheel over the plot): the curves cross half the supply in the order fs,
+ss, tt, ff, sf. The Points list on the left shows or hides each corner.
+"""
+point = [
+    { at = "sim.family.waveform_tab", say = "Press \"Waveform Tab (family)\"" },
+    { at = "sim.results", say = "Scroll down to \"Waveform Tab (family)\"" },
+    { at = "sim.setup", say = "Fold \"Setup\" (and \"Test template\")" },
+]
+done_when = ["wave.tab"]
+continue_button = true
+
+[[step]]
+id = "done"
+title = "What you now have"
+text = """
+tb_inv now has two testbench views with limits over the corners. Both are plain
+setup.toml files: commit them, and anyone can check the design again:
+
+    cdept -p ~/cdept-tutorial/inv-corners sim run work tb_inv --view tran_delay
+    cdept -p ~/cdept-tutorial/inv-corners sim run work tb_inv --view dc_transfer
+
+The command fails when a limit fails, so it can guard a change. Several testbenches
+can also be run together as a test suite, as the OTA tutorials do.
+"""
+continue_button = true

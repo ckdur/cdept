@@ -1,5 +1,8 @@
 # Quickstart
 
+To learn the GUI by doing, follow the [tutorials](../tutorials/index.md): CDePT guides
+you through them in its own window.
+
 This tutorial makes a project for the IHP SG13G2 PDK, adds a library with an inverter and
 a testbench, netlists the inverter and runs the testbench at three corners. It uses the
 command line; the same steps are available in the [GUI](gui.md). Every command below was

@@ -1,0 +1,81 @@
+# Replays the ota-ac tutorial with real ngspice runs.
+guide expect_step start
+wait 1.5
+guide press dialog.guide.start
+guide wait estimate
+guide continue
+guide expect_step select
+wait 0.8
+guide expect_pointing tree:work
+guide click
+wait 0.8
+guide expect_pointing tree:work/tb_ota5t
+guide click
+guide expect_step new
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.new_testbench
+guide click
+guide expect_step template
+wait 0.8
+guide expect_pointing dialog.new_testbench.template
+guide click
+wait 0.8
+guide expect_pointing dialog.new_testbench.template.ac_response
+guide click
+guide expect_step create
+wait 0.8
+guide expect_pointing dialog.new_testbench.params
+sim new_set param.inverting yes
+wait 0.3
+guide press dialog.new_testbench.param.gain_db_min
+text 30
+wait 0.3
+guide press dialog.new_testbench.param.ugbw_min
+text 80meg
+wait 0.3
+guide press dialog.new_testbench.param.pm_min
+text 50
+wait 0.8
+screenshot @SCRATCH@/01-create.png
+guide press dialog.confirm
+guide expect_step variables
+wait 1.5
+guide press sim.template
+wait 1.0
+guide expect_pointing sim.var.value.1
+screenshot @SCRATCH@/02-variables.png
+guide click
+key a ctrl
+text 1
+wait 0.5
+guide press sim.save
+wait 1.5
+guide continue
+guide expect_step run
+guide expect_pointing sim.run
+guide click
+guide wait read
+wait 0.8
+guide expect_marked
+wait 0.5
+guide press sim.setup
+wait 0.8
+screenshot @SCRATCH@/03-results.png
+guide continue
+guide expect_step wave
+guide expect_pointing sim.point.waveform_tab
+guide click
+guide wait cursor
+wait 3
+guide expect_pointing wave.panes
+guide click
+wait 2
+screenshot @SCRATCH@/04-cursor.png
+guide continue
+guide expect_step done
+wait 0.6
+guide continue
+guide expect_step finished
+quit

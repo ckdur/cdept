@@ -11,6 +11,7 @@ The manual does not repeat them: it links to them.
 XSCHEM
 KLAYOUT
 LINKING
+LAYOUT-TRIAL
 MAGIC
 NGSPICE
 VACASK

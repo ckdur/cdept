@@ -1,0 +1,183 @@
+# Replays the inv-symbol tutorial. The symbol is made through xschem's Symbol menu,
+# the cell through the Library Manager, the inverter and one source through the symbol
+# picker; the rest of the testbench is put down with xschem's commands at the places of
+# the reference drawing, with a mistake on the way that the checklist must name.
+guide expect_step start
+wait 1
+guide press dialog.guide.start
+guide wait open
+wait 0.5
+guide expect_pointing tree:work
+guide click
+wait 0.6
+guide expect_pointing tree:work/inv
+guide click
+wait 0.6
+guide expect_pointing tree:work/inv/schematic
+open_view work inv schematic
+guide expect_step make-symbol
+wait_frame
+wait 1
+guide expect_pointing xschem.menu:Symbol
+screenshot @SCRATCH@/01-symbol-menu.png
+guide click
+wait 0.8
+guide expect_pointing xschem.menu:Make symbol from schematic
+screenshot @SCRATCH@/02-make-symbol.png
+guide click
+wait 1.2
+guide expect_pointing xschem.button:OK
+screenshot @SCRATCH@/03-ok.png
+guide click
+guide wait see-symbol
+wait 1
+guide expect_pointing tree:work/inv/symbol
+open_view work inv symbol
+wait_frame
+wait 1
+screenshot @SCRATCH@/04-symbol.png
+guide continue
+
+guide expect_step manager
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.library_manager
+guide click
+guide wait new-cell
+wait 0.5
+guide press manager.library:work
+wait 0.5
+guide expect_pointing manager.new_cell
+guide click
+guide wait name-cell
+wait 0.8
+guide expect_pointing dialog.field:Name
+guide click
+text tb_inv
+wait 0.5
+screenshot @SCRATCH@/05-name-cell.png
+guide press dialog.confirm
+guide wait open-tb
+wait 0.8
+guide expect_pointing manager.view:schematic
+screenshot @SCRATCH@/06-open-tb.png
+open_view work tb_inv schematic
+guide wait dut
+wait_frame
+wait 1
+tcl xschem zoom_box -450 -150 450 300
+wait 0.5
+move 400 300
+key Insert
+wait 0.8
+guide expect_pointing xschem.picker.library:work
+guide click
+wait 0.6
+guide expect_pointing xschem.picker.cell:inv
+guide click
+wait 0.6
+guide expect_pointing xschem.picker.view:symbol
+guide click
+wait 0.5
+screenshot @SCRATCH@/07-picker-inv.png
+guide press xschem.picker.ok
+wait 0.8
+move 420 200
+click_here
+wait 0.3
+key Escape
+guide wait sources
+wait 0.5
+
+# One source through the picker, as a user does it.
+move 300 450
+key Insert
+wait 0.8
+guide expect_pointing xschem.picker.library:devices
+guide click
+wait 0.6
+guide expect_pointing xschem.picker.cell:vsource
+guide click
+wait 0.5
+guide press xschem.picker.ok
+wait 0.8
+move 300 450
+click_here
+wait 0.3
+key Escape
+wait 0.5
+# Its attributes through the dialog, as a user does them.
+tcl xschem unselect_all; xschem select instance V1; xschem redraw
+move 300 450
+key q
+wait 1.5
+guide expect_pointing xschem.button:OK
+dialog_type .dialog.symprop name=Vdd value={vdd} savecurrent=false
+wait 0.5
+screenshot @SCRATCH@/08-attributes.png
+guide click
+wait 1.2
+guide expect_check sources ok the supply source Vdd: value = {vdd}
+guide expect_check sources no place the input source Vin
+
+# The rest at the places of the reference drawing; the input source with a wrong
+# value first.
+tcl xschem select_all; xschem delete; xschem redraw
+tcl xschem instance work/inv/symbol/inv.sym 0 0 0 0 {name=x1}
+tcl xschem instance vsource.sym -300 190 0 0 {name=Vdd value="{vdd}" savecurrent=false}
+tcl xschem instance vsource.sym -80 190 0 0 {name=Vin value="pulse(0 1.2 0 1n)" savecurrent=false}
+tcl xschem instance capa.sym 300 190 0 0 {name=CL value=10f m=1}
+tcl xschem redraw
+wait 1.5
+guide expect_check sources no the input source Vin: value should be
+screenshot @SCRATCH@/09-wrong-pulse.png
+tcl xschem unselect_all; xschem select instance Vin; xschem delete; xschem instance vsource.sym -80 190 0 0 {name=Vin value="pulse(0 {vdd} 200p 50p 50p 400p 1n)" savecurrent=false}; xschem redraw
+guide wait connect
+tcl xschem instance gnd.sym -300 220 0 0 {name=l6 lab=0}
+tcl xschem instance gnd.sym -80 220 0 0 {name=l8 lab=0}
+tcl xschem instance gnd.sym 300 220 0 0 {name=l10 lab=0}
+tcl xschem redraw
+wait 1.5
+guide expect_check testbench no the inverter: pin A should be on in
+screenshot @SCRATCH@/10-unconnected.png
+tcl xschem wire -190 -20 -150 -20
+tcl xschem wire 150 -20 190 -20
+tcl xschem wire 150 0 250 0
+tcl xschem wire 150 20 190 20
+tcl xschem wire 190 20 190 60
+tcl xschem instance gnd.sym 190 60 0 0 {name=l4 lab=0}
+tcl xschem instance lab_pin.sym -190 -20 0 0 {name=l1 sig_type=std_logic lab=in}
+tcl xschem instance lab_pin.sym 190 -20 2 0 {name=l2 sig_type=std_logic lab=VDD}
+tcl xschem instance lab_pin.sym 250 0 2 0 {name=l3 sig_type=std_logic lab=out}
+tcl xschem instance lab_pin.sym -300 160 0 0 {name=l5 sig_type=std_logic lab=VDD}
+tcl xschem instance lab_pin.sym -80 160 0 0 {name=l7 sig_type=std_logic lab=in}
+tcl xschem instance lab_pin.sym 300 160 0 0 {name=l9 sig_type=std_logic lab=out}
+tcl xschem redraw
+guide wait save
+key f
+wait 1
+screenshot @SCRATCH@/11-complete.png
+move 500 600
+key s ctrl
+wait 1.2
+guide expect_pointing xschem.button:Yes
+guide click
+wait 1.5
+guide continue
+guide expect_step netlist
+guide expect_pointing menu.cell
+guide click
+wait 0.5
+guide expect_pointing menu.cell.netlist
+guide click
+wait 0.5
+guide expect_pointing menu.cell.netlist.SPICE
+guide click
+guide wait read
+wait 0.8
+guide expect_pointing tree:work/tb_inv
+screenshot @SCRATCH@/12-netlist.png
+guide continue
+guide expect_step finished
+quit

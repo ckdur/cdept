@@ -230,11 +230,13 @@ impl LayoutView {
 
     /// The Layout menu entry.
     pub(super) fn pins_menu(&mut self, ui: &mut Ui) {
-        if ui
+        let panel = ui
             .checkbox(&mut self.pins.open, "Pins Panel")
-            .on_hover_text("The layout's pins: place, rename, delete, check")
-            .changed()
-        {
+            .on_hover_text("The layout's pins: place, rename, delete, check");
+        if !self.pins.open {
+            crate::guide::anchor(ui, "menu.layout.pins_panel", &panel);
+        }
+        if panel.changed() {
             ui.close();
         }
     }
@@ -347,11 +349,11 @@ impl LayoutView {
                         }
                     });
                 let named = !self.pins.name.trim().is_empty();
-                if ui
+                let draw = ui
                     .add_enabled(named, egui::Button::new("Draw"))
-                    .on_hover_text("Draw the pin's box on the current layer (a conductor)")
-                    .clicked()
-                {
+                    .on_hover_text("Draw the pin's box on the current layer (a conductor)");
+                crate::guide::anchor(ui, "layout.pins.draw", &draw);
+                if draw.clicked() {
                     acts.push(Act::Draw);
                 }
                 if ui
@@ -432,7 +434,10 @@ impl LayoutView {
                                             }
                                         }
                                     }
-                                    if ui.small_button("Delete").clicked() {
+                                    let delete = ui.small_button("Delete");
+                                    let mark = format!("layout.pins.delete:{name}");
+                                    crate::guide::anchor(ui, &mark, &delete);
+                                    if delete.clicked() {
                                         acts.push(Act::Remove(name.clone()));
                                     }
                                 });

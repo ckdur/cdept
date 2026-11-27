@@ -11,7 +11,10 @@
 //! listed in [`ANCHORS`] and [`FACTS`] (a test checks it).
 
 mod card;
+mod circuit;
+mod facts;
 mod run;
+mod start;
 mod tutorial;
 
 use std::collections::HashMap;
@@ -19,30 +22,36 @@ use std::collections::HashMap;
 use egui::{Context, Id, Rect, Response, Ui, ViewportId};
 
 pub(crate) use card::{highlight, pointing, show as show_card};
-pub(crate) use run::Guide;
-pub use tutorial::{Tutorial, builtin, builtins};
+pub(crate) use circuit::{Instance, check, passes};
+pub(crate) use facts::{Open, World, view_file};
+pub(crate) use run::{Guide, Start};
+pub(crate) use start::{base_dir, make as make_start};
+pub use tutorial::{SERIES, Tutorial, builtin, builtins};
 
-/// The names widgets are marked with. A name ending in `.` is a family.
+/// The names widgets are marked with. A name ending in `.` or `:` is a family: the
+/// replay of a tutorial is what finds a wrong name in one.
 #[cfg(test)]
 pub(crate) const ANCHORS: &[&str] = &[
-    "menu.file",
-    "menu.file.new_project",
-    "menu.project",
-    "menu.project.technology",
-    "wizard.folder",
-    "wizard.pdks",
-    "wizard.pdk_folder",
-    "wizard.next",
-    "wizard.summary",
-    "wizard.libraries",
-    "wizard.create",
+    "menu.",
+    "wizard.",
     "technology.page.",
-    "libraries.panel",
+    "libraries.",
+    "manager.",
+    "tree:",
+    "cell.",
+    "dialog.",
+    "toolbar.",
+    "xschem.",
+    "schematic.",
+    "sim.",
+    "wave.",
+    "layout.",
 ];
 
-/// The facts a tutorial may ask about. A name ending in `.` is a family.
+/// The facts a tutorial may ask about.
 #[cfg(test)]
 pub(crate) const FACTS: &[&str] = &[
+    // Reported by widgets.
     "wizard.open",
     "wizard.page.project",
     "wizard.page.technology",
@@ -51,9 +60,27 @@ pub(crate) const FACTS: &[&str] = &[
     "wizard.scanned",
     "technology.tab",
     "technology.page.",
-    // Worked out by the guide itself (run.rs).
+    "dialog.",
+    "sim.",
+    "wave.",
+    "layout.",
+    "manager.",
+    // Worked out by the guide (facts.rs).
     "project.created",
+    "project.started",
     "library.pdk_selected",
+    "library:",
+    "view:",
+    "selected:",
+    "open:",
+    "saved:",
+    "pins:",
+    "setup:",
+    "file:",
+    "sim.ran:",
+    "sim.passed:",
+    // The tutorial's own circuits (`[[circuit]]`).
+    "circuit:",
 ];
 
 /// What the widgets said, kept in egui's memory so that any of them can reach it.
@@ -128,6 +155,17 @@ pub(crate) fn has_fact(ctx: &Context, name: &str) -> bool {
     with_marks(ctx, |marks| {
         marks.facts.get(name).is_some_and(|f| *f == marks.frame)
     })
+}
+
+/// What the current step asks about and points at, for views that work a fact out only
+/// when it is asked for. Empty while no tutorial runs.
+pub(crate) fn wanted(ctx: &Context) -> Vec<String> {
+    ctx.data(|d| d.get_temp::<Vec<String>>(id().with("wanted")))
+        .unwrap_or_default()
+}
+
+pub(crate) fn set_wanted(ctx: &Context, names: Vec<String>) {
+    ctx.data_mut(|d| d.insert_temp(id().with("wanted"), names));
 }
 
 /// Start a frame: what was marked before is old from now on.

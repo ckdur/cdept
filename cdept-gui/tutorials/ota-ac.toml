@@ -1,0 +1,199 @@
+schema = "cdept-tutorial"
+version = 1
+id = "ota-ac"
+title = "OTA 3: gain, unity-gain frequency, phase margin"
+series = "ota"
+order = 3
+start = ["base", "ota-sch", "ota-sym", "ota-tb", "ota-dc"]
+pdk = "ihp-sg13g2"
+goal = """
+You measure the open-loop AC response of the OTA, compare the DC gain and bandwidth
+with hand estimates, and read it as a waveform.
+"""
+minutes = 20
+before = """
+- [OTA 2](ota-bias.md), or the starting project (it has the operating-point
+  testbench).
+"""
+
+[[step]]
+id = "start"
+title = "Get the project"
+text = """
+Make the starting project: the OTA, its testbench schematics and the operating-point
+view of "OTA 2".
+"""
+start_button = true
+continue_button = true
+continue_needs = ["view:work/tb_ota5t/ota_op"]
+needs_hint = "Open a project with work/tb_ota5t/ota_op."
+
+[[step]]
+id = "estimate"
+title = "Estimate first"
+text = """
+At DC the OTA's gain is the pair's transconductance times the resistance at the
+output: A = gm1 / (gds2 + gds4). From the operating point of this design:
+gm1 = 201 µS, gds2 = 1.74 µS, gds4 = 1.69 µS. So A = 201 / 3.43 = 58.6, which is
+35.4 dB.
+
+With the load alone, the unity-gain frequency would be gm1 / (2π · CL) =
+201 µS / (2π · 100 fF) = 320 MHz. Keep both numbers.
+"""
+continue_button = true
+
+[[step]]
+id = "select"
+title = "Select tb_ota5t"
+text = """
+In the Libraries panel, open "work" and click the cell "tb_ota5t".
+"""
+point = [
+    { at = "tree:work/tb_ota5t", say = "Click tb_ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["selected:work/tb_ota5t", "view:work/tb_ota5t/ac_response"]
+
+[[step]]
+id = "new"
+title = "New testbench"
+text = """
+Open Tools > New Testbench….
+"""
+point = [
+    { at = "menu.tools.new_testbench", say = "Click \"New Testbench…\"" },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["dialog.new_testbench", "view:work/tb_ota5t/ac_response"]
+
+[[step]]
+id = "template"
+title = "The template ac_response"
+text = """
+Choose the template ac_response. It sweeps the frequency and reports the DC gain,
+the -3 dB bandwidth, the unity-gain frequency (ugbw) and the phase margin (pm) of out
+over the node "in".
+"""
+point = [
+    { at = "dialog.new_testbench.template.ac_response", say = "Choose ac_response" },
+    { at = "dialog.new_testbench.template", say = "Open the Template list" },
+]
+done_when = ["dialog.new_testbench.template.ac_response", "view:work/tb_ota5t/ac_response"]
+lost_without = ["dialog.new_testbench"]
+back_to = "new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "create"
+title = "Parameters, then Create"
+text = """
+Set these parameters in the window (scroll the list):
+
+- inverting: yes. Here "in" drives inn, the inverting input, so the response is -out/in.
+  With "no" the phase starts at 180° and the phase margin is wrong.
+- gain_db_min: 30
+- ugbw_min: 80meg
+- pm_min: 50
+
+Then press "Create".
+"""
+point = [{ at = "dialog.new_testbench.params", say = "Set inverting and the limits" }]
+done_when = ["view:work/tb_ota5t/ac_response"]
+lost_without = ["dialog.new_testbench"]
+back_to = "new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "variables"
+title = "Turn the AC source on, and save"
+text = """
+CDePT copied the design variables from the operating-point testbench, which
+simulates the same schematic (the Console says so). One must differ: there the AC
+source was off. In the Variables list (fold "Test template" first), set
+
+- ac_dm = 1
+
+(vbias, which the template adds, is not used by this schematic.) This is the 1 V of AC amplitude on Vin. An AC analysis is linear, so 1 V is only a
+unit: out then reads as the gain. Check that inverting is "yes" and the limits are set
+(under Test template; you can change them there). Then press "Save".
+"""
+point = [
+    { at = "sim.var.value.1", say = "Set ac_dm to 1" },
+    { at = "sim.setup", say = "The variables are under Setup (fold Test template)" },
+]
+continue_button = true
+continue_needs = [
+    "setup:work/tb_ota5t/ac_response:variables.ac_dm~\"1\"",
+    "setup:work/tb_ota5t/ac_response:template_args.inverting~yes",
+]
+needs_hint = "Set ac_dm to 1 (and inverting to yes), then press Save."
+
+[[step]]
+id = "run"
+title = "Run"
+text = """
+Press "Run".
+"""
+point = [{ at = "sim.run", say = "Click \"Run\"" }]
+done_when = ["sim.ran:work/tb_ota5t/ac_response"]
+
+[[step]]
+id = "read"
+title = "Compare with the estimate"
+text = """
+Fold "Setup" to see the results (numbers are written like 3.5187e1 = 35.187):
+
+- gain_db 35.2 dB: the estimate was 35.4 dB. The simple formula is very good.
+- bw_3db 4.5 MHz, ugbw 159 MHz.
+- pm 59.8°.
+
+The unity-gain frequency is half the 320 MHz estimate: the OTA's own transistors add
+about as much capacitance at out as the load does (OTA 5 measures it). The response
+also has more than one pole: 58 times the 4.5 MHz bandwidth is 260 MHz, not 159.
+The mirror adds a pole at its gate node and a zero at about twice that frequency,
+because M1's current reaches the output only through it.
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+
+[[step]]
+id = "wave"
+title = "Look at the response"
+text = """
+In the results, press "Waveform Tab" on the point.
+"""
+point = [
+    { at = "sim.point.waveform_tab", say = "Click \"Waveform Tab\"" },
+    { at = "sim.setup", say = "Fold Setup to see the point" },
+]
+done_when = ["wave.tab"]
+
+[[step]]
+id = "cursor"
+title = "Read it with a cursor"
+text = """
+The tab shows the AC magnitude in dB of out (and of "in", flat at 0 dB). The flat part
+is the DC gain, 35 dB. Click the curve to put cursor A on it; the table below reads
+frequency and value. Click where out crosses 0 dB: that is the unity-gain
+frequency, 159 MHz. The wheel zooms, "Fit" shows everything again.
+
+The phase margin is 180° plus the phase of the response (taken as -out/in) at that
+frequency; the pm line of the results has it.
+"""
+point = [{ at = "wave.panes", say = "Click the curve for cursor A" }]
+continue_button = true
+
+[[step]]
+id = "done"
+title = "What you have"
+text = """
+DC gain 35 dB, unity-gain frequency 159 MHz, phase margin 60°, at tt and 27 °C. A gain
+of 58 is modest: one stage of this OTA is not an op-amp. Its use is speed and
+simplicity.
+
+Next: "OTA 4: the step response".
+"""
+continue_button = true

@@ -1,0 +1,153 @@
+# Replays the inv-corners tutorial with real ngspice runs: nine points of the delay
+# (three of them fail the limit), then five corners of the DC transfer curve. Clicks
+# are where the guide points; the typing goes into the fields it points at.
+guide expect_step start
+wait 1
+guide press dialog.guide.start
+guide wait open
+wait 0.8
+guide expect_pointing tree:work
+guide click
+wait 0.6
+guide expect_pointing tree:work/tb_inv
+guide click
+wait 0.6
+guide expect_pointing tree:work/tb_inv/tran_delay
+open_view work tb_inv tran_delay
+guide wait limit
+wait 1.5
+guide expect_pointing sim.template.param.tpd_max
+guide click
+wait 0.3
+text 50p
+wait 0.5
+screenshot @SCRATCH@/01-limit.png
+guide continue
+guide expect_step corners
+guide expect_pointing sim.corners
+screenshot @SCRATCH@/02-corners-before.png
+guide press sim.corner.tt
+wait 0.3
+guide press sim.corner.ff
+wait 0.3
+guide press sim.corner.ss
+wait 0.5
+guide continue
+guide expect_step temperatures
+guide expect_pointing sim.temperatures
+guide click
+wait 0.3
+text -40, 27, 125
+wait 0.5
+screenshot @SCRATCH@/03-temperatures.png
+guide continue
+guide expect_step save
+guide expect_pointing sim.save
+guide click
+wait 1
+guide continue
+guide expect_step run
+guide expect_pointing sim.run
+guide click
+guide wait read
+wait 1.5
+guide expect_pointing sim.setup
+guide click
+wait 0.6
+guide press sim.template
+wait 0.8
+guide expect_pointing sim.results
+screenshot @SCRATCH@/04-results.png
+# Scroll to the list of points, as the text says.
+wheel 700 500 down 5
+wait 1
+guide expect_pointing sim.points
+screenshot @SCRATCH@/05-points-header.png
+guide click
+wait 0.8
+wheel 700 500 down 12
+wait 1
+screenshot @SCRATCH@/06-points.png
+sim expect_points 9
+guide continue
+
+guide expect_step new-dc
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.new_testbench
+guide click
+guide wait dc-template
+wait 0.8
+guide expect_pointing dialog.new_testbench.template
+guide click
+wait 0.8
+guide expect_pointing dialog.new_testbench.template.dc_transfer
+screenshot @SCRATCH@/07-template-list.png
+guide click
+guide wait dc-limits
+wait 0.8
+guide expect_pointing dialog.new_testbench.param.gain_min
+guide click
+wait 0.3
+text 10
+wait 0.5
+guide press dialog.new_testbench.param.vtrip_min
+wait 0.3
+text 0.5
+wait 0.5
+guide press dialog.new_testbench.param.vtrip_max
+wait 0.3
+text 0.7
+wait 0.8
+screenshot @SCRATCH@/08-dc-dialog.png
+guide press dialog.confirm
+guide wait dc-corners
+wait 1.5
+# The form folded in the step before is still folded: the guide says to open Setup.
+guide expect_pointing sim.setup
+screenshot @SCRATCH@/09-open-setup.png
+guide click
+wait 0.8
+guide expect_pointing sim.corners
+guide press sim.corner.tt
+wait 0.3
+guide press sim.corner.ff
+wait 0.3
+guide press sim.corner.ss
+wait 0.3
+guide press sim.corner.sf
+wait 0.3
+guide press sim.corner.fs
+wait 0.3
+screenshot @SCRATCH@/10-five-corners.png
+guide press sim.save
+wait 1
+guide continue
+guide expect_step dc-run
+guide expect_pointing sim.run
+guide click
+guide wait dc-read
+wait 1.5
+guide expect_pointing sim.setup
+guide click
+wait 0.8
+guide expect_pointing sim.results
+screenshot @SCRATCH@/11-dc-results.png
+guide continue
+guide expect_step family
+wait 0.5
+guide expect_pointing sim.results
+wheel 700 500 down 5
+wait 1
+guide expect_pointing sim.family.waveform_tab
+screenshot @SCRATCH@/12-family-button.png
+guide click
+guide wait done
+wv wait_loaded
+wv expect_points ready 5
+wait 1.5
+screenshot @SCRATCH@/13-family.png
+guide continue
+guide expect_step finished
+quit

@@ -1,0 +1,19 @@
+# Supply current and power over one period of the step (tutorial "OTA 6").
+template = "power"
+
+[template_args]
+step = "200p"
+stop = "1u"
+t_from = "0"
+t_to = "1u"
+period = "1u"
+i_avg_max = "50u"
+p_avg_max = "60u"
+
+[variables]
+vdd = "1.2"
+vlo = "0.32"
+vhi = "0.52"
+ibias = "20u"
+cl = "100f"
+ac_vdd = "0"

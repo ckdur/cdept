@@ -1,0 +1,362 @@
+schema = "cdept-tutorial"
+version = 1
+id = "ota-noise"
+title = "OTA 9: noise"
+series = "ota"
+order = 9
+start = ["base", "ota-sch", "ota-sym", "ota-tb", "ota-dc", "ota-ac"]
+pdk = "ihp-sg13g2"
+goal = """
+You simulate the OTA's noise, separate flicker from thermal noise, find the corner
+frequency between them, and see what a larger input pair does.
+"""
+minutes = 20
+before = """
+- [OTA 3](ota-ac.md): the open-loop testbench and the gain.
+"""
+
+[[circuit]]
+id = "pair-m4"
+view = "work/ota5t/schematic"
+[[circuit.part]]
+what = "M5, the tail current source"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4", m = "1" }
+pins = { D = "?tail", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M6, the diode that sets the bias"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4", m = "1" }
+pins = { D = "ibias", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M1, the input transistor on inp"
+symbol = "sg13_lv_pmos"
+with = { w = "30u", l = "0.5u", ng = "4", m = "4" }
+pins = { G = "inp", S = "?tail", B = "?tail", D = "?mirror" }
+[[circuit.part]]
+what = "M2, the input transistor on inn"
+symbol = "sg13_lv_pmos"
+with = { w = "30u", l = "0.5u", ng = "4", m = "4" }
+pins = { G = "inn", S = "?tail", B = "?tail", D = "out" }
+[[circuit.part]]
+what = "M3, the mirror's diode"
+symbol = "sg13_lv_nmos"
+with = { w = "2u", l = "4u", m = "1" }
+pins = { D = "?mirror", G = "?mirror", S = "vss", B = "vss" }
+[[circuit.part]]
+what = "M4, the mirror's output"
+symbol = "sg13_lv_nmos"
+with = { w = "2u", l = "4u", m = "1" }
+pins = { D = "out", G = "?mirror", S = "vss", B = "vss" }
+[[circuit.part]]
+what = "the input pin inp"
+symbol = "ipin"
+with = { lab = "inp" }
+[[circuit.part]]
+what = "the input pin inn"
+symbol = "ipin"
+with = { lab = "inn" }
+[[circuit.part]]
+what = "the bias input pin ibias"
+symbol = "ipin"
+with = { lab = "ibias" }
+[[circuit.part]]
+what = "the output pin out"
+symbol = "opin"
+with = { lab = "out" }
+[[circuit.part]]
+what = "the supply pin vdd"
+symbol = "iopin"
+with = { lab = "vdd" }
+[[circuit.part]]
+what = "the ground pin vss"
+symbol = "iopin"
+with = { lab = "vss" }
+
+[[step]]
+id = "start"
+title = "Get the project"
+text = """
+Make the starting project.
+"""
+start_button = true
+continue_button = true
+continue_needs = [
+    "view:work/tb_ota5t/ac_response",
+]
+needs_hint = "Open a project that has work/tb_ota5t/ac_response."
+
+[[step]]
+id = "idea"
+title = "Noise referred to the input"
+text = """
+Every transistor adds noise. At the output it is multiplied by the gain, so it is
+compared as input-referred noise: the noise voltage at the input that would give the
+same output noise, in V/√Hz.
+
+The open-loop testbench serves: above DC the loop is open, and Vin drives inn. The
+noise analysis refers everything to Vin, which needs an AC value (ac_dm = 1).
+
+For thermal noise a hand estimate is 8kT·γ/gm1 · (1 + gm3/gm1) for the pair and the
+mirror. With the long-channel γ = 2/3, gm1 = 201 µS and gm3 = 57 µS, it gives
+11.9 nV/√Hz.
+"""
+picture = "ota-tb-open"
+continue_button = true
+
+[[step]]
+id = "n-select"
+title = "Select tb_ota5t"
+text = """
+In the Libraries panel, click the cell "tb_ota5t".
+"""
+point = [
+    { at = "tree:work/tb_ota5t", say = "Click tb_ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["selected:work/tb_ota5t", "view:work/tb_ota5t/noise"]
+
+[[step]]
+id = "n-new"
+title = "New testbench: noise"
+text = """
+Open Tools > New Testbench….
+"""
+point = [
+    { at = "menu.tools.new_testbench", say = 'Click "New Testbench…"' },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["dialog.new_testbench", "view:work/tb_ota5t/noise"]
+
+[[step]]
+id = "n-template"
+title = "The template noise"
+text = """
+Choose noise.
+"""
+point = [
+    { at = "dialog.new_testbench.template.noise", say = "Choose noise" },
+    { at = "dialog.new_testbench.template", say = "Open the Template list" },
+]
+done_when = ["dialog.new_testbench.template.noise", "view:work/tb_ota5t/noise"]
+lost_without = ["dialog.new_testbench"]
+back_to = "n-new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "n-create"
+title = "Fill in, then Create"
+text = """
+Set:
+
+- fstart = 1 (Hz)
+- fspot = 10meg: the frequency of the spot-noise figures, far above the flicker noise
+
+src is vin and fstop 1G. Press "Create".
+"""
+point = [
+    { at = "dialog.new_testbench.params", say = "Set fstart and fspot" },
+]
+done_when = ["view:work/tb_ota5t/noise"]
+lost_without = ["dialog.new_testbench"]
+back_to = "n-new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "run"
+title = "Run"
+text = """
+The variables come from the AC testbench (ac_dm = 1). Press "Run".
+"""
+point = [
+    { at = "sim.run", say = 'Click "Run"' },
+]
+done_when = ["sim.ran:work/tb_ota5t/noise"]
+
+[[step]]
+id = "read"
+title = "Thermal noise"
+text = """
+- spot_in 16.1 nV/√Hz at 10 MHz: the input-referred noise. The estimate was 11.9:
+  these short, moderately inverted transistors are noisier than the long-channel
+  formula says.
+- spot_out 377 nV/√Hz, at the output.
+- int_out 3.1 mV rms: the output noise from 1 Hz to 1 GHz, the number a following
+  stage sees.
+- int_in is the input-referred noise summed up to 1 GHz. It counts frequencies where
+  the gain is gone and the input-referred value grows large, so it says little here.
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+
+[[step]]
+id = "wave"
+title = "The noise spectrum"
+text = """
+Press "Waveform Tab": it shows the input- and output-referred noise against frequency.
+"""
+point = [
+    { at = "sim.point.waveform_tab", say = 'Click "Waveform Tab"' },
+    { at = "sim.setup", say = "Fold Setup to see the point" },
+]
+done_when = ["wave.tab"]
+
+[[step]]
+id = "look"
+title = "Two regions"
+text = """
+At low frequency the input-referred noise falls with a slope: flicker (1/f) noise.
+Then it flattens: thermal noise. Put cursor A on the curve (click) to read values.
+"""
+point = [
+    { at = "wave.panes", say = "Click the curve for a cursor" },
+]
+continue_button = true
+
+[[step]]
+id = "open-tb"
+title = "Measure the flicker noise"
+text = """
+Open the view noise again.
+"""
+point = [
+    { at = "tree:work/tb_ota5t/noise", say = "Double-click noise" },
+    { at = "tree:work/tb_ota5t", say = "Open tb_ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["sim.view.noise"]
+
+[[step]]
+id = "one-k"
+title = "Spot noise at 1 kHz"
+text = """
+Under "Test template" set fspot = 1k, "Save", "Run". Press Continue when the result
+is there.
+"""
+point = [
+    { at = "sim.template.param.fspot", say = "Set 1k, Save, Run" },
+    { at = "sim.template", say = "Open the Test template" },
+]
+continue_button = true
+continue_needs = [
+    "setup:work/tb_ota5t/noise:template_args.fspot~1k",
+    "sim.ran:work/tb_ota5t/noise",
+]
+needs_hint = "Set fspot to 1k, Save, Run."
+
+[[step]]
+id = "corner"
+title = "The corner frequency"
+text = """
+spot_in is now 277 nV/√Hz at 1 kHz, seventeen times the thermal 16 nV/√Hz.
+
+Flicker noise power falls as 1/f, so it equals the thermal noise power where
+f = 1 kHz × (277 / 16.1)² ≈ 300 kHz. Check: at 100 kHz the two should add to
+√(16.1² + 277²/100) = 32 nV/√Hz (set fspot = 100k if you like: 31.8).
+
+For signals below some hundred kHz, flicker noise is what counts.
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+
+[[step]]
+id = "open-sch"
+title = "A larger pair"
+text = """
+Flicker noise falls with gate area, like mismatch. Open the OTA's schematic.
+"""
+point = [
+    { at = "tree:work/ota5t/schematic", say = "Double-click schematic" },
+    { at = "tree:work/ota5t", say = "Open ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["open:work/ota5t/schematic"]
+
+[[step]]
+id = "quad"
+title = "m=4 on M1 and M2"
+text = """
+Set m=4 on M1 and on M2.
+"""
+point = [
+    { at = "xschem.button:OK", say = "Set m=4, then OK" },
+]
+done_when = ["circuit:pair-m4"]
+continue_button = true
+continue_needs = [
+    "circuit:pair-m4",
+]
+
+[[step]]
+id = "save"
+title = "Save the schematic"
+text = """
+The noise analysis simulates the saved schematic.
+
+Save with Ctrl+S (answer Yes).
+"""
+point = [
+    { at = "xschem.button:Yes", say = "Click Yes" },
+]
+continue_button = true
+continue_needs = [
+    "circuit:pair-m4",
+    "saved:work/ota5t/schematic",
+]
+needs_hint = "Make the change, then save."
+
+[[step]]
+id = "back"
+title = "Run again"
+text = """
+Open the view noise (fspot is still 1k).
+"""
+point = [
+    { at = "tree:work/tb_ota5t/noise", say = "Double-click noise" },
+    { at = "tree:work/tb_ota5t", say = "Open tb_ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["sim.view.noise"]
+
+[[step]]
+id = "rerun"
+title = "Run"
+text = """
+Press "Run", and Continue when it is done.
+"""
+point = [
+    { at = "sim.run", say = 'Click "Run"' },
+]
+continue_button = true
+continue_needs = [
+    "sim.has_results",
+]
+needs_hint = "Run first."
+
+[[step]]
+id = "result"
+title = "What area bought"
+text = """
+spot_in at 1 kHz falls from 277 to 145 nV/√Hz: the noise power is 0.27 of what it was.
+Four times the pair's area would give 0.25 if all flicker noise came from the pair:
+nearly all of it does.
+
+Thermal noise falls less (13.2 instead of 16.1 nV/√Hz at 10 MHz): it comes from gm,
+which grew a little. The price is in OTA 5: with m=4 the phase margin is 49°. Noise,
+speed and stability are traded against each other, and a suite (OTA 7) shows all of
+them at once.
+
+That ends the OTA series.
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+

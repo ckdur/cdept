@@ -296,6 +296,7 @@ Methods (`call`):
 | `nets_load` / `nets_highlight` / `nets_flylines` / `nets_probe` / `nets_clear` | see docs/LINKING.md §8 | nets: the LVS database of the last extraction, highlights, flylines, probing |
 | `nets_live` | `{connectivity?, rules?, on?, delay_ms?, limit_ms?, update?}` | live flylines (LINKING.md §8.1): set up from the extraction's JSON, switch, or trace now; then `nets_live` events |
 | `markers` | `{shapes: [{kind: polygon\|box\|edge\|text, …}], color?, zoom?}` | `{markers}`; empty clears (DRC/LVS highlights, never part of the layout) |
+| `tutorial_probe` | `{queries}` | one boolean per query about the layout as it is (`layout.at:`, `layout.covers:`, `layout.pin:`, `tutorial.py`) |
 | `python` | `{code}` | `repr` of the last expression (tests, power users) |
 
 Unknown method → `ok: false`, error "unknown method …".

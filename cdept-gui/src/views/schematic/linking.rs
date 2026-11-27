@@ -184,15 +184,13 @@ impl SchematicView {
             ctx.request(Action::OpenFile(layouts[0].clone()));
             ui.close();
         }
-        if ui
-            .button("Generate / Update Layout")
-            .on_hover_text(
-                "Place the schematic's devices (PDK PCells) and cells in the layout, update \
-                 changed parameters (the schematic as saved; the layout view is made if \
-                 there is none)",
-            )
-            .clicked()
-        {
+        let generate = ui.button("Generate / Update Layout").on_hover_text(
+            "Place the schematic's devices (PDK PCells) and cells in the layout, update \
+             changed parameters (the schematic as saved; the layout view is made if \
+             there is none)",
+        );
+        crate::guide::anchor(ui, "menu.cell.layout", &generate);
+        if generate.clicked() {
             ui.close();
             let file = match layouts.first() {
                 Some(file) => Ok(file.clone()),

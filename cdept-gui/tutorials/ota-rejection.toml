@@ -1,0 +1,359 @@
+schema = "cdept-tutorial"
+version = 1
+id = "ota-rejection"
+title = "OTA 6: supply and common-mode rejection, and power"
+series = "ota"
+order = 6
+start = ["base", "ota-sch", "ota-sym", "ota-tb", "ota-dc", "ota-ac", "ota-step"]
+pdk = "ihp-sg13g2"
+goal = """
+You measure how much of the supply's and the input common mode's disturbance reaches
+the output (PSRR, CMRR), find where the common-mode gain comes from, and measure the
+power.
+"""
+minutes = 25
+before = """
+- [OTA 3](ota-ac.md) and [OTA 4](ota-step.md).
+"""
+
+[[step]]
+id = "start"
+title = "Get the project"
+text = """
+Make the starting project.
+"""
+start_button = true
+continue_button = true
+continue_needs = [
+    "view:work/tb_ota5t/ac_response",
+]
+needs_hint = "Open a project that has work/tb_ota5t/ac_response."
+
+[[step]]
+id = "idea"
+title = "Two more AC measurements"
+text = """
+The same open-loop testbench, with the AC source somewhere else:
+
+- PSRR: 1 V AC on the supply (ac_vdd = 1), no input signal.
+- CMRR: 1 V AC on the common-mode source Vcm (ac_cm = 1), which moves both inputs
+  together.
+
+The template psrr_cmrr reads out over the stimulated node at 1 kHz (xfer_db). Given
+the differential gain adm_db (35.2 dB, from OTA 3), the rejection is adm_db -
+xfer_db: how much smaller a disturbance acts than a signal at the input.
+"""
+picture = "ota-tb-open"
+continue_button = true
+
+[[step]]
+id = "psrr-select"
+title = "Select tb_ota5t"
+text = """
+In the Libraries panel, click the cell "tb_ota5t".
+"""
+point = [
+    { at = "tree:work/tb_ota5t", say = "Click tb_ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["selected:work/tb_ota5t", "view:work/tb_ota5t/psrr"]
+
+[[step]]
+id = "psrr-new"
+title = "New testbench: psrr"
+text = """
+Open Tools > New Testbench….
+"""
+point = [
+    { at = "menu.tools.new_testbench", say = 'Click "New Testbench…"' },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["dialog.new_testbench", "view:work/tb_ota5t/psrr"]
+
+[[step]]
+id = "psrr-template"
+title = "The template psrr_cmrr"
+text = """
+Choose psrr_cmrr.
+"""
+point = [
+    { at = "dialog.new_testbench.template.psrr_cmrr", say = "Choose psrr_cmrr" },
+    { at = "dialog.new_testbench.template", say = "Open the Template list" },
+]
+done_when = ["dialog.new_testbench.template.psrr_cmrr", "view:work/tb_ota5t/psrr"]
+lost_without = ["dialog.new_testbench"]
+back_to = "psrr-new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "psrr-create"
+title = "Fill in, then Create"
+text = """
+Change the view name to
+
+    psrr
+
+Leave mode at psrr and set adm_db = 35.2 and rejection_min = 50. Press "Create".
+"""
+point = [
+    { at = "dialog.new_testbench.view", say = "Name the view psrr; set adm_db and rejection_min" },
+]
+done_when = ["view:work/tb_ota5t/psrr"]
+lost_without = ["dialog.new_testbench"]
+back_to = "psrr-new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "psrr-vars"
+title = "Stimulus on the supply"
+text = """
+CDePT copied the design variables from another testbench of this schematic. Set the
+three AC variables so that only the supply is driven:
+
+- ac_dm = 0
+- ac_cm = 0
+- ac_vdd = 1
+
+(vbias is not used.) Then press "Save".
+"""
+point = [
+    { at = "sim.var.value.1", say = "ac_dm, ac_cm, ac_vdd" },
+    { at = "sim.setup", say = "The variables are under Setup (fold Test template)" },
+]
+continue_button = true
+continue_needs = [
+    'setup:work/tb_ota5t/psrr:variables.ac_vdd~"1"',
+    'setup:work/tb_ota5t/psrr:variables.ac_dm~"0"',
+    'setup:work/tb_ota5t/psrr:variables.ac_cm~"0"',
+]
+needs_hint = "Only ac_vdd is 1; then Save."
+
+[[step]]
+id = "psrr-run"
+title = "Run"
+text = """
+Press "Run".
+"""
+point = [
+    { at = "sim.run", say = 'Click "Run"' },
+]
+done_when = ["sim.ran:work/tb_ota5t/psrr"]
+
+[[step]]
+id = "psrr-read"
+title = "PSRR"
+text = """
+- xfer_db -30.9 dB: supply ripple arrives at out 35 times smaller (psrr_db is the same
+  number with the sign turned).
+- rejection_db 66.1 dB: referred to the input, supply ripple acts like a signal 2000
+  times smaller.
+
+Both numbers are called PSRR in places. Say which one you mean.
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+
+[[step]]
+id = "cmrr-select"
+title = "Select tb_ota5t"
+text = """
+In the Libraries panel, click the cell "tb_ota5t".
+"""
+point = [
+    { at = "tree:work/tb_ota5t", say = "Click tb_ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["selected:work/tb_ota5t", "view:work/tb_ota5t/cmrr"]
+
+[[step]]
+id = "cmrr-new"
+title = "New testbench: cmrr"
+text = """
+Open Tools > New Testbench….
+"""
+point = [
+    { at = "menu.tools.new_testbench", say = 'Click "New Testbench…"' },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["dialog.new_testbench", "view:work/tb_ota5t/cmrr"]
+
+[[step]]
+id = "cmrr-template"
+title = "psrr_cmrr again"
+text = """
+Choose psrr_cmrr again.
+"""
+point = [
+    { at = "dialog.new_testbench.template.psrr_cmrr", say = "Choose psrr_cmrr" },
+    { at = "dialog.new_testbench.template", say = "Open the Template list" },
+]
+done_when = ["dialog.new_testbench.template.psrr_cmrr", "view:work/tb_ota5t/cmrr"]
+lost_without = ["dialog.new_testbench"]
+back_to = "cmrr-new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "cmrr-create"
+title = "Fill in, then Create"
+text = """
+Change the view name to
+
+    cmrr
+
+Set mode = cmrr, stim = cm, adm_db = 35.2 and rejection_min = 40. Press "Create".
+"""
+point = [
+    { at = "dialog.new_testbench.view", say = "Name the view cmrr; set mode, stim, adm_db, limit" },
+]
+done_when = ["view:work/tb_ota5t/cmrr"]
+lost_without = ["dialog.new_testbench"]
+back_to = "cmrr-new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "cmrr-vars"
+title = "Stimulus on the common mode"
+text = """
+Set the AC variables so that only the common mode is driven:
+
+- ac_dm = 0
+- ac_vdd = 0
+- ac_cm = 1
+
+Then "Save".
+"""
+point = [
+    { at = "sim.var.value.0", say = "ac_cm = 1, the others 0" },
+    { at = "sim.setup", say = "The variables are under Setup (fold Test template)" },
+]
+continue_button = true
+continue_needs = [
+    'setup:work/tb_ota5t/cmrr:variables.ac_cm~"1"',
+    'setup:work/tb_ota5t/cmrr:variables.ac_dm~"0"',
+    'setup:work/tb_ota5t/cmrr:variables.ac_vdd~"0"',
+]
+needs_hint = "Only ac_cm is 1; then Save."
+
+[[step]]
+id = "cmrr-run"
+title = "Run"
+text = """
+Press "Run".
+"""
+point = [
+    { at = "sim.run", say = 'Click "Run"' },
+]
+done_when = ["sim.ran:work/tb_ota5t/cmrr"]
+
+[[step]]
+id = "cmrr-read"
+title = "CMRR, and where it comes from"
+text = """
+cm_gain_db -10.1 dB, rejection_db 45.3 dB.
+
+The textbook term is the tail source's finite resistance against the mirror:
+gds5 / (2 · gm3) = 2.50 µS / (2 · 57.4 µS) = 0.022, which would be -33 dB. The
+simulation says -10 dB, so something else dominates.
+
+M1 and M2 do not see the same voltages: M1's drain is on the mirror node at 0.56 V,
+M2's on out at 0.42 V, so M1 has less vds (0.26 V against 0.39 V) and a larger gds
+(2.75 against 1.74 µS). A common-mode step changes the vds of both alike, and their
+different gds turn it into a difference current:
+(gds1 - gds2) / (gds2 + gds4) = 0.296. Added to the tail term: 0.318, which is
+-10.0 dB. The simulation says -10.1 dB.
+
+So the OTA's common-mode rejection is set mostly by the mirror's gate voltage, not by
+the tail. Keep that in mind for "OTA 7".
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+
+[[step]]
+id = "power-select"
+title = "Select tb_ota5t_step"
+text = """
+In the Libraries panel, click the cell "tb_ota5t_step".
+"""
+point = [
+    { at = "tree:work/tb_ota5t_step", say = "Click tb_ota5t_step" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["selected:work/tb_ota5t_step", "view:work/tb_ota5t_step/power"]
+
+[[step]]
+id = "power-new"
+title = "New testbench: power"
+text = """
+Open Tools > New Testbench….
+"""
+point = [
+    { at = "menu.tools.new_testbench", say = 'Click "New Testbench…"' },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["dialog.new_testbench", "view:work/tb_ota5t_step/power"]
+
+[[step]]
+id = "power-template"
+title = "The template power"
+text = """
+Choose power.
+"""
+point = [
+    { at = "dialog.new_testbench.template.power", say = "Choose power" },
+    { at = "dialog.new_testbench.template", say = "Open the Template list" },
+]
+done_when = ["dialog.new_testbench.template.power", "view:work/tb_ota5t_step/power"]
+lost_without = ["dialog.new_testbench"]
+back_to = "power-new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "power-create"
+title = "Fill in, then Create"
+text = """
+It averages the supply current of the follower over one period of its 1 µs pulse.
+Set step = 200p, stop = 1u, period = 1u, i_avg_max = 50u and p_avg_max = 60u, then
+press "Create".
+"""
+point = [
+    { at = "dialog.new_testbench.params", say = "Set step, stop, period and the limits" },
+]
+done_when = ["view:work/tb_ota5t_step/power"]
+lost_without = ["dialog.new_testbench"]
+back_to = "power-new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "power-run"
+title = "Run"
+text = """
+The variables come from the step testbench. Press "Run".
+"""
+point = [
+    { at = "sim.run", say = 'Click "Run"' },
+]
+done_when = ["sim.ran:work/tb_ota5t_step/power"]
+
+[[step]]
+id = "power-read"
+title = "Power"
+text = """
+- i_avg 39.8 µA: the 20 µA bias branch and the 19.8 µA tail. A class-A amplifier draws
+  its current whether it works or not.
+- p_avg 47.8 µW.
+- p_peak 74.8 µW, during the edges.
+
+Next: "OTA 7: all corners".
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+

@@ -1,0 +1,97 @@
+# Replays the ota-suite tutorial: 90 ngspice runs, the fix, 90 runs again.
+guide expect_step start
+wait 1.5
+guide press dialog.guide.start
+guide wait corners
+guide continue
+guide expect_step select
+wait 0.8
+guide expect_pointing tree:work
+guide click
+wait 0.8
+guide expect_pointing tree:work/ota5t
+guide click
+guide expect_step new
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.new_suite
+guide click
+guide expect_step fill
+wait 1.0
+guide expect_pointing dialog.new_suite.tests
+guide press dialog.new_suite.test.ac_response
+wait 0.4
+guide press dialog.new_suite.test.cmrr
+wait 0.4
+guide press dialog.new_suite.test.ota_op
+wait 0.4
+guide press dialog.new_suite.test.psrr
+wait 0.4
+guide press dialog.new_suite.test.ota_step
+wait 0.4
+guide press dialog.new_suite.test.power
+wait 0.4
+guide press dialog.new_suite.corners
+text tt ff ss fs sf
+wait 0.3
+guide press dialog.new_suite.temperatures
+text -40 27 125
+wait 0.3
+wait 0.8
+screenshot @SCRATCH@/01-new-suite.png
+sim new_expect tests 6
+guide press dialog.confirm
+guide expect_step run
+wait 1.5
+guide expect_pointing sim.suite.run
+guide click
+sim suite_wait
+guide wait read
+wait 0.8
+guide expect_marked
+sim suite_expect fail
+sim suite_expect_rows 90
+wait 1.5
+screenshot @SCRATCH@/02-fail.png
+guide continue
+guide expect_step why
+wait 0.6
+guide continue
+guide expect_step open-sch
+wait 0.8
+guide expect_marked
+open_view work ota5t schematic
+guide expect_step fix
+wait_frame
+wait 1.0
+tcl xschem setprop instance M3 m 2; xschem setprop instance M4 m 2; xschem redraw
+guide wait save
+wait 0.8
+screenshot @SCRATCH@/03-fixed.png
+move 300 200
+key s ctrl
+wait 1.0
+guide expect_pointing xschem.button:Yes
+guide click
+wait 1.5
+guide continue
+guide expect_step back
+wait 0.8
+guide expect_marked
+open_view work ota5t suite
+guide expect_step rerun
+wait 1.5
+guide expect_pointing sim.suite.run
+guide click
+sim suite_wait
+guide wait after
+wait 0.8
+guide expect_marked
+sim suite_expect pass
+sim suite_expect_rows 90
+wait 1.5
+screenshot @SCRATCH@/04-pass.png
+guide continue
+guide expect_step finished
+quit

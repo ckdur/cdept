@@ -1,0 +1,116 @@
+# Replays the ota-bias tutorial with real ngspice runs: clicks where the guide points,
+# the variables typed into the form's own fields. Op Annotate opens the desktop's file
+# window, which a script cannot use: its menu entry is only pointed at, and the file
+# is loaded with xschem's command.
+guide expect_step start
+wait 1.5
+guide press dialog.guide.start
+guide wait bench
+wait 1
+screenshot @SCRATCH@/01-bench.png
+guide continue
+guide expect_step select
+guide expect_pointing tree:work
+guide click
+wait 0.8
+guide expect_pointing tree:work/tb_ota5t
+guide click
+guide expect_step new
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.new_testbench
+guide click
+guide expect_step template
+wait 0.8
+guide expect_pointing dialog.new_testbench.template
+guide click
+wait 0.8
+screenshot @SCRATCH@/02-template-list.png
+guide expect_pointing dialog.new_testbench.template.ota_op
+guide click
+guide expect_step create
+wait 0.8
+screenshot @SCRATCH@/03-create.png
+guide expect_pointing dialog.confirm
+guide click
+guide expect_step variables
+wait 1.5
+guide press sim.template
+wait 0.8
+guide expect_pointing sim.var.add
+screenshot @SCRATCH@/04-variables.png
+guide click
+wait 0.6
+guide press sim.var.name.4
+text vcm
+guide press sim.var.value.4
+text 0.42
+wait 0.5
+guide press sim.var.add
+wait 0.6
+guide press sim.var.name.5
+text ibias
+guide press sim.var.value.5
+text 20u
+wait 0.5
+guide press sim.var.add
+wait 0.6
+guide press sim.var.name.6
+text cl
+guide press sim.var.value.6
+text 100f
+wait 0.8
+screenshot @SCRATCH@/05-variables-typed.png
+guide press sim.save
+wait 1.5
+guide continue
+guide expect_step run
+guide expect_pointing sim.run
+guide click
+guide wait read
+wait 0.8
+guide expect_marked
+wait 0.5
+guide press sim.setup
+wait 0.8
+screenshot @SCRATCH@/06-results.png
+guide continue
+guide expect_step annotate
+open_view work tb_ota5t schematic
+wait_frame
+wait 1.0
+guide expect_pointing xschem.menu:Waves
+guide click
+wait 0.6
+guide expect_pointing xschem.menu:Op Annotate
+screenshot @SCRATCH@/07-waves-menu.png
+key Escape
+wait 0.5
+tcl xschem annotate_op {@SCRATCH@/home/cdept-tutorial/ota-bias/simulations/work/tb_ota5t/ota_op/tt/out.raw}
+wait 1.0
+tcl xschem redraw
+wait 1.0
+screenshot @SCRATCH@/08-annotated.png
+tcl xschem unselect_all; xschem select instance xdut; xschem redraw
+wait 0.5
+move 400 300
+key e
+wait 2.0
+tcl_expect ota5t.sch file tail [xschem get schname]
+tcl xschem zoom_full
+wait 1.0
+screenshot @SCRATCH@/09-inside.png
+key e ctrl
+wait 1.5
+screenshot @SCRATCH@/10-back.png
+dialog_click No
+wait 1.5
+wait 1.5
+tcl_expect tb_ota5t.sch file tail [xschem get schname]
+guide continue
+guide expect_step done
+wait 0.6
+guide continue
+guide expect_step finished
+quit

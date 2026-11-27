@@ -30,6 +30,10 @@ for _n in range(1, 13):
 
 # Most selected objects described in a selection event.
 MAX_SELECTION_ITEMS = 200
+# The grid (µm) of drawing and moving: the manufacturing grid of IHP SG13G2 and sky130.
+DRAW_GRID = 0.005
+# Hierarchy levels shown by default: more than any design has (as m_levels' default).
+ALL_LEVELS = 99
 # Pixels the pointer moves with the button down before a press is a drag (box mode).
 DRAG_PIXELS = 4
 
@@ -148,6 +152,9 @@ class Editor:
             cv.technology = technology
         pcells.sync(table.pcells)
         doc = lef.open_document(cv.layout(), table, technology, layer_properties).load()
+        # What is drawn or moved by hand snaps to the manufacturing grid: without a
+        # window KLayout's grid is 1 nm, and the PDKs' DRC decks want 5 nm.
+        view.set_config("grid-micron", "%g" % max(DRAW_GRID, cv.layout().dbu))
         top = doc.top_cell()
         if top is not None:
             cv.cell = top
@@ -162,7 +169,9 @@ class Editor:
         pins.style_view(view, self.pin_style)
         doc.pins.fresh = False
         self.pin_tool.armed = None
-        view.max_hier()
+        # All levels, as the tool bar says: not `max_hier()`, which in a layout still
+        # empty would hide the inside of what is placed or generated into it later.
+        view.max_hier_levels = ALL_LEVELS
         if self.width and self.height:
             view.resize(self.width, self.height)
         view.zoom_fit()

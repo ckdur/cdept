@@ -1,0 +1,108 @@
+# Replays the inv-verify tutorial: DRC and LVS on the layout with the short VSS strap,
+# the net check, the fix drawn in the layout tab, both checks again.
+guide expect_step start
+wait 1
+guide press dialog.guide.start
+guide wait open
+wait 3
+guide expect_pointing tree:work
+guide click
+wait 0.6
+guide expect_pointing tree:work/inv
+guide click
+wait 0.6
+guide expect_pointing tree:work/inv/layout
+open work inv layout
+guide wait two-checks
+wait_frame
+wait 3
+guide continue
+guide expect_step drc
+guide expect_pointing layout.drc
+guide click
+wait 0.6
+expect_check DRC: 1 violation
+guide wait read-drc
+wait 1
+guide expect_pointing layout.drc.rule:M1.b
+guide click
+wait 0.6
+guide expect_pointing layout.drc.show_all
+guide click
+wait 0.6
+wait 1
+screenshot @SCRATCH@/01-drc.png
+guide continue
+guide expect_step lvs
+guide expect_pointing layout.lvs
+guide click
+wait 0.6
+guide wait read-lvs
+wait 1
+screenshot @SCRATCH@/02-lvs.png
+guide continue
+guide expect_step nets
+guide expect_pointing menu.layout
+guide click
+wait 0.6
+guide expect_pointing menu.layout.update_connectivity
+guide click
+wait 0.6
+expect_nets 3 ok, 1 open
+guide wait fix
+nets_show VSS
+wait 1.5
+screenshot @SCRATCH@/03-open-net.png
+layout_edit clear_selection
+layout_call zoom {"what": "box", "box": [-1.5000, -1.5000, 2.5000, 1.5000]}
+wait 0.2
+guide expect_pointing layout.find:Metal1.drawing
+guide click
+wait 0.4
+key a ctrl
+text Metal1.drawing
+wait 0.8
+guide expect_pointing layout.layer:Metal1.drawing
+guide click
+wait 0.6
+guide expect_pointing layout.mode.box
+guide click
+wait 0.6
+guide expect_pointing layout.picture
+layout_call zoom {"what": "box", "box": [-0.0800, -0.7500, 0.2200, -0.4500]}
+wait 0.2
+move_middle
+click_middle
+wait 0.3
+layout_call zoom {"what": "box", "box": [0.0800, -0.5000, 0.3800, -0.2000]}
+wait 0.2
+move_middle
+click_middle
+guide wait drc-again
+wait 1
+layout_call zoom {"what": "box", "box": [-1.5000, -1.7000, 2.5000, 1.0000]}
+wait 0.2
+mode select
+wait 1
+screenshot @SCRATCH@/04-fixed.png
+guide expect_pointing layout.drc
+guide click
+wait 0.6
+expect_check DRC clean
+guide wait lvs-again
+guide expect_pointing layout.lvs
+guide click
+wait 0.6
+expect_check netlists match
+guide wait save
+wait 1
+screenshot @SCRATCH@/05-clean.png
+move_middle
+key s ctrl
+guide wait end
+expect_modified no
+wait 1
+screenshot @SCRATCH@/06-end.png
+guide continue
+guide expect_step finished
+quit

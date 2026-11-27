@@ -1492,11 +1492,11 @@ impl WaveView {
 
     fn toolbar(&mut self, ui: &mut Ui) {
         ui.horizontal_wrapped(|ui| {
-            if ui
+            let fit = ui
                 .button("Fit")
-                .on_hover_text("The whole x range, y fitted (double click)")
-                .clicked()
-            {
+                .on_hover_text("The whole x range, y fitted (double click)");
+            crate::guide::anchor(ui, "wave.fit", &fit);
+            if fit.clicked() {
                 self.fit_all();
             }
             let active_unit = self
@@ -1508,7 +1508,9 @@ impl WaveView {
                 let g = &mut self.groups[gi];
                 let (u0, u1) = g.plot_view();
                 let c = g.data_x((u0 + u1) / 2.0);
-                if ui.button("Zoom In").clicked() {
+                let zoom = ui.button("Zoom In");
+                crate::guide::anchor(ui, "wave.zoom_in", &zoom);
+                if zoom.clicked() {
                     g.zoom_at(c, 0.5);
                 }
                 if ui.button("Zoom Out").clicked() {
@@ -3147,6 +3149,13 @@ impl View for WaveView {
         }
         self.toolbar(ui);
         ui.separator();
+        // For tutorials: a waveform tab is in front, and where its parts are.
+        crate::guide::fact(ui.ctx(), "wave.tab");
+        for (which, name) in ["wave.cursor_a", "wave.cursor_b"].into_iter().enumerate() {
+            if self.groups.iter().any(|g| g.cursors[which].is_some()) {
+                crate::guide::fact(ui.ctx(), name);
+            }
+        }
         let id = self.id;
         egui::Panel::left(egui::Id::new(("wave-signals", id)))
             .resizable(true)
@@ -3156,6 +3165,7 @@ impl View for WaveView {
                     self.points_list(ui);
                     ui.separator();
                 }
+                crate::guide::anchor_rect(ui, "wave.signals", ui.max_rect());
                 self.signal_list(ui);
             });
         // the cursor table: room for about eight rows
@@ -3164,11 +3174,17 @@ impl View for WaveView {
         egui::Panel::bottom(egui::Id::new(("wave-cursor-table", id)))
             .resizable(true)
             .default_size(readout_h)
-            .show(ui, |ui| self.readout(ui));
+            .show(ui, |ui| {
+                crate::guide::anchor_rect(ui, "wave.readout", ui.max_rect());
+                self.readout(ui)
+            });
         if self.table_only() {
             egui::CentralPanel::default().show(ui, |ui| self.values_table(ui));
         } else {
-            egui::CentralPanel::default().show(ui, |ui| self.panes_ui(ui));
+            egui::CentralPanel::default().show(ui, |ui| {
+                crate::guide::anchor_rect(ui, "wave.panes", ui.max_rect());
+                self.panes_ui(ui)
+            });
         }
         self.refresh_groups();
         self.request();

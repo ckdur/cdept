@@ -1,0 +1,131 @@
+# Replays the ota-noise tutorial with real ngspice noise analyses.
+guide expect_step start
+wait 1.5
+guide press dialog.guide.start
+guide wait idea
+wait 0.8
+guide continue
+guide expect_step n-select
+wait 0.8
+guide expect_pointing tree:work
+guide click
+wait 0.8
+guide expect_pointing tree:work/tb_ota5t
+guide click
+guide expect_step n-new
+guide expect_pointing menu.tools
+guide click
+wait 0.5
+guide expect_pointing menu.tools.new_testbench
+guide click
+guide expect_step n-template
+wait 0.8
+guide expect_pointing dialog.new_testbench.template
+guide click
+wait 0.8
+guide expect_pointing dialog.new_testbench.template.noise
+guide click
+wait 0.8
+guide expect_step n-create
+guide expect_pointing dialog.new_testbench.params
+guide press dialog.new_testbench.param.fstart
+text 1
+wait 0.3
+guide press dialog.new_testbench.param.fspot
+text 10meg
+wait 0.3
+wait 0.8
+screenshot @SCRATCH@/01-create.png
+guide press dialog.confirm
+guide expect_step run
+wait 1.0
+wait 0.8
+guide expect_pointing sim.run
+guide click
+guide wait read
+wait 0.8
+guide expect_marked
+wait 0.5
+guide press sim.setup
+wait 0.4
+guide press sim.template
+wait 0.8
+screenshot @SCRATCH@/02-results.png
+guide continue
+guide expect_step wave
+guide expect_pointing sim.point.waveform_tab
+guide click
+guide wait look
+wait 3
+guide expect_pointing wave.panes
+guide click
+wait 2
+screenshot @SCRATCH@/03-spectrum.png
+guide continue
+guide expect_step open-tb
+wait 0.8
+guide expect_marked
+open_view work tb_ota5t noise
+guide expect_step one-k
+wait 1.5
+guide press sim.template
+wait 0.8
+guide expect_pointing sim.template.param.fspot
+guide press sim.template.param.fspot
+key a ctrl
+text 1k
+wait 0.3
+wait 0.5
+guide press sim.save
+wait 1.5
+guide press sim.run
+sim wait
+wait 1.0
+guide continue
+guide expect_step corner
+wait 0.8
+guide expect_marked
+wait 0.5
+guide press sim.setup
+wait 0.4
+guide press sim.template
+wait 0.8
+screenshot @SCRATCH@/04-1k.png
+guide continue
+guide expect_step open-sch
+wait 0.8
+guide expect_marked
+open_view work ota5t schematic
+guide expect_step quad
+wait_frame
+wait 1.0
+tcl xschem setprop instance M1 m 4; xschem setprop instance M2 m 4; xschem redraw
+guide wait save
+wait 0.8
+move 300 200
+key s ctrl
+wait 1.0
+guide expect_pointing xschem.button:Yes
+guide click
+wait 1.5
+guide continue
+guide expect_step back
+wait 0.8
+guide expect_marked
+open_view work tb_ota5t noise
+guide expect_step rerun
+wait 1.0
+wait 0.8
+guide expect_pointing sim.run
+guide click
+sim wait
+wait 1.0
+guide continue
+guide expect_step result
+wait 0.8
+guide expect_marked
+wait 0.8
+screenshot @SCRATCH@/05-m4.png
+guide continue
+guide expect_step finished
+quit

@@ -1,0 +1,121 @@
+# A project test template: startup_settle with the values of the follower testbench of
+# the five-transistor OTA (work/tb_ota5t_step), so that a testbench made from it needs
+# no design variable typed.
+name = "ota_step"
+description = "Unity-gain step response of the 5T OTA (testbench work/tb_ota5t_step): settling, overshoot, rise time and final error."
+requires_nets = ["${out}"]
+plot = ['v("${out}")']
+stimulus = "pulse(0 {vdd} 100p 10p 10p 5n 10n)"
+
+[[param]]
+name = "out"
+type = "net"
+default = "out"
+doc = "The output net."
+
+[[param]]
+name = "tol"
+type = "number"
+default = "0.01"
+doc = "Settling band as a fraction of the step (0.02 = 2 %)."
+
+[[param]]
+name = "t_step"
+type = "number"
+default = "10n"
+unit = "s"
+doc = "When the step (or the supply ramp) starts; settling time is counted from here."
+
+[[param]]
+name = "step"
+type = "number"
+default = "20p"
+unit = "s"
+doc = "Maximum time step."
+
+[[param]]
+name = "stop"
+type = "number"
+default = "60n"
+unit = "s"
+doc = "End time; long enough for the output to settle."
+
+[[param]]
+name = "target"
+default = "0.52"
+type = "number"
+unit = "V"
+doc = "Expected final value; reports the final error against it."
+
+[[param]]
+name = "settle_max"
+default = "20n"
+type = "number"
+unit = "s"
+doc = "Spec: largest allowed settling time."
+
+[[param]]
+name = "overshoot_max"
+default = "15"
+type = "number"
+unit = "%"
+doc = "Spec: largest allowed overshoot, percent of the step."
+
+[[param]]
+name = "final_err_max"
+default = "25m"
+type = "number"
+unit = "V"
+doc = "Spec: largest allowed |final value - target| (needs target)."
+
+[setup]
+# the values the testbench's sources use
+[setup.variables]
+vdd = "1.2"
+vlo = "0.32"
+vhi = "0.52"
+ibias = "20u"
+cl = "100f"
+ac_vdd = "0"
+[[setup.analysis]]
+kind = "tran"
+step = "${step}"
+stop = "${stop}"
+
+[[setup.output]]
+name = "final_value"
+expr = 'value_at(v("${out}"), xmax(v("${out}")))'
+
+[[setup.output]]
+name = "settle_time"
+expr = 'settling_time(v("${out}"), tol=${tol}, from=${t_step})'
+
+[[setup.output]]
+name = "overshoot_pct"
+expr = 'overshoot(clip(v("${out}"), ${t_step}, xmax(v("${out}"))))'
+
+[[setup.output]]
+name = "undershoot_pct"
+expr = 'undershoot(clip(v("${out}"), ${t_step}, xmax(v("${out}"))))'
+
+[[setup.output]]
+name = "t_rise"
+expr = 'rise_time(clip(v("${out}"), ${t_step}, xmax(v("${out}"))))'
+
+[[setup.output]]
+when = "target"
+name = "final_err"
+expr = 'abs(final_value - ${target})'
+
+[[setup.spec]]
+name = "settle_time"
+max = "${settle_max}"
+
+[[setup.spec]]
+name = "overshoot_pct"
+max = "${overshoot_max}"
+
+[[setup.spec]]
+when = "target"
+name = "final_err"
+max = "${final_err_max}"

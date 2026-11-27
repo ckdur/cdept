@@ -84,7 +84,7 @@ with_answers [list [list answer $copy]] {xschem saveas}
 check save-written {[file isfile $copy]}
 check_eq save-name [xschem get schname] $copy
 set w [join [updates window]]
-check save-picker-options {[regexp {"class":"LibraryPicker","options":\{"mode":"save","title":"Save file","extensions":"","initialdir":"[^"]*/inv/schematic","initialfile":"inv.sch"\}} $w]}
+check save-picker-options {[regexp {"class":"LibraryPicker","options":\{"mode":"save","title":"Save file","extensions":"","initialdir":"[^"]*/inv/schematic","initialfile":"inv.sch","devices":"[^"]*"\}} $w]}
 # an existing file: xschem asks before overwriting; No keeps the name
 with_answers [list [list answer $inv] {press .alert No}] {xschem saveas}
 check_eq save-overwrite-refused [xschem get schname] $copy

@@ -1,0 +1,366 @@
+schema = "cdept-tutorial"
+version = 1
+id = "ota-sizing"
+title = "OTA 5: sizing against a spec"
+series = "ota"
+order = 5
+start = ["base", "ota-sch", "ota-sym", "ota-tb", "ota-dc", "ota-ac", "ota-step"]
+pdk = "ihp-sg13g2"
+goal = """
+You sweep the load capacitance to find how much capacitance the OTA adds itself, then
+change a size to meet a tighter gain limit, and check what the change costs.
+"""
+minutes = 30
+before = """
+- [OTA 3](ota-ac.md): gain, unity-gain frequency, phase margin.
+"""
+
+[[circuit]]
+id = "pair-m2"
+view = "work/ota5t/schematic"
+[[circuit.part]]
+what = "M5, the tail current source"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4", m = "1" }
+pins = { D = "?tail", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M6, the diode that sets the bias"
+symbol = "sg13_lv_pmos"
+with = { w = "32u", l = "1u", ng = "4", m = "1" }
+pins = { D = "ibias", G = "ibias", S = "vdd", B = "vdd" }
+[[circuit.part]]
+what = "M1, the input transistor on inp"
+symbol = "sg13_lv_pmos"
+with = { w = "30u", l = "0.5u", ng = "4", m = "2" }
+pins = { G = "inp", S = "?tail", B = "?tail", D = "?mirror" }
+[[circuit.part]]
+what = "M2, the input transistor on inn"
+symbol = "sg13_lv_pmos"
+with = { w = "30u", l = "0.5u", ng = "4", m = "2" }
+pins = { G = "inn", S = "?tail", B = "?tail", D = "out" }
+[[circuit.part]]
+what = "M3, the mirror's diode"
+symbol = "sg13_lv_nmos"
+with = { w = "2u", l = "4u", m = "1" }
+pins = { D = "?mirror", G = "?mirror", S = "vss", B = "vss" }
+[[circuit.part]]
+what = "M4, the mirror's output"
+symbol = "sg13_lv_nmos"
+with = { w = "2u", l = "4u", m = "1" }
+pins = { D = "out", G = "?mirror", S = "vss", B = "vss" }
+[[circuit.part]]
+what = "the input pin inp"
+symbol = "ipin"
+with = { lab = "inp" }
+[[circuit.part]]
+what = "the input pin inn"
+symbol = "ipin"
+with = { lab = "inn" }
+[[circuit.part]]
+what = "the bias input pin ibias"
+symbol = "ipin"
+with = { lab = "ibias" }
+[[circuit.part]]
+what = "the output pin out"
+symbol = "opin"
+with = { lab = "out" }
+[[circuit.part]]
+what = "the supply pin vdd"
+symbol = "iopin"
+with = { lab = "vdd" }
+[[circuit.part]]
+what = "the ground pin vss"
+symbol = "iopin"
+with = { lab = "vss" }
+
+[[step]]
+id = "start"
+title = "Get the project"
+text = """
+Make the starting project.
+"""
+start_button = true
+continue_button = true
+continue_needs = [
+    "view:work/tb_ota5t/ac_response",
+]
+needs_hint = "Open a project that has work/tb_ota5t/ac_response."
+
+[[step]]
+id = "load-select"
+title = "Select tb_ota5t"
+text = """
+In the Libraries panel, click the cell "tb_ota5t".
+"""
+point = [
+    { at = "tree:work/tb_ota5t", say = "Click tb_ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["selected:work/tb_ota5t", "view:work/tb_ota5t/ac_load"]
+
+[[step]]
+id = "load-new"
+title = "New testbench: ac_load"
+text = """
+Open Tools > New Testbench….
+"""
+point = [
+    { at = "menu.tools.new_testbench", say = 'Click "New Testbench…"' },
+    { at = "menu.tools", say = "Open the Tools menu" },
+]
+done_when = ["dialog.new_testbench", "view:work/tb_ota5t/ac_load"]
+
+[[step]]
+id = "load-template"
+title = "The template ac_load"
+text = """
+Choose ac_load, a project template (templates/ac_load.toml): the AC response with a
+sweep of the load capacitance "cl".
+"""
+point = [
+    { at = "dialog.new_testbench.template.ac_load", say = "Choose ac_load" },
+    { at = "dialog.new_testbench.template", say = "Open the Template list" },
+]
+done_when = ["dialog.new_testbench.template.ac_load", "view:work/tb_ota5t/ac_load"]
+lost_without = ["dialog.new_testbench"]
+back_to = "load-new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "load-create"
+title = "Fill in, then Create"
+text = """
+Set the parameter loads to this list, then press "Create":
+
+    50f 100f 200f 500f 1p
+"""
+point = [
+    { at = "dialog.new_testbench.params", say = "Set loads, then Create" },
+]
+done_when = ["view:work/tb_ota5t/ac_load"]
+lost_without = ["dialog.new_testbench"]
+back_to = "load-new"
+lost_says = "The New Testbench window was closed. Open it again."
+
+[[step]]
+id = "load-run"
+title = "Run"
+text = """
+The design variables come from the AC testbench, which simulates the same schematic.
+Press "Run": five points, one per load.
+"""
+point = [
+    { at = "sim.run", say = 'Click "Run"' },
+]
+done_when = ["sim.ran:work/tb_ota5t/ac_load"]
+
+[[step]]
+id = "load-read"
+title = "What the OTA adds"
+text = """
+Fold "Setup" and look at the five points (scroll):
+
+- 50 fF: ugbw 259 MHz, pm 57.5°
+- 100 fF: 159 MHz, 59.8°
+- 200 fF: 99.7 MHz, 62.3°
+- 500 fF: 51.3 MHz, 70.1°
+- 1 pF: 28.6 MHz, 77.8°
+
+The DC gain does not change: the load only matters at high frequency. With 1 pF the
+load dominates, and ugbw = gm1 / (2π · C) gives C = 201 µS / (2π · 28.6 MHz) =
+1.12 pF: about 0.12 pF more than the load. At 100 fF the same formula gives C = 201 fF.
+So the OTA itself puts about 100 to 120 fF on its output, as much as the small load.
+That is why OTA 3's estimate with CL alone was off by two.
+
+A heavier load also raises the phase margin: it moves the dominant pole down and away
+from the mirror's.
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+
+[[step]]
+id = "open-ac"
+title = "Back to the AC testbench"
+text = """
+Open the view ac_response of tb_ota5t.
+"""
+point = [
+    { at = "tree:work/tb_ota5t/ac_response", say = "Double-click ac_response" },
+    { at = "tree:work/tb_ota5t", say = "Open tb_ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["sim.view.ac_response"]
+
+[[step]]
+id = "tighten"
+title = "Ask for more gain"
+text = """
+Suppose the specification asks for at least 36.5 dB. Under "Test template" set
+gain_db_min = 36.5, press "Save", then "Run". The gain, 35.2 dB, now FAILS.
+"""
+point = [
+    { at = "sim.template.param.gain_db_min", say = "Set 36.5, Save, Run" },
+    { at = "sim.template", say = "Open the Test template" },
+]
+continue_button = true
+continue_needs = [
+    "setup:work/tb_ota5t/ac_response:template_args.gain_db_min~36.5",
+    "sim.ran:work/tb_ota5t/ac_response",
+]
+needs_hint = "Set gain_db_min to 36.5, Save and Run."
+
+[[step]]
+id = "think"
+title = "Which knob?"
+text = """
+A = gm1 / (gds2 + gds4). Either the pair gets more gm from the same current, or the
+output conductances get smaller.
+
+For the same current, a transistor gives more gm per ampere the lower its current
+density: further into weak inversion. So doubling the input pair's width at the same
+tail current raises gm1.
+
+Double it with m=2, two of the same unit device in parallel, rather than a wider
+device: the unit keeps its model (same width per finger), and in layout two
+identical units are what you match.
+"""
+continue_button = true
+
+[[step]]
+id = "open-sch"
+title = "Open the OTA"
+text = """
+Open the schematic of ota5t.
+"""
+point = [
+    { at = "tree:work/ota5t/schematic", say = "Double-click schematic" },
+    { at = "tree:work/ota5t", say = "Open ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["open:work/ota5t/schematic"]
+
+[[step]]
+id = "double"
+title = "Set m=2 on M1 and M2"
+text = """
+Select M1, press q, set m=2, press OK. Do the same with M2. Both: the pair must stay
+identical.
+"""
+point = [
+    { at = "xschem.button:OK", say = "Set m=2, then OK" },
+]
+done_when = ["circuit:pair-m2"]
+continue_button = true
+continue_needs = [
+    "circuit:pair-m2",
+]
+
+[[step]]
+id = "save"
+title = "Save the schematic"
+text = """
+CDePT simulates the saved schematic.
+
+Save with Ctrl+S (answer Yes).
+"""
+point = [
+    { at = "xschem.button:Yes", say = "Click Yes" },
+]
+continue_button = true
+continue_needs = [
+    "circuit:pair-m2",
+    "saved:work/ota5t/schematic",
+]
+needs_hint = "Make the change, then save."
+
+[[step]]
+id = "again"
+title = "Run the AC testbench again"
+text = """
+Open ac_response again.
+"""
+point = [
+    { at = "tree:work/tb_ota5t/ac_response", say = "Double-click ac_response" },
+    { at = "tree:work/tb_ota5t", say = "Open tb_ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["sim.view.ac_response"]
+
+[[step]]
+id = "rerun"
+title = "Run"
+text = """
+Press "Run".
+"""
+point = [
+    { at = "sim.run", say = 'Click "Run"' },
+]
+done_when = ["sim.passed:work/tb_ota5t/ac_response"]
+
+[[step]]
+id = "compare"
+title = "What changed"
+text = """
+Compare with before:
+
+- gain_db 35.2 to 36.9 dB: passes. gm1 went from 201 to 237 µS while the output
+  conductance hardly moved (the estimate 237 / (1.60 + 1.70) = 71.8 is 37.1 dB).
+- ugbw 159 to 168 MHz: more gm.
+- pm 59.8 to 55.1°: the wider pair loads the mirror node and the output. Still above
+  50°.
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+
+[[step]]
+id = "open-op"
+title = "Check the bias again"
+text = """
+A new size means a new operating point. Open ota_op.
+"""
+point = [
+    { at = "tree:work/tb_ota5t/ota_op", say = "Double-click ota_op" },
+    { at = "tree:work/tb_ota5t", say = "Open tb_ota5t" },
+    { at = "tree:work", say = "Open work" },
+]
+done_when = ["sim.view.ota_op"]
+
+[[step]]
+id = "run-op"
+title = "Run"
+text = """
+Press "Run".
+"""
+point = [
+    { at = "sim.run", say = 'Click "Run"' },
+]
+done_when = ["sim.ran:work/tb_ota5t/ota_op"]
+
+[[step]]
+id = "op-read"
+title = "And the price"
+text = """
+Every spec still passes here: sat_margin went from 127 to 111 mV.
+
+More is not always better. With m=4 the gain would be 38.5 dB, but the phase margin
+falls to 49° and fails the 50° limit. A longer pair (l=1u, m=2) reaches 37.2 dB, but
+its phase margin drops to 40°.
+
+All of this is at one corner and one temperature. At 125 °C the gain of this OTA is
+about 4 dB lower than at 27 °C, so a 36.5 dB limit would not survive "OTA 7". A spec
+without its corners is half a spec.
+
+Next: "OTA 6: rejection and power".
+"""
+point = [
+    { at = "sim.results", say = "The results" },
+    { at = "sim.setup", say = "Fold Setup" },
+]
+continue_button = true
+

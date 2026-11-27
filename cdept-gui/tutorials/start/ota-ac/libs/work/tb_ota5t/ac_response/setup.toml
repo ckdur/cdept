@@ -1,0 +1,19 @@
+# Open-loop gain of the OTA (tutorial "OTA 3").
+template = "ac_response"
+
+[template_args]
+inverting = "yes"
+fstart = "1"
+fstop = "10G"
+gain_db_min = "30"
+ugbw_min = "80meg"
+pm_min = "50"
+
+[variables]
+vdd = "1.2"
+vcm = "0.42"
+ibias = "20u"
+cl = "100f"
+ac_dm = "1"
+ac_cm = "0"
+ac_vdd = "0"

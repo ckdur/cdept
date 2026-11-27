@@ -9,22 +9,101 @@ completion round started).
 
 ---
 
-## Tutorials (2026-11-27)
+## Tutorials (2026-11-27/28)
 
-Built: the in-GUI guide (`cdept-gui/src/guide/`, tutorial files in
-`cdept-gui/tutorials/`), the first tutorial `pdk-setup`, its replay
-(`cdept-gui/scripts/tutorial.sh`) and the task list `docs/tutorials/index.md`.
+The in-GUI guide (`cdept-gui/src/guide/`), 17 tutorials (`cdept-gui/tutorials/`: PDK
+set-up, inverter I1-I7, OTA O1-O9), their starting projects and replays
+(`cdept-gui/scripts/tutorial.sh`, all 17 pass together on 2026-11-28) and the manual
+pages ([tutorials](tutorials/index.md)). O10 (OTA layout) is not written.
 
-- [ ] A person follows `pdk-setup` (`cdept tutorial pdk-setup`); only the replay has.
-      The next tutorial waits for that.
-- [ ] The PDK list and "Other folder" are chosen by `tech` script commands in the replay,
-      not by clicks.
-- [ ] Highlights in a detached window are drawn but not replayed (`guide click` works in
-      the main window only).
-- [ ] Schematic and layout tutorials need anchors inside the pictures of xschem and
-      KLayout: the helpers would have to report where things are.
-- [ ] The marks in the task list come from docs, `--help` and the roadmap; each is
-      proven only when its tutorial exists.
+General, still open:
+- [ ] A person follows them. Only replays have, except that the user tried `pdk-setup`.
+- [ ] Replays are not run by CI (display, PDK, tools).
+- [ ] Highlights in a detached window are drawn but not replayed.
+- [ ] The guide cannot point at places inside the pictures of xschem and KLayout: it
+      checks the circuit and the layout instead.
+- [ ] The tutorials need IHP SG13G2; there are none for sky130.
+
+Inverter series (2026-11-28): I1-I5 exist and replay (`tutorial.sh`). In I2 and I3
+most devices, wires and labels are placed by xschem commands in the replay; one device
+each goes through the picker and one through the attribute dialog by real input.
+Found while writing I3-I5, fixed:
+- "Waveform Tab" on a single run point showed the first two signals of the raw file
+  (`v(in)` and an internal transistor node, never `v(out)`), not the testbench's plot
+  list. It now opens as a family of one point.
+- The Simulation tab kept one scroll position for every testbench; each has its own.
+- The statistics of corner and sweep runs drew a histogram per measure, which pushed
+  the list of points far off screen. Histograms are folded unless there is Monte Carlo.
+Still open:
+- [ ] After a run the results are below the form and nothing says so: the user must
+      fold "Test template" and "Setup" or scroll. Scrolling to the results (or showing
+      them above the form) would help.
+- [ ] The calculator's point list of the testbench still offers a point folder of an
+      earlier run plan ("all points (10)" after a 9-point run).
+- [ ] The guide's card covers part of waveform plots and results; it has to be dragged.
+- [ ] The replays check I4's cursors with real clicks; wheel zoom is real input, the
+      exact zoom range is then set by a script command.
+
+Layout tutorials (2026-11-28): I6 `inv-layout` and I7 `inv-verify` exist and replay;
+the trial behind them is [LAYOUT-TRIAL.md](LAYOUT-TRIAL.md). Found while doing them, fixed:
+- Without a window KLayout's grid was 1 nm (shapes off the 5 nm grid): the editor sets 5 nm.
+- A layout made by Generate in the editor showed its devices as empty boxes (levels were
+  `max_hier()` of the still empty layout) and they could not be clicked: all levels now.
+- "Place Library Cell…" grew taller than the screen, Place and Cancel off it.
+- No way to find a layer among 378, or a cell among a library's PCells: filter boxes.
+Still open:
+- [ ] A person follows I6 and I7; only the replays have. In them corners are clicked
+      zoomed in by script; the via_stack parameters are set by `place_library` (the form
+      is only opened), the pins' name and direction by `pin_draw`.
+- [ ] No grid, snapping, angle, path width or text settings in the layout tab (paths
+      0.1 µm, text "ABC"; both changeable in Properties).
+- [ ] The Pins, Nets, DRC/LVS and Link panels stack at the bottom of the layout tab and
+      leave the picture very small.
+- [ ] O10 (OTA layout): not written; the OTA's schematic needs fingers or parallel
+      devices first, and nobody has routed it (LAYOUT-TRIAL.md, last section).
+
+OTA series (2026-11-28): O1-O9 exist and replay with real ngspice runs (90-run suite,
+200-run Monte Carlo, noise). Replays place and resize devices with xschem commands, open
+testbench views with `open_view` (not a double click), set the two choice parameters
+(`inverting`, `mode`) with `sim new_set`, and load the operating point with
+`xschem annotate_op` (Waves > Op Annotate asks with the desktop's file window). O10 not
+written. Found while writing them, fixed:
+- Many simulator jobs at once crawled on a busy machine (ngspice's OpenMP threads spin
+  while waiting): 15 runs of 0.25 s did not finish in 100 s, 1.5 s with sleeping
+  threads. Simulator processes get `OMP_WAIT_POLICY=passive`, `GOMP_SPINCOUNT=0` unless
+  set already.
+- The template parameter fields trimmed on every keystroke: a space could not be typed
+  (a sweep's `50f 100f 200f` became `50f100f200f`).
+- A new testbench of a schematic that another testbench simulates got none of its design
+  variables; they are copied now.
+- The Jobs list of a 200-run Monte Carlo put the statistics 200 rows down: more than 30
+  jobs start folded. "+ Add" buttons showed a missing glyph.
+Still open:
+- [ ] `examples/ihp-inv` OTA (`ota5t`) has 30 and 32 um single gate fingers; the PDK's
+      check allows under 10 um (Console: "finger width is too big"). The tutorials use
+      `ng=4`. With that the design leaves saturation and loses CMRR at 125 C (M1), which
+      OTA 7 fixes with `m=2` on M3, M4. The example and its documented numbers are
+      unchanged.
+- [ ] The in-process ngspice backend does not get the thread settings.
+- [ ] A testbench made for an existing schematic still gets the template's starter
+      variables (`vbias`), which nothing uses.
+- [ ] Whether "Setup" and "Test template" are folded carries over between testbench views.
+- [ ] A person follows O1-O9; only the replays have.
+
+---
+
+## New testbench and suite in the GUI (2026-11-28)
+
+Built: `cdept-gui/src/views/newtest.rs` (the two dialogs), `sim::starter::create_testbench_using`
+(another cell's schematic), `sim::suite::create`; replay `cdept-gui/scripts/new-testbench.script`.
+
+- [ ] A suite's tests cannot be changed in the GUI after it is made (edit `suite.toml`).
+- [ ] New Suite offers testbenches of one library only; a test of another library, a
+      test's `name` and `[[combine]]` are written by hand.
+- [ ] The starter schematic of a DUT matches pins by name only; a DUT with more inputs
+      (the OTA's `inp`, `inn`, `ibias`) gets unconnected-looking nets of their own, said in
+      the Console only.
+- [ ] The corner check of New Suite is against the ngspice model set.
 
 ---
 
