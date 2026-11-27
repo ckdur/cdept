@@ -150,7 +150,7 @@ src, dst, f, shots, n = sys.argv[1:6]
 n = int(float(n))
 spike = int(n * 0.618) * 1e-9
 end = (n - 1) * 1e-9
-sub = {"@FILE@": f, "@SHOTS@": shots, "@SPIKE@": "%.12g" % spike, "@END@": "%.12g" % end,
+sub = {"@FILE@": f, "@DIR@": f.rsplit("/", 1)[0], "@SHOTS@": shots, "@SPIKE@": "%.12g" % spike, "@END@": "%.12g" % end,
        "@SPIKE_A@": "%.12g" % (spike - end / 1000), "@SPIKE_B@": "%.12g" % (spike + end / 1000),
        "@SPIKE_C@": "%.12g" % (spike - 50e-9), "@SPIKE_D@": "%.12g" % (spike + 50e-9)}
 t = open(src).read()

@@ -2191,12 +2191,32 @@ mod tests {
     #[test]
     fn point_names_sort_by_their_values() {
         let mut v = vec![
-            "vdd1p2", "vdd1p08", "mc_r10", "mc_r2", "tt_100", "tt_27", "x1.2", "x1.08", "a", "vdd1p08_ss",
+            "vdd1p2",
+            "vdd1p08",
+            "mc_r10",
+            "mc_r2",
+            "tt_100",
+            "tt_27",
+            "x1.2",
+            "x1.08",
+            "a",
+            "vdd1p08_ss",
         ];
         v.sort_by(|a, b| natural_cmp(a, b));
         assert_eq!(
             v,
-            ["a", "mc_r2", "mc_r10", "tt_27", "tt_100", "vdd1p08", "vdd1p08_ss", "vdd1p2", "x1.08", "x1.2"]
+            [
+                "a",
+                "mc_r2",
+                "mc_r10",
+                "tt_27",
+                "tt_100",
+                "vdd1p08",
+                "vdd1p08_ss",
+                "vdd1p2",
+                "x1.08",
+                "x1.2"
+            ]
         );
         assert_eq!(natural_cmp("p01", "p001"), std::cmp::Ordering::Greater);
     }

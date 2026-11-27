@@ -232,13 +232,16 @@ impl Panes {
             .iter()
             .find(|p| p.eye.is_some() && p.signals.len() == 1 && p.signals[0] == name)
             .map(|p| p.id);
-        let id = match own.and_then(|id| self.get(id)).or_else(|| {
-            self.list.iter().find(|p| {
-                p.eye
-                    .is_some_and(|e| e.period == eye.period && e.offset == eye.offset)
-                    && p.x_unit == unit
+        let id = match own
+            .and_then(|id| self.get(id))
+            .or_else(|| {
+                self.list.iter().find(|p| {
+                    p.eye
+                        .is_some_and(|e| e.period == eye.period && e.offset == eye.offset)
+                        && p.x_unit == unit
+                })
             })
-        }).or_else(|| self.list.iter().find(|p| p.signals.is_empty()))
+            .or_else(|| self.list.iter().find(|p| p.signals.is_empty()))
         {
             Some(p) => p.id,
             None => self.add_pane(),
@@ -282,7 +285,9 @@ impl Panes {
                     _ => self.active,
                 };
                 match self.get(wanted) {
-                    Some(p) if (p.signals.is_empty() && p.eye.is_none()) || p.x_unit == unit => p.id,
+                    Some(p) if (p.signals.is_empty() && p.eye.is_none()) || p.x_unit == unit => {
+                        p.id
+                    }
                     _ => match self
                         .list
                         .iter()

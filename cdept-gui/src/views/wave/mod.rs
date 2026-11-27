@@ -482,10 +482,13 @@ impl WaveView {
                 }
             }
             Layout::Bode => {
-                let mags: Vec<&String> = names.iter().filter(|n| n.ends_with(" (mag dB)")).collect();
-                let phases: Vec<&String> = names.iter().filter(|n| n.ends_with(" (phase)")).collect();
+                let mags: Vec<&String> =
+                    names.iter().filter(|n| n.ends_with(" (mag dB)")).collect();
+                let phases: Vec<&String> =
+                    names.iter().filter(|n| n.ends_with(" (phase)")).collect();
                 if mags.is_empty() {
-                    self.note = Some("Bode: the result is not complex (no magnitude and phase)".into());
+                    self.note =
+                        Some("Bode: the result is not complex (no magnitude and phase)".into());
                     return;
                 }
                 let gain = self.panes.add_pane();
@@ -519,7 +522,9 @@ impl WaveView {
                         let base = m.trim_end_matches(" (mag dB)");
                         let (Some(g), Some(p)) = (
                             s.extras.iter().find(|e| &e.name == *m),
-                            s.extras.iter().find(|e| e.name == format!("{base} (phase)")),
+                            s.extras
+                                .iter()
+                                .find(|e| e.name == format!("{base} (phase)")),
                         ) else {
                             continue;
                         };
@@ -539,7 +544,11 @@ impl WaveView {
                             name: base.to_string(),
                             unit: String::new(),
                         };
-                        let tag = if many { format!(" @ {}", s.tag) } else { String::new() };
+                        let tag = if many {
+                            format!(" @ {}", s.tag)
+                        } else {
+                            String::new()
+                        };
                         for mut mk in bode_markers(&w, &tag, &mut problems) {
                             mk.label = format!("{} ({base})", mk.label);
                             // the calculator's phase pane is in degrees, its gain in dB
@@ -708,24 +717,25 @@ impl WaveView {
         let mut seen: HashMap<String, usize> = HashMap::new();
         let mut list: Vec<Entry> = Vec::new();
         for s in &self.sources {
-            let mut add = |name: &str, unit: &str, x_unit: &str, calc: bool, complex: bool, form: bool| {
-                if let Some(&i) = seen.get(name) {
-                    if !form || list[i].form {
-                        list[i].count += 1;
+            let mut add =
+                |name: &str, unit: &str, x_unit: &str, calc: bool, complex: bool, form: bool| {
+                    if let Some(&i) = seen.get(name) {
+                        if !form || list[i].form {
+                            list[i].count += 1;
+                        }
+                    } else {
+                        seen.insert(name.to_string(), list.len());
+                        list.push(Entry {
+                            name: name.to_string(),
+                            unit: unit.to_string(),
+                            x_unit: model::norm_unit(x_unit),
+                            kind: model::kind_of(name, unit, calc),
+                            count: 1,
+                            complex,
+                            form,
+                        });
                     }
-                } else {
-                    seen.insert(name.to_string(), list.len());
-                    list.push(Entry {
-                        name: name.to_string(),
-                        unit: unit.to_string(),
-                        x_unit: model::norm_unit(x_unit),
-                        kind: model::kind_of(name, unit, calc),
-                        count: 1,
-                        complex,
-                        form,
-                    });
-                }
-            };
+                };
             if let SourceState::Ready(r) = &s.state {
                 let complex = s
                     .analyses
@@ -909,7 +919,9 @@ impl WaveView {
                             g.set_full((0.0, e.period));
                         }
                     }
-                    None => self.groups.push(XGroup::new(&p.x_unit, (0.0, e.period), false)),
+                    None => self
+                        .groups
+                        .push(XGroup::new(&p.x_unit, (0.0, e.period), false)),
                 }
             }
         }
@@ -1035,7 +1047,9 @@ impl WaveView {
     fn auto_y_log(&mut self) {
         let ids: Vec<PaneId> = self.panes.list.iter().map(|p| p.id).collect();
         for id in ids {
-            let Some(p) = self.panes.get(id) else { continue };
+            let Some(p) = self.panes.get(id) else {
+                continue;
+            };
             if p.y_manual.is_some() || p.eye.is_some() || p.signals.is_empty() {
                 continue;
             }
@@ -1079,7 +1093,6 @@ impl WaveView {
         }
     }
 
-
     // --- analyses: Bode, eye, integrated noise ---
 
     /// The samples of a signal of a ready source (x and y), at most `max` of them.
@@ -1107,7 +1120,10 @@ impl WaveView {
         if self.entry(&db).is_none() || self.entry(&ph).is_none() {
             return Err(format!("'{base}' is no complex (AC) signal"));
         }
-        let x_unit = self.entry(&db).map(|e| e.x_unit.clone()).unwrap_or_default();
+        let x_unit = self
+            .entry(&db)
+            .map(|e| e.x_unit.clone())
+            .unwrap_or_default();
         // the gain where the signal was (or the active pane), the phase right below
         let at = self
             .shown_forms(&base)
@@ -1116,14 +1132,17 @@ impl WaveView {
         for f in self.shown_forms(&base) {
             self.panes.remove_signal(&f);
         }
-        let gain_pane = self.panes.add(
-            &db,
-            &x_unit,
-            at.map_or(Target::Active, Target::Pane),
-        );
+        let gain_pane = self
+            .panes
+            .add(&db, &x_unit, at.map_or(Target::Active, Target::Pane));
         let below = self.panes.number(gain_pane).unwrap_or(1);
         let phase_pane = match self.panes.list.get(below) {
-            Some(p) if p.signals.iter().all(|s| s.starts_with("uphase(") || s.starts_with("phase(")) && !p.signals.is_empty() => {
+            Some(p)
+                if p.signals
+                    .iter()
+                    .all(|s| s.starts_with("uphase(") || s.starts_with("phase("))
+                    && !p.signals.is_empty() =>
+            {
                 let id = p.id;
                 self.panes.add(&ph, &x_unit, Target::Pane(id))
             }
@@ -1141,7 +1160,9 @@ impl WaveView {
         let mut problems = Vec::new();
         let many = self.sources.iter().filter(|s| s.visible).count() > 1;
         for s in self.sources.iter().filter(|s| s.visible) {
-            let SourceState::Ready(r) = &s.state else { continue };
+            let SourceState::Ready(r) = &s.state else {
+                continue;
+            };
             let (Some((f, re)), Some((_, im))) = (
                 Self::samples_of(r, &format!("re({base})"), 10_000_000),
                 Self::samples_of(r, &format!("im({base})"), 10_000_000),
@@ -1151,17 +1172,25 @@ impl WaveView {
             let w = libcdept::calc::Waveform {
                 x: Arc::new(f),
                 y: libcdept::calc::Samples::Complex(
-                    re.iter().zip(&im).map(|(a, b)| libcdept::calc::C::new(*a, *b)).collect(),
+                    re.iter()
+                        .zip(&im)
+                        .map(|(a, b)| libcdept::calc::C::new(*a, *b))
+                        .collect(),
                 ),
                 x_name: "frequency".into(),
                 x_unit: "Hz".into(),
                 name: base.clone(),
                 unit: String::new(),
             };
-            let tag = if many { format!(" @ {}", s.tag) } else { String::new() };
+            let tag = if many {
+                format!(" @ {}", s.tag)
+            } else {
+                String::new()
+            };
             markers.extend(bode_markers(&w, &tag, &mut problems));
         }
-        self.bode_markers.retain(|m| !m.label.contains(&format!("({base})")));
+        self.bode_markers
+            .retain(|m| !m.label.contains(&format!("({base})")));
         for m in &mut markers {
             m.label = format!("{} ({base})", m.label);
         }
@@ -1179,13 +1208,17 @@ impl WaveView {
     /// frequency up to each frequency, a signal of every point, in a new pane.
     fn integrate(&mut self, name: &str) -> Result<(), String> {
         self.refresh_catalog();
-        let e = self.entry(name).ok_or_else(|| format!("no signal '{name}'"))?;
+        let e = self
+            .entry(name)
+            .ok_or_else(|| format!("no signal '{name}'"))?;
         let unit = e.unit.replace("/√Hz", "");
         let x_unit = e.x_unit.clone();
         let out = format!("integ({name})");
         let mut made = 0;
         for i in 0..self.sources.len() {
-            let SourceState::Ready(r) = &self.sources[i].state else { continue };
+            let SourceState::Ready(r) = &self.sources[i].state else {
+                continue;
+            };
             let Some((f, y)) = Self::samples_of(r, name, 50_000_000) else {
                 continue;
             };
@@ -1210,7 +1243,9 @@ impl WaveView {
     /// An eye diagram of a signal of time in a pane of its own.
     fn eye(&mut self, name: &str, eye: Eye) -> Result<(), String> {
         self.refresh_catalog();
-        let e = self.entry(name).ok_or_else(|| format!("no signal '{name}'"))?;
+        let e = self
+            .entry(name)
+            .ok_or_else(|| format!("no signal '{name}'"))?;
         let x_unit = e.x_unit.clone();
         if !(eye.period.is_finite() && eye.period > 0.0 && eye.offset.is_finite()) {
             return Err("the eye period must be a positive number".into());
@@ -2402,7 +2437,11 @@ impl WaveView {
             ));
         });
         let value = |r: &Ready, n: &str| -> Option<f64> {
-            let sig = if *n == r.x_name { Some(0) } else { r.index.get(n).copied() }?;
+            let sig = if *n == r.x_name {
+                Some(0)
+            } else {
+                r.index.get(n).copied()
+            }?;
             let mut v = [0.0];
             r.ds.samples(sig, 0, &mut v).ok().map(|_| v[0])
         };
@@ -2416,11 +2455,15 @@ impl WaveView {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.add_sized([name_w, row_h], egui::Label::new(RichText::new("Signal").strong()));
+                    ui.add_sized(
+                        [name_w, row_h],
+                        egui::Label::new(RichText::new("Signal").strong()),
+                    );
                     for (tag, _) in ready.iter().take(cols) {
                         ui.add_sized(
                             [col_w, row_h],
-                            egui::Label::new(RichText::new(model::shorten(tag, 20)).strong()).truncate(),
+                            egui::Label::new(RichText::new(model::shorten(tag, 20)).strong())
+                                .truncate(),
                         );
                     }
                 });
@@ -2432,7 +2475,8 @@ impl WaveView {
                         )
                         .on_hover_text(n);
                         for (_, r) in ready.iter().take(cols) {
-                            let text = value(r, n).map_or("–".to_string(), |v| units::si(v, u, 6));
+                            let text =
+                                value(r, n).map_or("–".to_string(), |v| units::si(v, u, 6));
                             ui.add_sized([col_w, row_h], egui::Label::new(text));
                         }
                     });
@@ -2659,14 +2703,15 @@ impl WaveView {
             .show_axes([last, true])
             .x_grid_spacer(move |input| {
                 if log {
-                    units::log_grid(input.bounds)
+                    // base_step_size is the plot width of 8 points; a label needs 80
+                    units::log_grid(input.bounds, input.base_step_size * 10.0)
                 } else {
                     units::grid(input.bounds, 8.0)
                 }
             })
             .y_grid_spacer(move |input| {
                 if y_log {
-                    units::log_grid(input.bounds)
+                    units::log_grid(input.bounds, input.base_step_size * 3.0)
                 } else {
                     units::grid(input.bounds, y_div)
                 }
@@ -3116,7 +3161,8 @@ impl View for WaveView {
                 self.signal_list(ui);
             });
         // the cursor table: room for about eight rows
-        let readout_h = (ui.spacing().interact_size.y * 10.0 + 24.0).min(ui.available_height() * 0.4);
+        let readout_h =
+            (ui.spacing().interact_size.y * 10.0 + 24.0).min(ui.available_height() * 0.4);
         egui::Panel::bottom(egui::Id::new(("wave-cursor-table", id)))
             .resizable(true)
             .default_size(readout_h)
@@ -3762,14 +3808,21 @@ impl WaveView {
 
     pub(crate) fn script_form(&mut self, signal: &str, form: &str) -> Result<(), String> {
         if !model::FORMS.iter().any(|(f, _)| *f == form) {
-            return Err(format!("'{form}' is not a form (dB20 mag phase uphase re im dB10)"));
+            return Err(format!(
+                "'{form}' is not a form (dB20 mag phase uphase re im dB10)"
+            ));
         }
         self.refresh_catalog();
         let shown = self
             .shown_forms(signal)
             .into_iter()
             .next()
-            .or_else(|| self.panes.shown().find(|(_, s)| *s == signal).map(|(_, s)| s.clone()))
+            .or_else(|| {
+                self.panes
+                    .shown()
+                    .find(|(_, s)| *s == signal)
+                    .map(|(_, s)| s.clone())
+            })
             .ok_or_else(|| format!("'{signal}' is not shown"))?;
         self.set_form(&shown, form);
         Ok(())
@@ -3809,15 +3862,25 @@ impl WaveView {
 
     /// The notes of the lines of pane `n` (an eye's traces, or why it is not drawn).
     pub(crate) fn script_notes(&self, n: usize) -> Result<Vec<String>, String> {
-        let id = self.panes.by_number(n).ok_or("no such pane")?;
+        // 0: every pane
+        let id = if n == 0 {
+            None
+        } else {
+            Some(self.panes.by_number(n).ok_or("no such pane")?)
+        };
         if !self.up_to_date() {
             return Err("the data on screen is not up to date yet".into());
         }
         Ok(self
             .reply
             .as_ref()
-            .and_then(|r| r.pane(id))
-            .map(|p| p.insts.iter().filter_map(|a| a.note.clone()).collect())
+            .map(|r| {
+                r.panes
+                    .iter()
+                    .filter(|p| id.is_none_or(|id| p.pane == id))
+                    .flat_map(|p| p.insts.iter().filter_map(|a| a.note.clone()))
+                    .collect()
+            })
             .unwrap_or_default())
     }
 
@@ -3829,7 +3892,11 @@ impl WaveView {
             p.y_manual = None;
             return Ok(());
         }
-        let unit = self.panes.get(id).map(|p| p.x_unit.clone()).unwrap_or_default();
+        let unit = self
+            .panes
+            .get(id)
+            .map(|p| p.x_unit.clone())
+            .unwrap_or_default();
         let g = self.group_of(&unit).ok_or("no x group")?;
         let ok = !on || self.groups[g].full.0 > 0.0;
         if !ok {
@@ -3842,7 +3909,10 @@ impl WaveView {
     pub(crate) fn script_is_log(&self, n: usize) -> Result<(bool, bool), String> {
         let id = self.panes.by_number(n).ok_or("no such pane")?;
         let p = self.panes.get(id).ok_or("no such pane")?;
-        let g = self.group_of(&p.x_unit).map(|g| self.groups[g].log).unwrap_or(false);
+        let g = self
+            .group_of(&p.x_unit)
+            .map(|g| self.groups[g].log)
+            .unwrap_or(false);
         Ok((g && p.eye.is_none(), p.y_log))
     }
 
@@ -4023,17 +4093,31 @@ mod tests {
         assert!((got - pm).abs() < 0.2, "PM {got} vs {pm}");
         // phase -180: arg = -180 where the sum of atans is 180
         let (mut lo, mut hi) = (1e5f64, 1e9f64);
-        let phase = |f: f64| [p1, p2, p3].iter().map(|p| (f / p).atan().to_degrees()).sum::<f64>();
+        let phase = |f: f64| {
+            [p1, p2, p3]
+                .iter()
+                .map(|p| (f / p).atan().to_degrees())
+                .sum::<f64>()
+        };
         for _ in 0..200 {
             let mid = (lo * hi).sqrt();
-            if phase(mid) < 180.0 { lo = mid } else { hi = mid }
+            if phase(mid) < 180.0 {
+                lo = mid
+            } else {
+                hi = mid
+            }
         }
         let gm = -20.0 * mag(lo).log10();
         let gmm = m.iter().find(|m| m.label.starts_with("GM")).unwrap();
-        let got: f64 = gmm.label[3..gmm.label.find(" dB").unwrap()].parse().unwrap();
+        let got: f64 = gmm.label[3..gmm.label.find(" dB").unwrap()]
+            .parse()
+            .unwrap();
         assert!((got - gm).abs() < 0.1, "GM {got} vs {gm}");
         assert!((gmm.x / lo - 1.0).abs() < 5e-3, "GM at {} vs {lo}", gmm.x);
-        eprintln!("fu {fu:.6e} PM {pm:.3} GM {gm:.3} dB at {lo:.6e}: markers {:?}", m.iter().map(|m| &m.label).collect::<Vec<_>>());
+        eprintln!(
+            "fu {fu:.6e} PM {pm:.3} GM {gm:.3} dB at {lo:.6e}: markers {:?}",
+            m.iter().map(|m| &m.label).collect::<Vec<_>>()
+        );
     }
 
     #[test]

@@ -148,7 +148,11 @@ fn xyce_ac_ascii_and_binary() {
             cmd.arg("-a");
         }
         let out = cmd.arg("rc.cir").output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
         let ds = open(&dir.path().join(name), 0);
         check_rc(&ds, "OUT", &format!("Xyce {name}"));
     }
@@ -184,7 +188,11 @@ fn vacask_ac_and_noise() {
         .stdin(std::process::Stdio::null())
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
     let ds = open(&dir.path().join("ac1.raw"), 0);
     assert_eq!(ds.text(Text::Analysis), "ac");
     check_rc(&ds, "out", "VACASK ac1.raw");
@@ -241,7 +249,10 @@ fn ngspice_plots_of_one_file() {
         assert_eq!(dc.x_order(), XOrder::Segmented, "{name}");
         let segs = dc.segments();
         assert_eq!(segs.len(), 3, "{name}: {segs:?}");
-        assert!(segs.iter().all(|s| s.direction == -1 && s.last - s.first == 36));
+        assert!(
+            segs.iter()
+                .all(|s| s.direction == -1 && s.last - s.first == 36)
+        );
         // v(out) = (2 V1 + V2) / 3 (R1 = 1k to in, R2 = 2k to vb)
         let out = index(&dc, "v(out)");
         for (k, _) in segs.iter().enumerate() {
@@ -309,10 +320,7 @@ fn psf_folders() {
     let names: Vec<String> = (0..ds.signal_count()).map(|i| ds.signal_name(i)).collect();
     assert!(names.iter().any(|n| n.starts_with("uphase(")), "{names:?}");
     // magnitude from re/im equals the mag form
-    let s = names
-        .iter()
-        .position(|n| n.starts_with("re("))
-        .unwrap() as u32;
+    let s = names.iter().position(|n| n.starts_with("re(")).unwrap() as u32;
     let base = &names[s as usize][3..names[s as usize].len() - 1];
     let (re, im, mag) = (
         all(&ds, s),

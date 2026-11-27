@@ -126,7 +126,9 @@ pub fn grid(bounds: (f64, f64), divisions: f64) -> Vec<egui_plot::GridMark> {
 
 /// Grid marks of a logarithmic axis whose plot coordinate is log10(x): a labelled
 /// mark per decade, minor ones at 2..9 (every few decades when the range is wide).
-pub fn log_grid(bounds: (f64, f64)) -> Vec<egui_plot::GridMark> {
+/// `per_label` is the plot width a label needs (egui_plot hides labels closer than
+/// about 60 points on x): decades are skipped so that each mark keeps its label.
+pub fn log_grid(bounds: (f64, f64), per_label: f64) -> Vec<egui_plot::GridMark> {
     let (lo, hi) = bounds;
     if !(lo.is_finite() && hi.is_finite() && hi > lo) {
         return Vec::new();
@@ -136,7 +138,12 @@ pub fn log_grid(bounds: (f64, f64)) -> Vec<egui_plot::GridMark> {
         // less than a decade: a linear grid in the plot coordinate
         return grid(bounds, 5.0);
     }
-    let step = (decades / 10.0).ceil().max(1.0);
+    let fit = if per_label.is_finite() && per_label > 0.0 {
+        per_label.ceil()
+    } else {
+        1.0
+    };
+    let step = (decades / 10.0).ceil().max(fit).max(1.0);
     let mut marks = Vec::new();
     let mut d = (lo / step).floor() * step;
     while d <= hi + 1e-9 && marks.len() < 400 {
@@ -204,6 +211,23 @@ mod tests {
         );
         assert!(grid((1.0, 1.0), 8.0).is_empty());
         assert!(grid((0.0, f64::INFINITY), 8.0).is_empty());
+    }
+
+    #[test]
+    fn log_grid_keeps_its_labels() {
+        // ten decades: one mark a decade when there is room, every second when not
+        let decades = |m: &[egui_plot::GridMark]| {
+            m.iter()
+                .filter(|g| (g.value - g.value.round()).abs() < 1e-9)
+                .count()
+        };
+        assert_eq!(decades(&log_grid((0.0, 10.0), 0.5)), 11);
+        let tight = log_grid((0.0, 10.0), 1.6);
+        assert_eq!(decades(&tight), 6);
+        assert!(tight.iter().all(|g| g.step_size == 2.0));
+        // three decades: the minors 2..9 too
+        assert!(log_grid((0.0, 3.0), 0.2).len() > 20);
+        assert!(log_grid((f64::NAN, 1.0), 1.0).is_empty());
     }
 
     #[test]

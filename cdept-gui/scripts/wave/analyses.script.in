@@ -202,6 +202,112 @@ wv expect_point p4 failed
 wv expect_lines >0
 wait 0.3
 screenshot @SHOTS@/mixed.png
-# repeated open and close of an AC file and a PSF folder, then a cancel
+# repeated open and close of an AC file (with a Bode plot) and a PSF folder
+wv stats
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv bode v(out)
+wv close
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv close
 wv stats
 quit

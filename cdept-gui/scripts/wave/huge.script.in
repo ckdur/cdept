@@ -2,6 +2,15 @@
 # zoom and pan times with the pyramids, a one-sample spike at every zoom, the cache
 # reused by a second open.
 window 1600 1000
+# a load cancelled while the cache is written: no cache, no temporary file left
+wv open @FILE@
+wait 0.2
+wv expect_loading
+wv cancel
+wv expect_failed cancelled
+wv expect_files @DIR@ uwraw 0
+wv expect_files @DIR@ .tmp 0
+wv close
 wv open @FILE@
 wv wait_loaded
 wv stats
@@ -31,6 +40,7 @@ wv drag 0.8 0.2
 wv drag 0.2 0.8
 wv stats
 wv fit
+wv cursor a none
 wait 1
 screenshot @SHOTS@/huge.png
 wv close

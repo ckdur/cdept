@@ -87,7 +87,10 @@ pub enum Want {
     /// The one of this name, else of this kind (a family's other files), else the best:
     /// what a PSF folder prefers, else the first transient, else the first that has
     /// more than one point.
-    Like { name: String, kind: String },
+    Like {
+        name: String,
+        kind: String,
+    },
     Best,
 }
 
@@ -98,7 +101,11 @@ pub fn choose(list: &[Analysis], want: &Want) -> u32 {
         list.iter()
             .filter(ok)
             .find(|a| a.preferred && list.len() > 1 && a.points > 1)
-            .or_else(|| list.iter().filter(ok).find(|a| a.kind == "tran" && a.points > 1))
+            .or_else(|| {
+                list.iter()
+                    .filter(ok)
+                    .find(|a| a.kind == "tran" && a.points > 1)
+            })
             .or_else(|| list.iter().filter(ok).find(|a| a.points > 1))
             .or_else(|| list.iter().find(ok))
             .map_or(0, |a| a.index)
@@ -563,68 +570,75 @@ fn query_one(inst: &InstReq, pane: &PaneReq) -> (Queried, Option<String>) {
     let mut trace = Trace::default();
     let mut error = None;
     let mut parts_at: [Vec<Option<f64>>; 2] = [vec![], vec![]];
-    let (info, at, prepared) = match &inst.data {
-        Data::File(ds, signal) if ds.x_order() == XOrder::Segmented => {
-            // every part of x, one after the other, broken between them
-            let mut info = QueryInfo::default();
-            let mut part = Trace::default();
-            for (k, _) in ds.segments().iter().enumerate() {
-                match ds.query_segment(*signal, k as u32, pane.x0, pane.x1, pane.w.max(1), &mut part)
-                {
-                    Ok(i) => {
-                        info.source_points += i.source_points;
-                        info.mode = i.mode;
-                        info.ms += i.ms;
+    let (info, at, prepared) =
+        match &inst.data {
+            Data::File(ds, signal) if ds.x_order() == XOrder::Segmented => {
+                // every part of x, one after the other, broken between them
+                let mut info = QueryInfo::default();
+                let mut part = Trace::default();
+                for (k, _) in ds.segments().iter().enumerate() {
+                    match ds.query_segment(
+                        *signal,
+                        k as u32,
+                        pane.x0,
+                        pane.x1,
+                        pane.w.max(1),
+                        &mut part,
+                    ) {
+                        Ok(i) => {
+                            info.source_points += i.source_points;
+                            info.mode = i.mode;
+                            info.ms += i.ms;
+                        }
+                        Err(e) => {
+                            error.get_or_insert(e.to_string());
+                            continue;
+                        }
                     }
-                    Err(e) => {
-                        error.get_or_insert(e.to_string());
-                        continue;
+                    if !trace.x.is_empty() {
+                        trace.x.push(f64::NAN);
+                        trace.y.push(f64::NAN);
+                    }
+                    trace.x.extend_from_slice(&part.x);
+                    trace.y.extend_from_slice(&part.y);
+                    for (part, cursor) in parts_at.iter_mut().zip(pane.cursors) {
+                        part.push(cursor.and_then(|x| {
+                            ds.value_at_segment(*signal, k as u32, x).ok().map(|v| v.0)
+                        }));
                     }
                 }
-                if !trace.x.is_empty() {
-                    trace.x.push(f64::NAN);
-                    trace.y.push(f64::NAN);
-                }
-                trace.x.extend_from_slice(&part.x);
-                trace.y.extend_from_slice(&part.y);
-                for (part, cursor) in parts_at.iter_mut().zip(pane.cursors) {
-                    part.push(cursor.and_then(|x| {
-                        ds.value_at_segment(*signal, k as u32, x).ok().map(|v| v.0)
-                    }));
-                }
+                let first = |c: usize| parts_at[c].first().copied().flatten();
+                (info, [first(0), first(1)], ds.prepared(*signal))
             }
-            let first = |c: usize| parts_at[c].first().copied().flatten();
-            (info, [first(0), first(1)], ds.prepared(*signal))
-        }
-        Data::File(ds, signal) => {
-            let info = match ds.query(*signal, pane.x0, pane.x1, pane.w.max(1), &mut trace) {
-                Ok(i) => i,
-                Err(e) => {
-                    error = Some(e.to_string());
-                    QueryInfo::default()
-                }
-            };
-            let unordered = ds.x_order() == XOrder::Unordered;
-            let at = |c: Option<f64>| {
-                c.filter(|_| !unordered)
-                    .and_then(|x| ds.value_at(*signal, x).ok().map(|v| v.0))
-            };
-            (
-                info,
-                [at(pane.cursors[0]), at(pane.cursors[1])],
-                ds.prepared(*signal),
-            )
-        }
-        Data::Series(s) => {
-            let info = s.query(pane.x0, pane.x1, pane.w.max(1), &mut trace);
-            let at = |c: Option<f64>| c.and_then(|x| s.value_at(x));
-            (
-                info,
-                [at(pane.cursors[0]), at(pane.cursors[1])],
-                Prepared::Ready,
-            )
-        }
-    };
+            Data::File(ds, signal) => {
+                let info = match ds.query(*signal, pane.x0, pane.x1, pane.w.max(1), &mut trace) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        error = Some(e.to_string());
+                        QueryInfo::default()
+                    }
+                };
+                let unordered = ds.x_order() == XOrder::Unordered;
+                let at = |c: Option<f64>| {
+                    c.filter(|_| !unordered)
+                        .and_then(|x| ds.value_at(*signal, x).ok().map(|v| v.0))
+                };
+                (
+                    info,
+                    [at(pane.cursors[0]), at(pane.cursors[1])],
+                    ds.prepared(*signal),
+                )
+            }
+            Data::Series(s) => {
+                let info = s.query(pane.x0, pane.x1, pane.w.max(1), &mut trace);
+                let at = |c: Option<f64>| c.and_then(|x| s.value_at(x));
+                (
+                    info,
+                    [at(pane.cursors[0]), at(pane.cursors[1])],
+                    Prepared::Ready,
+                )
+            }
+        };
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     let (mut plo, mut phi) = (f64::INFINITY, f64::NEG_INFINITY);
     let unordered = match &inst.data {
@@ -673,7 +687,8 @@ fn stream(data: &Data, max: u64, mut f: impl FnMut(&[f64], &[f64]) -> bool) -> R
             while at < total {
                 let n = ((total - at) as usize).min(PIECE);
                 ds.samples(0, at, &mut xs[..n]).map_err(|e| e.to_string())?;
-                ds.samples(*sig, at, &mut ys[..n]).map_err(|e| e.to_string())?;
+                ds.samples(*sig, at, &mut ys[..n])
+                    .map_err(|e| e.to_string())?;
                 if !f(&xs[..n], &ys[..n]) {
                     break;
                 }
@@ -688,10 +703,7 @@ fn stream(data: &Data, max: u64, mut f: impl FnMut(&[f64], &[f64]) -> bool) -> R
 fn extent(data: &Data) -> Option<(f64, f64, u64)> {
     match data {
         Data::Series(s) => s.x_range().map(|(a, b)| (a, b, s.len() as u64)),
-        Data::File(ds, _) => ds
-            .x_extent()
-            .ok()
-            .map(|(a, b)| (a, b, ds.point_count())),
+        Data::File(ds, _) => ds.x_extent().ok().map(|(a, b)| (a, b, ds.point_count())),
     }
 }
 
@@ -747,7 +759,9 @@ fn draw_eye_line(
     let mut pts: Vec<(f64, f64)> = Vec::with_capacity(4096);
     let mut current: Option<f64> = None;
     let mut traces = 0u64;
-    let flush = |pts: &mut Vec<(f64, f64)>, canvas: &mut Option<&mut Canvas>, density: &mut Option<&mut [u32]>| {
+    let flush = |pts: &mut Vec<(f64, f64)>,
+                 canvas: &mut Option<&mut Canvas>,
+                 density: &mut Option<&mut [u32]>| {
         if pts.len() > 1 {
             if let Some(c) = canvas.as_deref_mut() {
                 c.polyline(pts, &inst.stroke);
@@ -1016,14 +1030,22 @@ fn draw_pane(pane: &PaneReq, queried: Vec<Option<Queried>>) -> PaneReply {
         // pixels outside the view cut off by the plot
         let (w, h) = (pane.w as usize, pane.h as usize);
         let (vx0, vx1) = (pane.x0.max(0.0), pane.x1.min(eye.period));
-        let (vx0, vx1) = if vx1 > vx0 { (vx0, vx1) } else { (0.0, eye.period) };
+        let (vx0, vx1) = if vx1 > vx0 {
+            (vx0, vx1)
+        } else {
+            (0.0, eye.period)
+        };
         let full_w = ((w as f64) * eye.period / (vx1 - vx0)).clamp(1.0, 1e6);
         let shift = vx0 / eye.period * full_w;
         let mut canvas = Canvas::new(w, h);
         let mut density = vec![0u32; if eye.density { w * h } else { 0 }];
         let mut colour = [255u8, 255, 255];
         for (q, inst) in queried.iter_mut().zip(&pane.insts) {
-            colour = [inst.stroke.rgba[0], inst.stroke.rgba[1], inst.stroke.rgba[2]];
+            colour = [
+                inst.stroke.rgba[0],
+                inst.stroke.rgba[1],
+                inst.stroke.rgba[2],
+            ];
             let r = draw_eye_line(
                 inst,
                 &eye,
@@ -1044,7 +1066,11 @@ fn draw_pane(pane: &PaneReq, queried: Vec<Option<Queried>>) -> PaneReply {
         } else {
             canvas.to_rgba()
         };
-        let (w, h) = if eye.density { (w, h) } else { (canvas.w, canvas.h) };
+        let (w, h) = if eye.density {
+            (w, h)
+        } else {
+            (canvas.w, canvas.h)
+        };
         return PaneReply {
             pane: pane.pane,
             u0: vx0,
@@ -1057,20 +1083,22 @@ fn draw_pane(pane: &PaneReq, queried: Vec<Option<Queried>>) -> PaneReply {
     }
     let image = ok.then(|| {
         let (w, h) = (pane.w as usize, pane.h as usize);
-        let draw =
-            |part: &[(&Queried, &InstReq)]| {
-                let mut canvas = Canvas::new(w, h);
-                let (fw, fh) = (canvas.w as f64, canvas.h as f64);
-                let mut pts: Vec<(f64, f64)> = Vec::new();
-                for (q, inst) in part {
-                    pts.clear();
-                    pts.extend(q.trace.x.iter().zip(&q.trace.y).map(|(x, y)| {
-                        ((map(*x) - u0) / (u1 - u0) * fw, (y1 - ylog(*y)) / (y1 - y0) * fh)
-                    }));
-                    canvas.polyline(&pts, &inst.stroke);
-                }
-                canvas
-            };
+        let draw = |part: &[(&Queried, &InstReq)]| {
+            let mut canvas = Canvas::new(w, h);
+            let (fw, fh) = (canvas.w as f64, canvas.h as f64);
+            let mut pts: Vec<(f64, f64)> = Vec::new();
+            for (q, inst) in part {
+                pts.clear();
+                pts.extend(q.trace.x.iter().zip(&q.trace.y).map(|(x, y)| {
+                    (
+                        (map(*x) - u0) / (u1 - u0) * fw,
+                        (y1 - ylog(*y)) / (y1 - y0) * fh,
+                    )
+                }));
+                canvas.polyline(&pts, &inst.stroke);
+            }
+            canvas
+        };
         let lines: Vec<(&Queried, &InstReq)> = queried.iter().zip(&pane.insts).collect();
         // Many lines: drawn in parts on a few threads, the parts put over each other in
         // order (the same picture as drawing them one after the other).
@@ -1195,12 +1223,20 @@ mod tests {
             density: false,
         };
         // 1e-20 s over 1 us: refused at once, nothing allocated
-        assert!(eye_check(&e(1e-20), 0.0, 1e-6, 1_000_000).unwrap_err().contains("too short"));
+        assert!(
+            eye_check(&e(1e-20), 0.0, 1e-6, 1_000_000)
+                .unwrap_err()
+                .contains("too short")
+        );
         assert!(eye_check(&e(f64::NAN), 0.0, 1e-6, 100).is_err());
         assert!(eye_check(&e(-1.0), 0.0, 1e-6, 100).is_err());
         assert!(eye_check(&e(1e-9), 0.0, 0.0, 100).is_err());
         // a period of less than two samples
-        assert!(eye_check(&e(1e-9), 0.0, 1e-6, 100).unwrap_err().contains("two samples"));
+        assert!(
+            eye_check(&e(1e-9), 0.0, 1e-6, 100)
+                .unwrap_err()
+                .contains("two samples")
+        );
         assert_eq!(eye_check(&e(1e-7), 0.0, 1e-6, 10_001).unwrap(), 10.0);
         // a square wave of period 10 drawn folded: lines and density
         let s = series("sq", 10_000, |i| if (i / 5) % 2 == 0 { 1.0 } else { 0.0 });
