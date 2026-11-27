@@ -1,6 +1,11 @@
 # View waveforms
 
-CDePT has no waveform viewer of its own. The viewer is **UberWave**, Symbiotic EDA's program
+```{note}
+This is changing (2026-11-27): CDePT is getting its own viewer tabs on UberWave's data engine
+(see the roadmap, Phase 5). This page describes what is in use until then.
+```
+
+CDePT has no finished waveform viewer of its own yet. The viewer in use is **UberWave**, Symbiotic EDA's program
 (C++ with Dear ImGui and ImPlot, built for very large ngspice raw files and Spectre PSF
 results). It is **part of the `cdept` executable**: its window runs on a thread of the cdept
 process, next to the main window, and CDePT talks to it with plain function calls with typed

@@ -290,11 +290,21 @@ real SLURM cluster (smoke-tested only), the post-layout DUT swap (Phase 7).
 ### Phase 5: Waveform Viewer + Calculator (~150 h) — done 2026-11-27
 - Readers: SPICE raw (binary and ascii, ngspice and Xyce flavours; small custom parser),
   CSV, digital VCD/FST/GHW via `wellen`.
-- **Decision: CDePT builds no waveform viewer of its own.** The analog viewer (egui plot,
-  strips, cursors, Bode, eye diagrams, overlay of sweep families) is UberWave; digital
-  VCD/FST/GHW viewing is Surfer or GTKWave, started the same way. What CDePT keeps is the
-  raw reader (`libcdept/src/raw`, used by the calculator, `[[output]]` and the listing of a
-  file's analyses) and the numbers: measures, the calculator and the spec table.
+- **Decision (2026-11-27, replaces "CDePT builds no viewer of its own"): CDePT builds its
+  own analog waveform viewer, in egui, on UberWave's components.** UberWave's data engine
+  (`wp3-data-engine`: raw and PSF readers, `.uwraw` cache, decimation, queries) is linked in
+  through a small typed C interface; other UberWave parts are reused where they work without
+  its window. Why: the embedded UberWave application brings its own window and loop, so it
+  cannot be a docked tab and only one can exist in a process. Wanted: normal dockable,
+  detachable tabs, several independent viewers, no helper process, no JSON. Order: (1) the
+  engine as a library without window or graphics dependencies and a prototype with two
+  independent tabs (zoom, two cursors); (2) test it with the large SAR ADC file (load time,
+  memory, smoothness, narrow spikes stay visible); (3) signal list, panes, families,
+  calculator results, markers; (4) Bode, eye and the other analyses; (5) switch over and
+  remove the embedded-window shim. The standalone `UberWaveViewer` stays an option.
+  Digital VCD/FST/GHW viewing is Surfer or GTKWave. The numbers (readers, measures,
+  calculator, spec table) stay in CDePT. The list below describes the embedded application
+  that is in use until step 5.
 - **UberWave** (Symbiotic EDA's program, repository `uberwave`; same owner as CDePT, so its licence does not limit the integration. **Now a built-in shim** (SYMBI-83): the crate `cdept-uberwave` builds the library `uberwave_embed` of the `uberwave` repository with `UBERWAVE_SRC` and links it into the cdept executable; its window runs on a thread of the process, commands and calculator data are plain calls. Without the source a stub is built and the process + IPC path described below remains as the fallback; the uberWAVE project from
   the proposal): C++20/ImGui/ImPlot analog and mixed-signal viewer built for multi-GB ngspice
   raw files (memory-mapped parser, decimation, `.uwraw` cache), plus Spectre PSF. Binary
@@ -325,7 +335,8 @@ real SLURM cluster (smoke-tested only), the post-layout DUT swap (Phase 7).
      `Embedded` by default when built in, `Process` as the fallback; `[wave] backend`,
      `CDEPT_UBERWAVE_BACKEND`, `cdept wave --backend`; `cdept wave --screenshot`). One viewer
      window per process, shared by the GUI; no decimation for the embedded one.
-  6. Which side owns large-file viewing is decided: UberWave. The numbers stay in CDePT.
+  6. Large-file handling stays UberWave's (its data engine); the drawing moves to CDePT
+     (decision of 2026-11-27 above).
 - Other viewers detected for "open with": GTKWave and gaw (xschem's viewer).
 - Calculator, in two layers:
   1. Native Rust function library (`rustfft`, `ndarray`): FFT/windowing, SNR/SNDR/SFDR/THD/ENOB,

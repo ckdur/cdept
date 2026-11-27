@@ -1,4 +1,5 @@
-//! Waveforms: CDePT has no waveform viewer of its own. It uses UberWave, Symbiotic EDA's
+//! Waveforms: what is used until CDePT's own viewer tabs (on UberWave's data engine,
+//! docs/ROADMAP.md Phase 5) replace it. It uses UberWave, Symbiotic EDA's
 //! viewer (the `uberwave` repository), in one of two ways ([`backend`]):
 //!
 //! * built into the cdept executable ([`embedded`], crate `cdept-uberwave`): the window
