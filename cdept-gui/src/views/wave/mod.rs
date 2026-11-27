@@ -1053,9 +1053,13 @@ impl View for WaveView {
                     .show(ui, |ui| v.signal_list(ui));
                 egui::Panel::bottom(egui::Id::new(("wave-readout", id)))
                     .resizable(true)
-                    .default_size(130.0)
+                    .default_size(170.0)
                     .show(ui, |ui| {
-                        egui::ScrollArea::vertical().show(ui, |ui| v.readout(ui));
+                        // Without this the scroll area keeps its smallest height and the
+                        // panel shows one row of the table.
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| v.readout(ui));
                     });
                 egui::CentralPanel::default().show(ui, |ui| v.plot(ui, id));
                 v.request();
