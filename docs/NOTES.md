@@ -641,6 +641,10 @@ Open points / risks (mine):
 - [ ] VACASK's raw files say `notype`: their signals have no unit in the tab.
 - [ ] CSV tables and digital files are not in tabs (UberWave's viewer, Surfer/GTKWave).
 - [ ] `wv` text arguments have no quoting (no spaces in `expect_marker` texts).
+- [ ] Not mine, seen while testing: `ota.script` failed twice at `sim suite_wait` (90
+      runs not done in 600 s) while other work on this desktop held the load average at
+      200-300; and when the GUI quits while a suite runs, its ngspice processes keep
+      running as orphans (23 of them, in a deleted scratch folder; killed by hand).
 
 Before the tabs can be the default (step 5): the Simulation tab's "Open in UberWave" and
 "Open family" buttons and `cdept wave` to open tabs (with UberWave's window as the
