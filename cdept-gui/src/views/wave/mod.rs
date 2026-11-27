@@ -512,6 +512,8 @@ impl WaveView {
                 Answer::Drawn(r) => self.take_reply(ctx, r),
             }
         }
+        // also from a tab behind another one (a script, a cursor moved before)
+        self.publish_cursors();
     }
 
     fn take_reply(&mut self, ctx: &egui::Context, mut r: Reply) {
@@ -1869,7 +1871,9 @@ impl WaveView {
                     );
                 }
             }
-            for m in &markers {
+            let mut markers = markers;
+            markers.sort_by(|a, b| a.x.total_cmp(&b.x));
+            for (k, m) in markers.iter().enumerate() {
                 let u = g.to_plot(m.x);
                 if !u.is_finite() {
                     continue;
@@ -1883,7 +1887,8 @@ impl WaveView {
                 pui.text(
                     Text::new(
                         "",
-                        PlotPoint::new(u, y1 - (y1 - y0) * 0.02),
+                        // neighbours' labels on rows of their own
+                        PlotPoint::new(u, y1 - (y1 - y0) * (0.02 + 0.09 * (k % 4) as f64)),
                         model::shorten(&m.label, 60),
                     )
                     .color(marker_color)
@@ -2740,6 +2745,11 @@ impl WaveView {
                 )
             })
             .collect())
+    }
+
+    /// Files that changed on disk (the query thread looks once a second).
+    pub(crate) fn script_changed_files(&self) -> usize {
+        self.changed.len()
     }
 
     pub(crate) fn script_markers(&self) -> &[Marker] {

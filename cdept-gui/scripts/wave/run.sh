@@ -5,7 +5,7 @@
 # load, repeated open/close, and the large SAR ADC file (docs/NOTES.md, own waveform
 # viewer).
 #
-#   cdept-gui/scripts/wave/run.sh [smoke|menu|features|family|torture|loop|sar ...]
+#   cdept-gui/scripts/wave/run.sh [smoke|menu|features|family|big|torture|loop|sar ...]
 #       (default: smoke menu features family torture loop sar)
 #
 # smoke: small inputs (small.py), what CI runs; menu: File > Open in UberWave... with
@@ -61,6 +61,34 @@ fresh_data() {
 status=0
 for what in ${*:-smoke menu features family torture loop sar}; do
     case $what in
+    big)
+        B=$W/big
+        rm -rf "$B"
+        python3 -I "$HERE/big.py" "$B" 600 >/dev/null
+        python3 -I - "$HERE/big.script.in" "$W/big.script" "$B" "$SHOTS" <<'PY'
+import sys
+src, dst, data, shots = sys.argv[1:5]
+fam = " ".join("%s/family/p%04d/out.raw" % (data, i) for i in range(600))
+hundred = " ".join("%s/family/p%04d/out.raw" % (data, i) for i in range(100, 200))
+panes = "\n".join("wv show_in new v(n%03d)" % i for i in range(300))
+loop = "\n".join("wv open_files %s\nwv expect_points loading 0\nwv close" % hundred for _ in range(15))
+touch = "sleep 1.1 && " + " && ".join("printf x >> %s/family/p%04d/out.raw" % (data, i) for i in (1, 2, 3))
+t = open(src).read()
+t = t.replace("@OPEN600@", "wv open_files " + fam).replace("@PANES300@", panes)
+t = t.replace("@LOOP100@", loop).replace("@TOUCH@", touch)
+t = t.replace("@DATA@", data).replace("@SHOTS@", shots)
+open(dst, "w").write(t)
+PY
+        env DISPLAY="${DISPLAY:-:0}" XDG_DATA_HOME="$W/xdg" HOME="$W/home" \
+            timeout 900 systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 \
+            "$CDEPT" gui --script "$W/big.script" >"$W/big.log" 2>&1 && echo "big: ok ($W/big.log)" || {
+            echo "big: FAILED (see $W/big.log)"
+            grep -a "ERROR" "$W/big.log" | tail -3
+            status=1
+        }
+        grep -a "wv stats" "$W/big.log" | sed 's/.*wv stats: //' | cut -c 1-400
+        rm -rf "$B"
+        ;;
     smoke)
         fresh_small
         gui smoke || status=1

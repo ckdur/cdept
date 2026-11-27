@@ -152,11 +152,13 @@ pub(crate) fn run(
 ) -> Result<(), String> {
     match command {
         DiskCommand::Shell(line) => {
-            let root = app
-                .project
-                .as_ref()
-                .map(|p| p.root.clone())
-                .ok_or("no project is open")?;
+            // without a project: the current folder
+            let root = match app.project.as_ref() {
+                Some(p) => p.root.clone(),
+                None => {
+                    std::env::current_dir().map_err(|e| format!("no project, no folder: {e}"))?
+                }
+            };
             let output = Command::new("sh")
                 .arg("-c")
                 .arg(&line)

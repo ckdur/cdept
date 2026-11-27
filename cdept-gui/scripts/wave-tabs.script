@@ -1,0 +1,93 @@
+# CDePT's own waveform tabs with a real testbench (examples/ihp-inv): "Waveform Tab
+# (family)" on the run points, the calculator's "Send to tab" (one point and the family,
+# a waveform in time, a spectrum in Hz, markers of a scalar), the spec table's cursor
+# outputs following a tab's cursors, a sweep with Monte Carlo as a family of 15. Needs
+# the PDK, ngspice and the helper, like simulation.script:
+#   PDK_ROOT=/opt/ext/OpenPDKs CDEPT_NGSPICE=/opt/ext/OpenLane/bin/ngspice \
+#   CDEPT_XSCHEM=target/debug/cdept-xschem CDEPT_EXAMPLE=ihp-inv \
+#     cdept-gui/scripts/run.sh cdept-gui/scripts/wave-tabs.script
+# (set CDEPT_SCRIPT_TIMEOUT to 600: two runs)
+panel Library Manager
+wait 0.3
+open cells tb_inv testbench
+sim expect_target cells/tb_inv/testbench
+sim run
+sim wait
+sim expect_state finished
+sim expect_rows 3 PASS
+
+# the family: what the button does
+wv open_family cells tb_inv testbench
+wv expect_points loading 0
+wv expect_points ready 3
+wv expect_pane 1 v(in) v(out)
+wv expect_lines 6
+wv expect_distinct 1
+wv cursor a 400p
+wv expect_cursor_at a v(in) tt_27 1.2 0.3
+
+# calculator: a waveform of every point, into this tab (named once, tagged by point)
+sim calc expr v("out") * 0.5
+sim calc send_tab
+sim calc expect_note to a waveform tab
+wv expect_tabs 1
+wv expect_lines 9
+wv expect_row v("out") * 0.5
+# a spectrum: its own pane of Hz
+sim calc point tt_27
+sim calc expr db20(fft(v("out")))
+sim calc send_tab
+wv expect_panes 2
+wv expect_x_unit 2 Hz
+# a scalar: markers where it was measured
+sim calc point all
+sim calc expr cross(v("out"), 0.6)
+sim calc send_tab
+wv expect_markers 3
+# not finite where v(in) is 0: those points are breaks, the rest is drawn
+sim calc expr db20(v("in"))
+sim calc send_tab
+wv expect_row db20(v("in"))
+wait 0.5
+screenshot /tmp/cdept-wave-tabs-calc.png
+
+# the cursor outputs of the spec table follow the tab's cursors
+sim calc expr value_at(v("in"), cursor_a)
+sim calc add_output vin_at_a
+wv pane select 1
+wv cursor a 50p
+wait 0.3
+sim calc follow
+sim calc expect_cursor_output vin_at_a -0.01 0.01
+sim calc expect_cursor_signal v(in) @ tt_27
+wv cursor a 400p
+wait 0.3
+sim calc follow
+sim calc expect_cursor_output vin_at_a 1.1 1.3
+
+# UberWave's own viewer is still there (the process stand-in is not set: just the call)
+sim revert
+
+# a sweep and Monte Carlo: a family of 15 (and the 3 points of before) in one tab
+sim add_sweep vdd 1.08,1.2,1.32
+sim mc on
+sim set_mc runs 5
+sim set_mc seed 3
+sim set_mc mode process
+sim expect_plan 15
+sim save
+sim run
+sim wait
+sim expect_points 15
+wv open_family cells tb_inv testbench
+wv expect_tabs 2
+# the three points of the first run are still in the folder: 18
+wv expect_points loading 0
+wv expect_points ready 18
+wv hide v(in)
+wv expect_lines 18
+wv expect_distinct 1
+wait 0.5
+screenshot /tmp/cdept-wave-tabs-family.png
+log wave-tabs: ok
+quit

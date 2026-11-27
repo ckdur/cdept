@@ -46,6 +46,7 @@
 //! | `wv style <signal> <color #rrggbb\|dash solid\|dashed\|dotted\|dashdot\|width w> [tag]` | Change a line's style |
 //! | `wv expect_style <n> <label> <color\|dash\|width> <value>` | The style of a line of pane n (label contains the text) |
 //! | `wv expect_distinct <n>` | No two lines of pane n look alike |
+//! | `wv expect_changed_files <n>` | Files of the tab that changed on disk |
 //! | `wv expect_markers <n>` | The calculator's markers in the tab |
 //! | `wv expect_cursor_at <a\|b> <signal> <tag> <value> [tol]` | The readout of one point's line at a cursor |
 //! | `wv test_trace <name> <empty\|nan\|inf\|nonmono\|ramp\|sine\|big> [n] [x unit] [tag]` | Hand a series to the tab as the calculator does (hostile ones too) |
@@ -96,6 +97,7 @@ pub fn patient(args: &[String]) -> bool {
                 | "expect_cursor_at"
                 | "drag_signal"
                 | "expect_markers"
+                | "expect_changed_files"
         )
     )
 }
@@ -765,6 +767,13 @@ pub fn run(
                 }
             }
             tracing::info!(target: "cdept::script", "wv: the {} lines of pane {n} all look different", styles.len());
+        }
+        ("expect_changed_files", [n]) => {
+            let want: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let got = app.script_wave()?.script_changed_files();
+            if got != want {
+                return Err(format!("{got} files changed on disk, expected {want}"));
+            }
         }
         ("expect_markers", [n]) => {
             let want: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;

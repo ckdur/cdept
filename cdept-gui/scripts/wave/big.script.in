@@ -1,0 +1,61 @@
+# Large cases (run.sh big, inputs from big.py): a family of 600 run points (15 broken),
+# 1200 lines, 300 signals in 300 panes, a family closed while it loads, 15 opens and
+# closes of 100 files, files changed while open, two tabs and a detached one.
+window 1600 1000
+@OPEN600@
+wv expect_points loading 0
+wv stats
+wv expect_points failed 10
+wv expect_points ready 590
+wv expect_point p0038 failed
+wv expect_point p0404 ready
+wv hide v(in)
+wv expect_lines 590
+wait 1
+wv stats
+wv wheel 0.5 up 3
+wv drag 0.3 0.6
+wv wheel 0.4 down 2
+wv drag 0.7 0.2
+wv wheel 0.5 up 4
+wv drag 0.2 0.8
+wv cursor a 500n
+wait 1
+wv stats
+screenshot @SHOTS@/big-1-family.png
+wv show v(in)
+wv expect_lines 1180
+wv fit
+wait 1
+wv stats
+wv points none
+wv expect_lines 0
+wv points all
+wv expect_lines 1180
+wv show_in new i(vdd)
+wv expect_lines 1770
+wait 1
+wv stats
+screenshot @SHOTS@/big-2-1770.png
+# files changed while open
+shell @TOUCH@
+wait 3
+wv expect_changed_files 3
+# hundreds of panes
+wv open @DATA@/wide.raw
+wv wait_loaded
+wv hide v(n000) v(n001)
+@PANES300@
+wv expect_panes 300
+wait 1
+wv stats
+screenshot @SHOTS@/big-3-panes.png
+wv detach
+wait 2
+wv stats
+# a family closed while it loads, then opens and closes
+@OPEN600@
+wv close
+@LOOP100@
+wv stats
+quit

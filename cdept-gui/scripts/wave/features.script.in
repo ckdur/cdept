@@ -48,6 +48,10 @@ wv test_trace inf_one inf 1000
 wv test_trace lissajous nonmono 5000 V
 wv expect_x_unit 4 V
 wv expect_lines >6
+# a long series: decimated like a file (the extremes kept)
+wv test_trace huge big 5000000
+wv expect_lines >7
+wv check_extremes huge
 wait 0.5
 screenshot @SHOTS@/feat-2-hostile.png
 # styles
