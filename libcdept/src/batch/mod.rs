@@ -146,6 +146,7 @@ impl Job {
             }
         }
         cmd.envs(self.env.iter().map(|(k, v)| (k, v)));
+        crate::orphan::die_with_parent(&mut cmd);
         tracing::debug!(job = %self.name, program = %self.program.display(), args = ?self.args, "batch run");
         // A program that was written a moment ago may still be open for writing in a
         // process forked meanwhile (ETXTBSY, os error 26): try again shortly.

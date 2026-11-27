@@ -24,6 +24,7 @@ pub mod link;
 mod locale;
 pub mod magic;
 pub mod ngspice;
+mod orphan;
 pub mod project;
 pub mod project_edit;
 pub mod raw;

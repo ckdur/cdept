@@ -35,7 +35,8 @@ UberWave's own viewer stays for good as a separate-window option (do not remove
 Open buttons and `cdept wave`, calculator send target, restore tabs after restart); the user
 has not tried the tabs by hand yet. Other open items: NOTES.md (CSV/digital in tabs,
 families with mixed analyses, labels of parametric sweep parts, preview before the min/max
-index, CJK names). Quitting during a simulation suite leaves ngspice running (SYMBI-90).
+index, CJK names). Programs a job waits for die with CDePT
+(`libcdept::orphan`, SYMBI-90 fixed).
 `ota.script` times out on a loaded machine; `cdept sim suite cells ota5t` passed 90/90.
 
 ## Tool and test environment

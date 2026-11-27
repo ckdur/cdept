@@ -550,6 +550,8 @@ pub(crate) fn capture_command(cmd: &mut Command, limit: Duration) -> Result<Capt
 /// Spawn, trying again when a program written a moment ago is still open for writing in a
 /// process forked meanwhile (ETXTBSY, os error 26).
 pub(crate) fn spawn_retry(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    // Both callers wait on this thread (the ssh/rsync here, not what runs on the remote).
+    crate::orphan::die_with_parent(cmd);
     let mut tries = 0;
     loop {
         match cmd.spawn() {

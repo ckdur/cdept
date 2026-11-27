@@ -4,6 +4,16 @@
 `std` threads, no async runtime. Tool adapters (ngspice now; Magic, Xyce, GUI later) put
 their runs on a `Queue` instead of spawning processes themselves.
 
+## When CDePT ends
+
+The programs a job waits for (simulators and other batch tools, Magic batch, the local ssh and
+rsync of a remote run) are killed by the kernel when CDePT ends in any way: quit, Ctrl+C,
+`kill -9` or a crash (`libcdept::orphan`, the Linux parent-death signal; tests in
+`libcdept/tests/orphans.rs`). Not covered: processes a tool starts itself (the signal reaches
+the direct child; Magic's and netgen's launch scripts `exec`, so they count), what already
+runs on a remote machine or in SLURM, and the tool windows, which are meant to stay open.
+Cancelling a job still kills the direct child only.
+
 ## API
 
 - `Queue::new(workers)`: a pool of worker threads (`Queue::default_workers()` = cores).

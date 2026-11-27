@@ -239,7 +239,7 @@ impl JobCtx {
             Some((Ok(a), Ok(b))) => (Stdio::from(a), Stdio::from(b)),
             _ => (Stdio::null(), Stdio::null()),
         };
-        let mut child = cmd
+        let mut child = crate::orphan::die_with_parent(cmd)
             .stdin(Stdio::null())
             .stdout(out)
             .stderr(err)

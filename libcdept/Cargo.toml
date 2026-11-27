@@ -28,6 +28,8 @@ notify = "9"
 chrono.workspace = true
 libloading = "0.8"
 rusqlite = { version = "0.43.0", features = ["bundled"] }
+# The parent-death signal of job processes (libcdept::orphan). MIT or Apache-2.0.
+libc = "0.2"
 # CACE datasheets (YAML): libcdept::cace.
 serde_yaml_ng = "0.10"
 # Digital waveforms (VCD, FST, GHW): libcdept::raw::digital. BSD-3-Clause.

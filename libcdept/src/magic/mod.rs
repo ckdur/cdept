@@ -243,7 +243,7 @@ impl Magic {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = cmd
+        let mut child = crate::orphan::die_with_parent(&mut cmd)
             .spawn()
             .wrap_err_with(|| format!("cannot start {}", self.program.display()))?;
         let mut stdin = child.stdin.take().expect("piped");
