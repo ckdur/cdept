@@ -89,6 +89,55 @@ pub fn norm_unit(unit: &str) -> String {
     }
 }
 
+/// The forms of a complex (AC) signal `NAME`, as the engine names them (`dB20(NAME)`),
+/// with their labels: the order of the menus.
+pub const FORMS: [(&str, &str); 7] = [
+    ("dB20", "dB"),
+    ("mag", "magnitude"),
+    ("phase", "phase"),
+    ("uphase", "phase (unwrapped)"),
+    ("re", "real"),
+    ("im", "imaginary"),
+    ("dB10", "dB (power)"),
+];
+
+/// `dB20(v(out))` gives `("dB20", "v(out)")`; a name that is no form, `None`.
+pub fn split_form(name: &str) -> Option<(&'static str, &str)> {
+    let open = name.find('(')?;
+    if !name.ends_with(')') {
+        return None;
+    }
+    let prefix = &name[..open];
+    let form = FORMS.iter().find(|(p, _)| *p == prefix)?.0;
+    Some((form, &name[open + 1..name.len() - 1]))
+}
+
+pub fn form_label(form: &str) -> &'static str {
+    FORMS
+        .iter()
+        .find(|(p, _)| *p == form)
+        .map_or("", |(_, l)| l)
+}
+
+/// An eye diagram pane: every `period` from `offset` on, over each other.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Eye {
+    pub period: f64,
+    pub offset: f64,
+    /// A density (how many traces cross each pixel) instead of lines.
+    pub density: bool,
+}
+
+/// The x unit of an eye pane: its own x group (0..period), never shared with time.
+pub fn eye_unit(unit: &str, eye: &Eye) -> String {
+    format!("{}~eye~{:e}~{:e}", norm_unit(unit), eye.period, eye.offset)
+}
+
+/// The unit to show of a pane's x unit (an eye pane's has its period after a `~`).
+pub fn display_unit(unit: &str) -> &str {
+    unit.split('~').next().unwrap_or(unit)
+}
+
 /// A strip of the tab: its own y axis, the signals in it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pane {
@@ -96,8 +145,26 @@ pub struct Pane {
     pub signals: Vec<String>,
     /// The x unit of its signals (normalised); "" until the first one comes.
     pub x_unit: String,
-    /// A y range chosen by the user; `None`: fitted to what is drawn.
+    /// A y range chosen by the user (plot coordinates: log10 on a log axis); `None`:
+    /// fitted to what is drawn.
     pub y_manual: Option<(f64, f64)>,
+    /// y on a logarithmic axis (a noise density).
+    pub y_log: bool,
+    /// An eye diagram.
+    pub eye: Option<Eye>,
+}
+
+impl Pane {
+    fn new(id: PaneId) -> Pane {
+        Pane {
+            id,
+            signals: vec![],
+            x_unit: String::new(),
+            y_manual: None,
+            y_log: false,
+            eye: None,
+        }
+    }
 }
 
 /// Where a signal goes.
@@ -119,12 +186,7 @@ pub struct Panes {
 impl Default for Panes {
     fn default() -> Panes {
         Panes {
-            list: vec![Pane {
-                id: 1,
-                signals: vec![],
-                x_unit: String::new(),
-                y_manual: None,
-            }],
+            list: vec![Pane::new(1)],
             active: 1,
             next: 2,
         }
@@ -153,12 +215,40 @@ impl Panes {
     pub fn add_pane(&mut self) -> PaneId {
         let id = self.next;
         self.next += 1;
-        self.list.push(Pane {
-            id,
-            signals: vec![],
-            x_unit: String::new(),
-            y_manual: None,
-        });
+        self.list.push(Pane::new(id));
+        self.active = id;
+        id
+    }
+
+    /// An eye pane for `name` (x unit `x_unit`): the eye pane it is alone in already
+    /// (which takes the new period), else the eye pane of that period and offset (it
+    /// takes the new density setting), else an empty plain pane, else a new one at the
+    /// bottom. The signal moves there.
+    pub fn add_eye(&mut self, name: &str, x_unit: &str, eye: Eye) -> PaneId {
+        let unit = eye_unit(x_unit, &eye);
+        // the signal alone in an eye pane already: that pane changes its period
+        let own = self
+            .list
+            .iter()
+            .find(|p| p.eye.is_some() && p.signals.len() == 1 && p.signals[0] == name)
+            .map(|p| p.id);
+        let id = match own.and_then(|id| self.get(id)).or_else(|| {
+            self.list.iter().find(|p| {
+                p.eye
+                    .is_some_and(|e| e.period == eye.period && e.offset == eye.offset)
+                    && p.x_unit == unit
+            })
+        }).or_else(|| self.list.iter().find(|p| p.signals.is_empty()))
+        {
+            Some(p) => p.id,
+            None => self.add_pane(),
+        };
+        self.remove_signal(name);
+        let p = self.get_mut(id).expect("the pane exists");
+        p.eye = Some(eye);
+        p.x_unit = unit;
+        p.y_manual = None;
+        p.signals.push(name.to_string());
         self.active = id;
         id
     }
@@ -179,7 +269,7 @@ impl Panes {
         let empty = self
             .list
             .iter()
-            .find(|p| p.signals.is_empty())
+            .find(|p| p.signals.is_empty() && p.eye.is_none())
             .map(|p| p.id);
         let pane = match target {
             Target::New => match empty {
@@ -192,7 +282,7 @@ impl Panes {
                     _ => self.active,
                 };
                 match self.get(wanted) {
-                    Some(p) if p.signals.is_empty() || p.x_unit == unit => p.id,
+                    Some(p) if (p.signals.is_empty() && p.eye.is_none()) || p.x_unit == unit => p.id,
                     _ => match self
                         .list
                         .iter()
@@ -209,7 +299,7 @@ impl Panes {
         };
         self.remove_signal(name);
         let p = self.get_mut(pane).expect("the pane exists");
-        if p.signals.is_empty() {
+        if p.signals.is_empty() && p.eye.is_none() {
             p.x_unit = unit;
         }
         p.signals.push(name.to_string());
@@ -232,6 +322,8 @@ impl Panes {
             let p = &mut self.list[0];
             p.y_manual = None;
             p.x_unit.clear();
+            p.eye = None;
+            p.y_log = false;
             return std::mem::take(&mut p.signals);
         }
         let gone = self.list.remove(i);

@@ -1,0 +1,46 @@
+# A very large binary raw file (huge.py): first open (the cache is written), memory,
+# zoom and pan times with the pyramids, a one-sample spike at every zoom, the cache
+# reused by a second open.
+window 1600 1000
+wv open @FILE@
+wv wait_loaded
+wv stats
+wv show v(sig) v(spike)
+wv fit
+wv expect_drawn max v(spike) 1
+wv expect_drawn min v(sig) -1.1 0.01
+wv stats
+# zoom in towards the spike, ten steps of the wheel at a time, checking it each time
+wv zoom 0 @END@
+wv expect_drawn max v(spike) 1
+wv zoom @SPIKE_A@ @SPIKE_B@
+wv expect_drawn max v(spike) 1
+wv zoom @SPIKE_C@ @SPIKE_D@
+wv expect_drawn max v(spike) 1
+wv check_extremes v(spike)
+wv cursor a @SPIKE@
+wv expect_cursor a v(spike) 1
+wv fit
+wv stats
+wv wheel 0.618 up 10
+wv wheel 0.618 up 10
+wv wheel 0.618 up 10
+wv expect_drawn max v(spike) 1
+wv wheel 0.5 down 30
+wv drag 0.8 0.2
+wv drag 0.2 0.8
+wv stats
+wv fit
+wait 1
+screenshot @SHOTS@/huge.png
+wv close
+# the cache is reused
+wv open @FILE@
+wv wait_loaded
+wv expect_cache .uwraw
+wv show v(sig) v(spike)
+wv fit
+wv expect_drawn max v(spike) 1
+wv stats
+wv close
+quit

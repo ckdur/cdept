@@ -1,0 +1,207 @@
+# Waveform tabs, step 4: AC (complex forms, log x, Bode with margins), eye diagrams,
+# noise (log-log, integrated noise against ngspice's), an operating point as a table,
+# files of several analyses, sweeps that go back, Spectre PSF folders, hostile complex
+# files. Inputs: analyses.py (@DATA@) and the simulators' files run.sh makes (@SIM@).
+window 1500 950
+
+# --- AC: binary and ascii of a low pass with a delay (the phase wraps) ---
+wv open @DATA@/ac_delay_ascii.raw
+wv wait_loaded
+wv expect_analysis ac
+wv expect_row v(out)
+wv expect_log 1 x on
+wv expect_pane 1 dB20(v(out))
+wv cursor a 1meg
+wv expect_cursor a v(out) -3.0103 1e-4
+wv form v(out) uphase
+wv expect_pane 1 uphase(v(out))
+# -45 deg of the pole and -720 deg/GHz of the 2 ns delay
+wv expect_cursor a v(out) -45.72 1e-4
+wv form v(out) phase
+wv cursor a 1g
+wv check_extremes v(out)
+wv form v(out) re
+wv cursor a 1meg
+wv expect_cursor a v(out) 0.4999 0.01
+wv ac_form mag
+wv expect_pane 1 mag(v(out))
+wv bode v(out)
+wv expect_panes 2
+wv expect_pane 1 dB20(v(out))
+wv expect_pane 2 uphase(v(out))
+wait 0.5
+screenshot @SHOTS@/ac-delay-bode.png
+
+# --- Bode of a three-pole loop: margins against ngspice's .meas ---
+wv open @SIM@/loop.raw
+wv wait_loaded
+wv bode v(out)
+wv expect_marker at 3.06565e6 1e-3
+wv expect_marker PM 3.06565e6 1e-3
+wv expect_marker GM 4.47456e6 1e-3
+wv expect_marker 9.4°
+wv expect_marker 6.5 4.47456e6 1e-3
+wv expect_log 1 x on
+wv expect_log 2 x on
+wv cursor a 3.06565meg
+wv expect_cursor a v(out) 0 0.01
+wait 0.5
+screenshot @SHOTS@/loop-bode.png
+
+# --- one file, six analyses (ngspice -r): tran first, then the others ---
+wv open @SIM@/multi.raw
+wv wait_loaded
+wv analyses
+wv expect_analysis tran
+wv expect_x_unit 1 s
+wv analysis dc
+wv wait_loaded
+wv expect_analysis dc
+wv expect_parts 3 segmented
+wv show v(out)
+wv cursor a 0.9
+# v(out) = (2 V1 + V2) / 3 for V2 = 0, 1, 2
+wv expect_cursor_part a v(out) 1 0.6 1e-6
+wv expect_cursor_part a v(out) 2 0.93333 1e-4
+wv expect_cursor_part a v(out) 3 1.26667 1e-4
+wv check_extremes v(out)
+wait 0.5
+screenshot @SHOTS@/multi-dc.png
+wv analysis op
+wv wait_loaded
+wv expect_value v(out) 0.933333 1e-5
+wv expect_value v(in) 0.9 1e-9
+wait 0.5
+screenshot @SHOTS@/multi-op.png
+wv analysis Noise
+wv wait_loaded
+wv expect_log 1 x on
+wv expect_log 1 y on
+wv integrate onoise_spectrum
+wv expect_panes 2
+wv cursor a 1g
+# ngspice's onoise_total of the same run
+wv expect_cursor a integ(onoise_spectrum) @ONOISE@ 0.01
+wait 0.5
+screenshot @SHOTS@/multi-noise.png
+wv analysis Integrated
+wv wait_loaded
+wv expect_value v(onoise_total) @ONOISE@ 1e-6
+wv analysis ac
+wv wait_loaded
+wv expect_row v(out)
+wv close
+
+# --- sweeps that go back ---
+wv open @DATA@/hyst.raw
+wv wait_loaded
+wv expect_parts 2 segmented
+wv cursor a 0.5
+wv expect_cursor_part a v(out) 1 1.1 1e-9
+wv expect_cursor_part a v(out) 2 0.9 1e-9
+wv check_extremes v(out)
+wv zoom 0.2 0.705
+wv check_extremes v(out)
+wv expect_drawn max v(out) 1.5 1e-6
+wv open @DATA@/param.raw
+wv wait_loaded
+wv expect_parts 4 segmented
+wv cursor a 0.9
+wv expect_cursor_part a v(out) 4 3.6 1e-9
+wv check_extremes v(out)
+wait 0.3
+screenshot @SHOTS@/param.png
+
+# --- eye diagrams ---
+wv open @DATA@/eye.raw
+wv wait_loaded
+wv eye v(rx) 1n 0.3n
+wv expect_panes 2
+wv expect_note 2 traces
+wait 0.5
+screenshot @SHOTS@/eye-lines.png
+wv eye v(rx) 1n 0.3n density
+wv expect_note 2 traces
+wait 0.5
+screenshot @SHOTS@/eye-density.png
+# absurd periods: refused at once, the tab stays responsive
+wv eye v(clk) 1e-20
+wv expect_note 3 too short
+wv eye v(clk) 20p
+wv expect_note 3 two samples
+wv eye v(clk) 1e30
+wv expect_note 3 traces
+wv stats
+wv close
+
+# --- Spectre PSF ---
+wv open @SIM@/psf/psf-parser/binary
+wv wait_loaded
+wv analyses
+wv analysis myac-ac
+wv wait_loaded
+wv expect_analysis ac
+wv expect_log 1 x on
+wait 0.3
+screenshot @SHOTS@/psf-ac.png
+wv analysis mytran-tran
+wv wait_loaded
+wv expect_x_unit 1 s
+wv open @SIM@/psf/spectre-examples/frequencySweep.ac
+wv wait_loaded
+wv expect_analysis frequencySweep
+wv open @SIM@/psf/inverter_test.raw
+wv wait_loaded
+wv expect_analysis sweepDC
+wv analysis runTran-tran
+wv wait_loaded
+wv expect_x_unit 1 s
+
+# --- Xyce and VACASK AC files ---
+wv open @SIM@/xyce_ascii.raw
+wv wait_loaded
+wv cursor a 159.155k
+wv expect_cursor a OUT -3.0103 1e-3
+wv open @SIM@/ac1.raw
+wv wait_loaded
+wv show out
+wv cursor a 159.155k
+wv expect_cursor a out -3.0103 1e-3
+
+# --- hostile complex files ---
+wv open @DATA@/ac_zero.raw
+wv wait_loaded
+wv cursor a 1k
+wv expect_cursor a v(out) -400
+wv form v(out) uphase
+wv expect_cursor a v(out) 0
+wv open @DATA@/ac_naninf.raw
+wv wait_loaded
+wv form v(out) phase
+wv open @DATA@/ac_f0.raw
+wv wait_loaded
+wv expect_log 1 x off
+wv open @DATA@/ac_unicode.raw
+wv wait_loaded
+wv show v(出力)
+wv bode v(ausgang_ä)
+wv open @DATA@/ac_cut.raw
+wv expect_failed Incomplete
+wv open @DATA@/ac_half.raw
+wv expect_failed imaginary
+wv open @DATA@/ac_lies.raw
+wv expect_failed Incomplete
+wv open @DATA@/ac_bin.raw
+wv wait_loaded
+
+# --- a family of mixed analyses ---
+wv open_files @DATA@/mixed/p0/out.raw @DATA@/mixed/p1/out.raw @DATA@/mixed/p2/out.raw @DATA@/mixed/p3/out.raw @DATA@/mixed/p4/out.raw
+wv expect_points loading 0
+wv expect_points ready 4
+wv expect_point p4 failed
+wv expect_lines >0
+wait 0.3
+screenshot @SHOTS@/mixed.png
+# repeated open and close of an AC file and a PSF folder, then a cancel
+wv stats
+quit

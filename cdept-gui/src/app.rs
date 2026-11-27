@@ -737,6 +737,31 @@ impl CdeptApp {
             .filter(|(p, _)| only.is_none_or(|o| o.contains(p)))
             .collect();
         files.sort_by(|a, b| natural_cmp(&a.0, &b.0));
+        // point folders an earlier run plan left (a sweep that had other values): only
+        // the points of the newest setup's runs, when the results store knows them
+        if only.is_none()
+            && let Ok(store) = libcdept::sim::results::Store::open(&project.root)
+            && let Ok(runs) = store.runs(library, cell, view)
+            && let Some(newest) = runs.last()
+            && let Ok(current) = store.latest_of_setup(library, cell, view, &newest.setup_hash)
+        {
+            let names: std::collections::HashSet<String> =
+                current.iter().map(|r| r.point.name.clone()).collect();
+            let before = files.len();
+            let kept: Vec<_> = files
+                .iter()
+                .filter(|(p, _)| names.contains(p))
+                .cloned()
+                .collect();
+            if !kept.is_empty() && kept.len() < before {
+                tracing::info!(
+                    target: "cdept::wave",
+                    "{library}/{cell}/{view}: {} point folder(s) of an earlier run plan left out of the family",
+                    before - kept.len()
+                );
+                files = kept;
+            }
+        }
         if files.is_empty() {
             self.ctx.error(format!(
                 "Waveform Tab (family): {library}/{cell}/{view} has no run point (run the testbench first)"
@@ -777,6 +802,7 @@ impl CdeptApp {
         let Some(view) = id.and_then(|id| self.views.wave_mut(id)) else {
             return;
         };
+        let names: Vec<String> = send.traces.iter().map(|(_, t)| t.name.clone()).collect();
         for (point, t) in send.traces {
             view.add_series(
                 &point,
@@ -790,6 +816,7 @@ impl CdeptApp {
             );
         }
         view.set_markers(send.markers);
+        view.calc_layout(&names, send.layout);
     }
 
     /// File › Open in UberWave…: a picked path starts an open in a thread; a failure
@@ -1437,7 +1464,7 @@ impl CdeptApp {
                 crate::import::file_menu(ui);
                 if ui
                     .button("Open Waveform File…")
-                    .on_hover_text("A raw file (ngspice, Xyce, VACASK) or .uwraw in a waveform tab of CDePT's own viewer")
+                    .on_hover_text("A raw file (ngspice, Xyce, VACASK), a Spectre PSF file or a .uwraw in a waveform tab of CDePT's own viewer")
                     .clicked()
                 {
                     let directory = self.ctx.project.as_ref().map(|p| p.root.join("simulations"));
@@ -1448,7 +1475,31 @@ impl CdeptApp {
                             kind: crate::pathfield::Kind::File,
                             title: "Open Waveform File".into(),
                             directory: directory.filter(|d| d.is_dir()),
-                            filters: vec![("Waveforms".into(), vec!["raw".into(), "uwraw".into()])],
+                            filters: vec![(
+                                "Waveforms".into(),
+                                ["raw", "uwraw", "tran", "ac", "dc", "noise", "xf", "sp", "pss"]
+                                    .iter()
+                                    .map(|e| e.to_string())
+                                    .collect(),
+                            )],
+                            must_exist: true,
+                            ..Default::default()
+                        },
+                    ));
+                }
+                if ui
+                    .button("Open PSF Results Folder…")
+                    .on_hover_text("A Spectre PSF result folder (with its logFile, or the files alone) in a waveform tab; its analyses are offered in the tab's toolbar")
+                    .clicked()
+                {
+                    let directory = self.ctx.project.as_ref().map(|p| p.root.join("simulations"));
+                    self.wave_pick = Some(crate::pathfield::ask(
+                        ui.ctx(),
+                        win,
+                        crate::pathfield::Request {
+                            kind: crate::pathfield::Kind::Folder,
+                            title: "Open PSF Results Folder".into(),
+                            directory: directory.filter(|d| d.is_dir()),
                             must_exist: true,
                             ..Default::default()
                         },
@@ -2058,37 +2109,46 @@ impl eframe::App for CdeptApp {
     }
 }
 
-/// Point names in a human order: `mc_r2` before `mc_r10`.
-fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
+/// Point names in a human order: `mc_r2` before `mc_r10`, `vdd1p08` before `vdd1p2`
+/// (`1p08` is 1.08, as a sweep value is written in a point name), `1.2` after `1.08`.
+pub(crate) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    // a number: digits, then maybe 'p' or '.' and more digits (a decimal point)
+    fn number(s: &[char], i: &mut usize) -> f64 {
+        let mut text = String::new();
+        while *i < s.len() && s[*i].is_ascii_digit() {
+            text.push(s[*i]);
+            *i += 1;
+        }
+        if *i + 1 < s.len() && (s[*i] == 'p' || s[*i] == '.') && s[*i + 1].is_ascii_digit() {
+            text.push('.');
+            *i += 1;
+            while *i < s.len() && s[*i].is_ascii_digit() {
+                text.push(s[*i]);
+                *i += 1;
+            }
+        }
+        text.parse().unwrap_or(f64::INFINITY)
+    }
+    let (x, y): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let (mut i, mut j) = (0, 0);
     loop {
-        match (x.peek().copied(), y.peek().copied()) {
-            (None, None) => return std::cmp::Ordering::Equal,
+        match (x.get(i), y.get(j)) {
+            (None, None) => return a.cmp(b),
             (None, _) => return std::cmp::Ordering::Less,
             (_, None) => return std::cmp::Ordering::Greater,
             (Some(c), Some(d)) if c.is_ascii_digit() && d.is_ascii_digit() => {
-                let mut n = String::new();
-                while let Some(c) = x.peek().copied().filter(char::is_ascii_digit) {
-                    n.push(c);
-                    x.next();
-                }
-                let mut m = String::new();
-                while let Some(d) = y.peek().copied().filter(char::is_ascii_digit) {
-                    m.push(d);
-                    y.next();
-                }
-                let (n, m) = (n.trim_start_matches('0'), m.trim_start_matches('0'));
-                let o = n.len().cmp(&m.len()).then_with(|| n.cmp(m));
-                if o != std::cmp::Ordering::Equal {
-                    return o;
+                let (n, m) = (number(&x, &mut i), number(&y, &mut j));
+                match n.partial_cmp(&m) {
+                    Some(std::cmp::Ordering::Equal) | None => {}
+                    Some(o) => return o,
                 }
             }
             (Some(c), Some(d)) => {
                 if c != d {
-                    return c.cmp(&d);
+                    return c.cmp(d);
                 }
-                x.next();
-                y.next();
+                i += 1;
+                j += 1;
             }
         }
     }
@@ -2127,6 +2187,19 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+
+    #[test]
+    fn point_names_sort_by_their_values() {
+        let mut v = vec![
+            "vdd1p2", "vdd1p08", "mc_r10", "mc_r2", "tt_100", "tt_27", "x1.2", "x1.08", "a", "vdd1p08_ss",
+        ];
+        v.sort_by(|a, b| natural_cmp(a, b));
+        assert_eq!(
+            v,
+            ["a", "mc_r2", "mc_r10", "tt_27", "tt_100", "vdd1p08", "vdd1p08_ss", "vdd1p2", "x1.08", "x1.2"]
+        );
+        assert_eq!(natural_cmp("p01", "p001"), std::cmp::Ordering::Greater);
+    }
 
     /// A project with one cell: a schematic, a symbol and a layout.
     fn project(root: &Path) {

@@ -5,11 +5,17 @@
 # load, repeated open/close, and the large SAR ADC file (docs/NOTES.md, own waveform
 # viewer).
 #
-#   cdept-gui/scripts/wave/run.sh [smoke|menu|features|family|big|torture|loop|sar ...]
-#       (default: smoke menu features family torture loop sar)
+#   cdept-gui/scripts/wave/run.sh [smoke|menu|features|family|analyses|big|torture|loop|sar|huge ...]
+#       (default: smoke menu features family analyses torture loop sar)
 #
 # smoke: small inputs (small.py), what CI runs; menu: File > Open in UberWave... with
 # the built-in viewer and the process (fake-uberwave.sh stands in for UberWaveViewer).
+# analyses: AC, Bode, eye, noise, operating point, plots of one file, sweeps that go
+# back, PSF folders, hostile complex files (analyses.py, plus ngspice files when
+# CDEPT_NGSPICE is set, Xyce's with CDEPT_XYCE, VACASK's with CDEPT_VACASK; without them
+# the script is cut to what the generated files cover). huge: a binary raw file of
+# HUGE_POINTS points (default 100 million; HUGE_SIGNALS signals, default 2), its first
+# open, cache, memory, zoom times and a one-sample spike; deleted afterwards.
 #
 # Needs a display, python3, unzip and a release build (cargo build --release -p cdept).
 # Everything goes under target/wave-test (the SAR file, 845 MB unzipped, into
@@ -59,8 +65,47 @@ fresh_data() {
 }
 
 status=0
-for what in ${*:-smoke menu features family torture loop sar}; do
+for what in ${*:-smoke menu features family analyses torture loop sar}; do
     case $what in
+    analyses)
+        A=$W/analyses
+        rm -rf "$A"
+        mkdir -p "$A/sim"
+        python3 -I "$HERE/analyses.py" "$A/data" >/dev/null
+        cp -r "$REPO/cdept-uberwave/uberwave/wp3-data-engine/tests/psf" "$A/sim/psf"
+        onoise=2.0350e-6
+        if [ -n "${CDEPT_NGSPICE:-}" ]; then
+            (cd "$A/sim" && sh "$HERE/analyses-sim.sh" ngspice "$CDEPT_NGSPICE") || status=1
+            onoise=$(cat "$A/sim/onoise_total" 2>/dev/null || echo 2.0350e-6)
+        fi
+        [ -n "${CDEPT_XYCE:-}" ] && { (cd "$A/sim" && sh "$HERE/analyses-sim.sh" xyce "$CDEPT_XYCE") || status=1; }
+        [ -n "${CDEPT_VACASK:-}" ] && { (cd "$A/sim" && sh "$HERE/analyses-sim.sh" vacask "$CDEPT_VACASK") || status=1; }
+        # without a simulator's files, the parts that need them are left out
+        python3 -I - "$HERE/analyses.script.in" "$W/analyses.script" "$A" "$SHOTS" "$onoise" <<'PY'
+import os, sys
+src, dst, a, shots, onoise = sys.argv[1:6]
+sim = os.path.join(a, "sim")
+need = {"loop.raw": "Bode of a three-pole", "multi.raw": "one file, six", "xyce_ascii.raw": "Xyce and", "ac1.raw": "Xyce and"}
+blocks = open(src).read().split("\n# --- ")
+out = [blocks[0]]
+for b in blocks[1:]:
+    files = [f for f, title in need.items() if b.startswith(title)]
+    if any(not os.path.exists(os.path.join(sim, f)) for f in files):
+        print("analyses: left out (no simulator file):", b.splitlines()[0])
+        continue
+    out.append(b)
+t = "\n# --- ".join(out)
+t = t.replace("@DATA@", os.path.join(a, "data")).replace("@SIM@", sim).replace("@SHOTS@", shots).replace("@ONOISE@", onoise)
+open(dst, "w").write(t)
+PY
+        env DISPLAY="${DISPLAY:-:0}" XDG_DATA_HOME="$W/xdg" HOME="$W/home" \
+            timeout 900 systemd-run --user --scope -q -p MemoryMax=6G -p MemorySwapMax=0 \
+            "$CDEPT" gui --script "$W/analyses.script" >"$W/analyses.log" 2>&1 && echo "analyses: ok ($W/analyses.log)" || {
+            echo "analyses: FAILED (see $W/analyses.log)"
+            grep -a "ERROR" "$W/analyses.log" | tail -3
+            status=1
+        }
+        ;;
     big)
         B=$W/big
         rm -rf "$B"
@@ -88,6 +133,41 @@ PY
         }
         grep -a "wv stats" "$W/big.log" | sed 's/.*wv stats: //' | cut -c 1-400
         rm -rf "$B"
+        ;;
+    huge)
+        # HUGE_DIR: where the file goes (default target/wave-test/huge); it and its cache
+        # are removed at the end unless KEEP_HUGE=1.
+        H=${HUGE_DIR:-$W/huge}
+        n=${HUGE_POINTS:-100000000}
+        rm -rf "$H"
+        mkdir -p "$H"
+        start=$(date +%s.%N)
+        python3 -I "$HERE/huge.py" "$H/huge.raw" "$n" "${HUGE_SIGNALS:-2}" || { status=1; continue; }
+        echo "huge: wrote $(du -h "$H/huge.raw" | cut -f1) in $(python3 -c "print(round($(date +%s.%N) - $start, 1))") s"
+        python3 -I - "$HERE/huge.script.in" "$W/huge.script" "$H/huge.raw" "$SHOTS" "$n" <<'PY'
+import sys
+src, dst, f, shots, n = sys.argv[1:6]
+n = int(float(n))
+spike = int(n * 0.618) * 1e-9
+end = (n - 1) * 1e-9
+sub = {"@FILE@": f, "@SHOTS@": shots, "@SPIKE@": "%.12g" % spike, "@END@": "%.12g" % end,
+       "@SPIKE_A@": "%.12g" % (spike - end / 1000), "@SPIKE_B@": "%.12g" % (spike + end / 1000),
+       "@SPIKE_C@": "%.12g" % (spike - 50e-9), "@SPIKE_D@": "%.12g" % (spike + 50e-9)}
+t = open(src).read()
+for k, v in sub.items():
+    t = t.replace(k, v)
+open(dst, "w").write(t)
+PY
+        env DISPLAY="${DISPLAY:-:0}" XDG_DATA_HOME="$W/xdg" HOME="$W/home" \
+            timeout 3600 systemd-run --user --scope -q -p MemoryMax=${HUGE_MEMORY:-12G} -p MemorySwapMax=0 \
+            "$CDEPT" gui --script "$W/huge.script" >"$W/huge.log" 2>&1 && echo "huge: ok ($W/huge.log)" || {
+            echo "huge: FAILED (see $W/huge.log)"
+            grep -a "ERROR" "$W/huge.log" | tail -3
+            status=1
+        }
+        grep -a "wv stats\|opened in\|drawn\|exact" "$W/huge.log" | sed 's/.*cdept::[a-z]*: //' | cut -c 1-600
+        ls -la "$H"
+        [ "${KEEP_HUGE:-0}" = 1 ] || rm -rf "$H"
         ;;
     smoke)
         fresh_small

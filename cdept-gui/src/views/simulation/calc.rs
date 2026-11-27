@@ -58,6 +58,8 @@ pub(crate) struct TabSend {
     pub markers: Vec<crate::views::wave::Marker>,
     /// Nothing to send: why (said in the panel instead).
     pub nothing: bool,
+    /// The layout chosen in the panel: plain, Bode (gain and phase panes, margins), eye.
+    pub layout: wcalc::Layout,
 }
 
 /// How an evaluation ends.
@@ -297,7 +299,8 @@ impl CalcPanel {
                 let outcomes =
                     wcalc::evaluate_points_with(&points, &expr, None, plot.as_deref(), &extra);
                 let mut f = rows_of(&outcomes);
-                let tab = tab_send((&l, &c, &v), &points, &outcomes, &expr, markers);
+                let mut tab = tab_send((&l, &c, &v), &points, &outcomes, &expr, markers);
+                tab.layout = layout;
                 let sent: usize = tab.traces.len();
                 if sent > 0 {
                     f.notes.push(format!(
@@ -309,11 +312,12 @@ impl CalcPanel {
                         }
                     ));
                 }
-                if layout_name != LayoutChoice::Plain {
-                    f.notes.push(
-                        "the Bode and eye layouts are UberWave's for now: the tab gets the plain traces"
-                            .into(),
-                    );
+                match layout_name {
+                    LayoutChoice::Bode => f.notes.push(
+                        "Bode layout: gain and phase panes on a log frequency axis, margins as markers".into(),
+                    ),
+                    LayoutChoice::Eye => f.notes.push("eye layout: the waveform folded in a pane of its own".into()),
+                    LayoutChoice::Plain => {}
                 }
                 if !tab.nothing {
                     f.to_tab = Some(tab);
@@ -936,6 +940,7 @@ fn tab_send(
             x: m.x,
             y: m.y,
             x_unit: m.x_unit,
+            y_unit: None,
         })
         .collect();
     TabSend {
@@ -944,6 +949,7 @@ fn tab_send(
         nothing: traces.is_empty() && markers.is_empty(),
         traces,
         markers,
+        layout: wcalc::Layout::Plain,
     }
 }
 

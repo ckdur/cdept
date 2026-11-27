@@ -13,7 +13,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use cdept_wavedata::{Dataset, OpenOptions, Phase, Prepared, QueryInfo, Series, Trace};
+use cdept_wavedata::{
+    Analysis, Dataset, OpenOptions, Phase, Prepared, QueryInfo, Series, Trace, XOrder,
+};
 
 use super::model::{InstKey, PaneId, SourceId};
 use super::raster::{Canvas, Stroke};
@@ -66,12 +68,58 @@ impl LoadProgress {
     }
 }
 
-pub type Opened = Result<(Dataset, Duration), cdept_wavedata::Error>;
+/// A file that opened: the dataset, the time it took, the analyses of the file (its
+/// plots, or a PSF folder's analyses) and the one opened.
+pub struct OpenedFile {
+    pub ds: Dataset,
+    pub took: Duration,
+    pub analyses: Vec<Analysis>,
+    pub analysis: u32,
+}
+
+pub type Opened = Result<OpenedFile, cdept_wavedata::Error>;
+
+/// Which analysis of a file to open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Want {
+    /// This index of the file's analyses.
+    Index(u32),
+    /// The one of this name, else of this kind (a family's other files), else the best:
+    /// what a PSF folder prefers, else the first transient, else the first that has
+    /// more than one point.
+    Like { name: String, kind: String },
+    Best,
+}
+
+/// The analysis to open of `list` for `want`.
+pub fn choose(list: &[Analysis], want: &Want) -> u32 {
+    let ok = |a: &&Analysis| a.plottable;
+    let best = || {
+        list.iter()
+            .filter(ok)
+            .find(|a| a.preferred && list.len() > 1 && a.points > 1)
+            .or_else(|| list.iter().filter(ok).find(|a| a.kind == "tran" && a.points > 1))
+            .or_else(|| list.iter().filter(ok).find(|a| a.points > 1))
+            .or_else(|| list.iter().find(ok))
+            .map_or(0, |a| a.index)
+    };
+    match want {
+        Want::Index(i) => *i,
+        Want::Like { name, kind } => list
+            .iter()
+            .filter(ok)
+            .find(|a| &a.name == name && &a.kind == kind)
+            .or_else(|| list.iter().filter(ok).find(|a| &a.kind == kind))
+            .map_or_else(best, |a| a.index),
+        Want::Best => best(),
+    }
+}
 
 struct Job {
     source: SourceId,
     generation: u64,
     path: PathBuf,
+    want: Want,
     progress: Arc<LoadProgress>,
 }
 
@@ -102,13 +150,20 @@ impl Loader {
     }
 
     /// Queue an open; the progress is the caller's to show and to cancel.
-    pub fn open(&self, source: SourceId, generation: u64, path: PathBuf) -> Arc<LoadProgress> {
+    pub fn open(
+        &self,
+        source: SourceId,
+        generation: u64,
+        path: PathBuf,
+        want: Want,
+    ) -> Arc<LoadProgress> {
         let progress = Arc::new(LoadProgress::default());
         let mut q = self.queue.lock().unwrap_or_else(|e| e.into_inner());
         q.0.push_back(Job {
             source,
             generation,
             path,
+            want,
             progress: progress.clone(),
         });
         if q.1 < LOADERS {
@@ -178,8 +233,13 @@ fn load_jobs(
             }
         };
         let started = Instant::now();
+        // The analyses first (an ascii raw file is read once for its plots): which one
+        // to open. A file that cannot be listed is opened as it is (and says why).
+        let analyses = cdept_wavedata::list_analyses(&job.path).unwrap_or_default();
+        let analysis = choose(&analyses, &job.want);
         let options = OpenOptions {
             cache_dir: cache_dir(),
+            plot: analysis,
             ..Default::default()
         };
         let p = &job.progress;
@@ -206,7 +266,12 @@ fn load_jobs(
         let _ = tx.send((
             job.source,
             job.generation,
-            r.map(|ds| (ds, started.elapsed())),
+            r.map(|ds| OpenedFile {
+                ds,
+                took: started.elapsed(),
+                analyses,
+                analysis,
+            }),
         ));
         ctx.request_repaint();
     }
@@ -246,6 +311,21 @@ pub struct InstReq {
     pub stroke: Stroke,
 }
 
+/// An eye diagram: every `period` of the data from `offset` on, drawn over each other
+/// on 0..period; as lines, or as a density (how many traces cross each pixel).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EyeReq {
+    pub period: f64,
+    pub offset: f64,
+    pub density: bool,
+}
+
+/// Periods an eye draws at most; more is refused (a period of 1e-20 s over a
+/// microsecond would be 1e14 traces).
+pub const EYE_MAX_PERIODS: f64 = 200_000.0;
+/// Samples an eye reads at most per line; beyond, the first periods are drawn.
+pub const EYE_MAX_SAMPLES: u64 = 20_000_000;
+
 /// One pane to draw: its x range (data units), axis, size in pixels, y range (or fit),
 /// the lines and the cursors of its x group.
 #[derive(Debug, Clone, PartialEq)]
@@ -254,11 +334,15 @@ pub struct PaneReq {
     pub x0: f64,
     pub x1: f64,
     pub log: bool,
+    /// y on a logarithmic axis (a noise density): the image and `y` are in log10.
+    pub y_log: bool,
     pub w: u32,
     pub h: u32,
+    /// Plot coordinates (log10 when `y_log`).
     pub y: Option<(f64, f64)>,
     pub insts: Vec<InstReq>,
     pub cursors: [Option<f64>; 2],
+    pub eye: Option<EyeReq>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -282,9 +366,16 @@ pub struct InstAnswer {
     pub points: usize,
     /// The smallest and largest finite value drawn inside the x range.
     pub drawn: Option<(f64, f64)>,
+    /// The same of the values above zero (for a log y axis).
+    pub drawn_pos: Option<(f64, f64)>,
     pub at_cursor: [Option<f64>; 2],
+    /// A sweep that goes back (several parts of x): the value of every part at the
+    /// cursors (`at_cursor` is the first part's).
+    pub parts_at_cursor: [Vec<Option<f64>>; 2],
     pub info: QueryInfo,
     pub prepared: Prepared,
+    /// Something to say about the line (an eye that cannot be drawn).
+    pub note: Option<String>,
 }
 
 /// The answer for one pane: the image covers `x0..x1` (plot coordinates: log10 on a log
@@ -471,7 +562,40 @@ struct Queried {
 fn query_one(inst: &InstReq, pane: &PaneReq) -> (Queried, Option<String>) {
     let mut trace = Trace::default();
     let mut error = None;
+    let mut parts_at: [Vec<Option<f64>>; 2] = [vec![], vec![]];
     let (info, at, prepared) = match &inst.data {
+        Data::File(ds, signal) if ds.x_order() == XOrder::Segmented => {
+            // every part of x, one after the other, broken between them
+            let mut info = QueryInfo::default();
+            let mut part = Trace::default();
+            for (k, _) in ds.segments().iter().enumerate() {
+                match ds.query_segment(*signal, k as u32, pane.x0, pane.x1, pane.w.max(1), &mut part)
+                {
+                    Ok(i) => {
+                        info.source_points += i.source_points;
+                        info.mode = i.mode;
+                        info.ms += i.ms;
+                    }
+                    Err(e) => {
+                        error.get_or_insert(e.to_string());
+                        continue;
+                    }
+                }
+                if !trace.x.is_empty() {
+                    trace.x.push(f64::NAN);
+                    trace.y.push(f64::NAN);
+                }
+                trace.x.extend_from_slice(&part.x);
+                trace.y.extend_from_slice(&part.y);
+                for (part, cursor) in parts_at.iter_mut().zip(pane.cursors) {
+                    part.push(cursor.and_then(|x| {
+                        ds.value_at_segment(*signal, k as u32, x).ok().map(|v| v.0)
+                    }));
+                }
+            }
+            let first = |c: usize| parts_at[c].first().copied().flatten();
+            (info, [first(0), first(1)], ds.prepared(*signal))
+        }
         Data::File(ds, signal) => {
             let info = match ds.query(*signal, pane.x0, pane.x1, pane.w.max(1), &mut trace) {
                 Ok(i) => i,
@@ -480,7 +604,11 @@ fn query_one(inst: &InstReq, pane: &PaneReq) -> (Queried, Option<String>) {
                     QueryInfo::default()
                 }
             };
-            let at = |c: Option<f64>| c.and_then(|x| ds.value_at(*signal, x).ok().map(|v| v.0));
+            let unordered = ds.x_order() == XOrder::Unordered;
+            let at = |c: Option<f64>| {
+                c.filter(|_| !unordered)
+                    .and_then(|x| ds.value_at(*signal, x).ok().map(|v| v.0))
+            };
             (
                 info,
                 [at(pane.cursors[0]), at(pane.cursors[1])],
@@ -497,24 +625,225 @@ fn query_one(inst: &InstReq, pane: &PaneReq) -> (Queried, Option<String>) {
             )
         }
     };
-    let mut lo = f64::INFINITY;
-    let mut hi = f64::NEG_INFINITY;
-    let unordered = matches!(&inst.data, Data::Series(s) if !s.increasing());
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut plo, mut phi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let unordered = match &inst.data {
+        Data::Series(s) => !s.increasing(),
+        Data::File(ds, _) => ds.x_order() == XOrder::Unordered,
+    };
+    let (xa, xb) = (pane.x0.min(pane.x1), pane.x0.max(pane.x1));
     for (x, y) in trace.x.iter().zip(&trace.y) {
-        if (unordered || (*x >= pane.x0 && *x <= pane.x1)) && y.is_finite() {
+        if (unordered || (*x >= xa && *x <= xb)) && y.is_finite() {
             lo = lo.min(*y);
             hi = hi.max(*y);
+            if *y > 0.0 {
+                plo = plo.min(*y);
+                phi = phi.max(*y);
+            }
         }
     }
     let answer = InstAnswer {
         key: inst.key,
         points: trace.x.len(),
         drawn: (lo <= hi).then_some((lo, hi)),
+        drawn_pos: (plo <= phi).then_some((plo, phi)),
         at_cursor: at,
+        parts_at_cursor: parts_at,
         info,
         prepared,
+        note: None,
     };
     (Queried { trace, answer }, error)
+}
+
+/// The samples of a line over its whole x range, read in pieces: x and y of every
+/// sample from `first` on, given to `f` piece by piece until it returns false.
+fn stream(data: &Data, max: u64, mut f: impl FnMut(&[f64], &[f64]) -> bool) -> Result<u64, String> {
+    match data {
+        Data::Series(s) => {
+            let n = (s.len() as u64).min(max) as usize;
+            f(&s.x()[..n], &s.y()[..n]);
+            Ok(n as u64)
+        }
+        Data::File(ds, sig) => {
+            let total = ds.point_count().min(max);
+            const PIECE: usize = 1 << 20;
+            let (mut xs, mut ys) = (vec![0.0; PIECE], vec![0.0; PIECE]);
+            let mut at = 0u64;
+            while at < total {
+                let n = ((total - at) as usize).min(PIECE);
+                ds.samples(0, at, &mut xs[..n]).map_err(|e| e.to_string())?;
+                ds.samples(*sig, at, &mut ys[..n]).map_err(|e| e.to_string())?;
+                if !f(&xs[..n], &ys[..n]) {
+                    break;
+                }
+                at += n as u64;
+            }
+            Ok(at)
+        }
+    }
+}
+
+/// The x extent of a line's data and its number of samples.
+fn extent(data: &Data) -> Option<(f64, f64, u64)> {
+    match data {
+        Data::Series(s) => s.x_range().map(|(a, b)| (a, b, s.len() as u64)),
+        Data::File(ds, _) => ds
+            .x_extent()
+            .ok()
+            .map(|(a, b)| (a, b, ds.point_count())),
+    }
+}
+
+/// Whether an eye of `eye` over data of x `lo..hi` with `n` samples can be drawn; the
+/// periods it has.
+pub fn eye_check(eye: &EyeReq, lo: f64, hi: f64, n: u64) -> Result<f64, String> {
+    let p = eye.period;
+    if !(p.is_finite() && p > 0.0) {
+        return Err("the eye period must be a positive number".into());
+    }
+    if !(eye.offset.is_finite()) {
+        return Err("the eye offset is not a number".into());
+    }
+    let span = hi - lo;
+    if !(span.is_finite() && span > 0.0) || n < 2 {
+        return Err("the signal has no x range to fold".into());
+    }
+    let periods = span / p;
+    if periods > EYE_MAX_PERIODS {
+        return Err(format!(
+            "period {p:e} is too short: {periods:.3e} periods (at most {EYE_MAX_PERIODS})"
+        ));
+    }
+    let spacing = span / (n - 1) as f64;
+    if p < 2.0 * spacing {
+        return Err(format!(
+            "period {p:e} is shorter than two samples ({spacing:e} apart)"
+        ));
+    }
+    Ok(periods.max(1.0))
+}
+
+/// An eye line: the samples folded by the period, each period a polyline over a period
+/// `fw` pixels wide moved left by `shift` pixels (a zoom inside the period); or counted
+/// into `density` (w x h, row by row) when given.
+#[allow(clippy::too_many_arguments)]
+fn draw_eye_line(
+    inst: &InstReq,
+    eye: &EyeReq,
+    (w, h): (usize, usize),
+    fw: f64,
+    shift: f64,
+    y: (f64, f64),
+    canvas: Option<&mut Canvas>,
+    density: Option<&mut [u32]>,
+) -> Result<String, String> {
+    let (lo, hi, n) = extent(&inst.data).ok_or("no data")?;
+    let periods = eye_check(eye, lo, hi, n)?;
+    let (y0, y1) = y;
+    let fh = h as f64;
+    let mut canvas = canvas;
+    let mut density = density;
+    let mut pts: Vec<(f64, f64)> = Vec::with_capacity(4096);
+    let mut current: Option<f64> = None;
+    let mut traces = 0u64;
+    let flush = |pts: &mut Vec<(f64, f64)>, canvas: &mut Option<&mut Canvas>, density: &mut Option<&mut [u32]>| {
+        if pts.len() > 1 {
+            if let Some(c) = canvas.as_deref_mut() {
+                c.polyline(pts, &inst.stroke);
+            }
+            if let Some(d) = density.as_deref_mut() {
+                for s in pts.windows(2) {
+                    count_segment(d, w, h, s[0], s[1]);
+                }
+            }
+        }
+        pts.clear();
+    };
+    let read = stream(&inst.data, EYE_MAX_SAMPLES, |xs, ys| {
+        for (x, v) in xs.iter().zip(ys) {
+            let t = (x - eye.offset) / eye.period;
+            if !t.is_finite() || t < 0.0 {
+                continue;
+            }
+            let k = t.floor();
+            if current != Some(k) {
+                // the next period starts: the line goes on to the first sample of it,
+                // drawn past the right edge, so no gap is left at the period's end
+                if let Some(last) = pts.last().copied()
+                    && current == Some(k - 1.0)
+                {
+                    let u = (t - k + 1.0) * fw - shift;
+                    let p = (u, (y1 - v) / (y1 - y0) * fh);
+                    pts.push(p);
+                    flush(&mut pts, &mut canvas, &mut density);
+                    // and the new period starts with the last sample, before the left edge
+                    pts.push((last.0 - fw, last.1));
+                } else {
+                    flush(&mut pts, &mut canvas, &mut density);
+                }
+                current = Some(k);
+                traces += 1;
+            }
+            let u = (t - k) * fw - shift;
+            pts.push((u, (y1 - v) / (y1 - y0) * fh));
+        }
+        true
+    })?;
+    flush(&mut pts, &mut canvas, &mut density);
+    let mut note = format!("{traces} traces of {periods:.0} periods");
+    if read < n {
+        note.push_str(&format!(
+            " (the first {read} of {n} samples: at most {EYE_MAX_SAMPLES})"
+        ));
+    }
+    Ok(note)
+}
+
+/// Count the pixels a segment crosses (one per column or row step).
+fn count_segment(d: &mut [u32], w: usize, h: usize, a: (f64, f64), b: (f64, f64)) {
+    if !(a.0.is_finite() && a.1.is_finite() && b.0.is_finite() && b.1.is_finite()) {
+        return;
+    }
+    let steps = ((b.0 - a.0).abs().max((b.1 - a.1).abs()).ceil() as usize).clamp(1, 4 * (w + h));
+    for k in 0..steps {
+        let t = k as f64 / steps as f64;
+        let (x, y) = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+        if x >= 0.0 && y >= 0.0 && (x as usize) < w && (y as usize) < h {
+            let i = y as usize * w + x as usize;
+            d[i] = d[i].saturating_add(1);
+        }
+    }
+}
+
+/// A density as an image: no traces transparent, the rest from dim to bright on a log
+/// scale (a few traces stay visible next to thousands).
+fn density_image(d: &[u32], w: usize, h: usize, rgb: [u8; 3]) -> Vec<u8> {
+    let max = d.iter().copied().max().unwrap_or(0).max(1) as f64;
+    let mut out = vec![0u8; w * h * 4];
+    // colour map: the line's colour at its densest, through a dark violet when sparse
+    let stops: [[f64; 3]; 3] = [
+        [70.0, 30.0, 140.0],
+        [rgb[0] as f64, rgb[1] as f64, rgb[2] as f64],
+        [255.0, 255.0, 255.0],
+    ];
+    for (i, c) in d.iter().enumerate() {
+        if *c == 0 {
+            continue;
+        }
+        let t = ((*c as f64).ln() + 1.0) / (max.ln() + 1.0);
+        let (a, b, f) = if t < 0.7 {
+            (stops[0], stops[1], t / 0.7)
+        } else {
+            (stops[1], stops[2], (t - 0.7) / 0.3)
+        };
+        let alpha = (0.55 + 0.45 * t).min(1.0);
+        for ch in 0..3 {
+            out[i * 4 + ch] = ((a[ch] + (b[ch] - a[ch]) * f) * alpha) as u8;
+        }
+        out[i * 4 + 3] = (alpha * 255.0) as u8;
+    }
+    out
 }
 
 /// The y range that shows `drawn` with a margin.
@@ -588,7 +917,21 @@ fn answer(request: Request, prepared_for: &mut HashMap<usize, Vec<u32>>) -> Repl
                     part.iter()
                         .map(|&(pi, ii)| {
                             let pane = &req.panes[pi];
-                            let (q, e) = query_one(&pane.insts[ii], pane);
+                            let inst = &pane.insts[ii];
+                            // an eye: the extremes of the whole line (it is all folded)
+                            let (q, e) = match (pane.eye, extent(&inst.data)) {
+                                (Some(_), Some((lo, hi, _))) => {
+                                    let whole = PaneReq {
+                                        x0: lo,
+                                        x1: hi,
+                                        cursors: [None, None],
+                                        insts: vec![],
+                                        ..pane.clone()
+                                    };
+                                    query_one(inst, &whole)
+                                }
+                                _ => query_one(inst, pane),
+                            };
                             (pi, ii, q, e)
                         })
                         .collect::<Vec<_>>()
@@ -651,13 +994,68 @@ fn answer(request: Request, prepared_for: &mut HashMap<usize, Vec<u32>>) -> Repl
 }
 
 fn draw_pane(pane: &PaneReq, queried: Vec<Option<Queried>>) -> PaneReply {
-    let queried: Vec<Queried> = queried.into_iter().flatten().collect();
-    let (y0, y1) = pane
-        .y
-        .unwrap_or_else(|| fit_y(queried.iter().filter_map(|q| q.answer.drawn)));
+    let mut queried: Vec<Queried> = queried.into_iter().flatten().collect();
+    let ylog = |v: f64| if pane.y_log { v.log10() } else { v };
+    let (y0, y1) = pane.y.unwrap_or_else(|| {
+        fit_y(queried.iter().filter_map(|q| {
+            if pane.y_log {
+                q.answer.drawn_pos.map(|(a, b)| (a.log10(), b.log10()))
+            } else {
+                q.answer.drawn
+            }
+        }))
+    });
     let map = |x: f64| if pane.log { x.log10() } else { x };
-    let (u0, u1) = (map(pane.x0), map(pane.x1));
-    let image = (pane.w > 0 && pane.h > 0 && u1 > u0 && y1 > y0).then(|| {
+    let (u0, u1) = match pane.eye {
+        Some(e) => (0.0, e.period),
+        None => (map(pane.x0), map(pane.x1)),
+    };
+    let ok = pane.w > 0 && pane.h > 0 && u1 > u0 && y1 > y0;
+    if let (Some(eye), true) = (pane.eye, ok) {
+        // the view inside the period (zoomed): drawn over the whole period, the
+        // pixels outside the view cut off by the plot
+        let (w, h) = (pane.w as usize, pane.h as usize);
+        let (vx0, vx1) = (pane.x0.max(0.0), pane.x1.min(eye.period));
+        let (vx0, vx1) = if vx1 > vx0 { (vx0, vx1) } else { (0.0, eye.period) };
+        let full_w = ((w as f64) * eye.period / (vx1 - vx0)).clamp(1.0, 1e6);
+        let shift = vx0 / eye.period * full_w;
+        let mut canvas = Canvas::new(w, h);
+        let mut density = vec![0u32; if eye.density { w * h } else { 0 }];
+        let mut colour = [255u8, 255, 255];
+        for (q, inst) in queried.iter_mut().zip(&pane.insts) {
+            colour = [inst.stroke.rgba[0], inst.stroke.rgba[1], inst.stroke.rgba[2]];
+            let r = draw_eye_line(
+                inst,
+                &eye,
+                (w, h),
+                full_w,
+                shift,
+                (y0, y1),
+                (!eye.density).then_some(&mut canvas),
+                eye.density.then_some(&mut density[..]),
+            );
+            match r {
+                Ok(note) => q.answer.note = Some(note),
+                Err(e) => q.answer.note = Some(format!("no eye: {e}")),
+            }
+        }
+        let rgba = if eye.density {
+            density_image(&density, w, h, colour)
+        } else {
+            canvas.to_rgba()
+        };
+        let (w, h) = if eye.density { (w, h) } else { (canvas.w, canvas.h) };
+        return PaneReply {
+            pane: pane.pane,
+            u0: vx0,
+            u1: vx1,
+            y0,
+            y1,
+            image: Some(egui::ColorImage::from_rgba_premultiplied([w, h], &rgba)),
+            insts: queried.into_iter().map(|q| q.answer).collect(),
+        };
+    }
+    let image = ok.then(|| {
         let (w, h) = (pane.w as usize, pane.h as usize);
         let draw =
             |part: &[(&Queried, &InstReq)]| {
@@ -667,7 +1065,7 @@ fn draw_pane(pane: &PaneReq, queried: Vec<Option<Queried>>) -> PaneReply {
                 for (q, inst) in part {
                     pts.clear();
                     pts.extend(q.trace.x.iter().zip(&q.trace.y).map(|(x, y)| {
-                        ((map(*x) - u0) / (u1 - u0) * fw, (y1 - y) / (y1 - y0) * fh)
+                        ((map(*x) - u0) / (u1 - u0) * fw, (y1 - ylog(*y)) / (y1 - y0) * fh)
                     }));
                     canvas.polyline(&pts, &inst.stroke);
                 }
@@ -749,6 +1147,8 @@ mod tests {
                     x0: 0.0,
                     x1: 99_999.0,
                     log: false,
+                    y_log: false,
+                    eye: None,
                     w: 300,
                     h: 100,
                     y: None,
@@ -760,6 +1160,8 @@ mod tests {
                     x0: 0.0,
                     x1: 9.0,
                     log: false,
+                    y_log: false,
+                    eye: None,
                     w: 0,
                     h: 0,
                     y: Some((0.0, 1.0)),
@@ -783,6 +1185,129 @@ mod tests {
         let p2 = r.pane(2).unwrap();
         assert!(p2.image.is_none());
         assert_eq!(p2.insts[0].drawn, Some((3.0, 3.0)));
+    }
+
+    #[test]
+    fn eyes_are_bounded_and_folded() {
+        let e = |period| EyeReq {
+            period,
+            offset: 0.0,
+            density: false,
+        };
+        // 1e-20 s over 1 us: refused at once, nothing allocated
+        assert!(eye_check(&e(1e-20), 0.0, 1e-6, 1_000_000).unwrap_err().contains("too short"));
+        assert!(eye_check(&e(f64::NAN), 0.0, 1e-6, 100).is_err());
+        assert!(eye_check(&e(-1.0), 0.0, 1e-6, 100).is_err());
+        assert!(eye_check(&e(1e-9), 0.0, 0.0, 100).is_err());
+        // a period of less than two samples
+        assert!(eye_check(&e(1e-9), 0.0, 1e-6, 100).unwrap_err().contains("two samples"));
+        assert_eq!(eye_check(&e(1e-7), 0.0, 1e-6, 10_001).unwrap(), 10.0);
+        // a square wave of period 10 drawn folded: lines and density
+        let s = series("sq", 10_000, |i| if (i / 5) % 2 == 0 { 1.0 } else { 0.0 });
+        for density in [false, true] {
+            let req = Request {
+                seq: 1,
+                panes: vec![PaneReq {
+                    pane: 1,
+                    x0: 0.0,
+                    x1: 10.0,
+                    log: false,
+                    y_log: false,
+                    w: 200,
+                    h: 100,
+                    y: None,
+                    insts: vec![InstReq {
+                        key: InstKey {
+                            source: 1,
+                            sig: SigRef::Extra(0),
+                        },
+                        data: Data::Series(s.clone()),
+                        stroke: Stroke {
+                            rgba: [255, 0, 0, 255],
+                            width: 1.0,
+                            dash: Dash::Solid,
+                        },
+                    }],
+                    cursors: [None, None],
+                    eye: Some(EyeReq {
+                        period: 10.0,
+                        offset: 0.0,
+                        density,
+                    }),
+                }],
+            };
+            let r = answer(req, &mut HashMap::new());
+            let p = r.pane(1).unwrap();
+            let note = p.insts[0].note.clone().unwrap();
+            assert!(note.starts_with("1000 traces"), "{note}");
+            assert!(p.y0 < 0.0 && p.y1 > 1.0);
+            let img = p.image.as_ref().unwrap();
+            let lit = img.pixels.iter().filter(|c| c.a() > 0).count();
+            assert!(lit > 300, "density {density}: {lit} pixels");
+        }
+        // the absurd period: a note, no image work
+        let req = Request {
+            seq: 2,
+            panes: vec![PaneReq {
+                pane: 1,
+                x0: 0.0,
+                x1: 1e-20,
+                log: false,
+                y_log: false,
+                w: 200,
+                h: 100,
+                y: None,
+                insts: vec![InstReq {
+                    key: InstKey {
+                        source: 1,
+                        sig: SigRef::Extra(0),
+                    },
+                    data: Data::Series(s),
+                    stroke: Stroke {
+                        rgba: [255, 0, 0, 255],
+                        width: 1.0,
+                        dash: Dash::Solid,
+                    },
+                }],
+                cursors: [None, None],
+                eye: Some(e(1e-20)),
+            }],
+        };
+        let started = Instant::now();
+        let r = answer(req, &mut HashMap::new());
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let note = r.pane(1).unwrap().insts[0].note.clone().unwrap();
+        assert!(note.contains("too short"), "{note}");
+    }
+
+    #[test]
+    fn analyses_are_chosen() {
+        let a = |i: u32, name: &str, kind: &str, points: u64, preferred: bool| Analysis {
+            index: i,
+            name: name.into(),
+            kind: kind.into(),
+            points,
+            signals: 3,
+            complex: kind == "ac",
+            plottable: points > 0,
+            preferred,
+            reason: String::new(),
+        };
+        let list = vec![
+            a(0, "AC Analysis", "ac", 81, false),
+            a(1, "Operating Point", "op", 1, false),
+            a(2, "Transient Analysis", "tran", 500, false),
+        ];
+        assert_eq!(choose(&list, &Want::Best), 2);
+        assert_eq!(choose(&list, &Want::Index(1)), 1);
+        let like = Want::Like {
+            name: "x".into(),
+            kind: "ac".into(),
+        };
+        assert_eq!(choose(&list, &like), 0);
+        let psf = vec![a(0, "dc2", "dc", 0, false), a(1, "ac1", "ac", 30, true)];
+        assert_eq!(choose(&psf, &Want::Best), 1);
+        assert_eq!(choose(&[], &Want::Best), 0);
     }
 
     #[test]

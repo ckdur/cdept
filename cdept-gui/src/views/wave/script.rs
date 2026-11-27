@@ -50,6 +50,15 @@
 //! | `wv expect_markers <n>` | The calculator's markers in the tab |
 //! | `wv expect_cursor_at <a\|b> <signal> <tag> <value> [tol]` | The readout of one point's line at a cursor |
 //! | `wv test_trace <name> <empty\|nan\|inf\|nonmono\|ramp\|sine\|big> [n] [x unit] [tag]` | Hand a series to the tab as the calculator does (hostile ones too) |
+//! | `wv analyses`, `wv analysis <n\|kind\|name>`, `wv expect_analysis <text>` | Log the analyses of the first file; open another (every file); the open one's name or kind has the text |
+//! | `wv form <signal> <dB20\|mag\|phase\|uphase\|re\|im\|dB10>`, `wv ac_form <form>` | The form one shown complex signal is drawn in; the form of all (and of those shown later) |
+//! | `wv bode <signal>` | Bode plot of a complex signal (gain and unwrapped phase panes, margin markers) |
+//! | `wv expect_marker <text> [x] [tol]` | A marker whose label has the text (at x, relative tolerance default 1e-3) |
+//! | `wv eye <signal> <period> [offset] [lines\|density]`, `wv expect_note <n> <text>` | An eye diagram in a pane of its own; a line note of pane n (traces drawn, or why not) |
+//! | `wv integrate <signal>` | The integrated noise of a noise density in a new pane (`integ(<signal>)`) |
+//! | `wv log <n> <x\|y> on\|off`, `wv expect_log <n> <x\|y> on\|off` | Log axes of pane n |
+//! | `wv expect_value <signal> <value> [tol]` | The table of values (an operating point) has this value for the first file |
+//! | `wv expect_parts <n> [order]`, `wv expect_cursor_part <a\|b> <signal> <part> <value> [tol]` | Parts of x of the first file (a parametric sweep), its order; one part's readout |
 //!
 //! Numbers take SI suffixes: `2.5u`, `10n`, `1meg`. Mouse commands use window
 //! coordinates: no schematic or layout should be the script's document meanwhile.
@@ -98,6 +107,12 @@ pub fn patient(args: &[String]) -> bool {
                 | "drag_signal"
                 | "expect_markers"
                 | "expect_changed_files"
+                | "expect_marker"
+                | "expect_note"
+                | "expect_analysis"
+                | "expect_value"
+                | "expect_parts"
+                | "expect_cursor_part"
         )
     )
 }
@@ -287,7 +302,11 @@ pub fn run(
         expect_rows <n> | expect_row <text> | fold <header> | pick <signal>... | pick_add <signal>... | expect_picked <signal>... | \
         picked show|new|hide | drag_signal <signal> <n> | style <signal> color|dash|width <value> [tag] | \
         expect_style <n> <label> color|dash|width <value> | expect_distinct <n> | expect_markers <n> | \
-        expect_cursor_at <a|b> <signal> <tag> <value> [tol] | test_trace <name> <kind> [n] [x unit] [tag]";
+        expect_cursor_at <a|b> <signal> <tag> <value> [tol] | test_trace <name> <kind> [n] [x unit] [tag] | \
+        analyses | analysis <n|kind|name> | expect_analysis <text> | form <signal> <form> | ac_form <form> | bode <signal> | \
+        expect_marker <text> [x] [tol] | eye <signal> <period> [offset] [lines|density] | expect_note <n> <text> | \
+        integrate <signal> | log <n> <x|y> on|off | expect_log <n> <x|y> on|off | expect_value <signal> <value> [tol] | \
+        expect_parts <n> [order] | expect_cursor_part <a|b> <signal> <part> <value> [tol]";
     let verb = args.first().map(String::as_str).unwrap_or("");
     let rest = args.get(1..).unwrap_or_default();
     match (verb, rest) {
@@ -811,6 +830,126 @@ pub fn run(
             let tag = rest.get(2).cloned().unwrap_or_else(|| "calc".into());
             let series = test_series(name, kind, n.min(200_000_000), &x_unit)?;
             app.script_wave()?.add_series(&tag, series);
+        }
+        ("analyses", []) => {
+            let (list, open) = app.script_wave()?.script_analyses()?;
+            for a in &list {
+                tracing::info!(
+                    target: "cdept::script",
+                    "wv analysis {}{}: {} ({}) {} points, {} signals{}{}",
+                    a.index + 1,
+                    if a.index == open { " (open)" } else { "" },
+                    a.name,
+                    a.kind,
+                    a.points,
+                    a.signals,
+                    if a.complex { ", complex" } else { "" },
+                    if a.plottable { String::new() } else { format!(", not plottable: {}", a.reason) }
+                );
+            }
+        }
+        ("analysis", [which]) => app.script_wave()?.script_set_analysis(which)?,
+        ("expect_analysis", text) if !text.is_empty() => {
+            let text = text.join(" ");
+            let (list, open) = app.script_wave()?.script_analyses()?;
+            let a = list.get(open as usize).ok_or("no analysis is open")?;
+            if !a.name.contains(&text) && a.kind != text {
+                return Err(format!("the open analysis is {} ({}), expected '{text}'", a.name, a.kind));
+            }
+        }
+        ("form", [signal, form]) => app.script_wave()?.script_form(signal, form)?,
+        ("ac_form", [form]) => app.script_wave()?.script_ac_form(form)?,
+        ("bode", [signal]) => {
+            if let Some(note) = app.script_wave()?.script_bode(signal)? {
+                tracing::info!(target: "cdept::script", "wv bode: {note}");
+            }
+        }
+        ("expect_marker", [text, rest @ ..]) if rest.len() <= 2 => {
+            let markers = app.script_wave()?.script_markers();
+            let found: Vec<_> = markers.iter().filter(|m| m.label.contains(text.as_str())).collect();
+            let Some(m) = found.first() else {
+                return Err(format!(
+                    "no marker '{text}': {:?}",
+                    markers.iter().map(|m| m.label.clone()).collect::<Vec<_>>()
+                ));
+            };
+            if let Some(x) = rest.first() {
+                let want = number(x)?;
+                let tol = tolerance(rest, 1, 1e-3)?;
+                if !close_to(m.x, want, tol) {
+                    return Err(format!("marker '{}' at {:e}, expected {want:e}", m.label, m.x));
+                }
+            }
+            tracing::info!(target: "cdept::script", "wv: marker '{}' at {:e} {}", m.label, m.x, m.x_unit);
+        }
+        ("eye", [signal, period, rest @ ..]) if rest.len() <= 2 => {
+            let offset = match rest.first() {
+                Some(o) if o != "lines" && o != "density" => number(o)?,
+                _ => 0.0,
+            };
+            let density = rest.iter().any(|r| r == "density");
+            app.script_wave()?.script_eye(
+                signal,
+                super::model::Eye {
+                    period: number(period)?,
+                    offset,
+                    density,
+                },
+            )?;
+        }
+        ("expect_note", [n, text @ ..]) if !text.is_empty() => {
+            let n: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let text = text.join(" ");
+            let notes = app.script_wave()?.script_notes(n)?;
+            if !notes.iter().any(|t| t.contains(&text)) {
+                return Err(format!("pane {n}: notes {notes:?}, expected '{text}'"));
+            }
+            tracing::info!(target: "cdept::script", "wv: pane {n}: {}", notes.join("; "));
+        }
+        ("integrate", [signal]) => app.script_wave()?.script_integrate(signal)?,
+        ("log", [n, axis, on]) => {
+            let n: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let on = on_off(on)?;
+            app.script_wave()?.script_log(n, axis == "y", on)?;
+        }
+        ("expect_log", [n, axis, on]) => {
+            let n: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let on = on_off(on)?;
+            let (x, y) = app.script_wave()?.script_is_log(n)?;
+            let got = if axis == "y" { y } else { x };
+            if got != on {
+                return Err(format!("pane {n}: log {axis} is {got}, expected {on}"));
+            }
+        }
+        ("expect_value", [signal, value, tol @ ..]) if tol.len() <= 1 => {
+            let want = number(value)?;
+            let tol = tolerance(tol, 0, 1e-9)?;
+            let got = app.script_wave()?.script_table_value(signal)?;
+            if !close_to(got, want, tol) {
+                return Err(format!("{signal} is {got:e} in the table, expected {want:e}"));
+            }
+            tracing::info!(target: "cdept::script", "wv: table {signal} = {got:e}");
+        }
+        ("expect_parts", [n, order @ ..]) if order.len() <= 1 => {
+            let want: usize = n.parse().map_err(|_| format!("'{n}' is not a number"))?;
+            let (got, o) = app.script_wave()?.script_parts()?;
+            if got != want || order.first().is_some_and(|w| !o.eq_ignore_ascii_case(w)) {
+                return Err(format!("{got} parts of x ({o}), expected {want} {order:?}"));
+            }
+        }
+        ("expect_cursor_part", [which, signal, part, value, tol @ ..]) if tol.len() <= 1 => {
+            let i = cursor_index(which)?;
+            let part: usize = part.parse().map_err(|_| format!("'{part}' is not a number"))?;
+            let want = number(value)?;
+            let tol = tolerance(tol, 0, 1e-9)?;
+            let got = app
+                .script_wave()?
+                .script_cursor_part(i, signal, part.wrapping_sub(1))?;
+            if !close_to(got, want, tol) {
+                return Err(format!(
+                    "{signal} part {part} at cursor {which} is {got:e}, expected {want:e}"
+                ));
+            }
         }
         _ => return Err(USAGE.into()),
     }
