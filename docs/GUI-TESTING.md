@@ -69,7 +69,8 @@ folder of examples/):
 | `cdept-gui/scripts/sar-enob.script` | The Phase 5 milestone on examples/ihp-inv (needs UberWave built in, the PDK, ngspice, the helper): tb_sar8/enob run from the Simulation tab, ENOB and SNDR by the calculator panel (`sim calc expr/evaluate/expect_value`), the code spectrum and the sampled codes sent to the built-in UberWave, an SFDR output added with a spec from the panel, saved and run again (3 PASS), an output reading `cursor_a` evaluated when the viewer's cursors move (`sim calc cursors`). The `sim calc` verbs are listed at the top of the script (`views/simulation/calc.rs`); `sim setup_section open|fold` opens or folds the Setup section | `setup.toml` and `simulations/` of the copy |
 | `cdept-gui/scripts/tests.script` | test templates and suites in the Simulation tab on examples/ihp-inv: a templated testbench (parameters, wrong values as the tab's problem, re-expansion, the saved file keeping only the template and own fields), switching template, the suite view running four tests into one table (needs the PDK, ngspice and the helper, like simulation.script; `sim template_*` / `sim suite_*` commands are listed at the top of the script) | `setup.toml` and `simulations/` of the copy |
 
-| `cdept-gui/scripts/wave/run.sh` | CDePT's own waveform tabs (`wv …`, below): hostile raw files, a corrupt and a stale `.uwraw` cache, a file that changes and is deleted while open, a read-only folder, a non-ASCII path under `LC_ALL=C`, a one-sample spike in 10 million samples at full zoom-out, two tabs indexing one file at once, a tab closed while it loads, a cancelled load, 60 opens and closes, and the 845 MB SAR ADC file (zoom/pan by wheel and drag, cursors, 25 traces, a second tab, a detached tab, frame and query statistics). It generates its inputs into `target/wave-test` (`gen.py`), unzips the SAR file into `target/sar` and runs a release build under a 6 GB cap: `cdept-gui/scripts/wave/run.sh [torture\|loop\|sar]` | `target/wave-test`, `target/sar` |
+| `cdept-gui/scripts/wave/run.sh` | CDePT's own waveform tabs (`wv …`, below), on generated inputs under `target/wave-test`, release build, each GUI run capped at 6 GB. `smoke` (small.py; what CI runs): open, show, zoom, a cursor. `menu`: File › Open in UberWave… with the built-in viewer and the process (fake-uberwave.sh), errors as a dialog. `features`: panes (new, remove, reorder, drag from the list), the list's groups, search and selection, a spectrum in Hz going to a pane of its own, hostile series (empty, NaN, Inf, x that goes back, 5 million points), styles. `family`: 12 files overlaid with different x grids, a garbage, a missing and a cut one, per-point show/hide, distinct styles, unicode and 200-character names. `big` (big.py): 600 run points with 15 broken, 1770 lines, 300 panes, files changed while open, a detached tab, a family closed while it loads, 15 opens and closes of 100 files. `torture`, `loop`, `sar`: hostile raw files, caches, a file that changes and goes, a read-only folder, a non-ASCII path under `LC_ALL=C`, a one-sample spike in 10 million samples, two tabs indexing one file, closing and cancelling loads, 60 opens and closes, and the 845 MB SAR ADC file (unzipped into `target/sar`, removed at the end unless `KEEP_SAR=1`). `cdept-gui/scripts/wave/run.sh [smoke\|menu\|features\|family\|big\|torture\|loop\|sar]` | `target/wave-test`, `target/sar` |
+| `cdept-gui/scripts/wave-tabs.script` | The waveform tabs with a real testbench (examples/ihp-inv; PDK, ngspice and the helper like simulation.script, `CDEPT_SCRIPT_TIMEOUT=600`): `wv open_family` (the button "Waveform Tab (family)"), `sim calc send_tab` ("Send to tab": a waveform of every point, a spectrum into a pane of Hz, markers of a scalar, -inf values), the spec table's cursor outputs following a tab (`sim calc follow`), a sweep with Monte Carlo opened as a family | `setup.toml` and `simulations/` of the copy |
 
 `$PROJECT` in a script stands for the folder of the project being opened.
 
@@ -375,7 +376,33 @@ suffixes (`2.5u`, `10n`, `1meg`).
 | `wv check_extremes <signal>` | What is drawn has exactly the extremes of every sample in the range (read on the spot) |
 | `wv wheel <fx> <up\|down> [count] [ctrl\|shift]`, `wv drag <fx1> <fx2>`, `wv click <fx> [left\|right]` | Mouse on the plot |
 | `wv expect_cache <text>`, `wv expect_changed <yes\|no>`, `wv expect_files <dir> <text> <n>` | Where the `.uwraw` is; whether the file changed on disk; how many files of a folder have the text in their name |
-| `wv stats` | Log frame intervals, the tab's UI time, query times by mode, RSS, peak RSS and the cgroup's memory since the last `wv stats` |
+| `wv stats` | Log frame intervals, the tab's UI time, query and drawing times, lines by query mode, RSS, peak RSS and the cgroup's memory since the last `wv stats` |
+| `wv open_files <file>…` | One tab on several files overlaid; tags are the file names, or their folders' names when the file names are equal (`out.raw` of run points) |
+| `wv open_family <lib> <cell> <view> [point…]` | What "Waveform Tab (family)" does: every run point folder of the view (or the ones named) in one tab, tags = point names; a folder without a raw file shows as a failed point |
+| `wv add_file <file> [tag]` | Add a file to the tab |
+| `wv expect_points <loading\|ready\|failed\|memory\|all> <n>`, `wv expect_point <tag> <state> [text]` | How many sources are in a state; one source's state and message |
+| `wv point <tag> on\|off`, `wv points all\|none` | Per-point show and hide |
+| `wv show_in <n\|new> <signal>…` | Show in pane n (1 is the top) or a new pane; a signal of another x unit goes to a pane of its unit |
+| `wv pane new\|remove\|up\|down\|select\|fit_y [n]` | Add, remove, move, make active, fit the y of a pane (`show` and the cursor commands act on the active pane) |
+| `wv expect_panes <n>`, `wv expect_pane <n> <signal>…`, `wv expect_x_unit <n> <unit>` | Panes; the signals of pane n in order; its x unit |
+| `wv expect_lines <n\|>n>` | Lines drawn now (signals × visible sources that have them) |
+| `wv y <n> <y0> <y1>\|fit`, `wv expect_y <n> <y0> <y1> [tol]` | Pane n's y range |
+| `wv list <flat\|kind\|tree> [search…]`, `wv expect_rows <n>`, `wv expect_row <text>`, `wv fold <header>` | The signal list (headers read `# Voltages (2)`) |
+| `wv pick <signal>…`, `wv pick_add <signal>…`, `wv expect_picked <signal>…`, `wv picked show\|new\|hide` | Select rows; what Show / New Pane / Hide do with the selection |
+| `wv drag_signal <signal> <n>` | Drag the signal's row of the list onto pane n (real input; the row must be on screen) |
+| `wv style <signal> <color #rrggbb\|dash solid\|dashed\|dotted\|dashdot\|width w> [tag]`, `wv expect_style <n> <label> <key> <value>`, `wv expect_distinct <n>` | Change a line's style; check one; no two lines of pane n look alike |
+| `wv expect_markers <n>`, `wv expect_changed_files <n>` | The calculator's markers in the tab; files changed on disk |
+| `wv expect_cursor_at <a\|b> <signal> <tag> <value> [tol]` | The readout of one point's line |
+| `wv test_trace <name> <empty\|nan\|inf\|nonmono\|ramp\|sine\|big> [n] [x unit] [tag]` | Hand a series to the tab as "Send to tab" does (default 1000 points, x in s, tag `calc`) |
+| `wave menu_open <file>`, `wave wait_opens`, `wave open_file <file>` | File › Open in UberWave… with a picked file (in a thread), until those opens are done; the same at once, failing the script on an error |
+| `wave expect_error <text>`, `wave dismiss` | The error dialog says this; close the dialog |
+| `sim calc send_tab`, `sim calc follow` | "Send to tab"; what the Cursors section does when a cursor moved (UberWave's or a tab's) |
+| `detach_panel <title>` | Move a panel (Console, Jobs, …) into a window of its own |
+
+With `RUST_LOG=info,cdept::frame=debug` the app logs every frame slower than 250 ms
+(`CDEPT_SLOW_FRAME_MS` changes the threshold) with the time of the main window, of each
+detached window (with and without creating its viewport) and the CPU time of the frame
+before without its buffer swap.
 
 ## Notes
 

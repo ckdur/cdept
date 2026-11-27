@@ -1,12 +1,77 @@
 # View waveforms
 
-```{note}
-This is changing (2026-11-27): CDePT is getting its own viewer tabs on UberWave's data engine
-(see the roadmap, Phase 5). UberWave's own viewer, which this page describes, stays as an
-option that opens in a separate window.
-```
+CDePT has two waveform viewers:
 
-CDePT has no finished waveform viewer of its own yet. The viewer in use is **UberWave**, Symbiotic EDA's program
+- **Waveform tabs**, CDePT's own viewer (being built, Phase 5 of the roadmap; it becomes
+  the default at its step 5): ordinary dockable, detachable tabs, any number of them, drawn
+  by CDePT on UberWave's data engine. See [the next section](#waveform-tabs).
+- **UberWave's own viewer**, which stays for good as an option that opens in a separate
+  window (the rest of this page). Nothing changes there: "Open in UberWave", "Open family
+  in UberWave", "Send to UberWave", `cdept wave`, calculator traces, cursors and markers.
+
+## Waveform tabs
+
+Open one with **File › Open Waveform File…** (a raw file of ngspice, Xyce or VACASK, or a
+`.uwraw`), **Waveform Tab** on a point of the Simulation tab's results, or
+**Waveform Tab (family)** next to "Open family in UberWave": every run point of the
+testbench view (corners × temperatures × sweeps, Monte Carlo runs) in one tab, each file
+tagged with its point name. `cdept tools` says in the row "Waveform tabs" whether the data
+engine is built in.
+
+- **Points**: the files of the tab, with a checkbox each (show or hide a point), All /
+  None, a filter, and their state: a file that is garbage, cut or missing shows as
+  failed (hover for why) and the others work. Four files are opened at once, the rest
+  wait. A family of 600 points loads and draws without stalls (2000 tested, see
+  [the numbers](../NOTES.md)).
+- **Signals**: every signal of every file, once. A search field (words, or a pattern
+  with `*` and `?`), grouping by kind (voltages, currents, calculator results, others),
+  by instance (`v(x1.x2.out)` under x1 › x2) or none. Click selects, Ctrl+click adds,
+  Shift+click selects a range; **Show** puts the selection into the active pane, **New
+  Pane** into a new one, **Hide** removes it. The checkbox shows or hides one signal.
+  Rows can be dragged onto a pane. A signal is drawn for every visible point that has
+  it.
+- **Panes** (strips): each has its own y axis (Ctrl+wheel chooses a y range, **Fit y**
+  goes back), a legend above it (never over the plot) and buttons to move it up, down or
+  remove it; **+ Pane** adds one. The active pane (framed) takes the signals of the list.
+  Panes of one x unit share zoom, pan and cursors; a trace whose x is in another unit (a
+  spectrum in Hz) goes to a pane of that unit, never onto a time pane.
+- **Mouse**: wheel zooms x around the pointer, Shift+wheel pans, drag pans, click puts
+  cursor A, right click cursor B, double click fits. The table below lists the values at
+  the cursors and their difference.
+- **Styles**: lines take the palette's colours; when colours would repeat they are
+  dashed, dotted, dash-dotted, then wider, so up to 80 lines differ. Right click on a
+  legend entry: colour, dash, width, move to another pane, hide the signal or the point.
+  A legend entry can be dragged to another pane.
+- **Calculator**: **Send to tab** next to "Send to UberWave" in the calculator panel
+  evaluates the expression on one point or all of them and puts the waveforms into the
+  newest waveform tab of that testbench (else a new one): one signal named after the
+  expression, tagged with each point. The arrays are handed over as they are (no file).
+  A complex result comes as `(mag dB)` and `(phase)`; points that are not finite break
+  the line. Scalars put **markers** where they were measured (crossings, edges); the
+  toolbar shows or hides them. The Bode and eye layouts stay UberWave's for now (the tab
+  gets the plain traces).
+- **Cursor outputs**: the Cursors section of the calculator panel follows a tab's cursors
+  as it follows UberWave's (whichever moved last): outputs that use `cursor_a` or
+  `cursor_b` are evaluated again.
+- **Files that change**: the toolbar says when files changed on disk; **Reload** opens
+  them again.
+
+The drawing is done off the screen thread: the engine gives every line decimated to the
+pane's width with each pixel column's minimum and maximum kept (a spike one sample wide
+stays visible at any zoom), and a background thread draws each pane into an image.
+
+Not there yet: log axes for AC results, Bode and eye layouts, noise and other analyses,
+Spectre PSF folders, ascii AC raw files, sweeps that go backwards (step 4 of the
+roadmap). No digital (VCD/FST) files: use Surfer or GTKWave.
+
+## UberWave's own viewer
+
+**File › Open in UberWave…** opens any file `cdept wave` takes in UberWave's window: a raw
+file or Spectre PSF file (the built-in viewer or the process), a CSV table as traces
+(built-in viewer only), a digital file in Surfer or GTKWave. A failure is shown as a
+dialog.
+
+UberWave's viewer is **UberWave**, Symbiotic EDA's program
 (C++ with Dear ImGui and ImPlot, built for very large ngspice raw files and Spectre PSF
 results). It is **part of the `cdept` executable**: its window runs on a thread of the cdept
 process, next to the main window, and CDePT talks to it with plain function calls with typed

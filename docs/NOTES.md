@@ -505,6 +505,61 @@ Open points / risks (mine):
   (egui's default fonts).
 - `wv` mouse commands assume no schematic/layout is the script's document.
 
+### Own waveform viewer, fixes and step 3 (2026-11-27, SYMBI-89)
+What exists (docs/howto/view-waveforms.md, GUI-TESTING.md):
+- The "3.4 s freeze" after `wv detach` was no frame: the tab measured the time between
+  two of its own draws, and the tab behind the detached one had been hidden 3.4 s. A
+  frame clock in the app (`cdept::frame` at debug level, `CDEPT_SLOW_FRAME_MS`) saw no
+  frame over 42 ms in the whole SAR run, detach included; detaching the Console, Jobs or
+  a small waveform tab costs nothing visible. The 25-30 ms frames after it were egui
+  tessellating the 25 dense traces of the tab that came to the front (30 ms CPU per
+  frame in release too), now gone: traces are drawn on the query thread into one image
+  per pane (`raster.rs`).
+- CI job `uberwave`: real data engine and real built-in UberWave from the public
+  submodule (`scripts/ci/uberwave.sh`; fails on a stub: build-log warnings, `cdept tools`
+  rows, `CDEPT_REQUIRE_ENGINES=1` tests). Emulated in a clean clone with `env -i`, an
+  empty HOME and a fresh CARGO_HOME, the display tests on a headless `Xvnc` (no xvfb
+  here): all green. Not run on GitHub yet.
+- File › Open in UberWave… (both backends, errors as a dialog).
+- Step 3: sources (files, families, memory series `cdept_wavedata::Series`), panes with
+  shared x per unit, signal list (search, groups, selection, drag), per-point show/hide,
+  styles, legend above the pane, Send to tab, Waveform Tab (family), markers, cursor
+  outputs following a tab.
+
+Measured (release, 1600x1000 window, this desktop):
+- SAR file (845 MB), 26 lines: UI frame p50 0.3-0.9 ms, drawing on the worker p95
+  14-23 ms per view change, query p95 1-9 ms with pyramids.
+- Family of 600 points (2000 samples each, 15 broken): the first open wrote 585
+  caches at about 50 ms each, 4 at a time, ~8 s (2000 points: 25 s), almost all of it
+  the 50 ms sleep of `UwRawWriter::finalize` (a Windows workaround); without it outside
+  Windows (UberWave 91e034d) 2000 points open in 0.3 s. With 590 /
+  1180 / 1770 lines: frame p95 2.6 / 4.6 / 10 ms, drawing 100-180 ms per view change,
+  cgroup memory 215-345 MiB. 2000 points: frame p95 9-15 ms, drawing 260-430 ms,
+  cgroup peak 491 MiB. That is the limit I would state: up to ~2000 points stay usable;
+  each view change then takes about half a second to redraw (the old image moves
+  meanwhile).
+- 60 opens and closes of a 200-file family: RSS 144-148 MiB, cgroup 75-80 MiB, flat.
+- 300 panes (300 signals of 20000 samples): frame p50 2 ms (only visible panes drawn).
+
+Open points / risks (mine):
+- [ ] Log x axes are wired (an AC file's `uwd_x_log`, `XGroup::log`, a decade grid) but
+      untested: the engine refuses ascii AC files and no binary AC file was tried.
+      Complex data comes from the calculator as two real traces only.
+- [ ] Drawing cost grows with lines × pixels touched; 2000 dense lines take ~0.4 s per
+      redraw. No level-of-detail for families (e.g. an envelope of all points).
+- [ ] A family lists every point folder of the view, also points left from an earlier
+      run plan (the UberWave family does the same).
+- [ ] Each open file keeps its dataset (and file descriptor/mapping) while the tab lives;
+      the fd limit here is 524288, a desktop with 1024 would fail opens beyond ~1000.
+- [ ] Selection order in the list is alphabetical (New Pane puts them in that order).
+- [ ] CJK characters show as boxes (egui's default fonts), as before.
+- [ ] `wv` mouse commands and `drag_signal` need the rows/panes on screen.
+- [ ] Sending to a tab gives the series to the source of the same tag; a new tab made by
+      Send to tab shows only the calculator traces (not the testbench defaults).
+- [ ] The Bode and eye layouts of the calculator panel still go to UberWave only.
+- [ ] `cdept wave` has no way to open a tab (not required; default unchanged until step 5).
+- [ ] Natural sorting of points reads `vdd1p2` after `vdd1p08`.
+
 ## 2. Things that may cause trouble
 
 ### 2.1 Most likely to bite soon
