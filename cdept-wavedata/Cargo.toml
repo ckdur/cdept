@@ -1,0 +1,17 @@
+[package]
+name = "cdept-wavedata"
+description = "Waveform data for CDePT's own viewer: UberWave's data engine (readers, .uwraw cache, min/max decimation) through its C interface; a stub when it is not built in"
+version.workspace = true
+license.workspace = true
+categories.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[lib]
+name = "cdept_wavedata"
+path = "src/lib.rs"
+
+[dev-dependencies]
+tempfile.workspace = true

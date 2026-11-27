@@ -1,10 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["cdept", "cdept-gui", "cdept-magic", "cdept-uberwave", "cdept-xschem", "libcdept"]
+members = ["cdept", "cdept-gui", "cdept-magic", "cdept-uberwave", "cdept-wavedata", "cdept-xschem", "libcdept"]
 # cdept-xschem (GPL helper, needs Tcl, cairo, flex, bison) and cdept-magic (GPL helper,
 # needs Tcl, Tk headers, cairo) are built on request:
 #   cargo build -p cdept-xschem
-default-members = ["cdept", "cdept-gui", "cdept-uberwave", "libcdept"]
+default-members = ["cdept", "cdept-gui", "cdept-uberwave", "cdept-wavedata", "libcdept"]
 
 [workspace.package]
 version = "0.1.0"
@@ -18,6 +18,7 @@ repository = "https://github.com/ckdur/cdept"
 libcdept = { path = "libcdept" }
 cdept-gui = { path = "cdept-gui" }
 cdept-uberwave = { path = "cdept-uberwave" }
+cdept-wavedata = { path = "cdept-wavedata" }
 
 eframe = { version = "0.36", default-features = false, features = [
     "default_fonts",

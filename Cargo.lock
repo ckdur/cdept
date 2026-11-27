@@ -352,10 +352,12 @@ name = "cdept-gui"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "cdept-wavedata",
  "chrono",
  "eframe",
  "egui",
  "egui_dock",
+ "egui_plot",
  "eyre",
  "image",
  "libcdept",
@@ -383,6 +385,13 @@ dependencies = [
 
 [[package]]
 name = "cdept-uberwave"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
+name = "cdept-wavedata"
 version = "0.1.0"
 dependencies = [
  "tempfile",
@@ -890,6 +899,17 @@ dependencies = [
  "log",
  "profiling",
  "winit",
+]
+
+[[package]]
+name = "egui_plot"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90f3711a5032bb65a41011b23fcdc6c4bb599757b82cc0181d41e7d1de16986a"
+dependencies = [
+ "ahash",
+ "egui",
+ "emath",
 ]
 
 [[package]]
