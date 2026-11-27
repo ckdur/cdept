@@ -85,8 +85,9 @@ models, the latest of the Opus, Sonnet and Fable families at the time of the wor
 Opus 5.5, Sonnet 5.5 and Fable 5.2), and no other AI models. They write code, tests and
 documentation.
 
-**The developer's role:** giving the AI its orders, testing the code and reviewing the code;
-guiding the AI with prior knowledge of the main programs; and the test cases that use the PDKs.
+**The developer's role:** giving the AI its orders; reviewing, testing and debugging the
+AI-generated output; guiding the AI with prior knowledge of the main programs; and the test
+cases that use the PDKs.
 
 Commits made with the AI carry a `Co-Authored-By` line that names the model. Not every commit
 has one (most of those without it are merge commits), so a missing line does not show that no
