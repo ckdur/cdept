@@ -30,9 +30,15 @@ unset UBERWAVE_SRC UBERWAVE_LIB_DIR UBERWAVE_OFFLINE UBERWAVE_DEPS_DIR CDEPT_WAV
 export CDEPT_REQUIRE_ENGINES=1
 
 echo "== build (the real engines)"
-cargo build -p cdept 2>&1 | tee "$target/ci-uberwave-build.log"
+mkdir -p "$target"
+log=$target/ci-uberwave-build.log
+cargo build -p cdept >"$log" 2>&1 || {
+    tail -50 "$log"
+    fail "cargo build failed"
+}
+grep -E "^(warning|error)" "$log" || true
 # A stub build only warns: look for the warnings of both build scripts.
-if grep -E "warning: cdept-(wavedata|uberwave)@.*(not built in|CDEPT_WAVEDATA_STUB)" "$target/ci-uberwave-build.log"; then
+if grep -E "warning: cdept-(wavedata|uberwave)@.*(not built in|CDEPT_WAVEDATA_STUB)" "$log"; then
     fail "a stub was built (the warning above)"
 fi
 tools=$("$target/debug/cdept" tools)

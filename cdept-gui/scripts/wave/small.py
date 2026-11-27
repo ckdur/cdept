@@ -50,3 +50,10 @@ for p in range(12):
     if p == 9:
         f = os.path.join(d, "out.raw")
         os.truncate(f, os.path.getsize(f) // 2)
+with open(os.path.join(out, "table.csv"), "w") as fh:
+    fh.write("time,vout,iload\n")
+    for i in range(200):
+        fh.write("%g,%g,%g\n" % (i * 1e-9, math.sin(i * 0.1), 1e-3 * i))
+os.makedirs(os.path.join(out, "proc"), exist_ok=True)
+with open(os.path.join(out, "proc", "p.raw"), "wb") as fh, open(os.path.join(out, "small.raw"), "rb") as src:
+    fh.write(src.read())

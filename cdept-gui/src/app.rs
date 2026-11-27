@@ -138,6 +138,9 @@ pub struct CdeptApp {
     script_wave: Option<u64>,
     /// File › Open Waveform File…: the path being asked for.
     wave_pick: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
+    /// File › Open in UberWave…: the path being asked for, then the opens running.
+    uberwave_pick: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
+    uberwave_opens: Vec<std::sync::mpsc::Receiver<(std::path::PathBuf, Result<String, String>)>>,
     /// Where the time of the frames goes (slow frames are logged, `cdept::frame`).
     frame_clock: FrameClock,
 }
@@ -218,6 +221,8 @@ impl CdeptApp {
             forced_tool: HashMap::new(),
             script_wave: None,
             wave_pick: None,
+            uberwave_pick: None,
+            uberwave_opens: Vec::new(),
             frame_clock: FrameClock::default(),
         };
         // With the project still being read, the documents come back once it is there.
@@ -700,6 +705,63 @@ impl CdeptApp {
         });
         tab.inspect(|tab| self.ctx.request(Action::OpenTab(*tab)))
             .is_some()
+    }
+
+    /// File › Open in UberWave…: a picked path starts an open in a thread; a failure
+    /// goes to the log and to a dialog.
+    fn poll_uberwave_opens(&mut self, ctx: &Context) {
+        if let Some(rx) = &self.uberwave_pick {
+            match rx.try_recv() {
+                Ok(Some(path)) => {
+                    self.uberwave_pick = None;
+                    self.script_uberwave_open(ctx, path);
+                }
+                Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.uberwave_pick = None
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        let mut errors = Vec::new();
+        self.uberwave_opens.retain(|rx| match rx.try_recv() {
+            Ok((_, Ok(line))) => {
+                tracing::info!(target: "cdept::wave", "UberWave: {line}");
+                false
+            }
+            Ok((path, Err(e))) => {
+                errors.push(format!("Open in UberWave: {}: {e}", path.display()));
+                false
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => true,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+        });
+        for e in errors {
+            self.ctx.error(e);
+        }
+    }
+
+    /// What File › Open in UberWave… does with the picked path (`wave menu_open`).
+    pub(crate) fn script_uberwave_open(&mut self, ctx: &Context, path: std::path::PathBuf) {
+        let rx = crate::uberwave::open_any_in_thread(self.ctx.project.as_ref(), path, ctx);
+        self.uberwave_opens.push(rx);
+    }
+
+    /// The message of the error dialog that is up, if one is.
+    pub(crate) fn script_error_dialog(&self) -> Option<String> {
+        match crate::dialogs::open(&self.ctx) {
+            Some(crate::dialogs::Dialog::Error(message)) => Some(message.clone()),
+            _ => None,
+        }
+    }
+
+    /// Close the dialog that is up (its OK or Cancel).
+    pub(crate) fn script_dismiss_dialog(&mut self) -> bool {
+        self.ctx.dialog.take().is_some()
+    }
+
+    /// The opens of File › Open in UberWave… still running.
+    pub(crate) fn script_uberwave_opens(&self) -> usize {
+        self.uberwave_opens.len()
     }
 
     /// `detach_panel <title>`: the panel moves to a window of its own.
@@ -1307,6 +1369,34 @@ impl CdeptApp {
                         },
                     ));
                 }
+                if ui
+                    .button("Open in UberWave…")
+                    .on_hover_text("Any file `cdept wave` takes, in UberWave's own viewer (a separate window): a raw file (ngspice, Xyce, VACASK), a Spectre PSF file, a CSV table (as traces; built-in UberWave only); a digital file opens in Surfer or GTKWave")
+                    .clicked()
+                {
+                    let directory = self.ctx.project.as_ref().map(|p| p.root.join("simulations"));
+                    self.uberwave_pick = Some(crate::pathfield::ask(
+                        ui.ctx(),
+                        win,
+                        crate::pathfield::Request {
+                            kind: crate::pathfield::Kind::File,
+                            title: "Open in UberWave".into(),
+                            directory: directory.filter(|d| d.is_dir()),
+                            filters: vec![
+                                (
+                                    "Waveforms".into(),
+                                    ["raw", "csv", "tsv", "txt", "dat", "vcd", "fst", "ghw", "tran", "ac", "dc", "noise", "pss"]
+                                        .iter()
+                                        .map(|e| e.to_string())
+                                        .collect(),
+                                ),
+                                ("All files".into(), vec!["*".into()]),
+                            ],
+                            must_exist: true,
+                            ..Default::default()
+                        },
+                    ));
+                }
                 ui.menu_button("Recent Projects", |ui| {
                     if self.ctx.settings.recent_projects.is_empty() {
                         ui.weak("None");
@@ -1803,6 +1893,7 @@ impl eframe::App for CdeptApp {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
             }
         }
+        self.poll_uberwave_opens(ctx);
         self.finish_netlists();
         // What changed on disk, and what the worker threads finished.
         if crate::background::tick(&mut self.ctx, &mut self.views, ctx).restore {

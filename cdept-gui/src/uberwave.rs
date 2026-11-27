@@ -51,6 +51,88 @@ pub(crate) fn open_dir(project: &Project, dir: &Path) -> Result<String, String> 
     Ok(with_note(opened.text(), opened.old_viewer_note()))
 }
 
+/// File › Open in UberWave…: what `cdept wave <file>` does with one file, so UberWave
+/// takes what it takes there: a SPICE raw file or a Spectre PSF result in its viewer (the
+/// built-in one or the process), a CSV table as traces (built-in viewer only), a digital
+/// file (VCD, FST, GHW) in Surfer or GTKWave. Blocks while a built-in viewer loads: call
+/// it from a thread. The line says what was done.
+pub(crate) fn open_any(project: Option<&Project>, path: &Path) -> Result<String, String> {
+    if !path.exists() {
+        return Err(format!("{} does not exist", path.display()));
+    }
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    // A raw file is not read here (it may be large): UberWave reads it.
+    let kind = if path.is_dir() || matches!(ext.as_str(), "raw" | "uwraw") {
+        wave::other::Kind::Spice
+    } else {
+        wave::other::kind(path)
+    };
+    match kind {
+        wave::other::Kind::Digital => {
+            let line = wave::other::open_digital(project, path).map_err(|e| format!("{e:#}"))?;
+            let words: Vec<String> = line
+                .iter()
+                .map(|w| w.to_string_lossy().into_owned())
+                .collect();
+            Ok(format!(
+                "a digital file: started {} (UberWave takes digital signals only as traces: cdept wave {} --show ...)",
+                words.join(" "),
+                path.display()
+            ))
+        }
+        wave::other::Kind::Table => {
+            let sent =
+                wave::other::open_in_uberwave(project, path, &[]).map_err(|e| format!("{e:#}"))?;
+            let names: Vec<String> = sent
+                .pushed
+                .iter()
+                .map(|(n, k)| format!("'{n}' ({k} points)"))
+                .collect();
+            let mut line = format!(
+                "{}: {} sent to the built-in UberWave",
+                path.display(),
+                if names.is_empty() {
+                    "no column".to_string()
+                } else {
+                    names.join(", ")
+                }
+            );
+            if !sent.notes.is_empty() {
+                line.push_str(&format!(" (note: {})", sent.notes.join("; ")));
+            }
+            Ok(line)
+        }
+        wave::other::Kind::Spice => wave::open_raw(project, path, None)
+            .map(|l| {
+                if l.embedded {
+                    format!("{} opened in the built-in UberWave", path.display())
+                } else {
+                    l.text()
+                }
+            })
+            .map_err(|e| format!("{e:#}")),
+    }
+}
+
+/// [`open_any`] in a thread; the answer comes on the channel.
+pub(crate) fn open_any_in_thread(
+    project: Option<&Project>,
+    path: PathBuf,
+    ctx: &egui::Context,
+) -> std::sync::mpsc::Receiver<(PathBuf, Result<String, String>)> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (project, ctx) = (project.cloned(), ctx.clone());
+    std::thread::spawn(move || {
+        let r = open_any(project.as_ref(), &path);
+        let _ = tx.send((path, r));
+        ctx.request_repaint();
+    });
+    rx
+}
+
 fn with_note(line: String, note: Option<String>) -> String {
     match note {
         Some(n) => format!("{line} (note: {n})"),
@@ -221,7 +303,7 @@ pub(crate) fn script(project: Option<&Project>, args: &[String]) -> Result<(), S
          wave calc <lib> <cell> <view> <point|all> <expr> | wave expect_start <text> | \
          wave expect_request <cmd> [text] | wave expect_trace <name> <n|>n> | wave quit_viewer <lib> <cell> <view> | \
          wave backend <embedded|process> | wave embedded_files <tag>... | wave embedded_signal <file> <name> | \
-         wave embedded_screenshot <png> | wave embedded_close";
+         wave embedded_screenshot <png> | wave embedded_close | wave open_file <file> | wave menu_open <file>";
     let project_or = || project.ok_or("no project is open");
     match args {
         [open, lib, cell, view, point] if open == "open" => {
@@ -334,6 +416,12 @@ pub(crate) fn script(project: Option<&Project>, args: &[String]) -> Result<(), S
                     have.join(", ")
                 ))
             }
+        }
+        [open, file @ ..] if open == "open_file" && !file.is_empty() => {
+            let path = std::path::absolute(file.join(" ")).map_err(|e| e.to_string())?;
+            let line = open_any(project, &path)?;
+            tracing::info!(target: "cdept::script", "wave: {line}");
+            Ok(())
         }
         [shot, png] if shot == "embedded_screenshot" => {
             let viewer = embedded_viewer()?;

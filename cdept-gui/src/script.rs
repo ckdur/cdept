@@ -249,6 +249,13 @@ impl Command {
         if let Command::Wv(args) = self {
             return crate::views::wave::script::patient(args);
         }
+        if let Command::Wave(args) = self
+            && args
+                .first()
+                .is_some_and(|a| a == "wait_opens" || a == "expect_error")
+        {
+            return true;
+        }
         matches!(
             self,
             Command::Menu(_)
@@ -308,6 +315,9 @@ impl Command {
             Command::Sim(args) if args.first().map(String::as_str) == Some("wait") => SIM_PATIENCE,
             Command::Magic(_) => SIM_PATIENCE,
             Command::Wv(args) => crate::views::wave::script::patience(args),
+            Command::Wave(args) if args.first().is_some_and(|a| a == "wait_opens") => {
+                Duration::from_secs(120)
+            }
             Command::Sim(args) if args.first().map(String::as_str) == Some("suite_wait") => {
                 SUITE_PATIENCE
             }
@@ -1957,6 +1967,36 @@ impl Script {
                     .as_magic_mut()
                     .ok_or("the active document is not a Magic layout")?;
                 crate::views::magic_script(view, &args)?;
+            }
+            Command::Wave(args) if args.first().is_some_and(|a| a == "menu_open") => {
+                // What File › Open in UberWave… does with a picked file: in a thread, a
+                // failure as a dialog (check it with expect_dialog after `wave wait_opens`).
+                let file = args[1..].join(" ");
+                if file.is_empty() {
+                    return Err("usage: wave menu_open <file>".into());
+                }
+                let path = std::path::absolute(&file).map_err(|e| e.to_string())?;
+                app.script_uberwave_open(ctx, path);
+            }
+            Command::Wave(args) if args.first().is_some_and(|a| a == "wait_opens") => {
+                if app.script_uberwave_opens() > 0 {
+                    return Err("File › Open in UberWave… is still opening".into());
+                }
+            }
+            Command::Wave(args) if args.first().is_some_and(|a| a == "expect_error") => {
+                let text = args[1..].join(" ");
+                match app.script_error_dialog() {
+                    Some(m) if m.contains(&text) => {
+                        tracing::info!(target: "cdept::script", "wave: error dialog: {m}");
+                    }
+                    Some(m) => return Err(format!("the error dialog says '{m}', not '{text}'")),
+                    None => return Err("no error dialog is up".into()),
+                }
+            }
+            Command::Wave(args) if args.first().is_some_and(|a| a == "dismiss") => {
+                if !app.script_dismiss_dialog() {
+                    return Err("no dialog is up".into());
+                }
             }
             Command::Wave(args) => crate::uberwave::script(app.script_project(), &args)?,
             Command::Wv(args) => {

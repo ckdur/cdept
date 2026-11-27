@@ -1,0 +1,39 @@
+# File > Open in UberWave... (UberWave's own viewer, a separate window) with both
+# backends; failures as a dialog. Inputs from small.py; run by run.sh menu, which sets
+# CDEPT_UBERWAVE to the stand-in fake-uberwave.sh for the process backend.
+#   wave menu_open <file>   what the menu does with a picked file (in a thread)
+#   wave wait_opens         until those opens are done
+#   wave open_file <file>   the same, at once, failing the script on an error
+window 1400 900
+# The built-in viewer (needs UberWave built in).
+wave backend embedded
+wave menu_open @DATA@/small.raw
+wave wait_opens
+wave embedded_files small.raw
+wave embedded_signal small.raw v(a)
+wave menu_open @DATA@/table.csv
+wave wait_opens
+wave embedded_signal (external) vout
+wave embedded_screenshot @SHOTS@/menu-embedded.png
+# Not a waveform: the error is a dialog.
+wave menu_open @DATA@/family/p005/out.raw
+wave wait_opens
+wave expect_error Open in UberWave
+wait 0.6
+screenshot @SHOTS@/menu-error.png
+wave dismiss
+wave menu_open @DATA@/does-not-exist.raw
+wave wait_opens
+wave expect_error does not exist
+wave dismiss
+wave embedded_close
+# The process (the stand-in records its arguments next to the file).
+wave backend process
+wave open_file @DATA@/proc/p.raw
+wv expect_files @DATA@/proc uberwave-args.txt 1
+# A table needs the built-in viewer: refused, as a dialog.
+wave menu_open @DATA@/table.csv
+wave wait_opens
+wave expect_error needs the built-in UberWave
+wave dismiss
+quit
