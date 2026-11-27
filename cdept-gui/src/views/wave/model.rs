@@ -69,7 +69,7 @@ pub fn default_style(index: usize, dark: bool) -> Style {
     Style {
         color: palette[index % n],
         dash: Dash::ALL[(index / n) % Dash::ALL.len()],
-        width: if (index / (n * Dash::ALL.len())) % 2 == 0 {
+        width: if (index / (n * Dash::ALL.len())).is_multiple_of(2) {
             1.5
         } else {
             2.5
@@ -337,7 +337,7 @@ impl XGroup {
         if self.log { x.log10() } else { x }
     }
 
-    pub fn from_plot(&self, u: f64) -> f64 {
+    pub fn data_x(&self, u: f64) -> f64 {
         if self.log { 10f64.powf(u) } else { u }
     }
 
@@ -351,23 +351,23 @@ impl XGroup {
         let (u0, u1) = self.plot_view();
         let c = self.to_plot(x);
         let (a, b) = (c - (c - u0) * factor, c + (u1 - c) * factor);
-        self.set_view(self.from_plot(a), self.from_plot(b));
+        self.set_view(self.data_x(a), self.data_x(b));
     }
 
     /// Pan by a fraction of the view's width.
     pub fn pan(&mut self, fraction: f64) {
         let (u0, u1) = self.plot_view();
         let d = (u1 - u0) * fraction;
-        let (a, b) = (self.from_plot(u0 + d), self.from_plot(u1 + d));
+        let (a, b) = (self.data_x(u0 + d), self.data_x(u1 + d));
         // panning keeps the width: clamp in plot space
         if a < self.full.0 {
             let w = u1 - u0;
             let s = self.to_plot(self.full.0);
-            self.view = (self.full.0, self.from_plot(s + w).min(self.full.1));
+            self.view = (self.full.0, self.data_x(s + w).min(self.full.1));
         } else if b > self.full.1 {
             let w = u1 - u0;
             let e = self.to_plot(self.full.1);
-            self.view = (self.from_plot(e - w).max(self.full.0), self.full.1);
+            self.view = (self.data_x(e - w).max(self.full.0), self.full.1);
         } else {
             self.view = (a, b);
         }

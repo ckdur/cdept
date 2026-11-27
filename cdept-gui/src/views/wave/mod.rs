@@ -931,7 +931,7 @@ impl WaveView {
             if let Some(gi) = self.group_of(&active_unit) {
                 let g = &mut self.groups[gi];
                 let (u0, u1) = g.plot_view();
-                let c = g.from_plot((u0 + u1) / 2.0);
+                let c = g.data_x((u0 + u1) / 2.0);
                 if ui.button("Zoom In").clicked() {
                     g.zoom_at(c, 0.5);
                 }
@@ -1458,7 +1458,8 @@ impl WaveView {
             return;
         }
         let Some(reply) = &self.reply else { return };
-        let mut rows: Vec<(String, Color32, String, Option<f64>, Option<f64>)> = Vec::new();
+        type Row = (String, Color32, String, Option<f64>, Option<f64>);
+        let mut rows: Vec<Row> = Vec::new();
         let insts = self.instances();
         for g in &self.groups {
             if g.cursors.iter().all(Option::is_none) {
@@ -1980,7 +1981,7 @@ impl WaveView {
                     }
                 } else {
                     let g = &mut self.groups[gi];
-                    let x = g.from_plot(to_u(pos.x));
+                    let x = g.data_x(to_u(pos.x));
                     g.zoom_at(x, factor);
                 }
             }
@@ -2003,13 +2004,13 @@ impl WaveView {
             }
         } else if response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
-                g.cursors[0] = Some(g.from_plot(to_u(pos.x)));
+                g.cursors[0] = Some(g.data_x(to_u(pos.x)));
             }
             self.panes.active = pane;
         } else if response.secondary_clicked()
             && let Some(pos) = response.interact_pointer_pos()
         {
-            g.cursors[1] = Some(g.from_plot(to_u(pos.x)));
+            g.cursors[1] = Some(g.data_x(to_u(pos.x)));
             self.panes.active = pane;
         }
     }

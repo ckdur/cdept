@@ -103,7 +103,7 @@ impl Series {
 
     /// The indices of the samples with `x_min <= x <= x_max`, plus one on each side.
     fn span(&self, x_min: f64, x_max: f64) -> Option<(usize, usize)> {
-        if self.x.is_empty() || !(x_min <= x_max) {
+        if self.x.is_empty() || x_min.partial_cmp(&x_max).is_none_or(|o| o.is_gt()) {
             return None;
         }
         let first = self.x.partition_point(|v| *v < x_min).saturating_sub(1);

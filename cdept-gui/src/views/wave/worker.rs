@@ -577,7 +577,8 @@ fn answer(request: Request, prepared_for: &mut HashMap<usize, Vec<u32>>) -> Repl
         .collect();
     let n = threads(jobs.len());
     let chunk = jobs.len().div_ceil(n).max(1);
-    let mut results: Vec<Vec<(usize, usize, Queried, Option<String>)>> = Vec::new();
+    type Part = Vec<(usize, usize, Queried, Option<String>)>;
+    let mut results: Vec<Part> = Vec::new();
     std::thread::scope(|scope| {
         let handles: Vec<_> = jobs
             .chunks(chunk)

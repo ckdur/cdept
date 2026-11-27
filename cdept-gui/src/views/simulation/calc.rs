@@ -89,7 +89,10 @@ static CURSOR_GEN: AtomicU64 = AtomicU64::new(0);
 static LISTENING: Mutex<bool> = Mutex::new(false);
 /// The values under the cursors when a waveform tab reported them last (the built-in
 /// UberWave is asked for its own); `None` when UberWave reported last.
-static TAB_SIGNALS: Mutex<Option<Vec<(String, Option<f64>, Option<f64>)>>> = Mutex::new(None);
+static TAB_SIGNALS: Mutex<Option<Vec<CursorValues>>> = Mutex::new(None);
+
+/// A signal and its values at cursor A and B.
+type CursorValues = (String, Option<f64>, Option<f64>);
 /// A waveform tab has reported cursors (the cursor section works without UberWave).
 static TAB_CURSORS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 

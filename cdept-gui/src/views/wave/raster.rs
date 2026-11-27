@@ -12,6 +12,7 @@
 
 /// A dash pattern, in multiples of the line width (at least 1 px).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[allow(clippy::enum_variant_names)] // dash-dot is the line's name
 pub enum Dash {
     #[default]
     Solid,
