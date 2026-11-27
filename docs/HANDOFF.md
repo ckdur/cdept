@@ -24,6 +24,14 @@ commit). The only working copy is the submodule `cdept-uberwave/uberwave`
 `AI:` footer when AI wrote them. After pushing, move the pointer in CDePT. The mirror does not update by
 itself: add the original as the remote `upstream`, fetch and merge. CI builds the stub.
 
+## Own waveform viewer (SYMBI-89, steps 1 and 2 done 2026-11-27)
+`cdept-wavedata` binds UberWave's data engine (C interface `uwdata`); waveform tabs in
+`cdept-gui/src/views/wave/` (File > Open Waveform File, or "Waveform Tab" at a run point).
+Tests: `cdept-gui/scripts/wave/run.sh`. The old embedded viewer stays until step 5. **The
+user reviews the prototype before steps 3-5.** Open: 3.4 s freeze when a waveform tab is
+detached, debug-build stutter with 25 traces, legend over the plot, colours repeat, no
+PSF or ASCII AC yet, monotonic x assumed. CI builds the data engine's stub.
+
 ## Tool and test environment
 Tools in `/opt/ext/OpenLane/bin`, PDKs in `/opt/ext/OpenPDKs`. Real-tool tests skip unless
 `PDK_ROOT`, `CDEPT_NGSPICE`, `CDEPT_XSCHEM`, `CDEPT_XYCE`, `CDEPT_VACASK`,
