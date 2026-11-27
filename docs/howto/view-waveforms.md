@@ -11,8 +11,9 @@ CDePT has two waveform viewers:
 
 ## Waveform tabs
 
-Open one with **File › Open Waveform File…** (a raw file of ngspice, Xyce or VACASK, or a
-`.uwraw`), **Waveform Tab** on a point of the Simulation tab's results, or
+Open one with **File › Open Waveform File…** (a raw file of ngspice, Xyce or VACASK, binary
+or ascii, a Spectre PSF file, or a `.uwraw`), **File › Open PSF Results Folder…** (a Spectre
+PSF result folder), **Waveform Tab** on a point of the Simulation tab's results, or
 **Waveform Tab (family)** next to "Open family in UberWave": every run point of the
 testbench view (corners × temperatures × sweeps, Monte Carlo runs) in one tab, each file
 tagged with its point name. `cdept tools` says in the row "Waveform tabs" whether the data
@@ -60,9 +61,51 @@ The drawing is done off the screen thread: the engine gives every line decimated
 pane's width with each pixel column's minimum and maximum kept (a spike one sample wide
 stays visible at any zoom), and a background thread draws each pane into an image.
 
-Not there yet: log axes for AC results, Bode and eye layouts, noise and other analyses,
-Spectre PSF folders, ascii AC raw files, sweeps that go backwards (step 4 of the
-roadmap). No digital (VCD/FST) files: use Surfer or GTKWave.
+### Analyses
+
+- **Several analyses in one file** (ngspice's `-r` writes the operating point, DC, AC,
+  noise and transient into one raw file; a PSF folder has one file per analysis): the
+  toolbar's **Analysis** menu chooses the one shown. A file opens on its transient (a PSF
+  file you named: its own analysis). In a family every file opens the analysis of that
+  name (else of that kind); a family whose points hold different analyses draws a line
+  only in panes of its x unit.
+- **AC**: a complex signal is one row of the list (marked `AC`), drawn in a form: dB,
+  magnitude, phase (−180..180°), unwrapped phase, real, imaginary, dB (power). The
+  toolbar's **AC** menu changes the form of all of them (and of those checked later),
+  the right-click menu of a legend entry changes one. Frequency is on a log axis (decades
+  labelled); a dB of 0 is −400 dB, not −∞; an axis that reaches 0 Hz or below is linear.
+  Binary and ascii files of ngspice, Xyce and VACASK are read.
+- **Bode plot** (legend menu of a complex signal): the gain in dB in its pane and the
+  unwrapped phase in the pane below, both on the log frequency axis, with CDePT's
+  measures of every visible point as markers: where the gain falls through 0 dB, the
+  phase margin there, the gain margin where the phase reaches −180°. The calculator
+  panel's **Bode** layout does the same with **Send to tab** (the `(mag dB)` and
+  `(phase)` traces into two panes, margins from them).
+- **Eye diagram** (legend menu of a signal of time, period and offset; or the calculator's
+  **eye** layout with Send to tab): the signal folded at the period from the offset, every
+  period on top of the others, in a pane of its own (x from 0 to the period, zoom inside
+  it), as lines or as a **density** (how many traces cross each pixel, from violet to
+  the line's colour to white). The pane's header says how many traces were drawn. At most
+  200000 periods and 20 million samples a line: a shorter period, or one of less than two
+  samples, is refused at once with a note (no work is started).
+- **Noise**: densities in V/√Hz (ngspice's noise spectra) start on log-log axes (**log
+  y** in each pane's header). **Integrated noise** in the legend menu adds √(∫ S² df)
+  from the first frequency up to each one as a signal `integ(<name>)` in a new pane; at
+  the last frequency it is ngspice's `onoise_total`.
+- **One point per signal** (an operating point, an integrated noise): the tab shows a
+  table of the values, one column per file; the list's search filters it.
+- **DC sweeps and sweeps that go back**: a sweep run backwards, a parametric sweep (the
+  inner sweep starts again for every outer value) and a sweep there and back are drawn
+  part by part (a jump back is no line); the cursor table has a row per part (`v(out) ·
+  sweep 2`), the extremes cover every part. An x that goes back and forth too often to
+  split (more than 4096 parts) is drawn in its order and has no value at a cursor.
+- **Spectre PSF**: a result folder (with its `logFile`, or the files alone) or a file of
+  one; its analyses are in the Analysis menu (sweep containers and operating points
+  cannot be plotted and say why). The caches go beside the folder (`<folder>.uwcache`,
+  as UberWave's do).
+
+No CSV tables or digital (VCD/FST/GHW) files in a tab: use **Open in UberWave…** (tables)
+or Surfer and GTKWave (digital).
 
 ## UberWave's own viewer
 

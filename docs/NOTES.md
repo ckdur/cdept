@@ -486,9 +486,9 @@ What exists:
   an option that opens in a separate window (decided 2026-11-27).
 
 Open points / risks (mine):
-- Engine x lookups assume an increasing x (binary search): a reversed DC sweep queries wrong.
-- PSF result folders are refused by `uwd_open` (the engine can read them; not wired).
-- ascii AC (complex) raw files are refused by the engine's ascii converter.
+- Engine x lookups assume an increasing x (binary search): a reversed DC sweep queries wrong. (Step 4: parts.)
+- PSF result folders are refused by `uwd_open` (the engine can read them; not wired). (Step 4: wired.)
+- ascii AC (complex) raw files are refused by the engine's ascii converter. (Step 4: read.)
 - No checksum in `.uwraw`: flipped data bytes in a cache with fresh stamps are not detected
   (table corruption and truncation are, and the cache is rebuilt).
 - A `.uwraw` truncated in place while mapped would SIGBUS; the engine's own writer only
@@ -542,23 +542,112 @@ Measured (release, 1600x1000 window, this desktop):
 - 300 panes (300 signals of 20000 samples): frame p50 2 ms (only visible panes drawn).
 
 Open points / risks (mine):
-- [ ] Log x axes are wired (an AC file's `uwd_x_log`, `XGroup::log`, a decade grid) but
+- [x] Log x axes are wired (an AC file's `uwd_x_log`, `XGroup::log`, a decade grid) but
       untested: the engine refuses ascii AC files and no binary AC file was tried.
-      Complex data comes from the calculator as two real traces only.
+      Complex data comes from the calculator as two real traces only. (Step 4: tested.)
 - [ ] Drawing cost grows with lines × pixels touched; 2000 dense lines take ~0.4 s per
       redraw. No level-of-detail for families (e.g. an envelope of all points).
-- [ ] A family lists every point folder of the view, also points left from an earlier
-      run plan (the UberWave family does the same).
+- [x] A family lists every point folder of the view, also points left from an earlier
+      run plan (the UberWave family does the same). (Step 4: the tab leaves them out
+      when the results store knows the newest plan; UberWave's family unchanged.)
 - [ ] Each open file keeps its dataset (and file descriptor/mapping) while the tab lives;
       the fd limit here is 524288, a desktop with 1024 would fail opens beyond ~1000.
 - [ ] Selection order in the list is alphabetical (New Pane puts them in that order).
 - [ ] CJK characters show as boxes (egui's default fonts), as before.
 - [ ] `wv` mouse commands and `drag_signal` need the rows/panes on screen.
-- [ ] Sending to a tab gives the series to the source of the same tag; a new tab made by
-      Send to tab shows only the calculator traces (not the testbench defaults).
-- [ ] The Bode and eye layouts of the calculator panel still go to UberWave only.
+- [x] Sending to a tab gives the series to the source of the same tag; a new tab made by
+      Send to tab shows only the calculator traces (not the testbench defaults). (Step 4.)
+- [x] The Bode and eye layouts of the calculator panel still go to UberWave only. (Step 4.)
 - [ ] `cdept wave` has no way to open a tab (not required; default unchanged until step 5).
-- [ ] Natural sorting of points reads `vdd1p2` after `vdd1p08`.
+- [x] Natural sorting of points reads `vdd1p2` after `vdd1p08`. (Step 4: by value.)
+
+### Own waveform viewer, step 4 (2026-11-27, SYMBI-89)
+What exists (docs/howto/view-waveforms.md "Analyses", GUI-TESTING.md `wv` verbs):
+- UberWave cee2f7d, 141e76e, 222b749 (data engine, C interface API 2): ascii complex raw
+  files (ngspice `re,im`, Xyce `re, im`; refused before), every complex form (re, im,
+  mag, phase, uphase = unwrapped in sweep order, dB20, dB10) in a cache of its own
+  (`<stem>.cx.uwraw`; UberWave keeps its four forms in `<stem>.uwraw`), the plots after
+  the first of an ascii file of several (failed before: a parse ran into the next
+  plot's header), DC plot names typed `tran` before ("DC transfer characteristic"),
+  V/√Hz for ngspice's noise densities, PSF folders and files through `uwd_open`
+  (`<folder>.uwcache/<analysis>[.all].uwraw`), `uwd_list_analyses`, monotonic parts of
+  x (`uwd_segment*`), log x for noise. Converter versions raised: old caches are made
+  again once (UberWave's own viewer too).
+- Tabs: AC forms (toolbar AC menu, legend menu), Bode with margins (legend menu; and
+  the calculator's Bode layout with Send to tab), eye diagrams as lines or density
+  (legend menu; calculator's eye layout), log y and integrated noise, op tables, the
+  Analysis menu, sweeps that go back drawn part by part with a cursor row per part,
+  File › Open PSF Results Folder…, small items (Send-to-tab tabs get the testbench
+  defaults too, points sorted by value, leftover point folders left out, a bigger
+  cursor table).
+
+Checked against numbers:
+- RC low pass, ngspice binary/ascii, Xyce binary/ascii, VACASK: dB within 3e-8 dB,
+  phase within 1e-7° of the closed form (Xyce's ascii has 9 digits), −3.0101 dB at fc
+  (cdept-wavedata/tests/analyses.rs).
+- Three-pole loop (A0 1e4, poles 1k/1M/20M Hz) through the tab's Bode markers and
+  ngspice's `meas`: unity gain 3.0657 MHz both, PM 9.4° vs 9.372°, GM 6.5 dB vs 6.454 dB
+  at 4.4746 MHz both; a unit test checks the markers against the closed form (PM within
+  0.2°, GM within 0.1 dB).
+- The OTA's open-loop AC (cells/ota5t ac_open, tt_27) sent to a tab with the Bode
+  layout: the tab's marker PM 59.4°, the calculator's `phase_margin` 59.378°
+  (wave-tabs.script).
+- Noise: √∫S²df of ngspice's onoise_spectrum 2.0378 µV vs its onoise_total 2.0350 µV
+  (0.14 %, trapezoids on 20 points/decade); VACASK's onoise at 1 Hz is 4kTR within 2 %.
+- Parametric DC (3 sweeps, V1 1.8 → 0): v(out) = (2 V1 + V2)/3 per part at the cursor;
+  the op table 0.93333 V.
+- PSF fixtures (psf-parser binary/ascii/psfxl, inverter_test.raw, spectre-examples):
+  every plottable analysis opens, |re + j im| equals mag, caches reused.
+
+Measured (release, this desktop, page cache warm):
+- 100 M points, 2 signals (2.4 GB raw): first open with the cache written 1.2-1.6 s,
+  reopen 0.33 s (0.83 s before the x scan read the chunks), RSS after drawing 2.1 GB
+  (file-backed), anon 40-53 MB, cgroup 2.4 GB; first full view before the pyramids
+  0.8 s, then pyramid queries p95 7 ms, max 55 ms; drawing p95 2-5 ms; UI frames p95
+  0.5-0.8 ms. The one-sample spike is drawn at every zoom, `check_extremes` exact.
+- 500 M points (12 GB raw + 12 GB cache, both deleted afterwards): first open 9.5 s,
+  reopen 2.0 s, first full view before the pyramids 5.6-6.7 s (on the query thread; UI
+  frames stayed under 7 ms), zoomed queries p95 12-16 ms, max 252 ms; cgroup held at its
+  12 GB cap (page cache), peak RSS reported 21-22 GB (mapped file pages), anon < 70 MB.
+- Eye of 192 000 samples (3000 traces): 13-20 ms drawing p50, 145-184 ms p95.
+
+Found and fixed under torture: the multi-plot ascii parse (above); a half complex pair
+is a format error (it was read as two reals); DC typed tran; an eye period of 1e-20 s is
+refused before any work (no allocation: periods counted from the span); uwd_source_changed
+waited for an 800 ms query (UI stalls when a script asked); `expect_failed` with another
+message waits its whole patience (600 s) instead of failing (script driver, not changed).
+
+Open points / risks (mine):
+- [ ] The first full view of a very large file waits for a min/max over all samples
+      until the pyramids exist (0.8 s at 100 M, 6 s at 500 M points): no coarser preview
+      meanwhile.
+- [ ] The parts of a parametric sweep are drawn in one colour (the cursor table names
+      them `sweep k`); the sweep values of the outer variable are not in a raw file, so
+      the parts are numbered, not labelled `V2=1`.
+- [ ] A family of files of different analyses shows the catalogue of whichever file
+      opened first; a complex signal of one file and a real one of the same name in
+      another merge as real (no AC forms). Lines go only to panes of their x unit.
+- [ ] Ascii raw files cut short are refused ("Incomplete conversion"), binary ones open
+      with the points that are there (header counts held to the file size): as before.
+- [ ] Unwrapping cannot follow a phase that moves more than 180° between two points
+      (a long delay sampled coarsely): it is wrapped there, as any unwrapper would.
+- [ ] Bode margins use CDePT's measures as they are: the loop gain must start near 0°
+      (pass `-v(out)/v(in)` for an inverting amplifier); markers are recomputed only
+      when Bode is chosen again.
+- [ ] PSF: sweep containers, Monte Carlo families and non-swept op data of a PSF folder
+      are listed as not plottable; a non-monotonic PSF sweep is refused by the
+      engine's PSF converter (raw files are split into parts instead). A PSF conversion
+      cancel was not tested mid-way (the fixtures convert in milliseconds).
+- [ ] VACASK's raw files say `notype`: their signals have no unit in the tab.
+- [ ] CSV tables and digital files are not in tabs (UberWave's viewer, Surfer/GTKWave).
+- [ ] `wv` text arguments have no quoting (no spaces in `expect_marker` texts).
+
+Before the tabs can be the default (step 5): the Simulation tab's "Open in UberWave" and
+"Open family" buttons and `cdept wave` to open tabs (with UberWave's window as the
+option), the calculator panel's default send target, restoring tabs after a restart
+(they are not restored now), the open points above that a user meets first (preview
+before the pyramids, parametric sweep colours/labels, mixed families), the CJK font
+(boxes), and a look by the user at the Bode/eye/noise screens.
 
 ## 2. Things that may cause trouble
 

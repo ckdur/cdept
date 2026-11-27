@@ -306,7 +306,11 @@ real SLURM cluster (smoke-tested only), the post-layout DUT swap (Phase 7).
   and the standalone `UberWaveViewer` process, with calculator traces, cursors and markers.
   Nothing of that integration is removed.
   Steps 1 and 2 built 2026-11-27: `uwdata` (C interface in `wp3-data-engine/capi`),
-  `cdept-wavedata`, waveform tabs `cdept-gui/src/views/wave` (docs/NOTES.md).
+  `cdept-wavedata`, waveform tabs `cdept-gui/src/views/wave` (docs/NOTES.md). Step 3
+  (panes, families, calculator traces, markers) and step 4 (AC forms and Bode with
+  margins, eye diagrams, noise, operating point tables, files of several analyses, PSF
+  folders, sweeps that go back, 100M+ point files) built 2026-11-27; step 5 (the default)
+  is open.
   Digital VCD/FST/GHW viewing is Surfer or GTKWave. The numbers (readers, measures,
   calculator, spec table) stay in CDePT. The list below describes UberWave's own viewer in
   CDePT, which stays as the separate-window option.

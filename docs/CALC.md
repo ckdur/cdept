@@ -232,6 +232,12 @@ testbench, on the run points on disk (also of earlier sessions):
   were measured are marked in the viewer (crossings, trigger and target of a delay, the
   10/90 % points of an edge, the settling time, extremes, `value_at`), labelled with the
   expression and the value; each send replaces them;
+- **Send to tab**: the same into a waveform tab of CDePT's own viewer (the newest tab of
+  the testbench view, else a new one), with the same layouts: *Bode* puts the
+  `(mag dB)` traces into a pane and the `(phase)` ones into the pane below on a log
+  frequency axis, with the unity gain, phase margin and gain margin of every point as
+  markers; *eye* folds each trace in a pane of its own
+  ([view waveforms](howto/view-waveforms.md#analyses));
 - **Add as output**: name, min, max: the expression becomes an `[[output]]` of the setup
   form (and a spec); Save keeps it, the next run has it in the spec table;
 - **Cursors (UberWave)**: follows the built-in viewer's cursors live (UberWave reports
