@@ -17,6 +17,10 @@ This builds `target/release/cdept`, the program with the GUI and every command. 
 as it is. It does not need xschem or KLayout to build; the tools are looked up when a
 command needs them.
 
+To run the window under X11, the system also needs `libxkbcommon-x11` (Debian and Ubuntu:
+`libxkbcommon-x11-0`; desktops usually have it, minimal installs and containers may not).
+CDePT stops at start-up with "Library libxkbcommon-x11.so could not be loaded" without it.
+
 The workspace has four crates:
 
 | Crate | Content | Licence |
