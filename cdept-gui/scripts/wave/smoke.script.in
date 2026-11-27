@@ -1,0 +1,12 @@
+# The waveform tabs on small inputs (small.py): a quick check that runs in CI with the
+# real data engine (scripts/ci/uberwave.sh) and by hand.
+window 1400 900
+wv open @DATA@/small.raw
+wv wait_loaded
+wv show v(a) v(b)
+wv fit
+wv expect_range 0 1.999u
+wv cursor a 500n
+wv expect_cursor_x a 500n
+wv check_extremes v(a)
+quit

@@ -29,6 +29,18 @@ fn skip() -> bool {
     false
 }
 
+/// CI's job `uberwave` sets `CDEPT_REQUIRE_ENGINES=1`: there a stub is a failure (a
+/// stub build only prints a cargo:warning).
+#[test]
+fn the_engine_is_built_in_when_required() {
+    if std::env::var_os("CDEPT_REQUIRE_ENGINES").is_some_and(|v| v == "1") {
+        assert!(
+            cdept_wavedata::available(),
+            "CDEPT_REQUIRE_ENGINES=1 but the waveform data engine is the stub (see the cargo:warning of cdept-wavedata's build)"
+        );
+    }
+}
+
 #[test]
 fn stub_or_real_open_reports() {
     let dir = tempfile::tempdir().unwrap();

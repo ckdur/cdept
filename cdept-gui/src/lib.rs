@@ -25,6 +25,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use log::LogBuffer;
 
+/// Whether the waveform tabs have UberWave's data engine (not its stub), for `cdept tools`.
+pub fn waveform_engine_built_in() -> bool {
+    cdept_wavedata::available()
+}
+
 const APP_ID: &str = "org.ckdur.cdept";
 const APP_NAME: &str = "Chip Design Project Tool (CDePT)";
 

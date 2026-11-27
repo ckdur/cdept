@@ -1683,6 +1683,17 @@ fn main() -> Result<()> {
                     t.spec.name, t.spec.role
                 );
             }
+            println!(
+                "{:<20} {:<16} {:<2} {}",
+                "Waveform tabs",
+                "Waveforms",
+                5,
+                if cdept_gui::waveform_engine_built_in() {
+                    "data engine built in (uwdata)"
+                } else {
+                    "data engine not built in (stub): waveform tabs cannot open files"
+                }
+            );
             // Inside a project, whether VACASK can run its technology (docs/VACASK.md).
             if let Some(root) = project_root(cli.project)
                 && let Ok(project) = Project::load(&root)

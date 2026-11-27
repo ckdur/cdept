@@ -84,6 +84,30 @@ jobs:
       - name: Rust tests that start KLayout
         run: cargo test -p libcdept --test klayout --test real_verify --test link --test oasis --test real_nets
 
+  # The REAL waveform data engine (cdept-wavedata) and the REAL built-in UberWave
+  # (cdept-uberwave), built from the public submodule; the other jobs build their stubs.
+  # A stub build only prints a cargo:warning, so scripts/ci/uberwave.sh checks it
+  # explicitly (the build log, `cdept tools`, CDEPT_REQUIRE_ENGINES=1 in the tests).
+  uberwave:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      # Public, over HTTPS, shallow (the repository holds large data files).
+      - run: git submodule update --init --depth 1 cdept-uberwave/uberwave
+      - uses: dtolnay/rust-toolchain@stable
+      - name: System libraries (eframe, UberWave's GLFW/OpenGL/GTK 3, xvfb)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git pkg-config python3 \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libwayland-dev \
+            libgl1-mesa-dev libegl-dev libgtk-3-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxi-dev wayland-protocols libwayland-bin libdbus-1-dev \
+            xvfb libgl1-mesa-dri
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the real engines, check that neither is the stub, run their tests
+        run: scripts/ci/uberwave.sh
+
   msrv:
     runs-on: ubuntu-24.04
     steps:
